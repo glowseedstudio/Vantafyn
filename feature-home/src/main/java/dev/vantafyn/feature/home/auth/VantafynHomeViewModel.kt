@@ -33,6 +33,7 @@ import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.VantafynPlaybackItem
+import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
 import java.util.UUID
 import kotlinx.coroutines.Job
@@ -133,7 +134,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun showProfilePicker() {
-        MusicPlaybackController.get(getApplication()).stop(clearQueue = true)
+        MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
         viewModelScope.launch {
             _state.update {
                 it.copy(
@@ -276,7 +277,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun logout() {
         viewModelScope.launch {
-            MusicPlaybackController.get(getApplication()).stop(clearQueue = true)
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.Logout)
             authRepository.logout()
             _state.value = VantafynHomeUiState(step = VantafynSetupStep.Welcome)
         }
@@ -293,7 +294,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun logoutCurrentProfile() {
         val profileId = _state.value.session?.profileId ?: return
         viewModelScope.launch {
-            MusicPlaybackController.get(getApplication()).stop(clearQueue = true)
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
             authRepository.removeProfile(profileId)
             val profiles = authRepository.savedProfiles()
             _state.value = VantafynHomeUiState(
@@ -412,8 +413,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun navigateMobile(destination: MobileDestination) {
         _state.update {
+            val previous = if (destination.isRootDestination()) {
+                it.previousMobileDestination
+            } else {
+                it.mobileDestination.rootDestination()
+            }
             it.copy(
                 mobileDestination = destination,
+                previousMobileDestination = previous,
                 selectedLibrary = if (destination == MobileDestination.LibraryDetail) it.selectedLibrary else null,
                 selectedMediaId = if (destination == MobileDestination.MediaDetail) it.selectedMediaId else null,
                 mediaDetail = if (destination == MobileDestination.MediaDetail) it.mediaDetail else null,
@@ -430,6 +437,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 mobileDestination = MobileDestination.LibraryDetail,
+                previousMobileDestination = MobileDestination.Libraries,
                 selectedLibrary = library,
                 libraryItems = emptyList(),
                 isLibraryItemsLoading = true,
@@ -458,6 +466,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 mobileDestination = MobileDestination.MediaDetail,
+                previousMobileDestination = it.mobileDestination.rootDestination(),
                 selectedMediaId = itemId,
                 mediaDetail = null,
                 isMediaDetailLoading = true,
@@ -479,6 +488,18 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun retryMediaDetail() {
         _state.value.selectedMediaId?.let(::openMedia)
+    }
+
+    fun navigateMobileBack() {
+        val snapshot = _state.value
+        when (snapshot.mobileDestination) {
+            MobileDestination.Player -> exitPlayback(0L)
+            MobileDestination.MediaDetail -> navigateMobile(snapshot.previousMobileDestination.rootDestination())
+            MobileDestination.LibraryDetail -> navigateMobile(MobileDestination.Libraries)
+            MobileDestination.HomeLayout,
+            MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
+            else -> Unit
+        }
     }
 
     fun toggleMediaFavorite() {
@@ -738,7 +759,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         subtitleStreamIndex: Int?,
     ) {
         viewModelScope.launch {
-            MusicPlaybackController.get(getApplication()).pause()
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.VideoPlayback)
             val previousInfo = _state.value.playbackInfo
             if (previousInfo != null) {
                 playbackRepository.reportStopped(session, previousInfo, target.startTicks)
@@ -1294,6 +1315,25 @@ enum class MobileDestination {
     MediaDetail,
     Player,
 }
+
+private fun MobileDestination.isRootDestination(): Boolean =
+    when (this) {
+        MobileDestination.Home,
+        MobileDestination.Libraries,
+        MobileDestination.Search,
+        MobileDestination.Music,
+        MobileDestination.Favorites,
+        MobileDestination.Admin,
+        MobileDestination.Profile -> true
+        MobileDestination.HomeLayout,
+        MobileDestination.PlaybackPreferences,
+        MobileDestination.LibraryDetail,
+        MobileDestination.MediaDetail,
+        MobileDestination.Player -> false
+    }
+
+private fun MobileDestination.rootDestination(): MobileDestination =
+    if (isRootDestination()) this else MobileDestination.Home
 
 data class PlaybackTarget(
     val id: UUID,

@@ -1,5 +1,6 @@
 package dev.vantafyn.feature.music
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,6 +38,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
@@ -59,8 +64,23 @@ fun MusicScreen(
     viewModel: MusicViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsState()
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(session?.profileId) {
         viewModel.bindSession(session)
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) viewModel.pauseForBackground()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    BackHandler(enabled = state.showNowPlaying || state.screen != MusicScreenState.Home) {
+        if (state.showNowPlaying) {
+            viewModel.closeNowPlaying()
+        } else {
+            viewModel.showHome()
+        }
     }
     Box(modifier.fillMaxSize()) {
         LazyColumn(
@@ -88,30 +108,101 @@ fun MusicScreen(
                     placeholder = "Songs, albums, artists",
                 )
             }
-            if (state.searchResults.isNotEmpty()) {
-                item {
-                    MusicTrackList(
-                        title = "Search Results",
-                        tracks = state.searchResults,
-                        onTrack = { viewModel.playTrack(it, state.searchResults) },
-                    )
+            when (val screen = state.screen) {
+                MusicScreenState.Home -> {
+                    if (state.searchResults.isNotEmpty()) {
+                        item {
+                            MusicTrackList(
+                                title = "Search Results",
+                                tracks = state.searchResults,
+                                playlists = state.home?.playlists.orEmpty(),
+                                onTrack = { viewModel.playTrack(it, state.searchResults) },
+                                onAddToPlaylist = viewModel::addTrackToPlaylist,
+                            )
+                        }
+                    }
+                    state.home?.let { home ->
+                        if (home.recentlyAdded.isNotEmpty()) item {
+                            MusicTrackRow("Recently Added", home.recentlyAdded) { viewModel.playTrack(it, home.recentlyAdded) }
+                        }
+                        if (home.albums.isNotEmpty()) item {
+                            MusicAlbumRow(home.albums, onAlbum = viewModel::openAlbum)
+                        }
+                        if (home.artists.isNotEmpty()) item {
+                            MusicArtistRow(home.artists, onArtist = viewModel::openArtist)
+                        }
+                        if (home.playlists.isNotEmpty()) item {
+                            MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
+                        }
+                        if (home.songs.isNotEmpty()) item {
+                            MusicSectionHeader("Songs", "View all", viewModel::showSongs)
+                            MusicTrackList(
+                                title = "",
+                                tracks = home.songs.take(20),
+                                playlists = home.playlists,
+                                onTrack = { viewModel.playTrack(it, home.songs) },
+                                onAddToPlaylist = viewModel::addTrackToPlaylist,
+                            )
+                        }
+                    }
                 }
-            }
-            state.home?.let { home ->
-                if (home.recentlyAdded.isNotEmpty()) item {
-                    MusicTrackRow("Recently Added", home.recentlyAdded) { viewModel.playTrack(it, home.recentlyAdded) }
+                is MusicScreenState.Album -> {
+                    item {
+                        MusicDetailHeader(screen.album.title, screen.album.artist ?: "Album", screen.album.artworkUrl, onBack = viewModel::showHome) {
+                            screen.tracks.firstOrNull()?.let { viewModel.playTrack(it, screen.tracks) }
+                        }
+                    }
+                    item {
+                        MusicTrackList(
+                            title = "Tracks",
+                            tracks = screen.tracks,
+                            playlists = state.home?.playlists.orEmpty(),
+                            onTrack = { viewModel.playTrack(it, screen.tracks) },
+                            onAddToPlaylist = viewModel::addTrackToPlaylist,
+                        )
+                    }
                 }
-                if (home.albums.isNotEmpty()) item {
-                    MusicAlbumRow(home.albums, onAlbum = viewModel::playAlbum)
+                is MusicScreenState.Artist -> {
+                    item {
+                        MusicDetailHeader(screen.artist.name, "Artist", screen.artist.imageUrl, onBack = viewModel::showHome, onPlay = null)
+                    }
+                    item {
+                        if (screen.albums.isEmpty()) {
+                            Text("No albums found for this artist yet.", color = VantafynColors.Muted)
+                        } else {
+                            MusicAlbumRow(screen.albums, onAlbum = viewModel::openAlbum)
+                        }
+                    }
                 }
-                if (home.artists.isNotEmpty()) item {
-                    MusicArtistRow(home.artists)
+                is MusicScreenState.Playlist -> {
+                    item {
+                        MusicDetailHeader(screen.playlist.name, "${screen.tracks.size} tracks", screen.playlist.imageUrl, onBack = viewModel::showHome) {
+                            screen.tracks.firstOrNull()?.let { viewModel.playTrack(it, screen.tracks) }
+                        }
+                    }
+                    item {
+                        MusicTrackList(
+                            title = "Playlist",
+                            tracks = screen.tracks,
+                            playlists = state.home?.playlists.orEmpty(),
+                            onTrack = { viewModel.playTrack(it, screen.tracks) },
+                            onAddToPlaylist = viewModel::addTrackToPlaylist,
+                        )
+                    }
                 }
-                if (home.playlists.isNotEmpty()) item {
-                    MusicPlaylistRow(home.playlists, onPlaylist = viewModel::playPlaylist)
-                }
-                if (home.songs.isNotEmpty()) item {
-                    MusicTrackList("Songs", home.songs.take(20)) { viewModel.playTrack(it, home.songs) }
+                is MusicScreenState.Songs -> {
+                    item {
+                        MusicSimpleHeader("Songs", onBack = viewModel::showHome)
+                    }
+                    item {
+                        MusicTrackList(
+                            title = "All Songs",
+                            tracks = screen.tracks,
+                            playlists = state.home?.playlists.orEmpty(),
+                            onTrack = { viewModel.playTrack(it, screen.tracks) },
+                            onAddToPlaylist = viewModel::addTrackToPlaylist,
+                        )
+                    }
                 }
             }
         }
@@ -197,12 +288,12 @@ private fun MusicAlbumRow(albums: List<JellyfinMusicAlbum>, onAlbum: (JellyfinMu
 }
 
 @Composable
-private fun MusicArtistRow(artists: List<JellyfinMusicArtist>) {
+private fun MusicArtistRow(artists: List<JellyfinMusicArtist>, onArtist: (JellyfinMusicArtist) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
         Text("Artists", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(artists, key = { it.id }) { artist ->
-                MusicArtworkTile(artist.imageUrl, artist.name, "Artist") {}
+                MusicArtworkTile(artist.imageUrl, artist.name, "Artist") { onArtist(artist) }
             }
         }
     }
@@ -221,9 +312,15 @@ private fun MusicPlaylistRow(playlists: List<JellyfinMusicPlaylist>, onPlaylist:
 }
 
 @Composable
-private fun MusicTrackList(title: String, tracks: List<JellyfinMusicTrack>, onTrack: (JellyfinMusicTrack) -> Unit) {
+private fun MusicTrackList(
+    title: String,
+    tracks: List<JellyfinMusicTrack>,
+    playlists: List<JellyfinMusicPlaylist> = emptyList(),
+    onTrack: (JellyfinMusicTrack) -> Unit,
+    onAddToPlaylist: (JellyfinMusicTrack, JellyfinMusicPlaylist) -> Unit = { _, _ -> },
+) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        if (title.isNotBlank()) Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         tracks.forEach { track ->
             Row(
                 modifier = Modifier
@@ -241,6 +338,46 @@ private fun MusicTrackList(title: String, tracks: List<JellyfinMusicTrack>, onTr
                     Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
+                playlists.firstOrNull()?.let { playlist ->
+                    MiniControl("+") { onAddToPlaylist(track, playlist) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicSectionHeader(title: String, action: String, onAction: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        MiniControl(action, onAction)
+    }
+}
+
+@Composable
+private fun MusicSimpleHeader(title: String, onBack: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        MiniControl("Back", onBack)
+    }
+}
+
+@Composable
+private fun MusicDetailHeader(title: String, subtitle: String, imageUrl: String?, onBack: () -> Unit, onPlay: (() -> Unit)?) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.44f))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        MusicSimpleHeader(title, onBack)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            MusicArt(imageUrl, Modifier.size(112.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(subtitle, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (onPlay != null) VantafynButton("Play", onClick = onPlay, modifier = Modifier.fillMaxWidth())
             }
         }
     }

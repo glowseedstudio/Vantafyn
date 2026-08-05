@@ -12,6 +12,10 @@
 - `UserViewsApi.getUserViews(...)` to find music libraries.
 - `ItemsApi.getItems(GetItemsRequest)` for songs, albums, artists, playlists, album tracks, artist albums, and search.
 - `UniversalAudioApi.getUniversalAudioStreamUrl(...)` to build authenticated audio stream URLs.
+- `MediaInfoApi.getPostedPlaybackInfo(...)` to prepare active music playback where Jellyfin returns playback metadata.
+- `PlayStateApi.reportPlaybackStart(...)` for track starts.
+- `PlayStateApi.reportPlaybackProgress(...)` for pause, resume, seek, and throttled progress.
+- `PlayStateApi.reportPlaybackStopped(...)` for queue changes, skips, completion, logout/profile switch, and video handoff.
 - `LyricsApi.getLyrics(itemId)` for server-provided synced/plain lyrics.
 - `PlaylistsApi.createPlaylist(...)` for playlist creation.
 - `PlaylistsApi.addItemToPlaylist(...)` for adding the current track.
@@ -44,7 +48,24 @@ No unrelated WispBench modules were copied. The implementation is Kotlin/Compose
 
 Music uses a singleton `MusicPlaybackController` backed by Media3 ExoPlayer, so navigation inside the app does not create duplicate players. Music keeps playing while moving around the mobile app.
 
-Starting video playback pauses music. Switching profiles or logging out stops and clears the music queue. Detail-page theme music checks the shared music controller and does not play over active music.
+Starting video playback stops and clears music with a Jellyfin stop report when the music reporter is active. Switching profiles or logging out stops and clears the music queue. Detail-page theme music checks the shared music controller and does not play over active music.
+
+The first implementation does not include a foreground notification/media service. Because of that, mobile music pauses when the app is backgrounded or the screen locks. Playback does not automatically resume on foreground; the user can resume from the mini-player or Now Playing.
+
+## Jellyfin Play-State Reporting
+
+`feature-music` prepares playback info for the selected track through `JellyfinPlaybackRepository.getPlaybackInfo(...)` before starting playback. When that succeeds, reports include the Jellyfin `playSessionId` and `mediaSourceId` returned by the server. If prepare fails, playback falls back to the universal audio stream URL and reports use item id plus position without a play session.
+
+Reporting is event-driven from `MusicPlaybackController`:
+
+- track start: `reportPlaybackStart`
+- pause/resume: `reportPlaybackProgress`
+- seek: `reportPlaybackProgress`
+- timed progress: throttled to roughly every 10 seconds while playing
+- next/previous/new queue: previous item `reportPlaybackStopped`, new item `reportPlaybackStart`
+- stop/logout/profile switch/video handoff/completion/error: `reportPlaybackStopped`
+
+Reporting failures are logged with debug-safe messages and do not stop playback.
 
 ## Lyrics
 
@@ -52,13 +73,26 @@ Vantafyn uses Jellyfin `LyricsApi.getLyrics(itemId)`. If Jellyfin returns timest
 
 Old WispBench local sidecar lookup is intentionally not used because Android cannot access arbitrary Jellyfin server filesystem paths.
 
+Lyrics reset whenever the current track changes. Timing is driven from the Media3 controller position, so highlights follow seek and next/previous transitions. Malformed or unavailable Jellyfin lyrics are treated as missing lyrics and do not crash the UI.
+
+## Mobile Music Navigation
+
+The Music tab now includes lightweight mobile destinations for:
+
+- album detail with track list and play action
+- artist detail with artist albums
+- playlist detail with loaded playlist items and play action
+- all songs list
+
+Playlist removal and queue reorder are not exposed yet because those controls need more UX work.
+
 ## Known Limitations
 
 - TV music UI is not built yet.
 - Foreground/background media notification service is not implemented in this milestone.
 - Queue reorder and playlist remove are repository-ready but not exposed in the first UI.
-- Jellyfin play-state reporting for music is not yet wired; audio streaming currently uses universal audio URLs.
-- Artist rows are browse-only visually in this pass; artist detail can be expanded later.
+- Jellyfin play-state reporting is wired for active mobile music sessions, but tracks reached by automatic queue transition may not have `playSessionId` until a richer queue pre-prepare path is added. They still report item id and position.
+- Artist detail currently shows artist albums. Top tracks and richer artist metadata can be expanded later.
 - Genres and instant mixes are not exposed in the first UI.
 
 ## Test Checklist

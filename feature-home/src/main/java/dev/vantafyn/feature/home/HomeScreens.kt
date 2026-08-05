@@ -1,5 +1,14 @@
 package dev.vantafyn.feature.home
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -135,108 +144,127 @@ fun VantafynAppContent(
 ) {
     val state by viewModel.state.collectAsState()
     val backgroundResId = state.selectedBackground.drawableResId()
-    when (state.step) {
-        VantafynSetupStep.Splash -> SplashScreen(tv = tv, backgroundResId = backgroundResId, modifier = modifier)
-        VantafynSetupStep.Welcome -> WelcomeScreen(state, tv, viewModel::continueFromWelcome, backgroundResId, modifier)
-        VantafynSetupStep.ConnectServer -> ConnectServerScreen(
-            state = state,
-            tv = tv,
-            onServerUrlChanged = viewModel::onServerUrlChanged,
-            onConnect = viewModel::connectToServer,
-            backgroundResId = backgroundResId,
-            modifier = modifier,
-        )
-        VantafynSetupStep.ServerConfirm -> ServerConfirmScreen(
-            state = state,
-            tv = tv,
-            onContinue = viewModel::continueToLogin,
-            backgroundResId = backgroundResId,
-            modifier = modifier,
-        )
-        VantafynSetupStep.Login -> LoginScreen(
-            state = state,
-            tv = tv,
-            onUsernameChanged = viewModel::onUsernameChanged,
-            onPasswordChanged = viewModel::onPasswordChanged,
-            onLogin = viewModel::login,
-            onQuickConnect = viewModel::startQuickConnect,
-            backgroundResId = backgroundResId,
-            modifier = modifier,
-        )
-        VantafynSetupStep.QuickConnect -> QuickConnectScreen(
-            state = state,
-            tv = tv,
-            onBack = viewModel::cancelQuickConnect,
-            onRetry = viewModel::retryQuickConnect,
-            backgroundResId = backgroundResId,
-            modifier = modifier,
-        )
-        VantafynSetupStep.ProfilePicker -> ProfilePickerScreen(
-            state = state,
-            tv = tv,
-            onSelect = viewModel::selectProfile,
-            onSelectPublicUser = viewModel::selectPublicUser,
-            onAddProfile = viewModel::addProfile,
-            onToggleManage = viewModel::toggleManageProfiles,
-            onRequestRemove = viewModel::requestRemoveProfile,
-            onCancelRemove = viewModel::cancelRemoveProfile,
-            onConfirmRemove = viewModel::confirmRemoveProfile,
-            backgroundResId = backgroundResId,
-            modifier = modifier,
-        )
-        VantafynSetupStep.Home -> HomeScreen(
-            state = state,
-            tv = tv,
-            onRetry = viewModel::retryLibraries,
-            onSwitchUser = viewModel::showProfilePicker,
-            onAddProfile = viewModel::addProfile,
-            onQuickConnect = viewModel::startQuickConnect,
-            onConfirmLogout = viewModel::confirmCurrentProfileLogout,
-            onCancelLogout = viewModel::cancelCurrentProfileLogout,
-            onLogoutCurrentProfile = viewModel::logoutCurrentProfile,
-            onNavigateMobile = viewModel::navigateMobile,
-            onOpenLibrary = viewModel::openLibrary,
-            onRetryLibrary = viewModel::retryLibraryItems,
-            onOpenMedia = viewModel::openMedia,
-            onRetryMedia = viewModel::retryMediaDetail,
-            onSearchQueryChanged = viewModel::onSearchQueryChanged,
-            onLoadFavorites = viewModel::loadFavorites,
-            onPlaybackComingSoon = viewModel::showPlaybackComingSoon,
-            onClearMessage = viewModel::clearMobileMessage,
-            onToggleHomeSection = viewModel::toggleHomeSection,
-            onMoveHomeSection = viewModel::moveHomeSection,
-            onResetHomeLayout = viewModel::resetHomeLayout,
-            onAddSmartRow = viewModel::addSmartRow,
-            onRemoveSmartRow = viewModel::removeSmartRow,
-            onCycleArtwork = viewModel::cycleSectionArtwork,
-            onCycleShape = viewModel::cycleSectionShape,
-            onCycleSize = viewModel::cycleSectionSize,
-            onCycleSpacing = viewModel::cycleSectionSpacing,
-            onToggleThemeMusic = viewModel::toggleThemeMusic,
-            onSelectThemeMusicVolume = viewModel::selectThemeMusicVolume,
-            onSelectBackground = viewModel::selectBackground,
-            onToggleMediaFavorite = viewModel::toggleMediaFavorite,
-            onToggleMediaPlayed = viewModel::toggleMediaPlayed,
-            onStartPlayback = { viewModel.startPlayback() },
-            onRetryPlayback = viewModel::retryPlayback,
-            onTryTranscodedPlayback = viewModel::tryTranscodedPlayback,
-            onExitPlayback = viewModel::exitPlayback,
-            onPlaybackStarted = viewModel::reportPlaybackStarted,
-            onPlaybackProgress = viewModel::reportPlaybackProgress,
-            onPlaybackEnded = viewModel::exitPlayback,
-            onPlayerError = viewModel::handlePlayerError,
-            onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
-            onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
-            onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
-            onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
-            onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
-            onChangePassword = viewModel::changeCurrentUserPassword,
-            onOpenAdminUser = viewModel::openAdminUser,
-            onCloseAdminUser = viewModel::closeAdminUser,
-            onUpdateAdminUser = viewModel::updateSelectedAdminUser,
-            onResetAdminPassword = viewModel::resetSelectedAdminPassword,
-            modifier = modifier,
-        )
+    AnimatedContent(
+        targetState = state.step,
+        transitionSpec = {
+            val duration = 320
+            (
+                fadeIn(animationSpec = tween(durationMillis = duration, easing = FastOutSlowInEasing)) +
+                    slideIntoContainer(
+                        AnimatedContentTransitionScope.SlideDirection.Up,
+                        animationSpec = tween(durationMillis = duration, easing = FastOutSlowInEasing),
+                        initialOffset = { it / 18 },
+                    )
+                ).togetherWith(
+                    fadeOut(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)),
+                ).using(SizeTransform(clip = false))
+        },
+        label = "setupStepTransition",
+    ) { step ->
+        when (step) {
+            VantafynSetupStep.Splash -> SplashScreen(tv = tv, backgroundResId = backgroundResId, modifier = modifier)
+            VantafynSetupStep.Welcome -> WelcomeScreen(state, tv, viewModel::continueFromWelcome, backgroundResId, modifier)
+            VantafynSetupStep.ConnectServer -> ConnectServerScreen(
+                state = state,
+                tv = tv,
+                onServerUrlChanged = viewModel::onServerUrlChanged,
+                onConnect = viewModel::connectToServer,
+                backgroundResId = backgroundResId,
+                modifier = modifier,
+            )
+            VantafynSetupStep.ServerConfirm -> ServerConfirmScreen(
+                state = state,
+                tv = tv,
+                onContinue = viewModel::continueToLogin,
+                backgroundResId = backgroundResId,
+                modifier = modifier,
+            )
+            VantafynSetupStep.Login -> LoginScreen(
+                state = state,
+                tv = tv,
+                onUsernameChanged = viewModel::onUsernameChanged,
+                onPasswordChanged = viewModel::onPasswordChanged,
+                onLogin = viewModel::login,
+                onQuickConnect = viewModel::startQuickConnect,
+                backgroundResId = backgroundResId,
+                modifier = modifier,
+            )
+            VantafynSetupStep.QuickConnect -> QuickConnectScreen(
+                state = state,
+                tv = tv,
+                onBack = viewModel::cancelQuickConnect,
+                onRetry = viewModel::retryQuickConnect,
+                backgroundResId = backgroundResId,
+                modifier = modifier,
+            )
+            VantafynSetupStep.ProfilePicker -> ProfilePickerScreen(
+                state = state,
+                tv = tv,
+                onSelect = viewModel::selectProfile,
+                onSelectPublicUser = viewModel::selectPublicUser,
+                onAddProfile = viewModel::addProfile,
+                onToggleManage = viewModel::toggleManageProfiles,
+                onRequestRemove = viewModel::requestRemoveProfile,
+                onCancelRemove = viewModel::cancelRemoveProfile,
+                onConfirmRemove = viewModel::confirmRemoveProfile,
+                backgroundResId = backgroundResId,
+                modifier = modifier,
+            )
+            VantafynSetupStep.Home -> HomeScreen(
+                state = state,
+                tv = tv,
+                onRetry = viewModel::retryLibraries,
+                onSwitchUser = viewModel::showProfilePicker,
+                onAddProfile = viewModel::addProfile,
+                onQuickConnect = viewModel::startQuickConnect,
+                onConfirmLogout = viewModel::confirmCurrentProfileLogout,
+                onCancelLogout = viewModel::cancelCurrentProfileLogout,
+                onLogoutCurrentProfile = viewModel::logoutCurrentProfile,
+                onNavigateMobile = viewModel::navigateMobile,
+                onOpenLibrary = viewModel::openLibrary,
+                onRetryLibrary = viewModel::retryLibraryItems,
+                onOpenMedia = viewModel::openMedia,
+                onRetryMedia = viewModel::retryMediaDetail,
+                onSearchQueryChanged = viewModel::onSearchQueryChanged,
+                onLoadFavorites = viewModel::loadFavorites,
+                onPlaybackComingSoon = viewModel::showPlaybackComingSoon,
+                onClearMessage = viewModel::clearMobileMessage,
+                onToggleHomeSection = viewModel::toggleHomeSection,
+                onMoveHomeSection = viewModel::moveHomeSection,
+                onResetHomeLayout = viewModel::resetHomeLayout,
+                onAddSmartRow = viewModel::addSmartRow,
+                onRemoveSmartRow = viewModel::removeSmartRow,
+                onCycleArtwork = viewModel::cycleSectionArtwork,
+                onCycleShape = viewModel::cycleSectionShape,
+                onCycleSize = viewModel::cycleSectionSize,
+                onCycleSpacing = viewModel::cycleSectionSpacing,
+                onToggleThemeMusic = viewModel::toggleThemeMusic,
+                onSelectThemeMusicVolume = viewModel::selectThemeMusicVolume,
+                onSelectBackground = viewModel::selectBackground,
+                onToggleMediaFavorite = viewModel::toggleMediaFavorite,
+                onToggleMediaPlayed = viewModel::toggleMediaPlayed,
+                onStartPlayback = { viewModel.startPlayback() },
+                onRetryPlayback = viewModel::retryPlayback,
+                onTryTranscodedPlayback = viewModel::tryTranscodedPlayback,
+                onExitPlayback = viewModel::exitPlayback,
+                onPlaybackStarted = viewModel::reportPlaybackStarted,
+                onPlaybackProgress = viewModel::reportPlaybackProgress,
+                onPlaybackEnded = viewModel::exitPlayback,
+                onPlayerError = viewModel::handlePlayerError,
+                onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
+                onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
+                onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
+                onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
+                onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
+                onChangePassword = viewModel::changeCurrentUserPassword,
+                onOpenAdminUser = viewModel::openAdminUser,
+                onCloseAdminUser = viewModel::closeAdminUser,
+                onUpdateAdminUser = viewModel::updateSelectedAdminUser,
+                onResetAdminPassword = viewModel::resetSelectedAdminPassword,
+                onNavigateBack = viewModel::navigateMobileBack,
+                modifier = modifier,
+            )
+        }
     }
 }
 
@@ -880,6 +908,7 @@ private fun HomeScreen(
     onCloseAdminUser: () -> Unit,
     onUpdateAdminUser: (Boolean?, Boolean?, Boolean?, Boolean?, List<java.util.UUID>?) -> Unit,
     onResetAdminPassword: (String) -> Unit,
+    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     if (!tv) {
@@ -933,6 +962,7 @@ private fun HomeScreen(
             onCloseAdminUser = onCloseAdminUser,
             onUpdateAdminUser = onUpdateAdminUser,
             onResetAdminPassword = onResetAdminPassword,
+            onNavigateBack = onNavigateBack,
             modifier = modifier,
         )
         return
@@ -1028,8 +1058,18 @@ private fun MobileShellScreen(
     onCloseAdminUser: () -> Unit,
     onUpdateAdminUser: (Boolean?, Boolean?, Boolean?, Boolean?, List<java.util.UUID>?) -> Unit,
     onResetAdminPassword: (String) -> Unit,
+    onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val handlesSystemBack = state.mobileDestination != MobileDestination.Home || state.adminUserDetail != null || state.confirmLogout || state.mobileMessage != null
+    BackHandler(enabled = handlesSystemBack) {
+        when {
+            state.adminUserDetail != null -> onCloseAdminUser()
+            state.confirmLogout -> onCancelLogout()
+            state.mobileMessage != null -> onClearMessage()
+            else -> onNavigateBack()
+        }
+    }
     VantafynOnboardingBackground(tv = false, modifier = modifier, backgroundResId = state.selectedBackground.drawableResId()) {
         Box(
             modifier = Modifier
@@ -1048,7 +1088,7 @@ private fun MobileShellScreen(
                 )
                 MobileDestination.MediaDetail -> MediaDetailScreen(
                     state = state,
-                    onBack = { onNavigate(MobileDestination.Home) },
+                    onBack = onNavigateBack,
                     onRetry = onRetryMedia,
                     onOpenMedia = onOpenMedia,
                     onPlaybackComingSoon = onPlaybackComingSoon,
@@ -1099,13 +1139,13 @@ private fun MobileShellScreen(
                         )
                         MobileDestination.PlaybackPreferences -> PlaybackPreferencesScreen(
                             state = state,
-                            onBack = { onNavigate(MobileDestination.Profile) },
+                            onBack = onNavigateBack,
                             onEdit = onEditPlaybackPreferences,
                             onSave = onSavePlaybackPreferences,
                         )
                         MobileDestination.HomeLayout -> HomeLayoutScreen(
                             state = state,
-                            onBack = { onNavigate(MobileDestination.Profile) },
+                            onBack = onNavigateBack,
                             onToggle = onToggleHomeSection,
                             onMove = onMoveHomeSection,
                             onReset = onResetHomeLayout,
@@ -1118,7 +1158,7 @@ private fun MobileShellScreen(
                         )
                         MobileDestination.LibraryDetail -> LibraryDetailScreen(
                             state = state,
-                            onBack = { onNavigate(MobileDestination.Libraries) },
+                            onBack = onNavigateBack,
                             onRetry = onRetryLibrary,
                             onOpenMedia = onOpenMedia,
                             onStartLiveTvPlayback = onStartLiveTvPlayback,
@@ -1130,7 +1170,7 @@ private fun MobileShellScreen(
             }
             if (state.mobileDestination != MobileDestination.Player) {
                 MobileBottomNav(
-                    selected = state.mobileDestination,
+                    selected = state.mobileDestination.bottomNavRoot(state.previousMobileDestination),
                     onSelected = onNavigate,
                     isAdmin = state.session?.user?.isAdministrator == true,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -3663,6 +3703,16 @@ private fun VantafynAppBackground.drawableResId(): Int =
         VantafynAppBackground.Background2 -> CoreUiR.drawable.vantafyn_background_2
         VantafynAppBackground.Background3 -> CoreUiR.drawable.vantafyn_background_3
         VantafynAppBackground.Background4 -> CoreUiR.drawable.vantafyn_background_4
+    }
+
+private fun MobileDestination.bottomNavRoot(previous: MobileDestination): MobileDestination =
+    when (this) {
+        MobileDestination.MediaDetail,
+        MobileDestination.Player -> previous.bottomNavRoot(MobileDestination.Home)
+        MobileDestination.LibraryDetail -> MobileDestination.Libraries
+        MobileDestination.HomeLayout,
+        MobileDestination.PlaybackPreferences -> MobileDestination.Profile
+        else -> this
     }
 
 private fun String.searchGroupLabel(): String =
