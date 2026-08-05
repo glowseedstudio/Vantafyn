@@ -1,0 +1,658 @@
+package dev.vantafyn.core.ui
+
+import android.view.KeyEvent
+import androidx.annotation.DrawableRes
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+
+@Composable
+fun VantafynScreenScaffold(
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.verticalGradient(
+                    listOf(Color(0xFF101624), VantafynColors.Graphite, Color(0xFF050812)),
+                ),
+            )
+            .padding(VantafynSpacing.xl),
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun VantafynOnboardingBackground(
+    tv: Boolean,
+    modifier: Modifier = Modifier,
+    @DrawableRes backgroundResId: Int = R.drawable.vantafyn_onboarding_background,
+    content: @Composable () -> Unit,
+) {
+    val customBackground = backgroundResId != R.drawable.vantafyn_onboarding_background
+    val baseScrim = when {
+        customBackground && tv -> 0.42f
+        customBackground -> 0.38f
+        tv -> 0.54f
+        else -> 0.52f
+    }
+    val sideScrimStart = when {
+        customBackground && tv -> 0.58f
+        customBackground -> 0.52f
+        tv -> 0.74f
+        else -> 0.70f
+    }
+    val sideScrimMid = when {
+        customBackground && tv -> 0.24f
+        customBackground -> 0.20f
+        tv -> 0.36f
+        else -> 0.34f
+    }
+    val bottomScrim = when {
+        customBackground && tv -> 0.50f
+        customBackground -> 0.52f
+        tv -> 0.68f
+        else -> 0.72f
+    }
+    Box(modifier = modifier.fillMaxSize()) {
+        Crossfade(targetState = backgroundResId, animationSpec = tween(durationMillis = 420), label = "vantafynBackground") { resId ->
+            Image(
+                painter = painterResource(id = resId),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = baseScrim)),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            VantafynColors.Graphite.copy(alpha = sideScrimStart),
+                            VantafynColors.Graphite.copy(alpha = sideScrimMid),
+                            Color.Transparent,
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            VantafynColors.Graphite.copy(alpha = 0.18f),
+                            Color.Transparent,
+                            VantafynColors.Graphite.copy(alpha = bottomScrim),
+                        ),
+                        startY = 0f,
+                    ),
+                ),
+        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            content()
+        }
+    }
+}
+
+@Composable
+fun VantafynButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) = VantafynGradientButton(
+    text = text,
+    onClick = onClick,
+    modifier = modifier,
+    enabled = enabled,
+)
+
+@Composable
+fun VantafynGradientButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(if (focused && enabled) 1.03f else 1f, label = "gradientButtonScale")
+    val borderColor by animateColorAsState(
+        if (focused && enabled) Color.White.copy(alpha = 0.42f) else Color.White.copy(alpha = 0.16f),
+        label = "gradientButtonBorder",
+    )
+    val shape = RoundedCornerShape(20.dp)
+    val gradient = if (enabled) {
+        Brush.horizontalGradient(
+            listOf(
+                Color(0xFF6EA8FF),
+                Color(0xFF8B7DFF),
+                Color(0xFFB06CFF),
+            ),
+        )
+    } else {
+        Brush.horizontalGradient(
+            listOf(
+                VantafynColors.SurfaceHigh.copy(alpha = 0.82f),
+                Color(0xFF252B3D).copy(alpha = 0.82f),
+            ),
+        )
+    }
+    Box(
+        modifier = modifier
+            .widthIn(min = 132.dp)
+            .height(58.dp)
+            .scale(scale)
+            .drawBehind {
+                if (enabled) {
+                    drawRoundRect(
+                        color = Color(0xFF7B8DFF).copy(alpha = if (focused) 0.24f else 0.14f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx(), 24.dp.toPx()),
+                    )
+                }
+            }
+            .padding(2.dp)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(shape)
+            .background(gradient)
+            .border(BorderStroke(1.dp, borderColor), shape)
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = VantafynSpacing.lg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) Color(0xFFF8FAFF) else VantafynColors.Muted,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+fun VantafynTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    placeholder: String? = null,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    visualTransformation: VisualTransformation = VisualTransformation.None,
+    tvKeyboardRequiresClick: Boolean = false,
+) {
+    var editing by remember { mutableStateOf(!tvKeyboardRequiresClick) }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val interactionSource = remember { MutableInteractionSource() }
+    val textFieldModifier = modifier
+        .fillMaxWidth()
+        .focusRequester(focusRequester)
+        .onFocusChanged {
+            if (!it.isFocused && tvKeyboardRequiresClick) {
+                editing = false
+            }
+        }
+        .onPreviewKeyEvent {
+            if (!tvKeyboardRequiresClick || it.type != KeyEventType.KeyUp) {
+                false
+            } else {
+                when (it.nativeKeyEvent.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_CENTER,
+                    KeyEvent.KEYCODE_ENTER,
+                    KeyEvent.KEYCODE_NUMPAD_ENTER,
+                    -> {
+                        editing = true
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                        true
+                    }
+                    KeyEvent.KEYCODE_BACK -> {
+                        if (editing) {
+                            editing = false
+                            keyboardController?.hide()
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    else -> false
+                }
+            }
+        }
+        .then(
+            if (tvKeyboardRequiresClick) {
+                Modifier.clickable(
+                    enabled = enabled,
+                    interactionSource = interactionSource,
+                    indication = null,
+                ) {
+                    editing = true
+                    focusRequester.requestFocus()
+                    keyboardController?.show()
+                }
+            } else {
+                Modifier
+            },
+        )
+
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = textFieldModifier,
+        label = { Text(label) },
+        placeholder = placeholder?.let { { Text(it) } },
+        singleLine = true,
+        enabled = enabled,
+        readOnly = tvKeyboardRequiresClick && !editing,
+        keyboardOptions = keyboardOptions,
+        visualTransformation = visualTransformation,
+        shape = RoundedCornerShape(VantafynRadii.sheet),
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = VantafynColors.Ink,
+            unfocusedTextColor = VantafynColors.Ink,
+            disabledTextColor = VantafynColors.Muted,
+            focusedContainerColor = VantafynColors.Surface.copy(alpha = 0.58f),
+            unfocusedContainerColor = VantafynColors.Surface.copy(alpha = 0.46f),
+            disabledContainerColor = VantafynColors.Surface.copy(alpha = 0.34f),
+            cursorColor = VantafynColors.Primary,
+            focusedBorderColor = VantafynColors.Primary,
+            unfocusedBorderColor = VantafynColors.Border,
+            disabledBorderColor = VantafynColors.Border.copy(alpha = 0.56f),
+            focusedLabelColor = VantafynColors.Ink,
+            unfocusedLabelColor = VantafynColors.Muted,
+            focusedPlaceholderColor = VantafynColors.Muted.copy(alpha = 0.78f),
+            unfocusedPlaceholderColor = VantafynColors.Muted.copy(alpha = 0.62f),
+        ),
+    )
+}
+
+@Composable
+fun VantafynCard(
+    modifier: Modifier = Modifier,
+    focusedScale: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        if (focused) VantafynColors.Primary else VantafynColors.Border,
+        label = "cardBorder",
+    )
+    val scale by animateFloatAsState(if (focused && focusedScale) 1.04f else 1f, label = "cardScale")
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            .focusable()
+            .clip(RoundedCornerShape(VantafynRadii.sheet))
+            .background(VantafynColors.Surface.copy(alpha = 0.66f))
+            .border(BorderStroke(1.dp, borderColor), RoundedCornerShape(VantafynRadii.sheet))
+            .padding(VantafynSpacing.lg),
+    ) {
+        content()
+    }
+}
+
+@Composable
+fun VantafynLoadingIndicator(text: String, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CircularProgressIndicator(color = VantafynColors.Primary, modifier = Modifier.size(24.dp))
+        Text(text, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+fun VantafynErrorCard(
+    message: String,
+    modifier: Modifier = Modifier,
+    action: (@Composable RowScope.() -> Unit)? = null,
+) {
+    VantafynCard(modifier = modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+            Text("Something needs attention", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge)
+            Text(message, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+            if (action != null) {
+                Spacer(Modifier.height(VantafynSpacing.xs))
+                Row(content = action)
+            }
+        }
+    }
+}
+
+@Composable
+fun VantafynServerCard(
+    name: String,
+    url: String,
+    version: String?,
+    modifier: Modifier = Modifier,
+    leadingContent: (@Composable () -> Unit)? = null,
+) {
+    val cardShape = RoundedCornerShape(22.dp)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawBehind {
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = 0.18f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(22.dp.toPx(), 22.dp.toPx()),
+                )
+            }
+            .clip(cardShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.07f),
+                        VantafynColors.Surface.copy(alpha = 0.58f),
+                        VantafynColors.SurfaceHigh.copy(alpha = 0.50f),
+                    ),
+                ),
+            )
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.09f)), cardShape)
+            .padding(horizontal = VantafynSpacing.lg, vertical = 22.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(Color(0xFF4F657D), Color(0xFF756A8A), Color(0xFF20252D)),
+                        ),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (leadingContent != null) {
+                    leadingContent()
+                } else {
+                    Text(
+                        name.take(1).uppercase(),
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp), modifier = Modifier.weight(1f)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        name,
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFF76D9C8).copy(alpha = 0.86f)),
+                    )
+                }
+                Text(url, color = VantafynColors.Muted.copy(alpha = 0.86f), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                version?.let {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.07f))
+                            .padding(horizontal = VantafynSpacing.sm, vertical = VantafynSpacing.xxs),
+                    ) {
+                        Text(
+                            "Jellyfin $it",
+                            color = VantafynColors.Muted.copy(alpha = 0.88f),
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VantafynProfileCard(
+    label: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    manageMode: Boolean = false,
+    onClick: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+    avatar: @Composable BoxScope.() -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val borderColor by animateColorAsState(
+        if (focused) VantafynColors.Primary else VantafynColors.Border,
+        label = "profileCardBorder",
+    )
+    val scale by animateFloatAsState(if (focused) 1.04f else 1f, label = "profileCardScale")
+    Column(
+        modifier = modifier
+            .scale(scale)
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(VantafynRadii.sheet))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.10f),
+                        VantafynColors.Surface.copy(alpha = 0.68f),
+                        VantafynColors.SurfaceHigh.copy(alpha = 0.62f),
+                    ),
+                ),
+            )
+            .border(BorderStroke(if (focused) 2.dp else 1.dp, borderColor), RoundedCornerShape(VantafynRadii.sheet))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(Color(0xFF273557), Color(0xFF35324E), VantafynColors.SurfaceHigh),
+                    ),
+                ),
+            contentAlignment = Alignment.Center,
+            content = avatar,
+        )
+        Text(
+            label,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+        )
+        subtitle?.let {
+            Text(it, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+        }
+        if (manageMode && onRemove != null) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(VantafynRadii.button))
+                    .background(VantafynColors.Destructive.copy(alpha = 0.22f))
+                    .border(BorderStroke(1.dp, VantafynColors.Destructive.copy(alpha = 0.38f)), RoundedCornerShape(VantafynRadii.button))
+                    .clickable(onClick = onRemove)
+                    .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.xs),
+            ) {
+                Text("Remove")
+            }
+        }
+    }
+}
+
+@Composable
+fun VantafynLogoHeader(
+    title: String,
+    tagline: String?,
+    tv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(if (tv) VantafynSpacing.md else VantafynSpacing.sm),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (tv) 92.dp else 76.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(20.dp))
+                .padding(if (tv) 12.dp else 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.vantafyn_logo),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        Text(
+            title,
+            color = VantafynColors.Ink,
+            style = if (tv) MaterialTheme.typography.displayLarge else MaterialTheme.typography.displayLarge,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        tagline?.let {
+            Text(
+                it,
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.titleLarge,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
+fun VantafynSetupHeader(
+    title: String,
+    subtitle: String?,
+    tv: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(if (tv) VantafynSpacing.md else VantafynSpacing.sm),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (tv) 58.dp else 48.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(14.dp))
+                .padding(7.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(id = R.drawable.vantafyn_logo),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        Text(
+            title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        subtitle?.let {
+            Text(
+                it,
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}

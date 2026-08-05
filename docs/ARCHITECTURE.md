@@ -25,9 +25,10 @@ Playback is intentionally not implemented in this milestone. The next step is to
 
 `core-jellyfin` owns the SDK and exposes plain Vantafyn models:
 
-- `JellyfinAuthRepository`: server test, username/password login, saved-session restore, and logout.
+- `JellyfinAuthRepository`: server test, public login-user discovery, username/password login, saved-session restore, and logout.
 - `JellyfinLibraryRepository`: authenticated library/view fetch.
-- `JellyfinSessionStorage`: storage boundary for server URL, user identity, and access token.
+- `JellyfinAdminRepository`: administrator-only read model for real server, session, user, and library-count data.
+- `JellyfinSessionStorage`: storage boundary for saved profiles, server metadata, user identity, and access tokens.
 - `JellyfinResult`: success/failure wrapper so UI code does not catch SDK exceptions directly.
 
 The Compose UI in `feature-home` uses `VantafynHomeViewModel`, which calls these repositories. App modules do not call the Jellyfin SDK directly.
@@ -37,11 +38,30 @@ SDK APIs currently used:
 - `createJellyfin { ... }`
 - `createApi(baseUrl, accessToken)`
 - `systemApi.getPublicSystemInfo()`
+- `userApi.getPublicUsers()`
 - `userApi.authenticateUserByName(...)`
 - `userApi.getCurrentUser()`
 - `userViewsApi.getUserViews(userId)`
+- `systemApi.getSystemInfo()`
+- `sessionApi.getSessions()`
+- `userApi.getUsers(...)`
+- `itemsApi.getItems(GetItemsRequest)`
 
-Session storage currently lives in app-private `SharedPreferences` via `SharedPreferencesJellyfinSessionStorage`. The interface exists so encrypted storage can replace it without changing UI or repository call sites.
+Session storage currently lives in app-private `SharedPreferences` via `SharedPreferencesJellyfinSessionStorage`. It supports multiple saved profiles and migrates the earlier single-session keys if present. The interface exists so encrypted storage or DataStore can replace it without changing UI or repository call sites. Passwords are not stored.
+
+Admin surfaces must only display metrics that Jellyfin actually returns. Current admin counts come from real item-count queries and live session/user APIs. Watch-time totals and historical playback analytics are left as "requires plugin later" because Jellyfin core does not expose those totals through this flow.
+
+The first-run and returning launch flow lives in `feature-home`:
+
+- Welcome
+- Connect Server
+- Server Confirm
+- Profile Picker for public server users when available
+- Sign In
+- Profile Picker
+- Home
+
+Returning launches show the profile picker even when only one saved profile exists. Selecting a saved profile validates the saved token before entering Home; expired profiles are sent back to Sign In for the saved server. Selecting a public server user pre-fills the username and then continues through password sign-in.
 
 ## Reference Boundary
 

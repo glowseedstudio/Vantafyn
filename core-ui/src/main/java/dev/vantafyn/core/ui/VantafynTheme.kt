@@ -37,14 +37,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 object VantafynColors {
-    val Graphite = Color(0xFF0D0F12)
-    val Surface = Color(0xFF171A1F)
-    val SurfaceHigh = Color(0xFF22262D)
-    val Ink = Color(0xFFF4F0E8)
-    val Muted = Color(0xFFA8ADB4)
-    val Gold = Color(0xFFC7A76C)
-    val BlueGrey = Color(0xFF75899A)
-    val Wine = Color(0xFF7C4E57)
+    val Graphite = Color(0xFF070A12)
+    val Surface = Color(0xFF141822)
+    val SurfaceHigh = Color(0xFF1B2030)
+    val Ink = Color(0xFFF5F7FF)
+    val Muted = Color(0xFFB8C0D8)
+    val Primary = Color(0xFF8EA2FF)
+    val Secondary = Color(0xFF62D6FF)
+    val Destructive = Color(0xFFA96A72)
+    val Border = Color.White.copy(alpha = 0.12f)
 }
 
 object VantafynSpacing {
@@ -59,9 +60,9 @@ object VantafynSpacing {
 }
 
 object VantafynRadii {
-    val button = 8.dp
-    val card = 8.dp
-    val sheet = 12.dp
+    val button = 12.dp
+    val card = 12.dp
+    val sheet = 16.dp
 }
 
 object VantafynMotion {
@@ -84,12 +85,12 @@ private val colorScheme = darkColorScheme(
     background = VantafynColors.Graphite,
     surface = VantafynColors.Surface,
     surfaceVariant = VantafynColors.SurfaceHigh,
-    primary = VantafynColors.Gold,
-    secondary = VantafynColors.BlueGrey,
-    tertiary = VantafynColors.Wine,
+    primary = VantafynColors.Primary,
+    secondary = VantafynColors.Secondary,
+    tertiary = VantafynColors.Destructive,
     onBackground = VantafynColors.Ink,
     onSurface = VantafynColors.Ink,
-    onPrimary = Color(0xFF17130B),
+    onPrimary = Color(0xFF071024),
 )
 
 @Composable
@@ -134,9 +135,9 @@ fun VantafynSurface(content: @Composable () -> Unit) {
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF12161B),
+                        Color(0xFF0E1320),
                         VantafynColors.Graphite,
-                        Color(0xFF090A0C),
+                        Color(0xFF060912),
                     ),
                 ),
             ),
@@ -153,9 +154,9 @@ fun PosterCard(
 ) {
     var focused by remember { mutableStateOf(false) }
     val border = if (focused) {
-        BorderStroke(2.dp, VantafynColors.Gold)
+        BorderStroke(2.dp, VantafynColors.Primary)
     } else {
-        BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        BorderStroke(1.dp, Color.White.copy(alpha = 0.10f))
     }
 
     Column(

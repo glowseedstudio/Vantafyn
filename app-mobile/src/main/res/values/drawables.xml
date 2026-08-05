@@ -1,0 +1,3 @@
+<resources>
+    <item name="vantafyn_onboarding_background" type="drawable">@drawable/vantafyn_onboarding_nebula</item>
+</resources>

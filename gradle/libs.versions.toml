@@ -14,6 +14,8 @@ navigationCompose = "2.9.0"
 tvFoundation = "1.0.0"
 tvMaterial = "1.1.0-alpha01"
 coroutines = "1.10.2"
+coil = "3.5.0"
+junit = "4.13.2"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -32,11 +34,14 @@ androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "medi
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-tv-foundation = { module = "androidx.tv:tv-foundation", version.ref = "tvFoundation" }
 androidx-tv-material = { module = "androidx.tv:tv-material", version.ref = "tvMaterial" }
+coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
+coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 jellyfin-api = { module = "org.jellyfin.sdk:jellyfin-api", version.ref = "jellyfinSdk" }
 jellyfin-api-okhttp = { module = "org.jellyfin.sdk:jellyfin-api-okhttp", version.ref = "jellyfinSdk" }
 jellyfin-core = { module = "org.jellyfin.sdk:jellyfin-core", version.ref = "jellyfinSdk" }
 jellyfin-model = { module = "org.jellyfin.sdk:jellyfin-model", version.ref = "jellyfinSdk" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
