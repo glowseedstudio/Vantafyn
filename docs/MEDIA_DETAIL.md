@@ -36,11 +36,11 @@ The mobile Media Detail screen is a premium metadata-first page. It does not sta
 
 ## Theme Music
 
-When enabled, detail pages request the first available Jellyfin theme song and play it through a small Media3 `ExoPlayer` instance scoped to the detail composable. The theme audio stream URL is generated with `universalAudioApi.getUniversalAudioStreamUrl(...)` and includes the saved access token as an `api_key` query parameter so ExoPlayer can fetch it outside the Jellyfin SDK client. It loops at low volume, requests Android audio focus through Media3 audio attributes, and is released when the user leaves the detail page or opens another item.
+When enabled, detail pages request the first available Jellyfin theme song and play it through a small Media3 `ExoPlayer` instance scoped to the detail composable. The theme audio stream URL is generated with `universalAudioApi.getUniversalAudioStreamUrl(...)` and includes the saved access token as an `api_key` query parameter so ExoPlayer can fetch it outside the Jellyfin SDK client. It loops, requests Android audio focus through Media3 audio attributes, fades in on entry, and fades out when the user leaves the detail page or opens another item.
 
-The setting lives in Profile/Settings as `Theme Music` and is persisted per saved profile in app-private preferences. Default is ON.
+The setting lives in Profile/Settings as `Theme Music` and is persisted per saved profile in app-private preferences. Default is ON with `Soft` volume. Volume choices are `Soft`, `Medium`, `High`, and `Full`.
 
-Current limitation: this is a first small ambience controller, not the future playback engine. It does not yet implement polished fade curves or user-facing volume controls.
+The theme player observes the app lifecycle: it fades down and pauses when the app stops, including backgrounding and lock-screen transitions, then resumes with a fade-in when the detail screen becomes active again.
 
 ## Placeholders
 

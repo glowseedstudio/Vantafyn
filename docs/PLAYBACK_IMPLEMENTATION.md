@@ -6,14 +6,18 @@
 - `core-jellyfin` owns Jellyfin playback API access through `JellyfinPlaybackRepository`.
 - `feature-player` owns the Media3 player surface, custom dark controls, progress UI, error overlay, and basic track sheets.
 - `feature-home` owns navigation and coordinates playback lifecycle reporting through the repository.
+- Live TV channel/program taps now enter the same mobile player path.
+- Live TV now has an explicit `openLiveStream(...)` fallback after playback-info auto-open failures.
 - TV playback is not implemented yet, but `app-tv` still builds.
 
 ## Jellyfin APIs Used
 
 - `MediaInfoApi.getPostedPlaybackInfo(itemId, PlaybackInfoDto)` for playback info, media sources, play session id, stream metadata, and transcoding URLs.
-- `PlayStateApi.onPlaybackStart(...)` for playback start reporting.
-- `PlayStateApi.onPlaybackProgress(...)` for periodic progress, pause, and seek reporting.
-- `PlayStateApi.onPlaybackStopped(...)` for exit/stop reporting.
+- `PlayStateApi.reportPlaybackStart(PlaybackStartInfo)` for playback start reporting, including position ticks.
+- `PlayStateApi.reportPlaybackProgress(PlaybackProgressInfo)` for periodic progress, pause, and seek reporting.
+- `PlayStateApi.reportPlaybackStopped(PlaybackStopInfo)` for exit/completion reporting.
+- `MediaInfoApi.closeLiveStream(liveStreamId)` when Jellyfin marks the stream as live and returns a live stream id.
+- `MediaInfoApi.openLiveStream(...)` as the explicit Live TV fallback when playback-info auto-open does not provide a playable stream.
 
 ## Direct Play Strategy
 
@@ -33,17 +37,35 @@ The playback profile allows HLS video transcoding to H.264/AAC. If Jellyfin retu
 
 Detail data now carries Jellyfin `playbackPositionTicks`. Resume uses those ticks when the item is partially watched and not already marked played.
 
-Progress is reported every seven seconds during playback and also on pause/seek. Stop is reported when the player is closed. Jellyfin remains responsible for deciding watched thresholds.
+Progress is reported every seven seconds during playback and also on pause/seek/background. Stop is reported when the player is closed or reaches completion. Jellyfin remains responsible for deciding watched thresholds.
+
+When playback closes, the detail item and home libraries are refreshed so Continue Watching/resume state can update from Jellyfin.
 
 ## Tracks
 
-Playback info exposes audio and subtitle streams as Vantafyn-owned models. The mobile player shows Audio and Subs sheets when tracks are available. Selecting a track re-requests playback info with the selected stream index.
+Playback info exposes audio and subtitle streams as Vantafyn-owned models. The mobile player shows Audio and Subs sheets when tracks are available. Selecting a track re-requests playback info with the selected stream index and current playback position.
 
 Current limitation: Media3 in-stream track override is not yet implemented for already-opened direct streams. Track changes restart playback through the Jellyfin playback-info flow.
 
 ## Live TV
 
-The same playback-info path is prepared for Live TV item ids, but Live TV-specific open/close live-stream lifecycle is not complete in this pass. If a Live TV item cannot play through regular playback info, it needs explicit `openLiveStream` / `closeLiveStream` handling next.
+Live TV library, guide rows, home Live TV rows, and program taps now attempt playback using the channel id through `MediaInfoApi.getPostedPlaybackInfo(...)` with `autoOpenLiveStream = true`.
+
+If Jellyfin returns a `liveStreamId`, Vantafyn marks the item as live, reports playback with the live stream id, disables seek semantics in reporting, and calls `closeLiveStream(liveStreamId)` on stop.
+
+If playback-info auto-open fails for Live TV, Vantafyn calls `MediaInfoApi.openLiveStream(...)` with the Android mobile device profile and builds playback from the returned media source. If that source includes `liveStreamId`, stop/error/retry closes it.
+
+Retries and track changes report stop on the previous active session before opening the new stream, which avoids duplicate Live TV sessions where Jellyfin provides closeable stream ids.
+
+## Diagnostics
+
+Debug-safe logs use the `VantafynPlayback` tag:
+
+```bash
+adb logcat -s VantafynPlayback
+```
+
+Logs include playback method, whether media/play/live stream ids are present, selected audio/subtitle indexes, and safe error class/message. Tokens and full signed URLs are not logged.
 
 ## Known Limitations
 
@@ -52,3 +74,4 @@ The same playback-info path is prepared for Live TV item ids, but Live TV-specif
 - Subtitle formats that require burn-in depend on Jellyfin transcoding.
 - Quality/source selection beyond direct vs transcode is not yet a full UI.
 - Track changes restart playback rather than switching tracks in-place.
+- Explicit Live TV fallback is implemented, but Live TV behavior still depends on server tuner/provider support.

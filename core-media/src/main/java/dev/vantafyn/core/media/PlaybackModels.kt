@@ -9,6 +9,8 @@ data class VantafynPlaybackItem(
     val startPositionMs: Long = 0L,
     val durationMs: Long? = null,
     val sourceLabel: String? = null,
+    val selectedAudioStreamIndex: Int? = null,
+    val selectedSubtitleStreamIndex: Int? = null,
     val audioTracks: List<VantafynAudioTrack> = emptyList(),
     val subtitleTracks: List<VantafynSubtitleTrack> = emptyList(),
 )

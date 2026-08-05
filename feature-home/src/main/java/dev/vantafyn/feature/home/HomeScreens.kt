@@ -69,6 +69,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -103,6 +106,7 @@ import dev.vantafyn.feature.home.auth.VantafynHomeUiState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
 import dev.vantafyn.feature.home.auth.HomeSectionType
 import dev.vantafyn.feature.home.auth.MobileDestination
+import dev.vantafyn.feature.home.auth.ThemeMusicVolume
 import dev.vantafyn.feature.home.auth.HomeSectionPreference
 import dev.vantafyn.feature.home.auth.VantafynAppBackground
 import dev.vantafyn.feature.home.auth.VantafynArtworkType
@@ -112,7 +116,14 @@ import dev.vantafyn.feature.home.auth.VantafynCardSpacing
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
 import dev.vantafyn.feature.home.auth.supportedSmartRows
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 @Composable
 fun VantafynAppContent(
@@ -200,6 +211,7 @@ fun VantafynAppContent(
             onCycleSize = viewModel::cycleSectionSize,
             onCycleSpacing = viewModel::cycleSectionSpacing,
             onToggleThemeMusic = viewModel::toggleThemeMusic,
+            onSelectThemeMusicVolume = viewModel::selectThemeMusicVolume,
             onSelectBackground = viewModel::selectBackground,
             onToggleMediaFavorite = viewModel::toggleMediaFavorite,
             onToggleMediaPlayed = viewModel::toggleMediaPlayed,
@@ -209,9 +221,11 @@ fun VantafynAppContent(
             onExitPlayback = viewModel::exitPlayback,
             onPlaybackStarted = viewModel::reportPlaybackStarted,
             onPlaybackProgress = viewModel::reportPlaybackProgress,
+            onPlaybackEnded = viewModel::exitPlayback,
             onPlayerError = viewModel::handlePlayerError,
             onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
             onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
+            onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
             onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
             onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
             onChangePassword = viewModel::changeCurrentUserPassword,
@@ -842,6 +856,7 @@ private fun HomeScreen(
     onCycleSize: (HomeSectionType) -> Unit,
     onCycleSpacing: (HomeSectionType) -> Unit,
     onToggleThemeMusic: () -> Unit,
+    onSelectThemeMusicVolume: (ThemeMusicVolume) -> Unit,
     onSelectBackground: (VantafynAppBackground) -> Unit,
     onToggleMediaFavorite: () -> Unit,
     onToggleMediaPlayed: () -> Unit,
@@ -851,9 +866,11 @@ private fun HomeScreen(
     onExitPlayback: (Long) -> Unit,
     onPlaybackStarted: (Long) -> Unit,
     onPlaybackProgress: (Long, Boolean) -> Unit,
+    onPlaybackEnded: (Long) -> Unit,
     onPlayerError: () -> Unit,
-    onSelectPlaybackAudioTrack: (Int) -> Unit,
-    onSelectPlaybackSubtitleTrack: (Int?) -> Unit,
+    onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
+    onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
+    onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -892,6 +909,7 @@ private fun HomeScreen(
             onCycleSize = onCycleSize,
             onCycleSpacing = onCycleSpacing,
             onToggleThemeMusic = onToggleThemeMusic,
+            onSelectThemeMusicVolume = onSelectThemeMusicVolume,
             onSelectBackground = onSelectBackground,
             onToggleMediaFavorite = onToggleMediaFavorite,
             onToggleMediaPlayed = onToggleMediaPlayed,
@@ -901,9 +919,11 @@ private fun HomeScreen(
             onExitPlayback = onExitPlayback,
             onPlaybackStarted = onPlaybackStarted,
             onPlaybackProgress = onPlaybackProgress,
+            onPlaybackEnded = onPlaybackEnded,
             onPlayerError = onPlayerError,
             onSelectPlaybackAudioTrack = onSelectPlaybackAudioTrack,
             onSelectPlaybackSubtitleTrack = onSelectPlaybackSubtitleTrack,
+            onStartLiveTvPlayback = onStartLiveTvPlayback,
             onEditPlaybackPreferences = onEditPlaybackPreferences,
             onSavePlaybackPreferences = onSavePlaybackPreferences,
             onChangePassword = onChangePassword,
@@ -984,6 +1004,7 @@ private fun MobileShellScreen(
     onCycleSize: (HomeSectionType) -> Unit,
     onCycleSpacing: (HomeSectionType) -> Unit,
     onToggleThemeMusic: () -> Unit,
+    onSelectThemeMusicVolume: (ThemeMusicVolume) -> Unit,
     onSelectBackground: (VantafynAppBackground) -> Unit,
     onToggleMediaFavorite: () -> Unit,
     onToggleMediaPlayed: () -> Unit,
@@ -993,9 +1014,11 @@ private fun MobileShellScreen(
     onExitPlayback: (Long) -> Unit,
     onPlaybackStarted: (Long) -> Unit,
     onPlaybackProgress: (Long, Boolean) -> Unit,
+    onPlaybackEnded: (Long) -> Unit,
     onPlayerError: () -> Unit,
-    onSelectPlaybackAudioTrack: (Int) -> Unit,
-    onSelectPlaybackSubtitleTrack: (Int?) -> Unit,
+    onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
+    onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
+    onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -1018,6 +1041,7 @@ private fun MobileShellScreen(
                     onProfile = { onNavigate(MobileDestination.Profile) },
                     onOpenLibrary = onOpenLibrary,
                     onOpenMedia = onOpenMedia,
+                    onStartLiveTvPlayback = onStartLiveTvPlayback,
                     onPlaybackComingSoon = onPlaybackComingSoon,
                 )
                 MobileDestination.MediaDetail -> MediaDetailScreen(
@@ -1028,6 +1052,7 @@ private fun MobileShellScreen(
                     onPlaybackComingSoon = onPlaybackComingSoon,
                     onStartPlayback = onStartPlayback,
                     themeMusicEnabled = state.themeMusicEnabled,
+                    themeMusicVolume = state.themeMusicVolume,
                     onToggleFavorite = onToggleMediaFavorite,
                     onTogglePlayed = onToggleMediaPlayed,
                 )
@@ -1041,6 +1066,7 @@ private fun MobileShellScreen(
                     onTryTranscode = onTryTranscodedPlayback,
                     onStarted = onPlaybackStarted,
                     onProgress = onPlaybackProgress,
+                    onEnded = onPlaybackEnded,
                     onPlayerError = onPlayerError,
                     onSelectAudioTrack = onSelectPlaybackAudioTrack,
                     onSelectSubtitleTrack = onSelectPlaybackSubtitleTrack,
@@ -1060,6 +1086,7 @@ private fun MobileShellScreen(
                             onHomeLayout = { onNavigate(MobileDestination.HomeLayout) },
                             onPlaybackPreferences = { onNavigate(MobileDestination.PlaybackPreferences) },
                             onToggleThemeMusic = onToggleThemeMusic,
+                            onSelectThemeMusicVolume = onSelectThemeMusicVolume,
                             onSwitchUser = onSwitchUser,
                             onAddProfile = onAddProfile,
                             onQuickConnect = onQuickConnect,
@@ -1091,6 +1118,7 @@ private fun MobileShellScreen(
                             onBack = { onNavigate(MobileDestination.Libraries) },
                             onRetry = onRetryLibrary,
                             onOpenMedia = onOpenMedia,
+                            onStartLiveTvPlayback = onStartLiveTvPlayback,
                             onPlaybackComingSoon = onPlaybackComingSoon,
                         )
                         else -> Unit
@@ -1149,6 +1177,7 @@ private fun MobileHomeContent(
     onProfile: () -> Unit,
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
+    onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onPlaybackComingSoon: () -> Unit,
 ) {
     Box(Modifier.fillMaxSize()) {
@@ -1215,7 +1244,17 @@ private fun MobileHomeContent(
                                 HomeMediaSection(
                                     section = section,
                                     preference = preference,
-                                    onOpenMedia = { onPlaybackComingSoon() },
+                                    onOpenMedia = { id ->
+                                        val channel = state.home?.liveTvChannels.orEmpty().firstOrNull { it.id == id }
+                                        val program = state.home?.liveTvPrograms.orEmpty().firstOrNull { it.id == id }
+                                        when {
+                                            channel != null -> onStartLiveTvPlayback(channel.id, channel.name, channel.currentProgramName)
+                                            program?.channelId != null -> program.channelId?.let { channelId ->
+                                                onStartLiveTvPlayback(channelId, program.title, program.subtitle)
+                                            } ?: onPlaybackComingSoon()
+                                            else -> onPlaybackComingSoon()
+                                        }
+                                    },
                                     onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
                                     onPlaybackComingSoon = onPlaybackComingSoon,
                                 )
@@ -1831,6 +1870,7 @@ private fun LibraryDetailScreen(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
+    onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onPlaybackComingSoon: () -> Unit,
 ) {
     val library = state.selectedLibrary
@@ -1858,7 +1898,11 @@ private fun LibraryDetailScreen(
                 LiveTvGuideSection(
                     channels = state.home?.liveTvChannels.orEmpty(),
                     programs = state.home?.liveTvPrograms.orEmpty(),
-                    onProgram = onPlaybackComingSoon,
+                    onChannel = { channel -> onStartLiveTvPlayback(channel.id, channel.name, channel.currentProgramName) },
+                    onProgram = { program ->
+                        program.channelId?.let { onStartLiveTvPlayback(it, program.title, program.subtitle) }
+                            ?: onPlaybackComingSoon()
+                    },
                 )
             }
         }
@@ -1882,7 +1926,11 @@ private fun LibraryDetailScreen(
                     MediaItemCard(
                         item = item,
                         onClick = {
-                            if (liveTv || item.itemType?.startsWith("LiveTv") == true) onPlaybackComingSoon() else onOpenMedia(item.id)
+                            if (liveTv || item.itemType?.startsWith("LiveTv") == true) {
+                                onStartLiveTvPlayback(item.id, item.title, item.subtitle)
+                            } else {
+                                onOpenMedia(item.id)
+                            }
                         },
                     )
                 }
@@ -1898,12 +1946,13 @@ private fun String?.isLiveTvCollection(): Boolean =
 private fun LiveTvGuideSection(
     channels: List<dev.vantafyn.core.jellyfin.JellyfinLiveTvChannel>,
     programs: List<dev.vantafyn.core.jellyfin.JellyfinLiveTvProgram>,
-    onProgram: () -> Unit,
+    onChannel: (dev.vantafyn.core.jellyfin.JellyfinLiveTvChannel) -> Unit,
+    onProgram: (dev.vantafyn.core.jellyfin.JellyfinLiveTvProgram) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("Program Guide", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            GlassAction("Guide", onClick = onProgram)
+            GlassAction("Guide", onClick = { channels.firstOrNull()?.let(onChannel) })
         }
         if (channels.isEmpty() && programs.isEmpty()) {
             EmptyState("Guide data unavailable", "Jellyfin did not return channel or program listings for this profile.")
@@ -1917,7 +1966,7 @@ private fun LiveTvGuideSection(
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
                             .background(Color.White.copy(alpha = 0.055f))
-                            .clickable(onClick = onProgram)
+                            .clickable { onChannel(channel) }
                             .padding(VantafynSpacing.sm),
                         horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1927,7 +1976,7 @@ private fun LiveTvGuideSection(
                             title = channel.name,
                             wide = false,
                             progress = null,
-                            onClick = onProgram,
+                            onClick = { onChannel(channel) },
                             modifier = Modifier.size(58.dp),
                         )
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -2205,6 +2254,7 @@ private fun ProfileSettingsScreen(
     onHomeLayout: () -> Unit,
     onPlaybackPreferences: () -> Unit,
     onToggleThemeMusic: () -> Unit,
+    onSelectThemeMusicVolume: (ThemeMusicVolume) -> Unit,
     onSwitchUser: () -> Unit,
     onAddProfile: () -> Unit,
     onQuickConnect: () -> Unit,
@@ -2236,6 +2286,11 @@ private fun ProfileSettingsScreen(
                     subtitle = "Plays Jellyfin theme songs when a detail page exposes one.",
                     checked = state.themeMusicEnabled,
                     onClick = onToggleThemeMusic,
+                )
+                ThemeMusicVolumeSelector(
+                    selected = state.themeMusicVolume,
+                    enabled = state.themeMusicEnabled,
+                    onSelect = onSelectThemeMusicVolume,
                 )
             }
         }
@@ -2376,6 +2431,53 @@ private fun PremiumToggleRow(title: String, subtitle: String, checked: Boolean, 
                     .clip(RoundedCornerShape(999.dp))
                     .background(Color.White.copy(alpha = 0.94f)),
             )
+        }
+    }
+}
+
+@Composable
+private fun ThemeMusicVolumeSelector(
+    selected: ThemeMusicVolume,
+    enabled: Boolean,
+    onSelect: (ThemeMusicVolume) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Theme music volume", color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+            Text(selected.label, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = if (enabled) 0.055f else 0.032f))
+                .padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            ThemeMusicVolume.entries.forEach { option ->
+                val isSelected = option == selected
+                Text(
+                    text = option.label,
+                    color = when {
+                        !enabled -> VantafynColors.Muted.copy(alpha = 0.48f)
+                        isSelected -> VantafynColors.Ink
+                        else -> VantafynColors.Muted
+                    },
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(if (isSelected && enabled) Color(0xFF7B8DFF).copy(alpha = 0.24f) else Color.Transparent)
+                        .clickable(enabled = enabled) { onSelect(option) }
+                        .padding(vertical = 9.dp),
+                )
+            }
         }
     }
 }
@@ -2768,6 +2870,7 @@ private fun MediaDetailScreen(
     onPlaybackComingSoon: () -> Unit,
     onStartPlayback: () -> Unit,
     themeMusicEnabled: Boolean,
+    themeMusicVolume: ThemeMusicVolume,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
 ) {
@@ -2775,6 +2878,7 @@ private fun MediaDetailScreen(
     DetailThemeAudio(
         url = detail?.themeSongUrl,
         enabled = themeMusicEnabled,
+        volume = themeMusicVolume,
     )
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -2848,14 +2952,18 @@ private fun MediaDetailScreen(
 }
 
 @Composable
-private fun DetailThemeAudio(url: String?, enabled: Boolean) {
+private fun DetailThemeAudio(url: String?, enabled: Boolean, volume: ThemeMusicVolume) {
     val context = LocalContext.current
-    DisposableEffect(url, enabled) {
-        if (!enabled || url.isNullOrBlank()) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(url, enabled, volume, lifecycleOwner) {
+        if (!enabled || url.isNullOrBlank() || volume.level <= 0f) {
             onDispose { }
         } else {
+            val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+            var fadeJob: Job? = null
+            var released = false
             val player = ExoPlayer.Builder(context).build().apply {
-                volume = 0.18f
+                this.volume = 0f
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setUsage(C.USAGE_MEDIA)
@@ -2866,12 +2974,63 @@ private fun DetailThemeAudio(url: String?, enabled: Boolean) {
                 repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
                 setMediaItem(MediaItem.fromUri(url))
                 prepare()
-                playWhenReady = true
+            }
+
+            fun fadeTo(targetVolume: Float, durationMs: Long, after: () -> Unit = {}) {
+                if (released) return
+                fadeJob?.cancel()
+                fadeJob = scope.launch {
+                    val startVolume = player.volume
+                    val steps = 18
+                    repeat(steps) { index ->
+                        if (!isActive || released) return@launch
+                        val progress = (index + 1).toFloat() / steps.toFloat()
+                        player.volume = startVolume + ((targetVolume - startVolume) * progress)
+                        delay(durationMs / steps)
+                    }
+                    if (!released) {
+                        player.volume = targetVolume
+                        after()
+                    }
+                }
+            }
+
+            fun startSoftly() {
+                if (released) return
+                player.playWhenReady = true
+                fadeTo(volume.level, durationMs = 900)
+            }
+
+            fun stopSoftly(releaseAfterFade: Boolean) {
+                if (released) return
+                fadeTo(0f, durationMs = 650) {
+                    if (released) return@fadeTo
+                    player.playWhenReady = false
+                    player.pause()
+                    if (releaseAfterFade) {
+                        released = true
+                        player.stop()
+                        player.release()
+                        scope.cancel()
+                    }
+                }
+            }
+
+            val observer = LifecycleEventObserver { _, event ->
+                when (event) {
+                    Lifecycle.Event.ON_START -> startSoftly()
+                    Lifecycle.Event.ON_STOP -> stopSoftly(releaseAfterFade = false)
+                    Lifecycle.Event.ON_DESTROY -> stopSoftly(releaseAfterFade = true)
+                    else -> Unit
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+                startSoftly()
             }
             onDispose {
-                player.volume = 0f
-                player.stop()
-                player.release()
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                stopSoftly(releaseAfterFade = true)
             }
         }
     }

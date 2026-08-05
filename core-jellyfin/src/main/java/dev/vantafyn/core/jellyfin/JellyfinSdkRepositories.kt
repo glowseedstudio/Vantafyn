@@ -2,6 +2,7 @@ package dev.vantafyn.core.jellyfin
 
 import android.content.Context
 import android.provider.Settings
+import android.util.Log
 import java.net.URLEncoder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -40,12 +41,18 @@ import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.MediaSourceInfo
+import org.jellyfin.sdk.model.api.MediaProtocol
 import org.jellyfin.sdk.model.api.SearchHint
 import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.PlayMethod
 import org.jellyfin.sdk.model.api.PlaybackInfoDto
+import org.jellyfin.sdk.model.api.PlaybackOrder
+import org.jellyfin.sdk.model.api.PlaybackProgressInfo
+import org.jellyfin.sdk.model.api.PlaybackStartInfo
+import org.jellyfin.sdk.model.api.PlaybackStopInfo
 import org.jellyfin.sdk.model.api.RepeatMode
 import org.jellyfin.sdk.model.api.MediaStream
+import org.jellyfin.sdk.model.api.OpenLiveStreamDto
 import org.jellyfin.sdk.model.api.SubtitlePlaybackMode
 import org.jellyfin.sdk.model.api.SubtitleDeliveryMethod
 import org.jellyfin.sdk.model.api.SubtitleProfile
@@ -74,7 +81,10 @@ class JellyfinRepositoryProvider(
     private val deviceId = resolveDeviceId(appContext)
     private val jellyfin = createJellyfin {
         this.context = appContext
-        clientInfo = ClientInfo(name = "Vantafyn", version = "0.1.0")
+        clientInfo = ClientInfo(
+            name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
+            version = "0.1.0",
+        )
         deviceInfo = DeviceInfo(
             id = deviceId,
             name = android.os.Build.MODEL ?: "Android",
@@ -530,81 +540,45 @@ class SdkJellyfinPlaybackRepository(
         forceTranscode: Boolean,
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
+        isLiveTv: Boolean,
     ): JellyfinResult<JellyfinPlaybackInfo> =
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                val response by api.mediaInfoApi.getPostedPlaybackInfo(
-                    itemId,
-                    PlaybackInfoDto(
-                        userId = session.user.id,
-                        maxStreamingBitrate = 60_000_000,
-                        startTimeTicks = startPositionTicks.takeIf { it > 0L },
-                        audioStreamIndex = audioStreamIndex,
-                        subtitleStreamIndex = subtitleStreamIndex,
-                        maxAudioChannels = 8,
-                        mediaSourceId = null,
-                        liveStreamId = null,
-                        deviceProfile = androidMobileDeviceProfile(),
-                        enableDirectPlay = !forceTranscode,
-                        enableDirectStream = true,
-                        enableTranscoding = true,
-                        allowVideoStreamCopy = !forceTranscode,
-                        allowAudioStreamCopy = true,
-                        autoOpenLiveStream = true,
-                        alwaysBurnInSubtitleWhenTranscoding = false,
-                    ),
-                )
-                val mediaSource = response.mediaSources
-                    .sortedWith(
-                        compareByDescending<MediaSourceInfo> { it.supportsDirectPlay && !forceTranscode }
-                            .thenByDescending { it.supportsDirectStream && !forceTranscode }
-                            .thenByDescending { it.supportsTranscoding },
-                    )
-                    .firstOrNull()
-                    ?: throw PlaybackException("This item has no playable media sources.")
-                val playSessionId = response.playSessionId
-                val method = when {
-                    !forceTranscode && mediaSource.supportsDirectPlay -> JellyfinPlaybackMethod.DirectPlay
-                    !forceTranscode && mediaSource.supportsDirectStream -> JellyfinPlaybackMethod.DirectStream
-                    mediaSource.supportsTranscoding -> JellyfinPlaybackMethod.Transcode
-                    else -> throw PlaybackException("This media source cannot be direct played or transcoded.")
-                }
-                val transcodeUrl = mediaSource.transcodingUrl
-                    ?.let { absoluteServerUrl(session.server.url, it).withAccessToken(session.accessToken) }
-                val directUrl = directStreamUrl(session, itemId, mediaSource, playSessionId, startPositionTicks)
-                val streamUrl = when (method) {
-                    JellyfinPlaybackMethod.DirectPlay -> directUrl
-                    JellyfinPlaybackMethod.DirectStream,
-                    JellyfinPlaybackMethod.Transcode -> transcodeUrl ?: directUrl
-                }
-                JellyfinResult.Success(
-                    JellyfinPlaybackInfo(
+                val info = try {
+                    getAutoPlaybackInfo(
+                        api = api,
+                        session = session,
                         itemId = itemId,
                         title = title,
                         subtitle = subtitle,
-                        streamUrl = streamUrl,
-                        fallbackStreamUrl = transcodeUrl?.takeIf {
-                            method == JellyfinPlaybackMethod.DirectPlay && it != streamUrl
-                        },
-                        playSessionId = playSessionId,
-                        mediaSourceId = mediaSource.id,
-                        liveStreamId = mediaSource.liveStreamId,
-                        method = method,
-                        runtimeTicks = mediaSource.runTimeTicks,
-                        startPositionTicks = startPositionTicks.coerceAtLeast(0L),
-                        audioStreamIndex = audioStreamIndex ?: mediaSource.defaultAudioStreamIndex,
-                        subtitleStreamIndex = subtitleStreamIndex ?: mediaSource.defaultSubtitleStreamIndex,
-                        audioTracks = mediaSource.mediaStreams.orEmpty()
-                            .filter { it.type == MediaStreamType.AUDIO }
-                            .map { it.toAudioTrack() },
-                        subtitleTracks = mediaSource.mediaStreams.orEmpty()
-                            .filter { it.type == MediaStreamType.SUBTITLE }
-                            .map { it.toSubtitleTrack(session) },
-                        sourceLabel = sourceLabel(mediaSource, method),
-                    ),
+                        startPositionTicks = startPositionTicks,
+                        forceTranscode = forceTranscode,
+                        audioStreamIndex = audioStreamIndex,
+                        subtitleStreamIndex = subtitleStreamIndex,
+                    )
+                } catch (throwable: Throwable) {
+                    if (!isLiveTv) throw throwable
+                    Log.d("VantafynPlayback", "Live TV auto-open playback failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty().take(120)}")
+                    getExplicitLiveStreamInfo(
+                        api = api,
+                        session = session,
+                        itemId = itemId,
+                        title = title,
+                        subtitle = subtitle,
+                        startPositionTicks = startPositionTicks,
+                        forceTranscode = forceTranscode,
+                        audioStreamIndex = audioStreamIndex,
+                        subtitleStreamIndex = subtitleStreamIndex,
+                    )
+                }
+                Log.d(
+                    "VantafynPlayback",
+                    "Prepared ${info.method} live=${info.isLiveStream} mediaSource=${info.mediaSourceId != null} playSession=${info.playSessionId != null} liveStream=${info.liveStreamId != null} audio=${info.audioStreamIndex} subtitle=${info.subtitleStreamIndex}",
                 )
+                JellyfinResult.Success(info)
             } catch (throwable: Throwable) {
+                Log.d("VantafynPlayback", "Playback prepare failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty().take(120)}")
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
@@ -615,15 +589,30 @@ class SdkJellyfinPlaybackRepository(
         positionTicks: Long,
     ): JellyfinResult<Unit> =
         report(session) { api ->
-            api.playStateApi.onPlaybackStart(
-                itemId = info.itemId,
-                mediaSourceId = info.mediaSourceId,
-                audioStreamIndex = info.audioStreamIndex,
-                subtitleStreamIndex = info.subtitleStreamIndex,
-                playMethod = info.method.toSdkPlayMethod(),
-                liveStreamId = info.liveStreamId,
-                playSessionId = info.playSessionId,
-                canSeek = true,
+            api.playStateApi.reportPlaybackStart(
+                PlaybackStartInfo(
+                    canSeek = !info.isLiveStream,
+                    item = null,
+                    itemId = info.itemId,
+                    sessionId = null,
+                    mediaSourceId = info.mediaSourceId,
+                    audioStreamIndex = info.audioStreamIndex,
+                    subtitleStreamIndex = info.subtitleStreamIndex,
+                    isPaused = false,
+                    isMuted = false,
+                    positionTicks = positionTicks.coerceAtLeast(0L),
+                    playbackStartTimeTicks = null,
+                    volumeLevel = 100,
+                    brightness = null,
+                    aspectRatio = null,
+                    playMethod = info.method.toSdkPlayMethod(),
+                    liveStreamId = info.liveStreamId,
+                    playSessionId = info.playSessionId,
+                    repeatMode = RepeatMode.REPEAT_NONE,
+                    playbackOrder = PlaybackOrder.DEFAULT,
+                    nowPlayingQueue = emptyList(),
+                    playlistItemId = null,
+                ),
             )
         }
 
@@ -634,19 +623,30 @@ class SdkJellyfinPlaybackRepository(
         isPaused: Boolean,
     ): JellyfinResult<Unit> =
         report(session) { api ->
-            api.playStateApi.onPlaybackProgress(
-                itemId = info.itemId,
-                mediaSourceId = info.mediaSourceId,
-                positionTicks = positionTicks.coerceAtLeast(0L),
-                audioStreamIndex = info.audioStreamIndex,
-                subtitleStreamIndex = info.subtitleStreamIndex,
-                volumeLevel = 100,
-                playMethod = info.method.toSdkPlayMethod(),
-                liveStreamId = info.liveStreamId,
-                playSessionId = info.playSessionId,
-                repeatMode = RepeatMode.REPEAT_NONE,
-                isPaused = isPaused,
-                isMuted = false,
+            api.playStateApi.reportPlaybackProgress(
+                PlaybackProgressInfo(
+                    canSeek = !info.isLiveStream,
+                    item = null,
+                    itemId = info.itemId,
+                    sessionId = null,
+                    mediaSourceId = info.mediaSourceId,
+                    audioStreamIndex = info.audioStreamIndex,
+                    subtitleStreamIndex = info.subtitleStreamIndex,
+                    isPaused = isPaused,
+                    isMuted = false,
+                    positionTicks = positionTicks.coerceAtLeast(0L),
+                    playbackStartTimeTicks = null,
+                    volumeLevel = 100,
+                    brightness = null,
+                    aspectRatio = null,
+                    playMethod = info.method.toSdkPlayMethod(),
+                    liveStreamId = info.liveStreamId,
+                    playSessionId = info.playSessionId,
+                    repeatMode = RepeatMode.REPEAT_NONE,
+                    playbackOrder = PlaybackOrder.DEFAULT,
+                    nowPlayingQueue = emptyList(),
+                    playlistItemId = null,
+                ),
             )
         }
 
@@ -656,14 +656,22 @@ class SdkJellyfinPlaybackRepository(
         positionTicks: Long,
     ): JellyfinResult<Unit> =
         report(session) { api ->
-            api.playStateApi.onPlaybackStopped(
-                itemId = info.itemId,
-                mediaSourceId = info.mediaSourceId,
-                nextMediaType = null,
-                positionTicks = positionTicks.coerceAtLeast(0L),
-                liveStreamId = info.liveStreamId,
-                playSessionId = info.playSessionId,
+            api.playStateApi.reportPlaybackStopped(
+                PlaybackStopInfo(
+                    item = null,
+                    itemId = info.itemId,
+                    sessionId = null,
+                    mediaSourceId = info.mediaSourceId,
+                    positionTicks = positionTicks.coerceAtLeast(0L),
+                    liveStreamId = info.liveStreamId,
+                    playSessionId = info.playSessionId,
+                    failed = false,
+                    nextMediaType = null,
+                    playlistItemId = null,
+                    nowPlayingQueue = emptyList(),
+                ),
             )
+            info.liveStreamId?.takeIf { info.isLiveStream }?.let { api.mediaInfoApi.closeLiveStream(it) }
         }
 
     private suspend fun report(
@@ -678,6 +686,183 @@ class SdkJellyfinPlaybackRepository(
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
+
+    private suspend fun getAutoPlaybackInfo(
+        api: ApiClient,
+        session: JellyfinSession,
+        itemId: java.util.UUID,
+        title: String,
+        subtitle: String?,
+        startPositionTicks: Long,
+        forceTranscode: Boolean,
+        audioStreamIndex: Int?,
+        subtitleStreamIndex: Int?,
+    ): JellyfinPlaybackInfo {
+        val response by api.mediaInfoApi.getPostedPlaybackInfo(
+            itemId,
+            PlaybackInfoDto(
+                userId = session.user.id,
+                maxStreamingBitrate = 60_000_000,
+                startTimeTicks = startPositionTicks.takeIf { it > 0L },
+                audioStreamIndex = audioStreamIndex,
+                subtitleStreamIndex = subtitleStreamIndex,
+                maxAudioChannels = 8,
+                mediaSourceId = null,
+                liveStreamId = null,
+                deviceProfile = androidMobileDeviceProfile(),
+                enableDirectPlay = !forceTranscode,
+                enableDirectStream = true,
+                enableTranscoding = true,
+                allowVideoStreamCopy = !forceTranscode,
+                allowAudioStreamCopy = true,
+                autoOpenLiveStream = true,
+                alwaysBurnInSubtitleWhenTranscoding = false,
+            ),
+        )
+        response.errorCode?.let { errorCode ->
+            throw PlaybackException("Server denied playback: ${errorCode.serialName}")
+        }
+        val mediaSource = selectMediaSource(response.mediaSources, forceTranscode)
+        return buildPlaybackInfo(
+            session = session,
+            itemId = itemId,
+            title = title,
+            subtitle = subtitle,
+            mediaSource = mediaSource,
+            playSessionId = response.playSessionId,
+            startPositionTicks = startPositionTicks,
+            forceTranscode = forceTranscode,
+            audioStreamIndex = audioStreamIndex,
+            subtitleStreamIndex = subtitleStreamIndex,
+            explicitLiveStream = false,
+        )
+    }
+
+    private suspend fun getExplicitLiveStreamInfo(
+        api: ApiClient,
+        session: JellyfinSession,
+        itemId: java.util.UUID,
+        title: String,
+        subtitle: String?,
+        startPositionTicks: Long,
+        forceTranscode: Boolean,
+        audioStreamIndex: Int?,
+        subtitleStreamIndex: Int?,
+    ): JellyfinPlaybackInfo {
+        val profile = androidMobileDeviceProfile()
+        val response by api.mediaInfoApi.openLiveStream(
+            null,
+            session.user.id,
+            null,
+            60_000_000,
+            startPositionTicks.takeIf { it > 0L },
+            audioStreamIndex,
+            subtitleStreamIndex,
+            8,
+            itemId,
+            !forceTranscode,
+            true,
+            false,
+            OpenLiveStreamDto(
+                openToken = null,
+                userId = session.user.id,
+                playSessionId = null,
+                maxStreamingBitrate = 60_000_000,
+                startTimeTicks = startPositionTicks.takeIf { it > 0L },
+                audioStreamIndex = audioStreamIndex,
+                subtitleStreamIndex = subtitleStreamIndex,
+                maxAudioChannels = 8,
+                itemId = itemId,
+                enableDirectPlay = !forceTranscode,
+                enableDirectStream = true,
+                alwaysBurnInSubtitleWhenTranscoding = false,
+                deviceProfile = profile,
+                directPlayProtocols = listOf(MediaProtocol.HTTP),
+            ),
+        )
+        val mediaSource = response.mediaSource ?: throw PlaybackException("Live stream unavailable.")
+        return buildPlaybackInfo(
+            session = session,
+            itemId = itemId,
+            title = title,
+            subtitle = subtitle,
+            mediaSource = mediaSource,
+            playSessionId = mediaSource.liveStreamId,
+            startPositionTicks = startPositionTicks,
+            forceTranscode = forceTranscode,
+            audioStreamIndex = audioStreamIndex,
+            subtitleStreamIndex = subtitleStreamIndex,
+            explicitLiveStream = true,
+        )
+    }
+
+    private fun selectMediaSource(
+        mediaSources: List<MediaSourceInfo>?,
+        forceTranscode: Boolean,
+    ): MediaSourceInfo =
+        mediaSources.orEmpty()
+            .sortedWith(
+                compareByDescending<MediaSourceInfo> { it.supportsDirectPlay && !forceTranscode }
+                    .thenByDescending { it.supportsDirectStream && !forceTranscode }
+                    .thenByDescending { it.supportsTranscoding },
+            )
+            .firstOrNull()
+            ?: throw PlaybackException("Server did not provide a playable stream.")
+
+    private fun buildPlaybackInfo(
+        session: JellyfinSession,
+        itemId: java.util.UUID,
+        title: String,
+        subtitle: String?,
+        mediaSource: MediaSourceInfo,
+        playSessionId: String?,
+        startPositionTicks: Long,
+        forceTranscode: Boolean,
+        audioStreamIndex: Int?,
+        subtitleStreamIndex: Int?,
+        explicitLiveStream: Boolean,
+    ): JellyfinPlaybackInfo {
+        val method = when {
+            !forceTranscode && mediaSource.supportsDirectPlay -> JellyfinPlaybackMethod.DirectPlay
+            !forceTranscode && mediaSource.supportsDirectStream -> JellyfinPlaybackMethod.DirectStream
+            mediaSource.supportsTranscoding -> JellyfinPlaybackMethod.Transcode
+            explicitLiveStream -> JellyfinPlaybackMethod.DirectStream
+            else -> throw PlaybackException("This media source cannot be direct played or transcoded.")
+        }
+        val transcodeUrl = mediaSource.transcodingUrl
+            ?.let { absoluteServerUrl(session.server.url, it).withAccessToken(session.accessToken) }
+        val directUrl = directStreamUrl(session, itemId, mediaSource, playSessionId, startPositionTicks)
+        val streamUrl = when (method) {
+            JellyfinPlaybackMethod.DirectPlay -> directUrl
+            JellyfinPlaybackMethod.DirectStream,
+            JellyfinPlaybackMethod.Transcode -> transcodeUrl ?: directUrl
+        }.takeIf { it.isNotBlank() } ?: throw PlaybackException("Server did not provide a playable stream.")
+        return JellyfinPlaybackInfo(
+            itemId = itemId,
+            title = title,
+            subtitle = subtitle,
+            streamUrl = streamUrl,
+            fallbackStreamUrl = transcodeUrl?.takeIf {
+                method == JellyfinPlaybackMethod.DirectPlay && it != streamUrl
+            },
+            playSessionId = playSessionId,
+            mediaSourceId = mediaSource.id,
+            liveStreamId = mediaSource.liveStreamId,
+            method = method,
+            runtimeTicks = mediaSource.runTimeTicks,
+            startPositionTicks = startPositionTicks.coerceAtLeast(0L),
+            audioStreamIndex = audioStreamIndex ?: mediaSource.defaultAudioStreamIndex,
+            subtitleStreamIndex = subtitleStreamIndex ?: mediaSource.defaultSubtitleStreamIndex,
+            audioTracks = mediaSource.mediaStreams.orEmpty()
+                .filter { it.type == MediaStreamType.AUDIO }
+                .map { it.toAudioTrack() },
+            subtitleTracks = mediaSource.mediaStreams.orEmpty()
+                .filter { it.type == MediaStreamType.SUBTITLE }
+                .map { it.toSubtitleTrack(session) },
+            sourceLabel = sourceLabel(mediaSource, method),
+            isLiveStream = explicitLiveStream || mediaSource.isInfiniteStream || mediaSource.liveStreamId != null,
+        )
+    }
 
     private fun directStreamUrl(
         session: JellyfinSession,

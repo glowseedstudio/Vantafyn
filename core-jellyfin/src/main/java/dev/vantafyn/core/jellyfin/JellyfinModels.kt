@@ -164,6 +164,7 @@ data class JellyfinPlaybackInfo(
     val audioTracks: List<JellyfinAudioTrack>,
     val subtitleTracks: List<JellyfinSubtitleTrack>,
     val sourceLabel: String?,
+    val isLiveStream: Boolean = false,
 )
 
 data class JellyfinAudioTrack(
@@ -392,6 +393,7 @@ interface JellyfinPlaybackRepository {
         forceTranscode: Boolean = false,
         audioStreamIndex: Int? = null,
         subtitleStreamIndex: Int? = null,
+        isLiveTv: Boolean = false,
     ): JellyfinResult<JellyfinPlaybackInfo>
 
     suspend fun reportStarted(session: JellyfinSession, info: JellyfinPlaybackInfo, positionTicks: Long): JellyfinResult<Unit>

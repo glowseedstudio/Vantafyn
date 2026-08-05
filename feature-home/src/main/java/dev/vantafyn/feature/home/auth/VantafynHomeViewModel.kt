@@ -208,6 +208,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             step = VantafynSetupStep.Home,
                             homeLayout = readHomeLayout(result.value.profileId),
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
+                            themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                         )
@@ -322,6 +323,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             password = "",
                             homeLayout = readHomeLayout(result.value.profileId),
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
+                            themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                         )
@@ -707,15 +709,35 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update { it.copy(mobileMessage = "Playback coming next") }
     }
 
-    fun startPlayback(forceTranscode: Boolean = false, audioStreamIndex: Int? = null, subtitleStreamIndex: Int? = null) {
+    fun startPlayback(
+        forceTranscode: Boolean = false,
+        audioStreamIndex: Int? = null,
+        subtitleStreamIndex: Int? = null,
+        positionMs: Long? = null,
+    ) {
         val snapshot = _state.value
+        if (snapshot.isPlaybackLoading) return
         val session = snapshot.session ?: return
         val detail = snapshot.mediaDetail ?: return
-        val target = detail.playbackTarget() ?: run {
+        val target = detail.playbackTarget(positionMs) ?: run {
             _state.update { it.copy(mobileMessage = "This item cannot be played yet") }
             return
         }
+        startPlaybackTarget(session, target, forceTranscode, audioStreamIndex, subtitleStreamIndex)
+    }
+
+    private fun startPlaybackTarget(
+        session: JellyfinSession,
+        target: PlaybackTarget,
+        forceTranscode: Boolean,
+        audioStreamIndex: Int?,
+        subtitleStreamIndex: Int?,
+    ) {
         viewModelScope.launch {
+            val previousInfo = _state.value.playbackInfo
+            if (previousInfo != null) {
+                playbackRepository.reportStopped(session, previousInfo, target.startTicks)
+            }
             _state.update {
                 it.copy(
                     previousMobileDestination = if (it.mobileDestination == MobileDestination.Player) {
@@ -726,6 +748,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     mobileDestination = MobileDestination.Player,
                     playbackInfo = null,
                     playbackItem = null,
+                    activePlaybackTarget = target,
                     isPlaybackLoading = true,
                     playbackError = null,
                     canTryPlaybackTranscode = false,
@@ -743,6 +766,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     forceTranscode = forceTranscode,
                     audioStreamIndex = audioStreamIndex,
                     subtitleStreamIndex = subtitleStreamIndex,
+                    isLiveTv = target.isLiveTv,
                 )
             ) {
                 is JellyfinResult.Success -> {
@@ -770,26 +794,46 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun retryPlayback() {
-        startPlayback(forceTranscode = false)
+        restartActivePlayback(forceTranscode = false)
     }
 
     fun tryTranscodedPlayback() {
-        startPlayback(forceTranscode = true)
+        restartActivePlayback(forceTranscode = true)
+    }
+
+    fun startLiveTvPlayback(channelId: UUID, title: String, subtitle: String?) {
+        val session = _state.value.session ?: return
+        startPlaybackTarget(
+            session = session,
+            target = PlaybackTarget(channelId, title, subtitle, startTicks = 0L, isLiveTv = true),
+            forceTranscode = false,
+            audioStreamIndex = null,
+            subtitleStreamIndex = null,
+        )
     }
 
     fun handlePlayerError() {
         val snapshot = _state.value
         if (!snapshot.hasPlaybackRetriedTranscode && snapshot.playbackInfo?.fallbackStreamUrl != null) {
-            startPlayback(forceTranscode = true)
+            restartActivePlayback(forceTranscode = true)
             return
         }
+        val session = snapshot.session
+        val info = snapshot.playbackInfo
         _state.update {
             it.copy(
                 playbackItem = null,
+                playbackInfo = null,
+                activePlaybackTarget = null,
                 isPlaybackLoading = false,
                 playbackError = "This video could not be played on this device.",
                 canTryPlaybackTranscode = snapshot.playbackInfo?.fallbackStreamUrl != null,
             )
+        }
+        if (session != null && info != null) {
+            viewModelScope.launch {
+                playbackRepository.reportStopped(session, info, info.startPositionTicks)
+            }
         }
     }
 
@@ -821,6 +865,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 mobileDestination = it.previousMobileDestination,
                 playbackInfo = null,
                 playbackItem = null,
+                activePlaybackTarget = null,
                 playbackError = null,
                 isPlaybackLoading = false,
                 hasReportedPlaybackStart = false,
@@ -836,11 +881,46 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun selectPlaybackAudioTrack(index: Int) {
-        startPlayback(forceTranscode = false, audioStreamIndex = index, subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex)
+        restartActivePlayback(forceTranscode = false, audioStreamIndex = index, subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex)
     }
 
     fun selectPlaybackSubtitleTrack(index: Int?) {
-        startPlayback(forceTranscode = false, audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex, subtitleStreamIndex = index)
+        restartActivePlayback(forceTranscode = false, audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex, subtitleStreamIndex = index ?: -1)
+    }
+
+    fun selectPlaybackAudioTrack(index: Int, positionMs: Long) {
+        restartActivePlayback(
+            forceTranscode = false,
+            audioStreamIndex = index,
+            subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex,
+            positionMs = positionMs,
+        )
+    }
+
+    fun selectPlaybackSubtitleTrack(index: Int?, positionMs: Long) {
+        restartActivePlayback(
+            forceTranscode = false,
+            audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex,
+            subtitleStreamIndex = index ?: -1,
+            positionMs = positionMs,
+        )
+    }
+
+    private fun restartActivePlayback(
+        forceTranscode: Boolean,
+        audioStreamIndex: Int? = _state.value.playbackInfo?.audioStreamIndex,
+        subtitleStreamIndex: Int? = _state.value.playbackInfo?.subtitleStreamIndex,
+        positionMs: Long? = null,
+    ) {
+        val session = _state.value.session ?: return
+        val target = _state.value.activePlaybackTarget ?: return startPlayback(forceTranscode, audioStreamIndex, subtitleStreamIndex, positionMs)
+        startPlaybackTarget(
+            session = session,
+            target = positionMs?.let { target.copy(startTicks = it.toTicks()) } ?: target,
+            forceTranscode = forceTranscode,
+            audioStreamIndex = audioStreamIndex,
+            subtitleStreamIndex = subtitleStreamIndex,
+        )
     }
 
     fun clearMobileMessage() {
@@ -931,6 +1011,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun selectThemeMusicVolume(volume: ThemeMusicVolume) {
+        _state.update { state ->
+            state.session?.profileId?.let { profileId ->
+                homeLayoutStorage.edit().putString("theme_music_volume_$profileId", volume.name).apply()
+            }
+            state.copy(themeMusicVolume = volume)
+        }
+    }
+
     fun selectBackground(background: VantafynAppBackground) {
         _state.update { state ->
             val key = background.name
@@ -1001,6 +1090,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     private fun readThemeMusicEnabled(profileId: String?): Boolean =
         profileId?.let { homeLayoutStorage.getBoolean("theme_music_$it", true) } ?: true
+
+    private fun readThemeMusicVolume(profileId: String?): ThemeMusicVolume {
+        val key = profileId?.let { homeLayoutStorage.getString("theme_music_volume_$it", null) }
+        return key?.let { runCatching { ThemeMusicVolume.valueOf(it) }.getOrNull() }
+            ?: ThemeMusicVolume.Soft
+    }
 
     private fun loadSavedProfiles() {
         viewModelScope.launch {
@@ -1082,6 +1177,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     step = VantafynSetupStep.Home,
                                     homeLayout = readHomeLayout(jellyfinSession.profileId),
                                     themeMusicEnabled = readThemeMusicEnabled(jellyfinSession.profileId),
+                                    themeMusicVolume = readThemeMusicVolume(jellyfinSession.profileId),
                                     selectedBackground = readSelectedBackground(jellyfinSession.profileId),
                                     configuredSmartRows = readSmartRows(jellyfinSession.profileId),
                                 )
@@ -1155,9 +1251,11 @@ data class VantafynHomeUiState(
     val confirmLogout: Boolean = false,
     val homeLayout: List<HomeSectionPreference> = defaultHomeLayout(),
     val themeMusicEnabled: Boolean = true,
+    val themeMusicVolume: ThemeMusicVolume = ThemeMusicVolume.Soft,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
     val configuredSmartRows: List<String> = emptyList(),
     val previousMobileDestination: MobileDestination = MobileDestination.Home,
+    val activePlaybackTarget: PlaybackTarget? = null,
     val playbackInfo: JellyfinPlaybackInfo? = null,
     val playbackItem: VantafynPlaybackItem? = null,
     val isPlaybackLoading: Boolean = false,
@@ -1169,6 +1267,13 @@ data class VantafynHomeUiState(
     val quickConnectMessage: String? = null,
     val errorMessage: String? = null,
 )
+
+enum class ThemeMusicVolume(val label: String, val level: Float) {
+    Soft("Soft", 0.12f),
+    Medium("Medium", 0.20f),
+    High("High", 0.32f),
+    Full("Full", 0.48f),
+}
 
 enum class MobileDestination {
     Home,
@@ -1184,14 +1289,15 @@ enum class MobileDestination {
     Player,
 }
 
-private data class PlaybackTarget(
+data class PlaybackTarget(
     val id: UUID,
     val title: String,
     val subtitle: String?,
     val startTicks: Long,
+    val isLiveTv: Boolean = false,
 )
 
-private fun JellyfinMediaDetail.playbackTarget(): PlaybackTarget? =
+private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): PlaybackTarget? =
     if (itemType.equals("Series", ignoreCase = true)) {
         episodes.firstOrNull { (it.progress ?: 0f) < 0.95f }?.let {
             PlaybackTarget(
@@ -1206,7 +1312,9 @@ private fun JellyfinMediaDetail.playbackTarget(): PlaybackTarget? =
             id = id,
             title = title,
             subtitle = subtitle,
-            startTicks = playbackPositionTicks.takeIf { (progress ?: 0f) > 0.05f && !isPlayed } ?: 0L,
+            startTicks = positionMs?.toTicks()
+                ?: playbackPositionTicks.takeIf { (progress ?: 0f) > 0.05f && !isPlayed }
+                ?: 0L,
         )
     }
 
@@ -1220,6 +1328,8 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(): VantafynPlaybackItem =
         startPositionMs = startPositionTicks / 10_000L,
         durationMs = runtimeTicks?.let { it / 10_000L },
         sourceLabel = sourceLabel,
+        selectedAudioStreamIndex = audioStreamIndex,
+        selectedSubtitleStreamIndex = subtitleStreamIndex?.takeIf { it >= 0 },
         audioTracks = audioTracks.map {
             VantafynAudioTrack(
                 index = it.index,

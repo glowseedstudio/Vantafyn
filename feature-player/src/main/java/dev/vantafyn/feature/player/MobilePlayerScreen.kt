@@ -72,12 +72,16 @@ fun MobilePlayerScreen(
     onTryTranscode: () -> Unit,
     onStarted: (Long) -> Unit,
     onProgress: (Long, Boolean) -> Unit,
+    onEnded: (Long) -> Unit,
     onPlayerError: () -> Unit,
-    onSelectAudioTrack: (Int) -> Unit,
-    onSelectSubtitleTrack: (Int?) -> Unit,
+    onSelectAudioTrack: (Int, Long) -> Unit,
+    onSelectSubtitleTrack: (Int?, Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var lastPositionMs by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(item?.streamUrl) {
+        lastPositionMs = item?.startPositionMs ?: 0L
+    }
     BackHandler { onBack(lastPositionMs) }
 
     Box(
@@ -92,6 +96,7 @@ fun MobilePlayerScreen(
                 onBack = { onBack(lastPositionMs) },
                 onStarted = onStarted,
                 onProgress = onProgress,
+                onEnded = onEnded,
                 onPlayerError = onPlayerError,
                 onSelectAudioTrack = onSelectAudioTrack,
                 onSelectSubtitleTrack = onSelectSubtitleTrack,
@@ -119,9 +124,10 @@ private fun PlayerSurface(
     onBack: () -> Unit,
     onStarted: (Long) -> Unit,
     onProgress: (Long, Boolean) -> Unit,
+    onEnded: (Long) -> Unit,
     onPlayerError: () -> Unit,
-    onSelectAudioTrack: (Int) -> Unit,
-    onSelectSubtitleTrack: (Int?) -> Unit,
+    onSelectAudioTrack: (Int, Long) -> Unit,
+    onSelectSubtitleTrack: (Int?, Long) -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -150,12 +156,16 @@ private fun PlayerSurface(
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                if (playbackState == Player.STATE_READY) {
-                    durationMs = player.duration.takeIf { it > 0 } ?: item.durationMs ?: durationMs
-                    if (!started) {
-                        started = true
-                        onStarted(player.currentPosition)
+                when (playbackState) {
+                    Player.STATE_READY -> {
+                        durationMs = player.duration.takeIf { it > 0 } ?: item.durationMs ?: durationMs
+                        if (!started) {
+                            started = true
+                            onStarted(player.currentPosition)
+                        }
                     }
+                    Player.STATE_ENDED -> onEnded(player.currentPosition)
+                    else -> Unit
                 }
             }
 
@@ -256,14 +266,16 @@ private fun PlayerSurface(
             sheet = current,
             audioTracks = item.audioTracks,
             subtitleTracks = item.subtitleTracks,
+            selectedAudioIndex = item.selectedAudioStreamIndex,
+            selectedSubtitleIndex = item.selectedSubtitleStreamIndex,
             onDismiss = { sheet = null },
             onAudio = {
                 sheet = null
-                onSelectAudioTrack(it)
+                onSelectAudioTrack(it, player.currentPosition)
             },
             onSubtitle = {
                 sheet = null
-                onSelectSubtitleTrack(it)
+                onSelectSubtitleTrack(it, player.currentPosition)
             },
         )
     }
@@ -366,6 +378,8 @@ private fun TrackSelectionSheet(
     sheet: TrackSheet,
     audioTracks: List<VantafynAudioTrack>,
     subtitleTracks: List<VantafynSubtitleTrack>,
+    selectedAudioIndex: Int?,
+    selectedSubtitleIndex: Int?,
     onDismiss: () -> Unit,
     onAudio: (Int) -> Unit,
     onSubtitle: (Int?) -> Unit,
@@ -379,14 +393,14 @@ private fun TrackSelectionSheet(
         ) {
             Text(if (sheet == TrackSheet.Audio) "Audio" else "Subtitles")
             if (sheet == TrackSheet.Subtitles) {
-                TrackRow("Off", "Disable subtitles") { onSubtitle(null) }
+                TrackRow("Off", "Disable subtitles", selected = selectedSubtitleIndex == null) { onSubtitle(null) }
             }
             when (sheet) {
                 TrackSheet.Audio -> audioTracks.forEach { track ->
-                    TrackRow(track.label, track.detail()) { onAudio(track.index) }
+                    TrackRow(track.label, track.detail(), selected = track.index == selectedAudioIndex) { onAudio(track.index) }
                 }
                 TrackSheet.Subtitles -> subtitleTracks.forEach { track ->
-                    TrackRow(track.label, track.detail()) { onSubtitle(track.index) }
+                    TrackRow(track.label, track.detail(), selected = track.index == selectedSubtitleIndex) { onSubtitle(track.index) }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -395,7 +409,7 @@ private fun TrackSelectionSheet(
 }
 
 @Composable
-private fun TrackRow(title: String, detail: String, onClick: () -> Unit) {
+private fun TrackRow(title: String, detail: String, selected: Boolean = false, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -403,7 +417,7 @@ private fun TrackRow(title: String, detail: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Text(title)
+        Text(if (selected) "$title  ✓" else title)
         if (detail.isNotBlank()) Text(detail)
     }
 }
