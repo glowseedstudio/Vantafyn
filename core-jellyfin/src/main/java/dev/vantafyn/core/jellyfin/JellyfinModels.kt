@@ -131,6 +131,7 @@ data class JellyfinMediaDetail(
     val isFavorite: Boolean,
     val isPlayed: Boolean,
     val progress: Float?,
+    val playbackPositionTicks: Long = 0L,
     val streamInfo: List<String> = emptyList(),
     val people: List<JellyfinPerson> = emptyList(),
     val seasons: List<JellyfinSeason> = emptyList(),
@@ -138,6 +139,50 @@ data class JellyfinMediaDetail(
     val related: List<JellyfinMediaItem> = emptyList(),
     val externalLinks: List<JellyfinExternalLink> = emptyList(),
     val themeSongUrl: String? = null,
+)
+
+enum class JellyfinPlaybackMethod {
+    DirectPlay,
+    DirectStream,
+    Transcode,
+}
+
+data class JellyfinPlaybackInfo(
+    val itemId: UUID,
+    val title: String,
+    val subtitle: String?,
+    val streamUrl: String,
+    val fallbackStreamUrl: String?,
+    val playSessionId: String?,
+    val mediaSourceId: String?,
+    val liveStreamId: String?,
+    val method: JellyfinPlaybackMethod,
+    val runtimeTicks: Long?,
+    val startPositionTicks: Long,
+    val audioStreamIndex: Int?,
+    val subtitleStreamIndex: Int?,
+    val audioTracks: List<JellyfinAudioTrack>,
+    val subtitleTracks: List<JellyfinSubtitleTrack>,
+    val sourceLabel: String?,
+)
+
+data class JellyfinAudioTrack(
+    val index: Int,
+    val label: String,
+    val language: String?,
+    val codec: String?,
+    val channels: Int?,
+    val isDefault: Boolean,
+)
+
+data class JellyfinSubtitleTrack(
+    val index: Int,
+    val label: String,
+    val language: String?,
+    val codec: String?,
+    val isExternal: Boolean,
+    val isDefault: Boolean,
+    val deliveryUrl: String?,
 )
 
 data class JellyfinPerson(
@@ -335,6 +380,23 @@ interface JellyfinMediaRepository {
         setFavorite(session, itemId, false)
     suspend fun refreshFavoriteState(session: JellyfinSession, itemId: UUID): JellyfinResult<Boolean>
     suspend fun setPlayed(session: JellyfinSession, itemId: UUID, isPlayed: Boolean): JellyfinResult<Boolean>
+}
+
+interface JellyfinPlaybackRepository {
+    suspend fun getPlaybackInfo(
+        session: JellyfinSession,
+        itemId: UUID,
+        title: String,
+        subtitle: String?,
+        startPositionTicks: Long = 0L,
+        forceTranscode: Boolean = false,
+        audioStreamIndex: Int? = null,
+        subtitleStreamIndex: Int? = null,
+    ): JellyfinResult<JellyfinPlaybackInfo>
+
+    suspend fun reportStarted(session: JellyfinSession, info: JellyfinPlaybackInfo, positionTicks: Long): JellyfinResult<Unit>
+    suspend fun reportProgress(session: JellyfinSession, info: JellyfinPlaybackInfo, positionTicks: Long, isPaused: Boolean): JellyfinResult<Unit>
+    suspend fun reportStopped(session: JellyfinSession, info: JellyfinPlaybackInfo, positionTicks: Long): JellyfinResult<Unit>
 }
 
 interface JellyfinSearchRepository {

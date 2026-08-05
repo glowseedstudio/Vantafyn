@@ -110,6 +110,7 @@ import dev.vantafyn.feature.home.auth.VantafynCardShape
 import dev.vantafyn.feature.home.auth.VantafynCardSize
 import dev.vantafyn.feature.home.auth.VantafynCardSpacing
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
+import dev.vantafyn.feature.player.MobilePlayerScreen
 import dev.vantafyn.feature.home.auth.supportedSmartRows
 import kotlinx.coroutines.delay
 
@@ -202,6 +203,15 @@ fun VantafynAppContent(
             onSelectBackground = viewModel::selectBackground,
             onToggleMediaFavorite = viewModel::toggleMediaFavorite,
             onToggleMediaPlayed = viewModel::toggleMediaPlayed,
+            onStartPlayback = { viewModel.startPlayback() },
+            onRetryPlayback = viewModel::retryPlayback,
+            onTryTranscodedPlayback = viewModel::tryTranscodedPlayback,
+            onExitPlayback = viewModel::exitPlayback,
+            onPlaybackStarted = viewModel::reportPlaybackStarted,
+            onPlaybackProgress = viewModel::reportPlaybackProgress,
+            onPlayerError = viewModel::handlePlayerError,
+            onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
+            onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
             onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
             onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
             onChangePassword = viewModel::changeCurrentUserPassword,
@@ -835,6 +845,15 @@ private fun HomeScreen(
     onSelectBackground: (VantafynAppBackground) -> Unit,
     onToggleMediaFavorite: () -> Unit,
     onToggleMediaPlayed: () -> Unit,
+    onStartPlayback: () -> Unit,
+    onRetryPlayback: () -> Unit,
+    onTryTranscodedPlayback: () -> Unit,
+    onExitPlayback: (Long) -> Unit,
+    onPlaybackStarted: (Long) -> Unit,
+    onPlaybackProgress: (Long, Boolean) -> Unit,
+    onPlayerError: () -> Unit,
+    onSelectPlaybackAudioTrack: (Int) -> Unit,
+    onSelectPlaybackSubtitleTrack: (Int?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -876,6 +895,15 @@ private fun HomeScreen(
             onSelectBackground = onSelectBackground,
             onToggleMediaFavorite = onToggleMediaFavorite,
             onToggleMediaPlayed = onToggleMediaPlayed,
+            onStartPlayback = onStartPlayback,
+            onRetryPlayback = onRetryPlayback,
+            onTryTranscodedPlayback = onTryTranscodedPlayback,
+            onExitPlayback = onExitPlayback,
+            onPlaybackStarted = onPlaybackStarted,
+            onPlaybackProgress = onPlaybackProgress,
+            onPlayerError = onPlayerError,
+            onSelectPlaybackAudioTrack = onSelectPlaybackAudioTrack,
+            onSelectPlaybackSubtitleTrack = onSelectPlaybackSubtitleTrack,
             onEditPlaybackPreferences = onEditPlaybackPreferences,
             onSavePlaybackPreferences = onSavePlaybackPreferences,
             onChangePassword = onChangePassword,
@@ -959,6 +987,15 @@ private fun MobileShellScreen(
     onSelectBackground: (VantafynAppBackground) -> Unit,
     onToggleMediaFavorite: () -> Unit,
     onToggleMediaPlayed: () -> Unit,
+    onStartPlayback: () -> Unit,
+    onRetryPlayback: () -> Unit,
+    onTryTranscodedPlayback: () -> Unit,
+    onExitPlayback: (Long) -> Unit,
+    onPlaybackStarted: (Long) -> Unit,
+    onPlaybackProgress: (Long, Boolean) -> Unit,
+    onPlayerError: () -> Unit,
+    onSelectPlaybackAudioTrack: (Int) -> Unit,
+    onSelectPlaybackSubtitleTrack: (Int?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -989,9 +1026,24 @@ private fun MobileShellScreen(
                     onRetry = onRetryMedia,
                     onOpenMedia = onOpenMedia,
                     onPlaybackComingSoon = onPlaybackComingSoon,
+                    onStartPlayback = onStartPlayback,
                     themeMusicEnabled = state.themeMusicEnabled,
                     onToggleFavorite = onToggleMediaFavorite,
                     onTogglePlayed = onToggleMediaPlayed,
+                )
+                MobileDestination.Player -> MobilePlayerScreen(
+                    item = state.playbackItem,
+                    isLoading = state.isPlaybackLoading,
+                    errorMessage = state.playbackError,
+                    canTryTranscode = state.canTryPlaybackTranscode,
+                    onBack = onExitPlayback,
+                    onRetry = onRetryPlayback,
+                    onTryTranscode = onTryTranscodedPlayback,
+                    onStarted = onPlaybackStarted,
+                    onProgress = onPlaybackProgress,
+                    onPlayerError = onPlayerError,
+                    onSelectAudioTrack = onSelectPlaybackAudioTrack,
+                    onSelectSubtitleTrack = onSelectPlaybackSubtitleTrack,
                 )
                 else -> Box(
                     Modifier
@@ -1045,12 +1097,14 @@ private fun MobileShellScreen(
                     }
                 }
             }
-            MobileBottomNav(
-                selected = state.mobileDestination,
-                onSelected = onNavigate,
-                isAdmin = state.session?.user?.isAdministrator == true,
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
+            if (state.mobileDestination != MobileDestination.Player) {
+                MobileBottomNav(
+                    selected = state.mobileDestination,
+                    onSelected = onNavigate,
+                    isAdmin = state.session?.user?.isAdministrator == true,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                )
+            }
         }
         state.adminUserDetail?.let { detail ->
             AdminUserDetailDialog(
@@ -1069,7 +1123,7 @@ private fun MobileShellScreen(
                 TextButton(onClick = onClearMessage) { Text("OK") }
             },
             title = { Text(message) },
-            text = { Text("Vantafyn will add playback after navigation and details are polished.") },
+            text = { Text("This action is not available in the current mobile milestone.") },
         )
     }
     if (state.confirmLogout) {
@@ -2712,6 +2766,7 @@ private fun MediaDetailScreen(
     onRetry: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onPlaybackComingSoon: () -> Unit,
+    onStartPlayback: () -> Unit,
     themeMusicEnabled: Boolean,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
@@ -2748,6 +2803,7 @@ private fun MediaDetailScreen(
                 HomeRowInset {
                     DetailActionPanel(
                         detail = detail,
+                        onStartPlayback = onStartPlayback,
                         onPlaybackComingSoon = onPlaybackComingSoon,
                         onToggleFavorite = onToggleFavorite,
                         onTogglePlayed = onTogglePlayed,
@@ -2762,7 +2818,7 @@ private fun MediaDetailScreen(
             if (detail.episodes.isNotEmpty()) {
                 item {
                     HomeRowInset {
-                        EpisodeSection(detail) { onPlaybackComingSoon() }
+                        EpisodeSection(detail, onPlaybackComingSoon)
                     }
                 }
             }
@@ -2824,12 +2880,13 @@ private fun DetailThemeAudio(url: String?, enabled: Boolean) {
 @Composable
 private fun DetailActionPanel(
     detail: JellyfinMediaDetail,
+    onStartPlayback: () -> Unit,
     onPlaybackComingSoon: () -> Unit,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-        VantafynButton(detail.primaryActionLabel(), onClick = onPlaybackComingSoon, modifier = Modifier.fillMaxWidth())
+        VantafynButton(detail.primaryActionLabel(), onClick = onStartPlayback, modifier = Modifier.fillMaxWidth())
         if (detail.streamInfo.isNotEmpty()) DetailChipRow(detail.streamInfo)
         Row(
             modifier = Modifier.fillMaxWidth(),

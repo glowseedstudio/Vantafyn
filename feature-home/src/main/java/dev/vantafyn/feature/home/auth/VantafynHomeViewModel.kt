@@ -15,6 +15,8 @@ import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinMediaItem
 import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
+import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
+import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
 import dev.vantafyn.core.jellyfin.JellyfinPublicUser
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectRepository
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectSession
@@ -28,6 +30,9 @@ import dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences
 import dev.vantafyn.core.jellyfin.JellyfinAdminUserDetail
 import dev.vantafyn.core.jellyfin.JellyfinUserPreferencesRepository
 import dev.vantafyn.core.jellyfin.SavedProfile
+import dev.vantafyn.core.media.VantafynAudioTrack
+import dev.vantafyn.core.media.VantafynPlaybackItem
+import dev.vantafyn.core.media.VantafynSubtitleTrack
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -48,6 +53,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val favoritesRepository: JellyfinFavoritesRepository = repositories.favoritesRepository
     private val adminRepository: JellyfinAdminRepository = repositories.adminRepository
     private val userPreferencesRepository: JellyfinUserPreferencesRepository = repositories.userPreferencesRepository
+    private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private var searchJob: Job? = null
     private var quickConnectJob: Job? = null
@@ -701,6 +707,142 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update { it.copy(mobileMessage = "Playback coming next") }
     }
 
+    fun startPlayback(forceTranscode: Boolean = false, audioStreamIndex: Int? = null, subtitleStreamIndex: Int? = null) {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val detail = snapshot.mediaDetail ?: return
+        val target = detail.playbackTarget() ?: run {
+            _state.update { it.copy(mobileMessage = "This item cannot be played yet") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    previousMobileDestination = if (it.mobileDestination == MobileDestination.Player) {
+                        it.previousMobileDestination
+                    } else {
+                        it.mobileDestination
+                    },
+                    mobileDestination = MobileDestination.Player,
+                    playbackInfo = null,
+                    playbackItem = null,
+                    isPlaybackLoading = true,
+                    playbackError = null,
+                    canTryPlaybackTranscode = false,
+                    hasPlaybackRetriedTranscode = forceTranscode,
+                    hasReportedPlaybackStart = false,
+                )
+            }
+            when (
+                val result = playbackRepository.getPlaybackInfo(
+                    session = session,
+                    itemId = target.id,
+                    title = target.title,
+                    subtitle = target.subtitle,
+                    startPositionTicks = target.startTicks,
+                    forceTranscode = forceTranscode,
+                    audioStreamIndex = audioStreamIndex,
+                    subtitleStreamIndex = subtitleStreamIndex,
+                )
+            ) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            isPlaybackLoading = false,
+                            playbackInfo = result.value,
+                            playbackItem = result.value.toPlaybackItem(),
+                            playbackError = null,
+                            canTryPlaybackTranscode = result.value.fallbackStreamUrl != null,
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            isPlaybackLoading = false,
+                            playbackError = result.message,
+                            canTryPlaybackTranscode = !forceTranscode,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun retryPlayback() {
+        startPlayback(forceTranscode = false)
+    }
+
+    fun tryTranscodedPlayback() {
+        startPlayback(forceTranscode = true)
+    }
+
+    fun handlePlayerError() {
+        val snapshot = _state.value
+        if (!snapshot.hasPlaybackRetriedTranscode && snapshot.playbackInfo?.fallbackStreamUrl != null) {
+            startPlayback(forceTranscode = true)
+            return
+        }
+        _state.update {
+            it.copy(
+                playbackItem = null,
+                isPlaybackLoading = false,
+                playbackError = "This video could not be played on this device.",
+                canTryPlaybackTranscode = snapshot.playbackInfo?.fallbackStreamUrl != null,
+            )
+        }
+    }
+
+    fun reportPlaybackStarted(positionMs: Long) {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val info = snapshot.playbackInfo ?: return
+        if (snapshot.hasReportedPlaybackStart) return
+        _state.update { it.copy(hasReportedPlaybackStart = true) }
+        viewModelScope.launch {
+            playbackRepository.reportStarted(session, info, positionMs.toTicks())
+        }
+    }
+
+    fun reportPlaybackProgress(positionMs: Long, isPaused: Boolean) {
+        val session = _state.value.session ?: return
+        val info = _state.value.playbackInfo ?: return
+        viewModelScope.launch {
+            playbackRepository.reportProgress(session, info, positionMs.toTicks(), isPaused)
+        }
+    }
+
+    fun exitPlayback(positionMs: Long) {
+        val snapshot = _state.value
+        val session = snapshot.session
+        val info = snapshot.playbackInfo
+        _state.update {
+            it.copy(
+                mobileDestination = it.previousMobileDestination,
+                playbackInfo = null,
+                playbackItem = null,
+                playbackError = null,
+                isPlaybackLoading = false,
+                hasReportedPlaybackStart = false,
+            )
+        }
+        if (session != null && info != null) {
+            viewModelScope.launch {
+                playbackRepository.reportStopped(session, info, positionMs.toTicks())
+                snapshot.selectedMediaId?.let { openMedia(it) }
+                loadLibraries(session)
+            }
+        }
+    }
+
+    fun selectPlaybackAudioTrack(index: Int) {
+        startPlayback(forceTranscode = false, audioStreamIndex = index, subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex)
+    }
+
+    fun selectPlaybackSubtitleTrack(index: Int?) {
+        startPlayback(forceTranscode = false, audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex, subtitleStreamIndex = index)
+    }
+
     fun clearMobileMessage() {
         _state.update { it.copy(mobileMessage = null) }
     }
@@ -1015,6 +1157,14 @@ data class VantafynHomeUiState(
     val themeMusicEnabled: Boolean = true,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
     val configuredSmartRows: List<String> = emptyList(),
+    val previousMobileDestination: MobileDestination = MobileDestination.Home,
+    val playbackInfo: JellyfinPlaybackInfo? = null,
+    val playbackItem: VantafynPlaybackItem? = null,
+    val isPlaybackLoading: Boolean = false,
+    val playbackError: String? = null,
+    val canTryPlaybackTranscode: Boolean = false,
+    val hasPlaybackRetriedTranscode: Boolean = false,
+    val hasReportedPlaybackStart: Boolean = false,
     val quickConnectSession: JellyfinQuickConnectSession? = null,
     val quickConnectMessage: String? = null,
     val errorMessage: String? = null,
@@ -1031,7 +1181,69 @@ enum class MobileDestination {
     PlaybackPreferences,
     LibraryDetail,
     MediaDetail,
+    Player,
 }
+
+private data class PlaybackTarget(
+    val id: UUID,
+    val title: String,
+    val subtitle: String?,
+    val startTicks: Long,
+)
+
+private fun JellyfinMediaDetail.playbackTarget(): PlaybackTarget? =
+    if (itemType.equals("Series", ignoreCase = true)) {
+        episodes.firstOrNull { (it.progress ?: 0f) < 0.95f }?.let {
+            PlaybackTarget(
+                id = it.id,
+                title = it.title,
+                subtitle = listOfNotNull(title, it.subtitle).joinToString(" · ").ifBlank { null },
+                startTicks = 0L,
+            )
+        }
+    } else {
+        PlaybackTarget(
+            id = id,
+            title = title,
+            subtitle = subtitle,
+            startTicks = playbackPositionTicks.takeIf { (progress ?: 0f) > 0.05f && !isPlayed } ?: 0L,
+        )
+    }
+
+private fun JellyfinPlaybackInfo.toPlaybackItem(): VantafynPlaybackItem =
+    VantafynPlaybackItem(
+        itemId = itemId.toString(),
+        title = title,
+        subtitle = subtitle,
+        streamUrl = streamUrl,
+        fallbackStreamUrl = fallbackStreamUrl,
+        startPositionMs = startPositionTicks / 10_000L,
+        durationMs = runtimeTicks?.let { it / 10_000L },
+        sourceLabel = sourceLabel,
+        audioTracks = audioTracks.map {
+            VantafynAudioTrack(
+                index = it.index,
+                label = it.label,
+                language = it.language,
+                codec = it.codec,
+                channels = it.channels,
+                isDefault = it.isDefault,
+            )
+        },
+        subtitleTracks = subtitleTracks.map {
+            VantafynSubtitleTrack(
+                index = it.index,
+                label = it.label,
+                language = it.language,
+                codec = it.codec,
+                isExternal = it.isExternal,
+                isDefault = it.isDefault,
+            )
+        },
+    )
+
+private fun Long.toTicks(): Long =
+    coerceAtLeast(0L) * 10_000L
 
 enum class VantafynAppBackground(val label: String) {
     Nebula("Nebula"),
