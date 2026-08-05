@@ -1,9 +1,12 @@
 package dev.vantafyn.core.media
 
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CoroutineScope
@@ -79,11 +82,12 @@ sealed interface VantafynMusicPlaybackEvent {
 }
 
 class MusicPlaybackController private constructor(context: Context) {
+    private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var tickerJob: Job? = null
     private var lastTransitionReason: VantafynMusicStopReason = VantafynMusicStopReason.QueueChange
 
-    private val player = ExoPlayer.Builder(context.applicationContext).build().apply {
+    internal val sessionPlayer: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
         setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -175,14 +179,15 @@ class MusicPlaybackController private constructor(context: Context) {
         if (queue.isEmpty()) return
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
         val previous = _state.value.currentTrack
-        val previousPosition = player.currentPosition.coerceAtLeast(0L)
+        val previousPosition = sessionPlayer.currentPosition.coerceAtLeast(0L)
         if (previous != null && previous.id != queue[safeIndex].id) {
             emitEvent(VantafynMusicPlaybackEvent.Stopped(previous, previousPosition, VantafynMusicStopReason.QueueChange))
         }
         lastTransitionReason = VantafynMusicStopReason.QueueChange
-        player.setMediaItems(queue.map { it.toMediaItem() }, safeIndex, 0L)
-        player.prepare()
-        player.playWhenReady = true
+        ensurePlaybackService()
+        sessionPlayer.setMediaItems(queue.map { it.toMediaItem() }, safeIndex, 0L)
+        sessionPlayer.prepare()
+        sessionPlayer.playWhenReady = true
         _state.update {
             it.copy(
                 queue = queue,
@@ -196,25 +201,27 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     fun togglePlayPause() {
-        if (player.isPlaying) {
-            player.pause()
+        if (sessionPlayer.isPlaying) {
+            sessionPlayer.pause()
         } else {
-            player.play()
+            ensurePlaybackService()
+            sessionPlayer.play()
         }
     }
 
     fun pause() {
-        if (player.isPlaying) player.pause()
+        if (sessionPlayer.isPlaying) sessionPlayer.pause()
     }
 
     fun stop(clearQueue: Boolean = false, reason: VantafynMusicStopReason = VantafynMusicStopReason.User) {
         val track = _state.value.currentTrack
-        val position = player.currentPosition.coerceAtLeast(0L)
+        val position = sessionPlayer.currentPosition.coerceAtLeast(0L)
         emitEvent(VantafynMusicPlaybackEvent.Stopped(track, position, reason))
-        player.stop()
+        sessionPlayer.stop()
         if (clearQueue) {
-            player.clearMediaItems()
+            sessionPlayer.clearMediaItems()
         }
+        stopPlaybackService()
         _state.update {
             it.copy(
                 queue = if (clearQueue) emptyList() else it.queue,
@@ -227,37 +234,48 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     fun next() {
-        if (player.hasNextMediaItem()) {
+        if (sessionPlayer.hasNextMediaItem()) {
             lastTransitionReason = VantafynMusicStopReason.Skip
-            player.seekToNextMediaItem()
-            player.play()
+            sessionPlayer.seekToNextMediaItem()
+            sessionPlayer.play()
         } else if (_state.value.repeatMode == VantafynMusicRepeatMode.All && _state.value.queue.isNotEmpty()) {
             lastTransitionReason = VantafynMusicStopReason.Skip
-            player.seekTo(0, 0L)
-            player.play()
+            sessionPlayer.seekTo(0, 0L)
+            sessionPlayer.play()
         }
+    }
+
+    fun playNext(track: VantafynMusicTrack) {
+        val insertIndex = (_state.value.queueIndex + 1).coerceAtMost(_state.value.queue.size)
+        sessionPlayer.addMediaItem(insertIndex, track.toMediaItem())
+        _state.update { it.copy(queue = it.queue.toMutableList().apply { add(insertIndex, track) }) }
+    }
+
+    fun addToQueue(track: VantafynMusicTrack) {
+        sessionPlayer.addMediaItem(track.toMediaItem())
+        _state.update { it.copy(queue = it.queue + track) }
     }
 
     fun previous() {
-        if (player.currentPosition > 3_000L || !player.hasPreviousMediaItem()) {
-            player.seekTo(0L)
+        if (sessionPlayer.currentPosition > 3_000L || !sessionPlayer.hasPreviousMediaItem()) {
+            sessionPlayer.seekTo(0L)
             _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, 0L)) }
         } else {
             lastTransitionReason = VantafynMusicStopReason.Skip
-            player.seekToPreviousMediaItem()
+            sessionPlayer.seekToPreviousMediaItem()
         }
-        player.play()
+        sessionPlayer.play()
     }
 
     fun seekTo(positionMs: Long) {
-        player.seekTo(positionMs.coerceAtLeast(0L))
-        _state.update { it.copy(positionMs = player.currentPosition.coerceAtLeast(0L)) }
-        _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, player.currentPosition.coerceAtLeast(0L))) }
+        sessionPlayer.seekTo(positionMs.coerceAtLeast(0L))
+        _state.update { it.copy(positionMs = sessionPlayer.currentPosition.coerceAtLeast(0L)) }
+        _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, sessionPlayer.currentPosition.coerceAtLeast(0L))) }
     }
 
     fun toggleShuffle() {
         val enabled = !_state.value.shuffleEnabled
-        player.shuffleModeEnabled = enabled
+        sessionPlayer.shuffleModeEnabled = enabled
         _state.update { it.copy(shuffleEnabled = enabled) }
     }
 
@@ -267,7 +285,7 @@ class MusicPlaybackController private constructor(context: Context) {
             VantafynMusicRepeatMode.All -> VantafynMusicRepeatMode.One
             VantafynMusicRepeatMode.One -> VantafynMusicRepeatMode.Off
         }
-        player.repeatMode = when (next) {
+        sessionPlayer.repeatMode = when (next) {
             VantafynMusicRepeatMode.Off -> Player.REPEAT_MODE_OFF
             VantafynMusicRepeatMode.One -> Player.REPEAT_MODE_ONE
             VantafynMusicRepeatMode.All -> Player.REPEAT_MODE_ALL
@@ -277,12 +295,12 @@ class MusicPlaybackController private constructor(context: Context) {
 
     fun release() {
         tickerJob?.cancel()
-        player.release()
+        sessionPlayer.release()
         scope.cancel()
     }
 
     private fun syncTicker() {
-        if (!player.isPlaying) {
+        if (!sessionPlayer.isPlaying) {
             tickerJob?.cancel()
             tickerJob = null
             return
@@ -292,10 +310,10 @@ class MusicPlaybackController private constructor(context: Context) {
             while (isActive) {
                 _state.update { state ->
                     state.copy(
-                        queueIndex = player.currentMediaItemIndex.takeIf { it >= 0 } ?: state.queueIndex,
-                        positionMs = player.currentPosition.coerceAtLeast(0L),
-                        durationMs = player.duration.takeIf { it > 0 } ?: state.currentTrack?.durationMs ?: state.durationMs,
-                        isPlaying = player.isPlaying,
+                        queueIndex = sessionPlayer.currentMediaItemIndex.takeIf { it >= 0 } ?: state.queueIndex,
+                        positionMs = sessionPlayer.currentPosition.coerceAtLeast(0L),
+                        durationMs = sessionPlayer.duration.takeIf { it > 0 } ?: state.currentTrack?.durationMs ?: state.durationMs,
+                        isPlaying = sessionPlayer.isPlaying,
                     )
                 }
                 delay(500L)
@@ -307,10 +325,32 @@ class MusicPlaybackController private constructor(context: Context) {
         _events.tryEmit(event)
     }
 
+    private fun ensurePlaybackService() {
+        val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
+        runCatching {
+            androidx.core.content.ContextCompat.startForegroundService(appContext, intent)
+        }.recoverCatching {
+            appContext.startService(intent)
+        }
+    }
+
+    private fun stopPlaybackService() {
+        val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
+        runCatching { appContext.stopService(intent) }
+    }
+
     private fun VantafynMusicTrack.toMediaItem(): MediaItem =
         MediaItem.Builder()
             .setUri(streamUrl)
             .setMediaId(id.toString())
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setArtist(artist)
+                    .setAlbumTitle(album)
+                    .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .build(),
+            )
             .build()
 
     companion object {

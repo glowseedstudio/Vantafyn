@@ -36,6 +36,7 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ChannelType
 import org.jellyfin.sdk.model.api.CreatePlaylistDto
+import org.jellyfin.sdk.model.api.CreateUserByName
 import org.jellyfin.sdk.model.api.DeviceProfile
 import org.jellyfin.sdk.model.api.DirectPlayProfile
 import org.jellyfin.sdk.model.api.DlnaProfileType
@@ -393,6 +394,20 @@ class SdkJellyfinMediaRepository(
             }
         }
 
+    override suspend fun getSeasonEpisodes(
+        session: JellyfinSession,
+        seriesId: java.util.UUID,
+        seasonId: java.util.UUID?,
+    ): JellyfinResult<List<JellyfinEpisode>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                JellyfinResult.Success(fetchEpisodes(api, session, seriesId, seasonId, limit = 200))
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
     override suspend fun setFavorite(
         session: JellyfinSession,
         itemId: java.util.UUID,
@@ -476,6 +491,7 @@ class SdkJellyfinMediaRepository(
         session: JellyfinSession,
         seriesId: java.util.UUID,
         seasonId: java.util.UUID?,
+        limit: Int = 24,
     ): List<JellyfinEpisode> =
         runCatching {
             val response by api.tvShowsApi.getEpisodes(
@@ -484,7 +500,7 @@ class SdkJellyfinMediaRepository(
                     userId = session.user.id,
                     fields = itemFields,
                     seasonId = seasonId,
-                    limit = 24,
+                    limit = limit,
                     enableImages = true,
                     imageTypeLimit = 2,
                     enableImageTypes = itemImageTypes,
@@ -1251,7 +1267,44 @@ class SdkJellyfinMusicRepository(
                 enableTotalRecordCount = false,
             ),
         )
-        return response.items.map { it.toMusicPlaylist(api) }
+        return response.items.mapNotNull { playlist ->
+            val playlistId = playlist.id
+            val items = runCatching {
+                val playlistItems by api.playlistsApi.getPlaylistItems(
+                    GetPlaylistItemsRequest(
+                        playlistId = playlistId,
+                        userId = session.user.id,
+                        fields = musicItemFields,
+                        limit = 20,
+                        enableImages = false,
+                        enableUserData = false,
+                        imageTypeLimit = 0,
+                        enableImageTypes = emptyList(),
+                    ),
+                )
+                playlistItems.items
+            }.getOrElse {
+                Log.d("VantafynMusic", "Playlist classification failed for '${playlist.name.orEmpty().take(80)}': ${it.javaClass.simpleName}")
+                emptyList()
+            }
+            val hasItems = items.isNotEmpty()
+            val audioCount = items.count { it.type == BaseItemKind.AUDIO || it.mediaType == MediaType.AUDIO }
+            val videoCount = items.count {
+                it.type in setOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE, BaseItemKind.SERIES, BaseItemKind.BOX_SET) ||
+                    it.mediaType == MediaType.VIDEO
+            }
+            when {
+                hasItems && audioCount > 0 && videoCount == 0 -> playlist.toMusicPlaylist(api, audioCount)
+                hasItems -> {
+                    Log.d("VantafynMusic", "Hiding non-music playlist '${playlist.name.orEmpty().take(80)}' audio=$audioCount video=$videoCount")
+                    null
+                }
+                else -> {
+                    Log.d("VantafynMusic", "Hiding empty/unknown playlist '${playlist.name.orEmpty().take(80)}' from Music")
+                    null
+                }
+            }
+        }
     }
 }
 
@@ -1335,9 +1388,17 @@ class SdkJellyfinAdminRepository(
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
                 val system by api.systemApi.getSystemInfo()
-                val sessions = runCatching {
+                val allSessions = runCatching {
                     val result by api.sessionApi.getSessions()
-                    result.map { dto ->
+                    result
+                }.getOrDefault(emptyList())
+                val sessions = allSessions
+                    .filter { it.nowPlayingItem != null }
+                    .sortedByDescending { it.lastPlaybackCheckIn ?: it.lastActivityDate }
+                    .map { dto ->
+                        val item = dto.nowPlayingItem
+                        val playState = dto.playState
+                        val transcode = dto.transcodingInfo
                         JellyfinAdminSession(
                             id = dto.id ?: dto.deviceId ?: dto.userId?.toString().orEmpty(),
                             userId = dto.userId,
@@ -1346,11 +1407,30 @@ class SdkJellyfinAdminRepository(
                             client = dto.client,
                             deviceName = dto.deviceName,
                             remoteEndPoint = dto.remoteEndPoint,
-                            nowPlayingTitle = dto.nowPlayingItem?.name,
-                            isTranscoding = dto.transcodingInfo != null,
+                            nowPlayingTitle = item?.name,
+                            nowPlayingSubtitle = item?.seasonEpisodeLabel() ?: item?.productionYear?.toString(),
+                            nowPlayingImageUrl = item?.primaryImageUrl(api, 420) ?: item?.thumbImageUrl(api, 520),
+                            nowPlayingBackdropUrl = item?.backdropImageUrl(api, 760) ?: item?.thumbImageUrl(api, 760),
+                            nowPlayingType = item?.type?.serialName ?: item?.type?.name,
+                            playMethod = playState?.playMethod?.let { method ->
+                                when (method) {
+                                    PlayMethod.DIRECT_PLAY -> "Direct Play"
+                                    PlayMethod.DIRECT_STREAM -> "Direct Stream"
+                                    PlayMethod.TRANSCODE -> "Transcoding"
+                                }
+                            } ?: if (transcode != null) "Transcoding" else "Unknown",
+                            isPaused = playState?.isPaused == true,
+                            positionTicks = playState?.positionTicks,
+                            runtimeTicks = item?.runTimeTicks,
+                            videoCodec = transcode?.videoCodec,
+                            audioCodec = transcode?.audioCodec,
+                            container = transcode?.container,
+                            bitrate = transcode?.bitrate,
+                            transcodeReasons = transcode?.transcodeReasons.orEmpty().map { it.serialName },
+                            lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
+                            isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
                         )
                     }
-                }.getOrDefault(emptyList())
                 val users = runCatching {
                     val result by api.userApi.getUsers(isHidden = null, isDisabled = null)
                     result.map { user ->
@@ -1372,6 +1452,7 @@ class SdkJellyfinAdminRepository(
                         serverVersion = system.version,
                         operatingSystem = system.operatingSystemDisplayName ?: system.operatingSystem,
                         activeSessions = sessions,
+                        connectedSessionCount = allSessions.size,
                         users = users,
                         libraryCount = libraries.size,
                         totalItems = countItems(api, session, null),
@@ -1402,6 +1483,29 @@ class SdkJellyfinAdminRepository(
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
                 val user by api.userApi.getUserById(userId)
                 JellyfinResult.Success(user.toAdminUserDetail(api))
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun createUser(
+        session: JellyfinSession,
+        username: String,
+        password: String,
+    ): JellyfinResult<JellyfinAdminUserDetail> =
+        withContext(ioDispatcher) {
+            if (!session.user.isAdministrator) {
+                return@withContext JellyfinResult.Failure("Admin access is not available for this user")
+            }
+            val trimmedName = username.trim()
+            if (trimmedName.isBlank()) {
+                return@withContext JellyfinResult.Failure("Enter a user name")
+            }
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val created by api.userApi.createUserByName(CreateUserByName(name = trimmedName, password = password))
+                val refreshed by api.userApi.getUserById(created.id)
+                JellyfinResult.Success(refreshed.toAdminUserDetail(api))
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
@@ -1560,8 +1664,10 @@ class SdkJellyfinHomeRepository(
                         shape = JellyfinMediaCardShape.Library,
                     )
                 }
+                val heroSeed = System.currentTimeMillis() / 3_600_000L
                 val heroItems = (resumeItems + latestMovies + nextUpItems + latestTv)
                     .distinctBy { it.id }
+                    .shuffled(kotlin.random.Random(heroSeed))
                     .map { it.toHero(api) }
                     .filter { it.backdropUrl != null || it.posterUrl != null }
                     .take(8)
@@ -1896,12 +2002,12 @@ private fun BaseItemDto.toMusicArtist(api: ApiClient): JellyfinMusicArtist =
         imageUrl = primaryImageUrl(api, 520),
     )
 
-private fun BaseItemDto.toMusicPlaylist(api: ApiClient): JellyfinMusicPlaylist =
+private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: Int? = null): JellyfinMusicPlaylist =
     JellyfinMusicPlaylist(
         id = id,
         name = name ?: "Playlist",
         imageUrl = primaryImageUrl(api, 520),
-        trackCount = childCount ?: recursiveItemCount,
+        trackCount = classifiedTrackCount ?: childCount ?: recursiveItemCount,
     )
 
 private fun Long.toLyricMillis(): Long =
@@ -1933,6 +2039,8 @@ private fun BaseItemDto.toDetail(
         progress = userData.progress(),
         playbackPositionTicks = userData?.playbackPositionTicks ?: 0L,
         streamInfo = streamInfo(),
+        mediaInfo = mediaInfoLines(),
+        mediaSources = mediaSources.orEmpty().map { it.toMediaSourceSummary() },
         people = people.orEmpty().take(18).map { it.toPerson(api) },
         seasons = seasons,
         episodes = episodes,
@@ -1953,9 +2061,71 @@ private fun BaseItemDto.toEpisode(api: ApiClient): JellyfinEpisode =
         overview = overview,
         imageUrl = thumbImageUrl(api, 520) ?: backdropImageUrl(api, 520) ?: primaryImageUrl(api, 360),
         progress = userData.progress(),
+        playbackPositionTicks = userData?.playbackPositionTicks ?: 0L,
+        isPlayed = userData?.played == true,
+        runtimeMinutes = runTimeTicks?.let { (it / 600_000_000L).toInt() },
         indexNumber = indexNumber,
         seasonIndexNumber = parentIndexNumber,
     )
+
+private fun BaseItemDto.mediaInfoLines(): List<JellyfinMediaInfoLine> =
+    buildList {
+        container?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("Container", it.uppercase())) }
+        mediaSources.orEmpty().firstOrNull()?.let { source ->
+            source.name?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("Version", it)) }
+            source.size?.takeIf { it > 0L }?.let { add(JellyfinMediaInfoLine("Size", it.fileSizeLabel())) }
+            source.bitrate?.takeIf { it > 0 }?.let { add(JellyfinMediaInfoLine("Bitrate", it.bitrateLabel())) }
+            source.path?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("Path", it, adminOnly = true)) }
+            val video = source.mediaStreams.orEmpty().firstOrNull { it.type == MediaStreamType.VIDEO }
+            val audio = source.mediaStreams.orEmpty().firstOrNull { it.type == MediaStreamType.AUDIO }
+            video?.codec?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("Video", it.uppercase())) }
+            video?.resolutionLabel()?.let { add(JellyfinMediaInfoLine("Resolution", it)) }
+            video?.videoRangeType?.toString()?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("Range", it)) }
+            audio?.codec?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("Audio", it.uppercase())) }
+            audio?.channels?.takeIf { it > 0 }?.let { add(JellyfinMediaInfoLine("Audio channels", it.toString())) }
+        }
+        runTimeTicks?.let { add(JellyfinMediaInfoLine("Runtime", "${(it / 600_000_000L).toInt()} min")) }
+        providerIds?.get("Imdb")?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("IMDb", it)) }
+        providerIds?.get("Tmdb")?.takeIf { it.isNotBlank() }?.let { add(JellyfinMediaInfoLine("TMDb", it)) }
+    }
+
+private fun MediaSourceInfo.toMediaSourceSummary(): JellyfinMediaSourceSummary {
+    val video = mediaStreams.orEmpty().firstOrNull { it.type == MediaStreamType.VIDEO }
+    val audio = mediaStreams.orEmpty().firstOrNull { it.type == MediaStreamType.AUDIO }
+    return JellyfinMediaSourceSummary(
+        id = id,
+        name = name,
+        container = container,
+        path = path,
+        sizeLabel = size?.takeIf { it > 0L }?.fileSizeLabel(),
+        bitrateLabel = bitrate?.takeIf { it > 0 }?.bitrateLabel(),
+        videoCodec = video?.codec,
+        audioCodec = audio?.codec,
+        resolution = video?.resolutionLabel(),
+        dynamicRange = video?.videoRangeType?.toString(),
+        audioTracks = mediaStreams.orEmpty()
+            .filter { it.type == MediaStreamType.AUDIO }
+            .map { it.displayTitle ?: it.title ?: it.language?.uppercase() ?: "Audio ${it.index}" },
+        subtitleTracks = mediaStreams.orEmpty()
+            .filter { it.type == MediaStreamType.SUBTITLE }
+            .map { it.displayTitle ?: it.title ?: it.language?.uppercase() ?: "Subtitle ${it.index}" },
+    )
+}
+
+private fun MediaStream.resolutionLabel(): String? {
+    val width = width ?: return null
+    val height = height ?: return null
+    return "${width}x$height"
+}
+
+private fun Long.fileSizeLabel(): String {
+    val gib = this / 1_073_741_824.0
+    val mib = this / 1_048_576.0
+    return if (gib >= 1.0) "%.1f GB".format(gib) else "%.0f MB".format(mib)
+}
+
+private fun Int.bitrateLabel(): String =
+    if (this >= 1_000_000) "%.1f Mbps".format(this / 1_000_000.0) else "${this / 1_000} kbps"
 
 private suspend fun fetchLiveTvChannels(
     api: ApiClient,

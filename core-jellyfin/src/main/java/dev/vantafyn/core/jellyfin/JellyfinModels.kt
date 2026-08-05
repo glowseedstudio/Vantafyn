@@ -133,12 +133,35 @@ data class JellyfinMediaDetail(
     val progress: Float?,
     val playbackPositionTicks: Long = 0L,
     val streamInfo: List<String> = emptyList(),
+    val mediaInfo: List<JellyfinMediaInfoLine> = emptyList(),
+    val mediaSources: List<JellyfinMediaSourceSummary> = emptyList(),
     val people: List<JellyfinPerson> = emptyList(),
     val seasons: List<JellyfinSeason> = emptyList(),
     val episodes: List<JellyfinEpisode> = emptyList(),
     val related: List<JellyfinMediaItem> = emptyList(),
     val externalLinks: List<JellyfinExternalLink> = emptyList(),
     val themeSongUrl: String? = null,
+)
+
+data class JellyfinMediaInfoLine(
+    val label: String,
+    val value: String,
+    val adminOnly: Boolean = false,
+)
+
+data class JellyfinMediaSourceSummary(
+    val id: String?,
+    val name: String?,
+    val container: String?,
+    val path: String?,
+    val sizeLabel: String?,
+    val bitrateLabel: String?,
+    val videoCodec: String?,
+    val audioCodec: String?,
+    val resolution: String?,
+    val dynamicRange: String?,
+    val audioTracks: List<String>,
+    val subtitleTracks: List<String>,
 )
 
 enum class JellyfinPlaybackMethod {
@@ -207,6 +230,9 @@ data class JellyfinEpisode(
     val overview: String?,
     val imageUrl: String?,
     val progress: Float?,
+    val playbackPositionTicks: Long = 0L,
+    val isPlayed: Boolean = false,
+    val runtimeMinutes: Int? = null,
     val indexNumber: Int?,
     val seasonIndexNumber: Int?,
 )
@@ -310,6 +336,7 @@ data class JellyfinAdminOverview(
     val serverVersion: String?,
     val operatingSystem: String?,
     val activeSessions: List<JellyfinAdminSession>,
+    val connectedSessionCount: Int,
     val users: List<JellyfinAdminUser>,
     val libraryCount: Int,
     val totalItems: Int?,
@@ -329,6 +356,20 @@ data class JellyfinAdminSession(
     val deviceName: String?,
     val remoteEndPoint: String?,
     val nowPlayingTitle: String?,
+    val nowPlayingSubtitle: String?,
+    val nowPlayingImageUrl: String?,
+    val nowPlayingBackdropUrl: String?,
+    val nowPlayingType: String?,
+    val playMethod: String?,
+    val isPaused: Boolean,
+    val positionTicks: Long?,
+    val runtimeTicks: Long?,
+    val videoCodec: String?,
+    val audioCodec: String?,
+    val container: String?,
+    val bitrate: Int?,
+    val transcodeReasons: List<String>,
+    val lastPlaybackCheckIn: String?,
     val isTranscoding: Boolean,
 )
 
@@ -436,6 +477,7 @@ interface JellyfinHomeRepository {
 
 interface JellyfinMediaRepository {
     suspend fun getMediaDetail(session: JellyfinSession, itemId: UUID): JellyfinResult<JellyfinMediaDetail>
+    suspend fun getSeasonEpisodes(session: JellyfinSession, seriesId: UUID, seasonId: UUID?): JellyfinResult<List<JellyfinEpisode>>
     suspend fun setFavorite(session: JellyfinSession, itemId: UUID, isFavorite: Boolean): JellyfinResult<Boolean>
     suspend fun addFavorite(session: JellyfinSession, itemId: UUID): JellyfinResult<Boolean> =
         setFavorite(session, itemId, true)
@@ -485,6 +527,7 @@ interface JellyfinMusicRepository {
 
 interface JellyfinAdminRepository {
     suspend fun getOverview(session: JellyfinSession, libraries: List<JellyfinLibrary>): JellyfinResult<JellyfinAdminOverview>
+    suspend fun createUser(session: JellyfinSession, username: String, password: String): JellyfinResult<JellyfinAdminUserDetail>
     suspend fun getUserDetail(session: JellyfinSession, userId: UUID): JellyfinResult<JellyfinAdminUserDetail>
     suspend fun updateUserPolicy(
         session: JellyfinSession,

@@ -31,6 +31,7 @@ The WispBench code was used as owned reference material for:
 - repeat/shuffle behavior
 - playlist action model
 - synced/plain lyrics model and LRC parsing behavior
+- full Now Playing hierarchy: art-led backdrop, large album art, icon transport controls, queue/actions, and dedicated lyrics mode
 
 No unrelated WispBench modules were copied. The implementation is Kotlin/Compose/Media3 and uses Vantafyn styling.
 
@@ -50,7 +51,31 @@ Music uses a singleton `MusicPlaybackController` backed by Media3 ExoPlayer, so 
 
 Starting video playback stops and clears music with a Jellyfin stop report when the music reporter is active. Switching profiles or logging out stops and clears the music queue. Detail-page theme music checks the shared music controller and does not play over active music.
 
-The first implementation does not include a foreground notification/media service. Because of that, mobile music pauses when the app is backgrounded or the screen locks. Playback does not automatically resume on foreground; the user can resume from the mini-player or Now Playing.
+Mobile music now runs behind a Media3 `MediaSessionService` declared by `core-media`. The mobile manifest requests foreground media playback and notification permissions. The service uses the same singleton player, so background/lock-screen playback does not create a second player.
+
+Android 13+ requires the user to grant `POST_NOTIFICATIONS` before Vantafyn can reliably show lock-screen and notification media controls. Vantafyn does not ask on cold launch. The first user-initiated music start/resume shows an in-app explainer before the Android permission dialog. If the user chooses `Not now` or denies the permission, music continues in-app, but lock-screen controls may not appear. The user can later manage this from Settings > Permissions.
+
+When playback stops because of logout, profile switch, video playback, completion, or an explicit stop, `MusicPlaybackController` stops the Media3 service so the foreground notification is cleared.
+
+## Notification Permission And Channel
+
+Permission behavior:
+
+- Android 13+: `POST_NOTIFICATIONS` is requested only after Vantafyn explains that it is used for music controls.
+- Android 12 and below: no runtime notification permission is requested.
+- Granted: music can continue in the background and the system media notification/lock-screen controls can appear.
+- Denied or dismissed: playback can continue in the app, but notification and lock-screen controls may not appear.
+- Permanently denied: Settings shows an action that opens Android notification settings.
+
+The Media3 music service creates a notification channel:
+
+- id: `vantafyn_music_playback`
+- name: `Music playback`
+- description: `Playback controls for music playing in Vantafyn`
+- importance: low
+- sound/vibration: disabled
+
+Music `MediaItem` metadata includes title, artist, album, and artwork URI so the Media3 notification can show the current song and artwork when supported by the OS/provider.
 
 ## Jellyfin Play-State Reporting
 
@@ -75,6 +100,12 @@ Old WispBench local sidecar lookup is intentionally not used because Android can
 
 Lyrics reset whenever the current track changes. Timing is driven from the Media3 controller position, so highlights follow seek and next/previous transitions. Malformed or unavailable Jellyfin lyrics are treated as missing lyrics and do not crash the UI.
 
+Lyrics now open as a dedicated full-screen music surface from Now Playing. Synced lines are tappable for seeking, highlight the active line, and reset on track changes.
+
+## Music Playlist Filtering
+
+The Music tab only shows playlists classified as audio playlists. Because Jellyfin playlists do not always expose a reliable media type, `core-jellyfin` inspects the first page of each playlist. Playlists with audio items and no video items are included. Movie, episode, series, collection, mixed-video, empty, or unknown playlists are hidden from Music.
+
 ## Mobile Music Navigation
 
 The Music tab now includes lightweight mobile destinations for:
@@ -83,13 +114,13 @@ The Music tab now includes lightweight mobile destinations for:
 - artist detail with artist albums
 - playlist detail with loaded playlist items and play action
 - all songs list
+- music-specific long-press actions for tracks: play, play next, add to queue, add to playlist, go to album placeholder, more info placeholder
 
 Playlist removal and queue reorder are not exposed yet because those controls need more UX work.
 
 ## Known Limitations
 
 - TV music UI is not built yet.
-- Foreground/background media notification service is not implemented in this milestone.
 - Queue reorder and playlist remove are repository-ready but not exposed in the first UI.
 - Jellyfin play-state reporting is wired for active mobile music sessions, but tracks reached by automatic queue transition may not have `playSessionId` until a richer queue pre-prepare path is added. They still report item id and position.
 - Artist detail currently shows artist albums. Top tracks and richer artist metadata can be expanded later.
@@ -122,8 +153,12 @@ Playlist removal and queue reorder are not exposed yet because those controls ne
 23. Switching profile/logging out stops music cleanly.
 24. Starting video pauses music cleanly.
 25. Theme music does not overlap music playback.
-26. No WispBench branding remains.
-27. YearForge is not present.
-28. Visualizer is not present.
-29. Vantafyn styling is applied.
-30. No unrelated WispBench code is copied.
+26. Android 13+ first music start shows the Vantafyn notification explainer before the OS dialog.
+27. Denying notification permission does not crash playback.
+28. Settings shows notification permission status and action.
+29. Notification channel exists as `Music playback`.
+30. No WispBench branding remains.
+31. YearForge is not present.
+32. Visualizer is not present.
+33. Vantafyn styling is applied.
+34. No unrelated WispBench code is copied.

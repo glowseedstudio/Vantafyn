@@ -58,7 +58,9 @@
 3. Start music, then switch profile. Music should stop and clear its queue.
 4. Start music, then log out. Music should stop and clear its queue.
 5. Start music, then background the app or lock the screen. Music should pause because no foreground notification service exists yet.
-6. Return to the app and confirm playback can be resumed manually.
+6. Confirm music continues through background/lock-screen while the Media3 session service is active.
+7. Confirm notification/lock-screen controls appear when Android notification permission allows them.
+8. Return to the app and confirm mini-player/Now Playing state remains synced.
 
 ## Regression Checks
 

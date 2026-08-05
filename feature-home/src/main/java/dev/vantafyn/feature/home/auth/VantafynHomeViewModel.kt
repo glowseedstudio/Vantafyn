@@ -10,6 +10,7 @@ import dev.vantafyn.core.jellyfin.JellyfinAdminRepository
 import dev.vantafyn.core.jellyfin.JellyfinFavoritesRepository
 import dev.vantafyn.core.jellyfin.JellyfinHome
 import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
+import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
@@ -57,6 +58,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val userPreferencesRepository: JellyfinUserPreferencesRepository = repositories.userPreferencesRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
+    private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
     private var searchJob: Job? = null
     private var quickConnectJob: Job? = null
 
@@ -424,6 +426,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 selectedLibrary = if (destination == MobileDestination.LibraryDetail) it.selectedLibrary else null,
                 selectedMediaId = if (destination == MobileDestination.MediaDetail) it.selectedMediaId else null,
                 mediaDetail = if (destination == MobileDestination.MediaDetail) it.mediaDetail else null,
+                selectedAdminUserId = if (destination == MobileDestination.AdminUserSettings) it.selectedAdminUserId else null,
+                adminUserDetail = if (destination == MobileDestination.AdminUserSettings) it.adminUserDetail else null,
+                adminUserError = if (destination == MobileDestination.AdminUserSettings) it.adminUserError else null,
                 mobileMessage = null,
             )
         }
@@ -469,6 +474,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 previousMobileDestination = it.mobileDestination.rootDestination(),
                 selectedMediaId = itemId,
                 mediaDetail = null,
+                selectedSeasonId = null,
+                selectedSeasonEpisodes = emptyList(),
+                isSeasonEpisodesLoading = false,
+                seasonEpisodesError = null,
                 isMediaDetailLoading = true,
                 mediaDetailError = null,
                 mobileMessage = null,
@@ -477,7 +486,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             when (val result = mediaRepository.getMediaDetail(session, itemId)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(isMediaDetailLoading = false, mediaDetail = result.value) }
+                    val selectedSeasonId = result.value.defaultSeasonId()
+                    _state.update {
+                        it.copy(
+                            isMediaDetailLoading = false,
+                            mediaDetail = result.value,
+                            selectedSeasonId = selectedSeasonId,
+                            selectedSeasonEpisodes = result.value.episodes,
+                        )
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isMediaDetailLoading = false, mediaDetailError = result.message) }
@@ -490,6 +507,35 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.value.selectedMediaId?.let(::openMedia)
     }
 
+    fun selectSeason(seasonId: UUID?) {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val detail = snapshot.mediaDetail ?: return
+        if (!detail.itemType.equals("Series", ignoreCase = true)) return
+        _state.update {
+            it.copy(
+                selectedSeasonId = seasonId,
+                selectedSeasonEpisodes = if (seasonId == detail.seasons.firstOrNull()?.id) detail.episodes else emptyList(),
+                isSeasonEpisodesLoading = true,
+                seasonEpisodesError = null,
+            )
+        }
+        viewModelScope.launch {
+            when (val result = mediaRepository.getSeasonEpisodes(session, detail.id, seasonId)) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(
+                        isSeasonEpisodesLoading = false,
+                        selectedSeasonEpisodes = result.value,
+                        seasonEpisodesError = null,
+                    )
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(isSeasonEpisodesLoading = false, seasonEpisodesError = result.message)
+                }
+            }
+        }
+    }
+
     fun navigateMobileBack() {
         val snapshot = _state.value
         when (snapshot.mobileDestination) {
@@ -498,6 +544,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.LibraryDetail -> navigateMobile(MobileDestination.Libraries)
             MobileDestination.HomeLayout,
             MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
+            MobileDestination.AdminUserSettings -> closeAdminUser()
             else -> Unit
         }
     }
@@ -528,6 +575,25 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun setMediaFavorite(itemId: UUID, isFavorite: Boolean) {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            when (val result = mediaRepository.setFavorite(session, itemId, isFavorite)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            mediaDetail = it.mediaDetail?.takeIf { detail -> detail.id == itemId }?.copy(isFavorite = result.value) ?: it.mediaDetail,
+                            mobileMessage = if (result.value) "Added to My List" else "Removed from My List",
+                        )
+                    }
+                    loadFavorites(session)
+                    loadLibraries(session)
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(mobileMessage = result.message) }
+            }
+        }
+    }
+
     fun toggleMediaPlayed() {
         val snapshot = _state.value
         val session = snapshot.session ?: return
@@ -549,6 +615,24 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                 }
+            }
+        }
+    }
+
+    fun setMediaPlayed(itemId: UUID, isPlayed: Boolean) {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            when (val result = mediaRepository.setPlayed(session, itemId, isPlayed)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            mediaDetail = it.mediaDetail?.takeIf { detail -> detail.id == itemId }?.copy(isPlayed = result.value) ?: it.mediaDetail,
+                            mobileMessage = if (result.value) "Marked watched" else "Marked unwatched",
+                        )
+                    }
+                    loadLibraries(session)
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(mobileMessage = result.message) }
             }
         }
     }
@@ -675,7 +759,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val session = _state.value.session ?: return
         if (!session.user.isAdministrator) return
         viewModelScope.launch {
-            _state.update { it.copy(selectedAdminUserId = userId, isAdminUserLoading = true, adminUserError = null) }
+            _state.update {
+                it.copy(
+                    mobileDestination = MobileDestination.AdminUserSettings,
+                    previousMobileDestination = MobileDestination.Admin,
+                    selectedAdminUserId = userId,
+                    adminUserDetail = null,
+                    isAdminUserLoading = true,
+                    adminUserError = null,
+                    mobileMessage = null,
+                )
+            }
             when (val result = adminRepository.getUserDetail(session, userId)) {
                 is JellyfinResult.Success -> _state.update { it.copy(isAdminUserLoading = false, adminUserDetail = result.value) }
                 is JellyfinResult.Failure -> _state.update { it.copy(isAdminUserLoading = false, adminUserError = result.message) }
@@ -684,7 +778,42 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeAdminUser() {
-        _state.update { it.copy(selectedAdminUserId = null, adminUserDetail = null, adminUserError = null) }
+        _state.update {
+            it.copy(
+                mobileDestination = MobileDestination.Admin,
+                previousMobileDestination = MobileDestination.Home,
+                selectedAdminUserId = null,
+                adminUserDetail = null,
+                isAdminUserLoading = false,
+                isAdminUserSaving = false,
+                adminUserError = null,
+            )
+        }
+    }
+
+    fun createAdminUser(username: String, password: String) {
+        val session = _state.value.session ?: return
+        if (!session.user.isAdministrator) return
+        viewModelScope.launch {
+            _state.update { it.copy(isAdminUserSaving = true, adminUserError = null, mobileMessage = null) }
+            when (val result = adminRepository.createUser(session, username, password)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            mobileDestination = MobileDestination.AdminUserSettings,
+                            previousMobileDestination = MobileDestination.Admin,
+                            selectedAdminUserId = result.value.user.id,
+                            adminUserDetail = result.value,
+                            isAdminUserSaving = false,
+                            isAdminUserLoading = false,
+                            mobileMessage = "User created",
+                        )
+                    }
+                    loadAdminOverview()
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(isAdminUserSaving = false, adminUserError = result.message) }
+            }
+        }
     }
 
     fun updateSelectedAdminUser(
@@ -749,6 +878,34 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             return
         }
         startPlaybackTarget(session, target, forceTranscode, audioStreamIndex, subtitleStreamIndex)
+    }
+
+    fun startPlaybackFromBeginning() {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val detail = snapshot.mediaDetail ?: return
+        val target = detail.beginningPlaybackTarget(snapshot.selectedSeasonEpisodes) ?: run {
+            _state.update { it.copy(mobileMessage = "This item cannot be played yet") }
+            return
+        }
+        startPlaybackTarget(session, target, forceTranscode = false, audioStreamIndex = null, subtitleStreamIndex = null)
+    }
+
+    fun startEpisodePlayback(episode: JellyfinEpisode, fromBeginning: Boolean = false) {
+        val session = _state.value.session ?: return
+        val detail = _state.value.mediaDetail
+        startPlaybackTarget(
+            session = session,
+            target = PlaybackTarget(
+                id = episode.id,
+                title = episode.title,
+                subtitle = listOfNotNull(detail?.title, episode.subtitle).joinToString(" · ").ifBlank { null },
+                startTicks = if (fromBeginning) 0L else episode.playbackPositionTicks.takeIf { (episode.progress ?: 0f) > 0.05f && !episode.isPlayed } ?: 0L,
+            ),
+            forceTranscode = false,
+            audioStreamIndex = null,
+            subtitleStreamIndex = null,
+        )
     }
 
     private fun startPlaybackTarget(
@@ -954,6 +1111,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun toggleHomeSection(type: HomeSectionType) {
+        if (type == HomeSectionType.MediaBar) return
         _state.update { state ->
             val updated = state.homeLayout.map {
                 if (it.type == type) it.copy(visible = !it.visible) else it
@@ -964,15 +1122,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun moveHomeSection(type: HomeSectionType, direction: Int) {
+        if (type == HomeSectionType.MediaBar) return
         _state.update { state ->
-            val current = state.homeLayout.sortedBy { it.order }
+            val fixed = state.homeLayout.firstOrNull { it.type == HomeSectionType.MediaBar }
+                ?: defaultHomeLayout().first { it.type == HomeSectionType.MediaBar }
+            val current = state.homeLayout
+                .filter { it.type != HomeSectionType.MediaBar }
+                .sortedBy { it.order }
             val index = current.indexOfFirst { it.type == type }
             val target = (index + direction).coerceIn(0, current.lastIndex)
             if (index < 0 || index == target) return@update state
             val mutable = current.toMutableList()
             val item = mutable.removeAt(index)
             mutable.add(target, item)
-            val updated = mutable.mapIndexed { order, preference -> preference.copy(order = order) }
+            val updated = listOf(fixed.copy(visible = true, order = 0)) +
+                mutable.mapIndexed { index, preference -> preference.copy(order = index + 1) }
             persistHomeLayout(state.session?.profileId, updated)
             state.copy(homeLayout = updated)
         }
@@ -1127,16 +1291,41 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             _state.update { it.copy(step = VantafynSetupStep.Splash, isLoading = true) }
             val profiles = authRepository.savedProfiles()
+            val autoLogin = readAutoLoginLastProfile()
+            if (autoLogin) {
+                val lastProfile = profiles.maxByOrNull { it.lastUsedAt }
+                if (lastProfile != null) {
+                    _state.update {
+                        it.copy(
+                            savedProfiles = profiles,
+                            autoLoginLastProfile = true,
+                            selectedBackground = readSelectedBackground(null),
+                        )
+                    }
+                    selectProfile(lastProfile)
+                    return@launch
+                }
+            }
             _state.update {
                 it.copy(
                     step = if (profiles.isEmpty()) VantafynSetupStep.Welcome else VantafynSetupStep.ProfilePicker,
                     isLoading = false,
                     savedProfiles = profiles,
+                    autoLoginLastProfile = autoLogin,
                     selectedBackground = readSelectedBackground(null),
                 )
             }
         }
     }
+
+    fun toggleAutoLoginLastProfile() {
+        val enabled = !_state.value.autoLoginLastProfile
+        appPreferences.edit().putBoolean(KEY_AUTO_LOGIN_LAST_PROFILE, enabled).apply()
+        _state.update { it.copy(autoLoginLastProfile = enabled) }
+    }
+
+    private fun readAutoLoginLastProfile(): Boolean =
+        appPreferences.getBoolean(KEY_AUTO_LOGIN_LAST_PROFILE, false)
 
     private suspend fun refreshSavedProfiles() {
         _state.update { it.copy(savedProfiles = authRepository.savedProfiles()) }
@@ -1237,6 +1426,7 @@ data class VantafynHomeUiState(
     val server: JellyfinServerConfig? = null,
     val session: JellyfinSession? = null,
     val savedProfiles: List<SavedProfile> = emptyList(),
+    val autoLoginLastProfile: Boolean = false,
     val publicUsers: List<JellyfinPublicUser> = emptyList(),
     val manageProfiles: Boolean = false,
     val pendingRemoval: SavedProfile? = null,
@@ -1251,6 +1441,10 @@ data class VantafynHomeUiState(
     val libraryItemsError: String? = null,
     val selectedMediaId: UUID? = null,
     val mediaDetail: JellyfinMediaDetail? = null,
+    val selectedSeasonId: UUID? = null,
+    val selectedSeasonEpisodes: List<JellyfinEpisode> = emptyList(),
+    val isSeasonEpisodesLoading: Boolean = false,
+    val seasonEpisodesError: String? = null,
     val isMediaDetailLoading: Boolean = false,
     val mediaDetailError: String? = null,
     val searchQuery: String = "",
@@ -1308,6 +1502,7 @@ enum class MobileDestination {
     Music,
     Favorites,
     Admin,
+    AdminUserSettings,
     Profile,
     HomeLayout,
     PlaybackPreferences,
@@ -1325,6 +1520,7 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.Favorites,
         MobileDestination.Admin,
         MobileDestination.Profile -> true
+        MobileDestination.AdminUserSettings,
         MobileDestination.HomeLayout,
         MobileDestination.PlaybackPreferences,
         MobileDestination.LibraryDetail,
@@ -1363,6 +1559,35 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
                 ?: 0L,
         )
     }
+
+private fun JellyfinMediaDetail.beginningPlaybackTarget(selectedEpisodes: List<JellyfinEpisode>): PlaybackTarget? =
+    if (itemType.equals("Series", ignoreCase = true)) {
+        val episode = (selectedEpisodes.ifEmpty { episodes })
+            .sortedWith(compareBy<JellyfinEpisode> { it.seasonIndexNumber ?: Int.MAX_VALUE }.thenBy { it.indexNumber ?: Int.MAX_VALUE })
+            .firstOrNull()
+            ?: return null
+        PlaybackTarget(
+            id = episode.id,
+            title = episode.title,
+            subtitle = listOfNotNull(title, episode.subtitle).joinToString(" · ").ifBlank { null },
+            startTicks = 0L,
+        )
+    } else {
+        PlaybackTarget(
+            id = id,
+            title = title,
+            subtitle = subtitle,
+            startTicks = 0L,
+        )
+    }
+
+private fun JellyfinMediaDetail.defaultSeasonId(): UUID? {
+    if (!itemType.equals("Series", ignoreCase = true)) return null
+    val nextEpisode = episodes.firstOrNull { (it.progress ?: 0f) in 0.01f..0.94f }
+        ?: episodes.firstOrNull { !it.isPlayed }
+        ?: episodes.firstOrNull()
+    return seasons.firstOrNull { it.indexNumber == nextEpisode?.seasonIndexNumber }?.id ?: seasons.firstOrNull()?.id
+}
 
 private fun JellyfinPlaybackInfo.toPlaybackItem(): VantafynPlaybackItem =
     VantafynPlaybackItem(
@@ -1493,6 +1718,8 @@ private fun VantafynCardSize.next(): VantafynCardSize =
 
 private fun VantafynCardSpacing.next(): VantafynCardSpacing =
     enumValues<VantafynCardSpacing>().let { it[(ordinal + 1) % it.size] }
+
+private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
 
 enum class VantafynSetupStep {
     Splash,

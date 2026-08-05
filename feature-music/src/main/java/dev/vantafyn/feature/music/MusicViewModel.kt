@@ -215,7 +215,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun closeNowPlaying() {
-        _state.update { it.copy(showNowPlaying = false) }
+        _state.update { it.copy(showNowPlaying = false, showLyricsScreen = false) }
+    }
+
+    fun openLyrics() {
+        _state.update { it.copy(showLyricsScreen = true, showNowPlaying = true) }
+    }
+
+    fun closeLyrics() {
+        _state.update { it.copy(showLyricsScreen = false) }
     }
 
     fun togglePlayPause() = playbackController.togglePlayPause()
@@ -224,6 +232,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun seekTo(positionMs: Long) = playbackController.seekTo(positionMs)
     fun toggleShuffle() = playbackController.toggleShuffle()
     fun cycleRepeat() = playbackController.cycleRepeatMode()
+    fun playNext(track: JellyfinMusicTrack) {
+        playbackController.playNext(track.toPlaybackTrack())
+        _state.update { it.copy(message = "Queued next") }
+    }
+
+    fun addToQueue(track: JellyfinMusicTrack) {
+        playbackController.addToQueue(track.toPlaybackTrack())
+        _state.update { it.copy(message = "Added to queue") }
+    }
 
     fun createPlaylistWithCurrent(name: String) {
         val activeSession = session ?: return
@@ -392,6 +409,7 @@ data class MusicUiState(
     val home: JellyfinMusicHome? = null,
     val playback: VantafynMusicPlaybackState,
     val showNowPlaying: Boolean = false,
+    val showLyricsScreen: Boolean = false,
     val lyricsTrackId: UUID? = null,
     val lyrics: JellyfinLyrics? = null,
     val isLyricsLoading: Boolean = false,

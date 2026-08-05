@@ -37,6 +37,10 @@ The playback profile allows HLS video transcoding to H.264/AAC. If Jellyfin retu
 
 Detail data now carries Jellyfin `playbackPositionTicks`. Resume uses those ticks when the item is partially watched and not already marked played.
 
+Watch from beginning is explicit: detail actions call playback with `startPositionTicks = 0`, even if Jellyfin has saved resume progress. This does not erase the existing resume point by itself; Jellyfin is updated only through normal playback progress/stop reporting after playback starts.
+
+Series playback chooses an episode target rather than trying to play the series container. The primary action uses the first unfinished loaded episode. The Watch from beginning action uses the first valid episode from the selected season when available.
+
 Progress is reported every seven seconds during playback and also on pause/seek/background. Stop is reported when the player is closed or reaches completion. Jellyfin remains responsible for deciding watched thresholds.
 
 When playback closes, the detail item and home libraries are refreshed so Continue Watching/resume state can update from Jellyfin.
@@ -73,5 +77,6 @@ Logs include playback method, whether media/play/live stream ids are present, se
 - External subtitle sidecar attachment handling is limited to URLs Jellyfin exposes in playback info.
 - Subtitle formats that require burn-in depend on Jellyfin transcoding.
 - Quality/source selection beyond direct vs transcode is not yet a full UI.
+- Pre-playback media version selection is visible in Media Info but not yet selectable as a playback override.
 - Track changes restart playback rather than switching tracks in-place.
 - Explicit Live TV fallback is implemented, but Live TV behavior still depends on server tuner/provider support.
