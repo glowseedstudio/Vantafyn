@@ -13,6 +13,7 @@ media3 = "1.10.1"
 navigationCompose = "2.9.0"
 tvFoundation = "1.0.0"
 tvMaterial = "1.1.0-alpha01"
+coroutines = "1.10.2"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -24,6 +25,8 @@ androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
 androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version.ref = "media3" }
 androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
@@ -33,6 +36,7 @@ jellyfin-api = { module = "org.jellyfin.sdk:jellyfin-api", version.ref = "jellyf
 jellyfin-api-okhttp = { module = "org.jellyfin.sdk:jellyfin-api-okhttp", version.ref = "jellyfinSdk" }
 jellyfin-core = { module = "org.jellyfin.sdk:jellyfin-core", version.ref = "jellyfinSdk" }
 jellyfin-model = { module = "org.jellyfin.sdk:jellyfin-model", version.ref = "jellyfinSdk" }
+kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

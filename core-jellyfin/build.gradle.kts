@@ -20,4 +20,6 @@ dependencies {
     api(libs.jellyfin.api.okhttp)
     api(libs.jellyfin.core)
     api(libs.jellyfin.model)
+    implementation(libs.androidx.core.ktx)
+    implementation(libs.kotlinx.coroutines.android)
 }

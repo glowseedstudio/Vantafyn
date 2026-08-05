@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
@@ -166,6 +167,7 @@ fun PosterCard(
                 .width(spec.width)
                 .height(spec.height)
                 .onFocusChanged { focused = it.isFocused }
+                .focusable()
                 .clip(RoundedCornerShape(VantafynRadii.card))
                 .background(
                     Brush.verticalGradient(

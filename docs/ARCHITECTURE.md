@@ -6,7 +6,7 @@ Vantafyn is a Kotlin, Jetpack Compose Android client for Jellyfin with TV and ph
 
 - `app-tv`: Android TV, Google TV, and Fire OS entry point. This module owns TV manifests, launcher metadata, TV navigation shell, and TV-specific app wiring.
 - `app-mobile`: Android phone entry point. This module owns phone manifests, launcher metadata, and phone-specific app wiring.
-- `core-jellyfin`: Shared Jellyfin connection, discovery, authentication, API, WebSocket, session, and device profile logic. It depends on the Jellyfin Kotlin SDK.
+- `core-jellyfin`: Shared Jellyfin connection, authentication, API, session, storage abstraction, and library-view logic. It depends on the Jellyfin Kotlin SDK.
 - `core-media`: Shared playback abstractions and Media3 integration. The first playback engine is AndroidX Media3 ExoPlayer.
 - `core-ui`: Shared Vantafyn design system: colors, typography, spacing, card shapes, poster cards, focus treatment, and motion constants.
 - `feature-home`: Shared onboarding and home surfaces. TV and phone compose their own layout around the same screen concepts.
@@ -19,7 +19,29 @@ Vantafyn is a Kotlin, Jetpack Compose Android client for Jellyfin with TV and ph
 
 The app modules should remain thin. Shared Jellyfin behavior belongs in `core-jellyfin`, shared playback behavior belongs in `core-media`, and reusable visual language belongs in `core-ui`. Feature modules should depend on core modules, while core modules should not depend on app or feature modules.
 
-Playback is intentionally not implemented in this skeleton. The next step is to make the Jellyfin session flow buildable end to end, then add item lookup and playback URL selection before wiring Media3.
+Playback is intentionally not implemented in this milestone. The next step is to add library detail screens and media item queries, then add playback URL selection before wiring Media3.
+
+## Jellyfin Connection Flow
+
+`core-jellyfin` owns the SDK and exposes plain Vantafyn models:
+
+- `JellyfinAuthRepository`: server test, username/password login, saved-session restore, and logout.
+- `JellyfinLibraryRepository`: authenticated library/view fetch.
+- `JellyfinSessionStorage`: storage boundary for server URL, user identity, and access token.
+- `JellyfinResult`: success/failure wrapper so UI code does not catch SDK exceptions directly.
+
+The Compose UI in `feature-home` uses `VantafynHomeViewModel`, which calls these repositories. App modules do not call the Jellyfin SDK directly.
+
+SDK APIs currently used:
+
+- `createJellyfin { ... }`
+- `createApi(baseUrl, accessToken)`
+- `systemApi.getPublicSystemInfo()`
+- `userApi.authenticateUserByName(...)`
+- `userApi.getCurrentUser()`
+- `userViewsApi.getUserViews(userId)`
+
+Session storage currently lives in app-private `SharedPreferences` via `SharedPreferencesJellyfinSessionStorage`. The interface exists so encrypted storage can replace it without changing UI or repository call sites.
 
 ## Reference Boundary
 
