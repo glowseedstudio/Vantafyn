@@ -86,6 +86,7 @@ import dev.vantafyn.core.jellyfin.JellyfinPublicUser
 import dev.vantafyn.core.jellyfin.JellyfinSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinHeroMediaItem
 import dev.vantafyn.core.jellyfin.SavedProfile
+import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.ui.MobilePosterSpec
 import dev.vantafyn.core.ui.PosterCard
 import dev.vantafyn.core.ui.TvPosterSpec
@@ -116,6 +117,7 @@ import dev.vantafyn.feature.home.auth.VantafynCardSpacing
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
 import dev.vantafyn.feature.home.auth.supportedSmartRows
+import dev.vantafyn.feature.music.MusicScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -1079,6 +1081,7 @@ private fun MobileShellScreen(
                     when (state.mobileDestination) {
                         MobileDestination.Libraries -> LibrariesScreen(state, onOpenLibrary)
                         MobileDestination.Search -> SearchScreen(state, onSearchQueryChanged, onOpenMedia)
+                        MobileDestination.Music -> MusicScreen(session = state.session)
                         MobileDestination.Favorites -> FavoritesScreen(state, onLoadFavorites, onOpenMedia)
                         MobileDestination.Admin -> AdminScreen(state, onOpenUser = onOpenAdminUser)
                         MobileDestination.Profile -> ProfileSettingsScreen(
@@ -2955,8 +2958,10 @@ private fun MediaDetailScreen(
 private fun DetailThemeAudio(url: String?, enabled: Boolean, volume: ThemeMusicVolume) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(url, enabled, volume, lifecycleOwner) {
-        if (!enabled || url.isNullOrBlank() || volume.level <= 0f) {
+    val musicState by remember(context) { MusicPlaybackController.get(context).state }.collectAsState()
+    val canPlayTheme = musicState.currentTrack == null
+    DisposableEffect(url, enabled, volume, lifecycleOwner, canPlayTheme) {
+        if (!enabled || !canPlayTheme || url.isNullOrBlank() || volume.level <= 0f) {
             onDispose { }
         } else {
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -3417,7 +3422,7 @@ private fun MobileBottomNav(
             MobileDestination.Home,
             MobileDestination.Libraries,
             MobileDestination.Search,
-            MobileDestination.Favorites,
+            MobileDestination.Music,
             MobileDestination.Admin,
             MobileDestination.Profile,
         )
@@ -3426,7 +3431,7 @@ private fun MobileBottomNav(
             MobileDestination.Home,
             MobileDestination.Libraries,
             MobileDestination.Search,
-            MobileDestination.Favorites,
+            MobileDestination.Music,
             MobileDestination.Profile,
         )
     }
@@ -3504,6 +3509,13 @@ private fun MiniNavIcon(destination: MobileDestination, selected: Boolean) {
             MobileDestination.Search -> {
                 drawCircle(color, radius = 6.2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(9.dp.toPx(), 9.dp.toPx()), style = outline)
                 drawLine(color, start = androidx.compose.ui.geometry.Offset(14.dp.toPx(), 14.dp.toPx()), end = androidx.compose.ui.geometry.Offset(20.dp.toPx(), 20.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+            }
+            MobileDestination.Music -> {
+                drawLine(color, start = androidx.compose.ui.geometry.Offset(8.dp.toPx(), 5.dp.toPx()), end = androidx.compose.ui.geometry.Offset(8.dp.toPx(), 16.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, start = androidx.compose.ui.geometry.Offset(8.dp.toPx(), 5.dp.toPx()), end = androidx.compose.ui.geometry.Offset(17.dp.toPx(), 4.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawLine(color, start = androidx.compose.ui.geometry.Offset(17.dp.toPx(), 4.dp.toPx()), end = androidx.compose.ui.geometry.Offset(17.dp.toPx(), 14.dp.toPx()), strokeWidth = stroke, cap = StrokeCap.Round)
+                drawCircle(color, radius = 3.2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(6.5.dp.toPx(), 17.dp.toPx()), style = outline)
+                drawCircle(color, radius = 3.2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(15.5.dp.toPx(), 15.dp.toPx()), style = outline)
             }
             MobileDestination.Favorites -> {
                 val path = Path().apply {

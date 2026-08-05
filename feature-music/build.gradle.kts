@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "dev.vantafyn.feature.home"
+    namespace = "dev.vantafyn.feature.music"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
@@ -20,8 +20,6 @@ dependencies {
     implementation(project(":core-jellyfin"))
     implementation(project(":core-media"))
     implementation(project(":core-ui"))
-    implementation(project(":feature-music"))
-    implementation(project(":feature-player"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.foundation)
     implementation(libs.androidx.compose.material3)

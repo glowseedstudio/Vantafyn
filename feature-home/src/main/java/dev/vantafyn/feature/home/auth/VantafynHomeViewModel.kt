@@ -31,6 +31,7 @@ import dev.vantafyn.core.jellyfin.JellyfinAdminUserDetail
 import dev.vantafyn.core.jellyfin.JellyfinUserPreferencesRepository
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.media.VantafynAudioTrack
+import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynSubtitleTrack
 import java.util.UUID
@@ -132,6 +133,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun showProfilePicker() {
+        MusicPlaybackController.get(getApplication()).stop(clearQueue = true)
         viewModelScope.launch {
             _state.update {
                 it.copy(
@@ -274,6 +276,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun logout() {
         viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true)
             authRepository.logout()
             _state.value = VantafynHomeUiState(step = VantafynSetupStep.Welcome)
         }
@@ -290,6 +293,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun logoutCurrentProfile() {
         val profileId = _state.value.session?.profileId ?: return
         viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true)
             authRepository.removeProfile(profileId)
             val profiles = authRepository.savedProfiles()
             _state.value = VantafynHomeUiState(
@@ -734,6 +738,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         subtitleStreamIndex: Int?,
     ) {
         viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).pause()
             val previousInfo = _state.value.playbackInfo
             if (previousInfo != null) {
                 playbackRepository.reportStopped(session, previousInfo, target.startTicks)
@@ -1279,6 +1284,7 @@ enum class MobileDestination {
     Home,
     Libraries,
     Search,
+    Music,
     Favorites,
     Admin,
     Profile,

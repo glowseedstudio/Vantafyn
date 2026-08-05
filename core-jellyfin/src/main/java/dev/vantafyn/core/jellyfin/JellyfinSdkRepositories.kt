@@ -11,12 +11,15 @@ import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
 import org.jellyfin.sdk.api.client.extensions.authenticateWithQuickConnect
+import org.jellyfin.sdk.api.client.extensions.artistsApi
 import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.api.client.extensions.liveTvApi
+import org.jellyfin.sdk.api.client.extensions.lyricsApi
 import org.jellyfin.sdk.api.client.extensions.mediaInfoApi
 import org.jellyfin.sdk.api.client.extensions.playStateApi
+import org.jellyfin.sdk.api.client.extensions.playlistsApi
 import org.jellyfin.sdk.api.client.extensions.quickConnectApi
 import org.jellyfin.sdk.api.client.extensions.searchApi
 import org.jellyfin.sdk.api.client.extensions.sessionApi
@@ -32,6 +35,7 @@ import org.jellyfin.sdk.model.DeviceInfo
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.ChannelType
+import org.jellyfin.sdk.model.api.CreatePlaylistDto
 import org.jellyfin.sdk.model.api.DeviceProfile
 import org.jellyfin.sdk.model.api.DirectPlayProfile
 import org.jellyfin.sdk.model.api.DlnaProfileType
@@ -42,6 +46,8 @@ import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.MediaSourceInfo
 import org.jellyfin.sdk.model.api.MediaProtocol
+import org.jellyfin.sdk.model.api.MediaStreamProtocol
+import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.SearchHint
 import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.PlayMethod
@@ -66,6 +72,7 @@ import org.jellyfin.sdk.model.api.request.GetEpisodesRequest
 import org.jellyfin.sdk.model.api.request.GetLatestMediaRequest
 import org.jellyfin.sdk.model.api.request.GetLiveTvChannelsRequest
 import org.jellyfin.sdk.model.api.request.GetNextUpRequest
+import org.jellyfin.sdk.model.api.request.GetPlaylistItemsRequest
 import org.jellyfin.sdk.model.api.request.GetRecommendedProgramsRequest
 import org.jellyfin.sdk.model.api.request.GetResumeItemsRequest
 import org.jellyfin.sdk.model.api.request.GetSearchHintsRequest
@@ -122,6 +129,9 @@ class JellyfinRepositoryProvider(
 
     val playbackRepository: JellyfinPlaybackRepository =
         SdkJellyfinPlaybackRepository(jellyfin, deviceId, ioDispatcher)
+
+    val musicRepository: JellyfinMusicRepository =
+        SdkJellyfinMusicRepository(jellyfin, ioDispatcher)
 
     private fun resolveDeviceId(context: Context): String =
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -965,6 +975,286 @@ class SdkJellyfinFavoritesRepository(
         }
 }
 
+class SdkJellyfinMusicRepository(
+    private val jellyfin: Jellyfin,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : JellyfinMusicRepository {
+    override suspend fun getMusicHome(session: JellyfinSession): JellyfinResult<JellyfinMusicHome> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val views by api.userViewsApi.getUserViews(userId = session.user.id)
+                val libraries = views.items
+                    .filter { it.collectionType?.serialName.equals("music", ignoreCase = true) }
+                    .map {
+                        JellyfinMusicLibrary(
+                            id = it.id,
+                            name = it.name ?: "Music",
+                            imageUrl = it.primaryImageUrl(api, 520),
+                        )
+                    }
+                val recentlyAdded = getMusicTracks(api, session, limit = 24, sortBy = listOf(ItemSortBy.DATE_CREATED), sortOrder = listOf(SortOrder.DESCENDING))
+                val albums = getMusicAlbums(api, session, limit = 40)
+                val artists = getMusicArtists(api, session, limit = 40)
+                val playlists = getMusicPlaylists(api, session, limit = 40)
+                val songs = getMusicTracks(api, session, limit = 60, sortBy = listOf(ItemSortBy.SORT_NAME), sortOrder = listOf(SortOrder.ASCENDING))
+                JellyfinResult.Success(
+                    JellyfinMusicHome(
+                        libraries = libraries,
+                        recentlyAdded = recentlyAdded,
+                        albums = albums,
+                        artists = artists,
+                        playlists = playlists,
+                        songs = songs,
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getAlbumTracks(session: JellyfinSession, albumId: java.util.UUID): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                JellyfinResult.Success(
+                    getMusicTracks(
+                        api = api,
+                        session = session,
+                        limit = 500,
+                        parentId = albumId,
+                        sortBy = listOf(ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER, ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getArtistAlbums(session: JellyfinSession, artistId: java.util.UUID): JellyfinResult<List<JellyfinMusicAlbum>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.itemsApi.getItems(
+                    GetItemsRequest(
+                        userId = session.user.id,
+                        recursive = true,
+                        limit = 120,
+                        artistIds = listOf(artistId),
+                        sortBy = listOf(ItemSortBy.PREMIERE_DATE, ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.DESCENDING),
+                        fields = musicItemFields,
+                        includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                        enableImages = true,
+                        imageTypeLimit = 2,
+                        enableImageTypes = listOf(ImageType.PRIMARY),
+                        enableTotalRecordCount = false,
+                    ),
+                )
+                JellyfinResult.Success(response.items.map { it.toMusicAlbum(api) })
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getPlaylistItems(session: JellyfinSession, playlistId: java.util.UUID): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.playlistsApi.getPlaylistItems(
+                    GetPlaylistItemsRequest(
+                        playlistId = playlistId,
+                        userId = session.user.id,
+                        fields = musicItemFields,
+                        enableImages = true,
+                        enableUserData = true,
+                        imageTypeLimit = 2,
+                        enableImageTypes = listOf(ImageType.PRIMARY),
+                    ),
+                )
+                JellyfinResult.Success(response.items.filter { it.type == BaseItemKind.AUDIO }.map { it.toMusicTrack(api, session) })
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                JellyfinResult.Success(
+                    getMusicTracks(
+                        api = api,
+                        session = session,
+                        limit = limit,
+                        searchTerm = query.takeIf { it.isNotBlank() },
+                        sortBy = listOf(ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getLyrics(session: JellyfinSession, trackId: java.util.UUID): JellyfinResult<JellyfinLyrics?> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response = runCatching { api.lyricsApi.getLyrics(trackId) }.getOrNull()
+                    ?: return@withContext JellyfinResult.Success(null)
+                val lyric by response
+                val lines = lyric.lyrics.orEmpty().mapNotNull { line ->
+                    val text = line.text?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    JellyfinLyricLine(startMs = line.start?.toLyricMillis(), text = text)
+                }
+                val plain = lines.joinToString("\n") { it.text }.trim()
+                JellyfinResult.Success(
+                    JellyfinLyrics(
+                        plainText = plain,
+                        syncedLines = lines,
+                        source = "Jellyfin Lyrics API",
+                    ).takeIf { it.plainText.isNotBlank() || it.syncedLines.isNotEmpty() },
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun createPlaylist(session: JellyfinSession, name: String, itemIds: List<java.util.UUID>): JellyfinResult<java.util.UUID> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.playlistsApi.createPlaylist(
+                    CreatePlaylistDto(
+                        name = name.trim().ifBlank { "Vantafyn Playlist" },
+                        ids = itemIds,
+                        userId = session.user.id,
+                        mediaType = MediaType.AUDIO,
+                        users = emptyList(),
+                        isPublic = false,
+                    ),
+                )
+                val id = response.id?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
+                    ?: return@withContext JellyfinResult.Failure("Jellyfin did not return a playlist id.")
+                JellyfinResult.Success(id)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun addToPlaylist(session: JellyfinSession, playlistId: java.util.UUID, itemIds: List<java.util.UUID>): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.playlistsApi.addItemToPlaylist(playlistId, itemIds, session.user.id)
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun removeFromPlaylist(session: JellyfinSession, playlistId: java.util.UUID, playlistItemIds: List<String>): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.playlistsApi.removeItemFromPlaylist(playlistId.toString(), playlistItemIds)
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    private suspend fun getMusicTracks(
+        api: ApiClient,
+        session: JellyfinSession,
+        limit: Int,
+        parentId: java.util.UUID? = null,
+        searchTerm: String? = null,
+        sortBy: List<ItemSortBy>,
+        sortOrder: List<SortOrder>,
+    ): List<JellyfinMusicTrack> {
+        val response by api.itemsApi.getItems(
+            GetItemsRequest(
+                userId = session.user.id,
+                parentId = parentId,
+                recursive = parentId == null,
+                searchTerm = searchTerm,
+                limit = limit,
+                sortBy = sortBy,
+                sortOrder = sortOrder,
+                fields = musicItemFields,
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                mediaTypes = listOf(MediaType.AUDIO),
+                enableUserData = true,
+                imageTypeLimit = 2,
+                enableImageTypes = listOf(ImageType.PRIMARY),
+                enableImages = true,
+                enableTotalRecordCount = false,
+            ),
+        )
+        return response.items.map { it.toMusicTrack(api, session) }
+    }
+
+    private suspend fun getMusicAlbums(api: ApiClient, session: JellyfinSession, limit: Int): List<JellyfinMusicAlbum> {
+        val response by api.itemsApi.getItems(
+            GetItemsRequest(
+                userId = session.user.id,
+                recursive = true,
+                limit = limit,
+                sortBy = listOf(ItemSortBy.DATE_CREATED),
+                sortOrder = listOf(SortOrder.DESCENDING),
+                fields = musicItemFields,
+                includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                enableImages = true,
+                imageTypeLimit = 2,
+                enableImageTypes = listOf(ImageType.PRIMARY),
+                enableTotalRecordCount = false,
+            ),
+        )
+        return response.items.map { it.toMusicAlbum(api) }
+    }
+
+    private suspend fun getMusicArtists(api: ApiClient, session: JellyfinSession, limit: Int): List<JellyfinMusicArtist> {
+        val response by api.itemsApi.getItems(
+            GetItemsRequest(
+                userId = session.user.id,
+                recursive = true,
+                limit = limit,
+                sortBy = listOf(ItemSortBy.SORT_NAME),
+                sortOrder = listOf(SortOrder.ASCENDING),
+                fields = musicItemFields,
+                includeItemTypes = listOf(BaseItemKind.MUSIC_ARTIST),
+                enableImages = true,
+                imageTypeLimit = 1,
+                enableImageTypes = listOf(ImageType.PRIMARY),
+                enableTotalRecordCount = false,
+            ),
+        )
+        return response.items.map { it.toMusicArtist(api) }
+    }
+
+    private suspend fun getMusicPlaylists(api: ApiClient, session: JellyfinSession, limit: Int): List<JellyfinMusicPlaylist> {
+        val response by api.itemsApi.getItems(
+            GetItemsRequest(
+                userId = session.user.id,
+                recursive = true,
+                limit = limit,
+                sortBy = listOf(ItemSortBy.SORT_NAME),
+                sortOrder = listOf(SortOrder.ASCENDING),
+                fields = musicItemFields,
+                includeItemTypes = listOf(BaseItemKind.PLAYLIST),
+                enableImages = true,
+                imageTypeLimit = 1,
+                enableImageTypes = listOf(ImageType.PRIMARY),
+                enableTotalRecordCount = false,
+            ),
+        )
+        return response.items.map { it.toMusicPlaylist(api) }
+    }
+}
+
 class SdkJellyfinUserPreferencesRepository(
     private val jellyfin: Jellyfin,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -1487,6 +1777,12 @@ private val itemFields = listOf(
     ItemFields.MEDIA_STREAMS,
 )
 
+private val musicItemFields = listOf(
+    ItemFields.GENRES,
+    ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
+    ItemFields.MEDIA_STREAMS,
+)
+
 private val itemImageTypes = listOf(ImageType.PRIMARY, ImageType.BACKDROP, ImageType.THUMB, ImageType.LOGO)
 
 private val mediaItemTypes = listOf(
@@ -1547,6 +1843,69 @@ private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShap
         progress = userData.progress(),
         shape = shape,
     )
+
+private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): JellyfinMusicTrack =
+    JellyfinMusicTrack(
+        id = id,
+        title = name ?: "Untitled track",
+        artist = artists?.joinToString(", ")?.takeIf { it.isNotBlank() }
+            ?: albumArtist
+            ?: "Unknown artist",
+        album = album,
+        albumId = albumId,
+        durationMs = runTimeTicks?.let { it / 10_000L },
+        artworkUrl = primaryImageUrl(api, 520),
+        hasLyrics = hasLyrics == true,
+        streamUrl = api.universalAudioApi.getUniversalAudioStreamUrl(
+            itemId = id,
+            container = listOf("mp3", "aac", "flac", "opus", "vorbis", "m4a"),
+            mediaSourceId = null,
+            deviceId = null,
+            userId = session.user.id,
+            audioCodec = "aac,mp3,flac,opus,vorbis",
+            maxAudioChannels = 2,
+            transcodingAudioChannels = null,
+            maxStreamingBitrate = 384_000,
+            audioBitRate = null,
+            startTimeTicks = null,
+            transcodingContainer = "mp3",
+            transcodingProtocol = MediaStreamProtocol.HTTP,
+            maxAudioSampleRate = null,
+            maxAudioBitDepth = null,
+            enableRemoteMedia = true,
+            breakOnNonKeyFrames = false,
+            enableRedirection = true,
+            enableAudioVbrEncoding = true,
+        ).withAccessToken(session.accessToken),
+        playlistItemId = playlistItemId,
+    )
+
+private fun BaseItemDto.toMusicAlbum(api: ApiClient): JellyfinMusicAlbum =
+    JellyfinMusicAlbum(
+        id = id,
+        title = name ?: "Untitled album",
+        artist = albumArtist ?: artists?.joinToString(", "),
+        year = productionYear,
+        artworkUrl = primaryImageUrl(api, 520),
+    )
+
+private fun BaseItemDto.toMusicArtist(api: ApiClient): JellyfinMusicArtist =
+    JellyfinMusicArtist(
+        id = id,
+        name = name ?: "Unknown artist",
+        imageUrl = primaryImageUrl(api, 520),
+    )
+
+private fun BaseItemDto.toMusicPlaylist(api: ApiClient): JellyfinMusicPlaylist =
+    JellyfinMusicPlaylist(
+        id = id,
+        name = name ?: "Playlist",
+        imageUrl = primaryImageUrl(api, 520),
+        trackCount = childCount ?: recursiveItemCount,
+    )
+
+private fun Long.toLyricMillis(): Long =
+    if (this > 86_400_000L) this / 10_000L else this
 
 private fun BaseItemDto.toDetail(
     api: ApiClient,

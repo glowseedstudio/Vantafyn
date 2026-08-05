@@ -227,6 +227,68 @@ data class JellyfinSearchResult(
     val shape: JellyfinMediaCardShape,
 )
 
+data class JellyfinMusicLibrary(
+    val id: UUID,
+    val name: String,
+    val imageUrl: String?,
+)
+
+data class JellyfinMusicTrack(
+    val id: UUID,
+    val title: String,
+    val artist: String,
+    val album: String?,
+    val albumId: UUID?,
+    val durationMs: Long?,
+    val artworkUrl: String?,
+    val hasLyrics: Boolean,
+    val streamUrl: String,
+    val playlistItemId: String? = null,
+)
+
+data class JellyfinMusicAlbum(
+    val id: UUID,
+    val title: String,
+    val artist: String?,
+    val year: Int?,
+    val artworkUrl: String?,
+)
+
+data class JellyfinMusicArtist(
+    val id: UUID,
+    val name: String,
+    val imageUrl: String?,
+)
+
+data class JellyfinMusicPlaylist(
+    val id: UUID,
+    val name: String,
+    val imageUrl: String?,
+    val trackCount: Int?,
+)
+
+data class JellyfinMusicHome(
+    val libraries: List<JellyfinMusicLibrary>,
+    val recentlyAdded: List<JellyfinMusicTrack>,
+    val albums: List<JellyfinMusicAlbum>,
+    val artists: List<JellyfinMusicArtist>,
+    val playlists: List<JellyfinMusicPlaylist>,
+    val songs: List<JellyfinMusicTrack>,
+)
+
+data class JellyfinLyricLine(
+    val startMs: Long?,
+    val text: String,
+)
+
+data class JellyfinLyrics(
+    val plainText: String,
+    val syncedLines: List<JellyfinLyricLine>,
+    val source: String,
+) {
+    val isSynced: Boolean = syncedLines.any { it.startMs != null }
+}
+
 data class JellyfinQuickConnectSession(
     val server: JellyfinServerConfig,
     val secret: String,
@@ -407,6 +469,18 @@ interface JellyfinSearchRepository {
 
 interface JellyfinFavoritesRepository {
     suspend fun getFavorites(session: JellyfinSession, limit: Int = 80): JellyfinResult<List<JellyfinMediaItem>>
+}
+
+interface JellyfinMusicRepository {
+    suspend fun getMusicHome(session: JellyfinSession): JellyfinResult<JellyfinMusicHome>
+    suspend fun getAlbumTracks(session: JellyfinSession, albumId: UUID): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getArtistAlbums(session: JellyfinSession, artistId: UUID): JellyfinResult<List<JellyfinMusicAlbum>>
+    suspend fun getPlaylistItems(session: JellyfinSession, playlistId: UUID): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int = 50): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getLyrics(session: JellyfinSession, trackId: UUID): JellyfinResult<JellyfinLyrics?>
+    suspend fun createPlaylist(session: JellyfinSession, name: String, itemIds: List<UUID>): JellyfinResult<UUID>
+    suspend fun addToPlaylist(session: JellyfinSession, playlistId: UUID, itemIds: List<UUID>): JellyfinResult<Unit>
+    suspend fun removeFromPlaylist(session: JellyfinSession, playlistId: UUID, playlistItemIds: List<String>): JellyfinResult<Unit>
 }
 
 interface JellyfinAdminRepository {
