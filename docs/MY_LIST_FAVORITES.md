@@ -16,9 +16,9 @@ Favorite writes must use only the active Jellyfin session:
 - active Jellyfin server URL from `JellyfinSession.server.url`
 - active Jellyfin access token from `JellyfinSession.accessToken`
 - active Jellyfin user id from `JellyfinSession.user.id`
-- Jellyfin SDK `userLibraryApi.markFavoriteItem(...)`
-- Jellyfin SDK `userLibraryApi.unmarkFavoriteItem(...)`
-- Jellyfin SDK `itemsApi.getItemUserData(...)` to verify the resulting state
+- Jellyfin SDK `userLibraryApi.markFavoriteItem(itemId, userId)`
+- Jellyfin SDK `userLibraryApi.unmarkFavoriteItem(itemId, userId)`
+- Jellyfin SDK `itemsApi.getItemUserData(itemId, userId)` to verify the resulting state
 
 My List/Favorites must never route through:
 

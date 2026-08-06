@@ -457,11 +457,11 @@ class SdkJellyfinMediaRepository(
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
                 Log.d("VantafynFavorites", "Jellyfin favorite $action requested itemId=$itemId server=$host repository=SdkJellyfinMediaRepository")
                 if (isFavorite) {
-                    api.userLibraryApi.markFavoriteItem(session.user.id, itemId)
+                    api.userLibraryApi.markFavoriteItem(itemId, session.user.id)
                 } else {
-                    api.userLibraryApi.unmarkFavoriteItem(session.user.id, itemId)
+                    api.userLibraryApi.unmarkFavoriteItem(itemId, session.user.id)
                 }
-                val verifiedUserData by api.itemsApi.getItemUserData(session.user.id, itemId)
+                val verifiedUserData by api.itemsApi.getItemUserData(itemId, session.user.id)
                 val verifiedFavorite = verifiedUserData.isFavorite == true
                 if (verifiedFavorite == isFavorite) {
                     Log.d("VantafynFavorites", "Jellyfin favorite $action succeeded itemId=$itemId server=$host isFavorite=$verifiedFavorite")
@@ -483,7 +483,7 @@ class SdkJellyfinMediaRepository(
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                val userData by api.itemsApi.getItemUserData(session.user.id, itemId)
+                val userData by api.itemsApi.getItemUserData(itemId, session.user.id)
                 JellyfinResult.Success(userData.isFavorite == true)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -499,9 +499,9 @@ class SdkJellyfinMediaRepository(
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
                 val userData by if (isPlayed) {
-                    api.playStateApi.markPlayedItem(session.user.id, itemId, null)
+                    api.playStateApi.markPlayedItem(itemId, session.user.id, null)
                 } else {
-                    api.playStateApi.markUnplayedItem(session.user.id, itemId)
+                    api.playStateApi.markUnplayedItem(itemId, session.user.id)
                 }
                 JellyfinResult.Success(userData.played == true)
             } catch (throwable: Throwable) {
