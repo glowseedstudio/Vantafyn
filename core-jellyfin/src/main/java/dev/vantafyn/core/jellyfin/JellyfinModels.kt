@@ -51,6 +51,7 @@ data class JellyfinMediaCard(
     val logoUrl: String? = null,
     val progress: Float?,
     val shape: JellyfinMediaCardShape,
+    val isFavorite: Boolean = false,
 )
 
 data class JellyfinHeroMediaItem(
@@ -92,6 +93,7 @@ data class JellyfinMediaItem(
     val logoUrl: String?,
     val progress: Float?,
     val shape: JellyfinMediaCardShape,
+    val isFavorite: Boolean = false,
 )
 
 data class JellyfinLiveTvChannel(
@@ -251,6 +253,7 @@ data class JellyfinSearchResult(
     val imageUrl: String?,
     val backdropUrl: String?,
     val shape: JellyfinMediaCardShape,
+    val isFavorite: Boolean = false,
 )
 
 data class JellyfinMusicLibrary(
@@ -447,6 +450,22 @@ data class SavedProfile(
     val lastUsedAt: Long,
 )
 
+enum class JellyfinRestoreFailureReason {
+    ServerUnreachable,
+    NetworkUnavailable,
+    AuthExpired,
+    Unauthorized,
+    InvalidServerUrl,
+    ServerError,
+    UnknownError,
+}
+
+class JellyfinSessionRestoreFailure(
+    val reason: JellyfinRestoreFailureReason,
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException(message, cause)
+
 interface JellyfinSessionStorage {
     suspend fun read(): StoredJellyfinSession?
     suspend fun read(profileId: String): StoredJellyfinSession?
@@ -459,6 +478,7 @@ interface JellyfinSessionStorage {
 interface JellyfinAuthRepository {
     suspend fun savedProfiles(): List<SavedProfile>
     suspend fun restoreSession(profileId: String): JellyfinResult<JellyfinSession>
+    suspend fun updateSavedServerUrl(profileId: String, serverUrl: String): JellyfinResult<JellyfinSession>
     suspend fun testServer(serverUrl: String): JellyfinResult<JellyfinServerConfig>
     suspend fun publicUsers(server: JellyfinServerConfig): JellyfinResult<List<JellyfinPublicUser>>
     suspend fun login(serverUrl: String, username: String, password: String): JellyfinResult<JellyfinSession>

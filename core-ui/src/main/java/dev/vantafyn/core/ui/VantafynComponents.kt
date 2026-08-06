@@ -4,8 +4,13 @@ import android.view.KeyEvent
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
@@ -45,12 +50,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -61,6 +71,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 
 enum class VantafynGlassVariant {
     Panel,
@@ -284,6 +295,46 @@ fun VantafynGlassDock(
     contentPadding = contentPadding,
     content = content,
 )
+
+@Composable
+fun Modifier.vantafynAnimatedModalBorder(
+    cornerRadius: Dp = 28.dp,
+    strokeWidth: Dp = 2.dp,
+    durationMillis: Int = 5200,
+): Modifier {
+    val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = durationMillis, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "vantafynModalBorderShift",
+    )
+    val shape = RoundedCornerShape(cornerRadius)
+    return this.clip(shape).drawWithContent {
+        drawContent()
+        val radius = cornerRadius.toPx()
+        val start = Offset(-size.width * shift, -size.height * shift)
+        val end = Offset(size.width * (1f - shift), size.height * (1f - shift))
+        drawRoundRect(
+            brush = Brush.linearGradient(
+                colors = listOf(
+                    Color(0xFF00D6FF),
+                    Color(0xFF2B7CFF),
+                    Color(0xFF8D4DFF),
+                    Color(0xFF00D6FF),
+                ),
+                start = start,
+                end = end,
+                tileMode = TileMode.Repeated,
+            ),
+            cornerRadius = CornerRadius(radius, radius),
+            style = Stroke(width = strokeWidth.toPx()),
+        )
+    }
+}
 
 @Composable
 fun VantafynScreenScaffold(
@@ -872,7 +923,9 @@ fun VantafynPermissionSheet(
         contentAlignment = Alignment.Center,
     ) {
         VantafynGlassPanel(
-            modifier = Modifier.widthIn(max = 460.dp),
+            modifier = Modifier
+                .widthIn(max = 460.dp)
+                .vantafynAnimatedModalBorder(),
             cornerRadius = 28.dp,
             contentPadding = PaddingValues(VantafynSpacing.lg),
         ) {

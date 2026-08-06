@@ -6,7 +6,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
+import androidx.core.app.NotificationCompat
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
@@ -23,6 +25,7 @@ class VantafynMusicPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         createMusicPlaybackChannel()
+        startForegroundImmediately()
 
         val controller = MusicPlaybackController.get(this)
         mediaSession = MediaSession.Builder(this, controller.sessionPlayer)
@@ -71,6 +74,30 @@ class VantafynMusicPlaybackService : MediaSessionService() {
 
     private fun startAsForegroundService(session: MediaSession) {
         onUpdateNotification(session, startInForegroundRequired = true)
+    }
+
+    private fun startForegroundImmediately() {
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("Vantafyn")
+            .setContentText("Preparing music playback")
+            .setContentIntent(createLaunchPendingIntent())
+            .setOngoing(true)
+            .setSilent(true)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_TRANSPORT)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun createLaunchPendingIntent(): PendingIntent {

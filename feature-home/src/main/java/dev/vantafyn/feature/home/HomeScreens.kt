@@ -141,6 +141,7 @@ import dev.vantafyn.core.ui.VantafynServerCard
 import dev.vantafyn.core.ui.VantafynSetupHeader
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import dev.vantafyn.core.ui.R as CoreUiR
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
@@ -153,6 +154,7 @@ import dev.vantafyn.feature.home.auth.VantafynArtworkType
 import dev.vantafyn.feature.home.auth.VantafynCardShape
 import dev.vantafyn.feature.home.auth.VantafynCardSize
 import dev.vantafyn.feature.home.auth.VantafynCardSpacing
+import dev.vantafyn.feature.requests.RequestsScreen
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
 import dev.vantafyn.feature.home.auth.supportedSmartRows
@@ -235,6 +237,18 @@ fun VantafynAppContent(
                 onRequestRemove = viewModel::requestRemoveProfile,
                 onCancelRemove = viewModel::cancelRemoveProfile,
                 onConfirmRemove = viewModel::confirmRemoveProfile,
+                backgroundResId = backgroundResId,
+                modifier = modifier,
+            )
+            VantafynSetupStep.ConnectionRecovery -> ConnectionRecoveryScreen(
+                state = state,
+                tv = tv,
+                onServerUrlChanged = viewModel::onServerUrlChanged,
+                onRetry = viewModel::retryFailedRestore,
+                onSaveServerAddress = viewModel::saveRecoveryServerAddress,
+                onUseAnotherServer = viewModel::useAnotherServerFromRecovery,
+                onSignInAgain = viewModel::signInAgainFromRecovery,
+                onChooseProfile = viewModel::showProfilePicker,
                 backgroundResId = backgroundResId,
                 modifier = modifier,
             )
@@ -551,6 +565,100 @@ private fun QuickConnectScreen(
 }
 
 @Composable
+private fun ConnectionRecoveryScreen(
+    state: VantafynHomeUiState,
+    tv: Boolean,
+    onServerUrlChanged: (String) -> Unit,
+    onRetry: () -> Unit,
+    onSaveServerAddress: () -> Unit,
+    onUseAnotherServer: () -> Unit,
+    onSignInAgain: () -> Unit,
+    onChooseProfile: () -> Unit,
+    backgroundResId: Int,
+    modifier: Modifier = Modifier,
+) {
+    val profile = state.restoreFailureProfile
+    VantafynOnboardingBackground(tv = tv, modifier = modifier, backgroundResId = backgroundResId) {
+        CenterPane {
+            VantafynSetupHeader(
+                title = "Can’t reach your server",
+                subtitle = "Vantafyn couldn’t connect to the saved Jellyfin server for this profile.",
+                tv = tv,
+            )
+            Spacer(Modifier.height(if (tv) VantafynSpacing.xl else VantafynSpacing.lg))
+            VantafynGlassPanel(
+                modifier = Modifier
+                    .fillMaxWidth(if (tv) 0.62f else 1f)
+                    .vantafynAnimatedModalBorder(),
+                cornerRadius = 28.dp,
+                contentPadding = PaddingValues(18.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(profile?.displayName ?: "Saved profile", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(profile?.serverName ?: "Jellyfin Server", color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(profile?.serverUrl ?: state.serverUrl, color = VantafynColors.Muted.copy(alpha = 0.82f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        "You can retry, switch to a remote address, or sign in again without deleting this profile.",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                    if ((profile?.serverUrl ?: state.serverUrl).looksLocalServerAddress()) {
+                        VantafynGlassSurface(
+                            modifier = Modifier.fillMaxWidth(),
+                            variant = VantafynGlassVariant.Card,
+                            cornerRadius = 18.dp,
+                            contentPadding = PaddingValues(12.dp),
+                        ) {
+                            Text(
+                                "This address looks local. It usually only works on your home network. Use your remote Jellyfin address if you want access away from home.",
+                                color = VantafynColors.Ink.copy(alpha = 0.86f),
+                                style = MaterialTheme.typography.bodyLarge,
+                            )
+                        }
+                    }
+                    VantafynTextField(
+                        value = state.serverUrl,
+                        onValueChange = onServerUrlChanged,
+                        label = "Server address",
+                        placeholder = "https://media.example.com",
+                        enabled = !state.isLoading,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        tvKeyboardRequiresClick = tv,
+                    )
+                    state.restoreFailureMessage?.let { Text(it, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge) }
+                }
+            }
+            StatusBlock(state)
+            Spacer(Modifier.height(if (tv) VantafynSpacing.xl else VantafynSpacing.lg))
+            Column(
+                modifier = Modifier.fillMaxWidth(if (tv) 0.48f else 0.86f),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                VantafynButton("Retry", onClick = onRetry, enabled = !state.isLoading, modifier = Modifier.fillMaxWidth())
+                VantafynButton(
+                    if ((profile?.serverUrl ?: state.serverUrl).looksLocalServerAddress()) "Enter remote address" else "Edit server address",
+                    onClick = onSaveServerAddress,
+                    enabled = !state.isLoading && state.serverUrl.isNotBlank(),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedButton(onClick = onUseAnotherServer, enabled = !state.isLoading, modifier = Modifier.fillMaxWidth()) {
+                    Text("Use another server")
+                }
+                OutlinedButton(onClick = onSignInAgain, enabled = !state.isLoading, modifier = Modifier.fillMaxWidth()) {
+                    Text("Sign in again")
+                }
+                if (state.savedProfiles.size > 1) {
+                    TextButton(onClick = onChooseProfile, enabled = !state.isLoading) {
+                        Text("Choose another profile")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ProfilePickerScreen(
     state: VantafynHomeUiState,
     tv: Boolean,
@@ -643,6 +751,7 @@ private fun MobileProfilePickerScreen(
                         SavedProfileTile(
                             profile = profile,
                             showServer = state.savedProfiles.map { it.serverRef }.distinct().size > 1,
+                            warning = if (profile.id in state.failedProfileIds) "Server unreachable" else null,
                             manageMode = state.manageProfiles,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -727,6 +836,7 @@ private fun TvProfilePickerScreen(
                         SavedProfileTile(
                             profile = profile,
                             showServer = state.savedProfiles.map { it.serverRef }.distinct().size > 1,
+                            warning = if (profile.id in state.failedProfileIds) "Server unreachable" else null,
                             manageMode = state.manageProfiles,
                             modifier = Modifier
                                 .width(150.dp)
@@ -813,6 +923,7 @@ private fun ProfilePickerFeedback(
 private fun SavedProfileTile(
     profile: SavedProfile,
     showServer: Boolean,
+    warning: String?,
     manageMode: Boolean,
     modifier: Modifier,
     onSelect: () -> Unit,
@@ -820,7 +931,7 @@ private fun SavedProfileTile(
 ) {
     VantafynProfileCard(
         label = profile.displayName,
-        subtitle = if (showServer) profile.serverName ?: profile.serverUrl else null,
+        subtitle = warning ?: if (showServer) profile.serverName ?: profile.serverUrl else null,
         modifier = modifier,
         manageMode = manageMode,
         onClick = onSelect,
@@ -1207,6 +1318,7 @@ private fun MobileShellScreen(
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
                         )
                         MobileDestination.Favorites -> FavoritesScreen(state, onLoadFavorites, onOpenMedia, onRemoveFromMyList = { onSetMediaFavorite(it, false) }, onMediaLongPress = { mediaActionTarget = it })
+                        MobileDestination.Requests -> RequestsScreen(session = state.session)
                         MobileDestination.Admin -> AdminScreen(state, onOpenUser = onOpenAdminUser, onCreateUser = onCreateAdminUser)
                         MobileDestination.AdminUserSettings -> AdminUserSettingsScreen(
                             state = state,
@@ -1216,6 +1328,8 @@ private fun MobileShellScreen(
                         )
                         MobileDestination.Profile -> ProfileSettingsScreen(
                             state = state,
+                            onAdmin = { onNavigate(MobileDestination.Admin) },
+                            onRequests = { onNavigate(MobileDestination.Requests) },
                             onHomeLayout = { onNavigate(MobileDestination.HomeLayout) },
                             onPlaybackPreferences = { onNavigate(MobileDestination.PlaybackPreferences) },
                             onToggleThemeMusic = onToggleThemeMusic,
@@ -1272,6 +1386,8 @@ private fun MobileShellScreen(
                         null
                     },
                     isAdmin = state.session?.user?.isAdministrator == true,
+                    requestsVisible = state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers,
+                    pendingOmbiAccessRequestCount = state.pendingOmbiAccessRequestCount,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             }
@@ -1291,16 +1407,25 @@ private fun MobileShellScreen(
     }
     state.mobileMessage?.let { message ->
         AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(),
             onDismissRequest = onClearMessage,
             confirmButton = {
                 TextButton(onClick = onClearMessage) { Text("OK") }
             },
             title = { Text(message) },
-            text = { Text("Some secondary actions are still being wired, but playback-capable rows should open playback directly.") },
+            text = {
+                Text(
+                    when {
+                        message.contains("My List", ignoreCase = true) -> "Your Jellyfin favorite status has been updated for this profile."
+                        else -> "The action has been completed."
+                    },
+                )
+            },
         )
     }
     if (state.confirmLogout) {
         AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(),
             onDismissRequest = onCancelLogout,
             confirmButton = {
                 TextButton(onClick = onLogoutCurrentProfile) { Text("Log Out") }
@@ -2259,6 +2384,7 @@ private fun LiveTvGuideSection(
     }
     if (showGuide) {
         AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(),
             onDismissRequest = { showGuide = false },
             confirmButton = { TextButton(onClick = { showGuide = false }) { Text("Close") } },
             containerColor = VantafynColors.SurfaceHigh.copy(alpha = 0.96f),
@@ -2750,6 +2876,8 @@ private fun AdminUsersSection(users: List<dev.vantafyn.core.jellyfin.JellyfinAdm
 @Composable
 private fun ProfileSettingsScreen(
     state: VantafynHomeUiState,
+    onAdmin: () -> Unit,
+    onRequests: () -> Unit,
     onHomeLayout: () -> Unit,
     onPlaybackPreferences: () -> Unit,
     onToggleThemeMusic: () -> Unit,
@@ -2830,6 +2958,18 @@ private fun ProfileSettingsScreen(
         item {
             GlassPanel {
                 Text("Vantafyn", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                if (state.session?.user?.isAdministrator == true) {
+                    SettingsRow("Admin", "Server overview, users, active sessions, and management tools.", onAdmin, compact = true)
+                }
+                if (state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers) {
+                    val ombiStatus = when {
+                        !state.ombiConfigured -> "Ombi not configured"
+                        state.ombiRequestsEnabledForUsers -> "Ombi connected and enabled"
+                        state.ombiRequestsEnabledForAdmins -> "Ombi enabled for admins only"
+                        else -> "Ombi disabled"
+                    }
+                    SettingsRow("Integrations & Requests", "$ombiStatus. Let users request movies and TV shows through Ombi.", onRequests, compact = true)
+                }
                 SettingsRow("Home Sections", "Preview and tune your home rows.", onHomeLayout, compact = true)
                 SettingsRow("Playback Preferences", "Audio language, subtitle mode, and track memory.", onPlaybackPreferences, compact = true)
                 SettingsRow("Change Password", "Update your current Jellyfin password.", { showPasswordDialog = true }, compact = true)
@@ -3116,6 +3256,7 @@ private fun PasswordChangeDialog(
     var current by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
     AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
@@ -3907,6 +4048,7 @@ private fun DetailActionSheet(
     onMediaInfo: () -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {},
         containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
@@ -3956,6 +4098,7 @@ private fun DetailSheetAction(icon: String, label: String, onClick: () -> Unit, 
 @Composable
 private fun MediaInfoSheet(detail: JellyfinMediaDetail, isAdmin: Boolean, onDismiss: () -> Unit) {
     AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Close") }
@@ -4284,6 +4427,8 @@ private fun MobileBottomNav(
     onSelected: (MobileDestination) -> Unit,
     onMusicLongPress: (() -> Unit)?,
     isAdmin: Boolean,
+    requestsVisible: Boolean,
+    pendingOmbiAccessRequestCount: Int,
     modifier: Modifier = Modifier,
 ) {
     val tabs = if (isAdmin) {
@@ -4291,51 +4436,56 @@ private fun MobileBottomNav(
             MobileDestination.Home,
             MobileDestination.Libraries,
             MobileDestination.Search,
-            MobileDestination.Music,
-            MobileDestination.Favorites,
+            MobileDestination.Requests,
             MobileDestination.Admin,
             MobileDestination.Profile,
         )
     } else {
-        listOf(
-            MobileDestination.Home,
-            MobileDestination.Libraries,
-            MobileDestination.Search,
-            MobileDestination.Music,
-            MobileDestination.Favorites,
-            MobileDestination.Profile,
-        )
+        buildList {
+            add(MobileDestination.Home)
+            add(MobileDestination.Libraries)
+            add(MobileDestination.Search)
+            if (requestsVisible) add(MobileDestination.Requests)
+            add(MobileDestination.Profile)
+        }
     }
     VantafynGlassDock(
         modifier = modifier
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .fillMaxWidth()
-            .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm)
-            .height(62.dp),
-        cornerRadius = 30.dp,
-        contentPadding = PaddingValues(VantafynSpacing.xs),
+            .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
     ) {
         Row(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(54.dp),
             horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             tabs.forEach { destination ->
-                val selectedTab = selected == destination || (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile)
-                    VantafynGlassSurface(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxSize()
-                            .combinedClickable(
-                                onClick = { onSelected(destination) },
-                                onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
-                            ),
-                        variant = VantafynGlassVariant.Chip,
-                    selected = false,
-                        cornerRadius = 999.dp,
+                val tabSelected = selected == destination || (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxSize()
+                        .combinedClickable(
+                            onClick = { onSelected(destination) },
+                            onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
+                        ),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        MiniNavIcon(destination, selectedTab)
+                    MiniNavIcon(destination, tabSelected)
+                    if (
+                        pendingOmbiAccessRequestCount > 0 &&
+                        (destination == MobileDestination.Admin || destination == MobileDestination.Requests)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(top = 8.dp, end = 10.dp)
+                                .size(7.dp)
+                                .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                        )
                     }
                 }
             }
@@ -4352,17 +4502,6 @@ private fun MusicQuickPlayerSheet(
     modifier: Modifier = Modifier,
 ) {
     val track = playback.currentTrack
-    val borderTransition = rememberInfiniteTransition(label = "music-quick-player-border")
-    val borderShift by borderTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 5200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "music-quick-player-border-shift",
-    )
-    val sheetShape = RoundedCornerShape(28.dp)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -4372,28 +4511,7 @@ private fun MusicQuickPlayerSheet(
         VantafynGlassPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(sheetShape)
-                .drawWithContent {
-                    drawContent()
-                    val strokeWidth = 2.dp.toPx()
-                    val radius = 28.dp.toPx()
-                    val travel = size.width * 2f
-                    val startX = -size.width + (travel * borderShift)
-                    drawRoundRect(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFF00D6FF),
-                                Color(0xFF2B7CFF),
-                                Color(0xFF8D4DFF),
-                                Color(0xFF00D6FF),
-                            ),
-                            start = Offset(startX, 0f),
-                            end = Offset(startX + size.width, size.height),
-                        ),
-                        cornerRadius = CornerRadius(radius, radius),
-                        style = Stroke(width = strokeWidth),
-                    )
-                },
+                .vantafynAnimatedModalBorder(),
             cornerRadius = 28.dp,
             contentPadding = PaddingValues(0.dp),
         ) {
@@ -4566,6 +4684,18 @@ private fun Long.toMusicTimeLabel(): String {
     return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
 
+private fun String.looksLocalServerAddress(): Boolean {
+    val host = runCatching { java.net.URI(if (contains("://")) this else "http://$this").host.orEmpty() }
+        .getOrDefault("")
+        .lowercase()
+    if (host.endsWith(".local")) return true
+    val parts = host.split('.').mapNotNull { it.toIntOrNull() }
+    if (parts.size != 4) return false
+    return parts[0] == 10 ||
+        (parts[0] == 192 && parts[1] == 168) ||
+        (parts[0] == 172 && parts[1] in 16..31)
+}
+
 @Composable
 private fun SelectedNavWaterFill() {
     val transition = rememberInfiniteTransition(label = "navWater")
@@ -4708,6 +4838,21 @@ private fun MiniNavIcon(destination: MobileDestination, selected: Boolean) {
                 }
                 drawIconPath(path)
             }
+            MobileDestination.Requests -> {
+                drawIconRoundRect(
+                    topLeft = androidx.compose.ui.geometry.Offset(3.5.dp.toPx(), 6.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(16.dp.toPx(), 12.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(3.5.dp.toPx()),
+                )
+                drawIconLine(
+                    start = androidx.compose.ui.geometry.Offset(7.dp.toPx(), 12.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(16.dp.toPx(), 12.dp.toPx()),
+                )
+                drawIconLine(
+                    start = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 8.5.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 15.5.dp.toPx()),
+                )
+            }
             MobileDestination.Admin -> {
                 val path = Path().apply {
                     moveTo(11.5.dp.toPx(), 3.dp.toPx())
@@ -4759,6 +4904,7 @@ private fun ProfileSettingsDialog(
     onSwitchUser: () -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = {
@@ -4863,6 +5009,7 @@ private fun MediaContextMenu(
     onMarkUnwatched: () -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {},
         containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
@@ -4913,13 +5060,13 @@ private fun ContextAction(icon: String, label: String, onClick: () -> Unit, enab
 }
 
 private fun JellyfinMediaCard.toMediaActionTarget(): MediaActionTarget =
-    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType)
+    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite)
 
 private fun JellyfinMediaItem.toMediaActionTarget(inMyList: Boolean = false): MediaActionTarget =
-    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = inMyList)
+    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = inMyList || isFavorite)
 
 private fun JellyfinSearchResult.toMediaActionTarget(): MediaActionTarget =
-    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType)
+    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite)
 
 private fun MobileDestination.bottomNavRoot(previous: MobileDestination): MobileDestination =
     when (this) {

@@ -7,6 +7,7 @@ import java.net.URLEncoder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
@@ -163,35 +164,26 @@ class SdkJellyfinAuthRepository(
         }
 
     override suspend fun restoreSession(profileId: String): JellyfinResult<JellyfinSession> =
-        runCatchingResult {
+        runCatchingRestoreResult {
             val stored = storage.read(profileId) ?: throw SessionRestoreException("Saved profile was not found")
-            val server = JellyfinServerConfig(
-                url = stored.serverUrl,
-                name = stored.serverName,
-                version = stored.serverVersion,
-                serverId = stored.serverId,
+            restoreStoredSession(stored)
+        }
+
+    override suspend fun updateSavedServerUrl(profileId: String, serverUrl: String): JellyfinResult<JellyfinSession> =
+        runCatchingRestoreResult {
+            val stored = storage.read(profileId) ?: throw SessionRestoreException("Saved profile was not found")
+            val server = when (val result = testServer(serverUrl)) {
+                is JellyfinResult.Success -> result.value
+                is JellyfinResult.Failure -> throw result.cause ?: IllegalArgumentException(result.message)
+            }
+            val updated = stored.copy(
+                serverUrl = server.url,
+                serverName = server.name ?: stored.serverName,
+                serverVersion = server.version ?: stored.serverVersion,
+                serverId = server.serverId ?: stored.serverId,
             )
-            val api = jellyfin.createApi(baseUrl = server.url, accessToken = stored.accessToken)
-            val currentUser by api.userApi.getCurrentUser()
-            val systemInfo = getPublicSystemInfo(api, server)
-            val restored = JellyfinSession(
-                server = server.copy(
-                    name = systemInfo.name ?: server.name,
-                    version = systemInfo.version ?: server.version,
-                    serverId = systemInfo.id ?: server.serverId,
-                ),
-                user = JellyfinUser(
-                    id = currentUser.id,
-                    name = currentUser.name ?: stored.userName,
-                    serverName = currentUser.serverName,
-                    primaryImageTag = currentUser.primaryImageTag ?: stored.userImageTag,
-                    isAdministrator = currentUser.policy?.isAdministrator == true,
-                ),
-                profileId = stored.profileId,
-                accessToken = stored.accessToken,
-            )
-            storage.write(restored.toStoredSession())
-            restored
+            storage.write(updated)
+            restoreStoredSession(updated)
         }
 
     override suspend fun testServer(serverUrl: String): JellyfinResult<JellyfinServerConfig> =
@@ -296,6 +288,50 @@ class SdkJellyfinAuthRepository(
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
+
+    private suspend fun <T> runCatchingRestoreResult(block: suspend () -> T): JellyfinResult<T> =
+        withContext(ioDispatcher) {
+            try {
+                JellyfinResult.Success(withTimeout(RESTORE_TIMEOUT_MS) { block() })
+            } catch (throwable: Throwable) {
+                val failure = throwable as? JellyfinSessionRestoreFailure ?: throwable.toRestoreFailure()
+                JellyfinResult.Failure(failure.message ?: "Could not restore saved Jellyfin session", failure)
+            }
+        }
+
+    private suspend fun restoreStoredSession(stored: StoredJellyfinSession): JellyfinSession {
+        val server = JellyfinServerConfig(
+            url = stored.serverUrl,
+            name = stored.serverName,
+            version = stored.serverVersion,
+            serverId = stored.serverId,
+        )
+        val api = jellyfin.createApi(baseUrl = server.url, accessToken = stored.accessToken)
+        val currentUser by api.userApi.getCurrentUser()
+        val systemInfo = getPublicSystemInfo(api, server)
+        val restored = JellyfinSession(
+            server = server.copy(
+                name = systemInfo.name ?: server.name,
+                version = systemInfo.version ?: server.version,
+                serverId = systemInfo.id ?: server.serverId,
+            ),
+            user = JellyfinUser(
+                id = currentUser.id,
+                name = currentUser.name ?: stored.userName,
+                serverName = currentUser.serverName,
+                primaryImageTag = currentUser.primaryImageTag ?: stored.userImageTag,
+                isAdministrator = currentUser.policy?.isAdministrator == true,
+            ),
+            profileId = stored.profileId,
+            accessToken = stored.accessToken,
+        )
+        storage.write(restored.toStoredSession())
+        return restored
+    }
+
+    private companion object {
+        const val RESTORE_TIMEOUT_MS = 12_000L
+    }
 }
 
 class SdkJellyfinLibraryRepository(
@@ -1933,6 +1969,7 @@ private fun BaseItemDto.toCard(api: ApiClient, shape: JellyfinMediaCardShape): J
         logoUrl = logoImageUrl(api, 420),
         progress = userData?.playedPercentage?.toFloat()?.div(100f)?.coerceIn(0f, 1f),
         shape = shape,
+        isFavorite = userData?.isFavorite == true,
     )
 
 private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShape): JellyfinMediaItem =
@@ -1948,6 +1985,7 @@ private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShap
         logoUrl = logoImageUrl(api, 460),
         progress = userData.progress(),
         shape = shape,
+        isFavorite = userData?.isFavorite == true,
     )
 
 private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): JellyfinMusicTrack =
@@ -2582,6 +2620,40 @@ private fun toUserMessage(throwable: Throwable): String {
         throwable is IllegalArgumentException -> throwable.message ?: "Invalid server address"
         else -> "Could not reach the Jellyfin server"
     }
+}
+
+private fun Throwable.toRestoreFailure(): JellyfinSessionRestoreFailure {
+    val className = javaClass.name
+    val message = message.orEmpty()
+    val reason = when {
+        this is kotlinx.coroutines.TimeoutCancellationException -> JellyfinRestoreFailureReason.ServerUnreachable
+        this is SessionRestoreException -> JellyfinRestoreFailureReason.AuthExpired
+        this is IllegalArgumentException -> JellyfinRestoreFailureReason.InvalidServerUrl
+        className.contains("InvalidStatusException") && message.contains("401") -> JellyfinRestoreFailureReason.AuthExpired
+        className.contains("InvalidStatusException") && message.contains("403") -> JellyfinRestoreFailureReason.Unauthorized
+        className.contains("UnknownHost", ignoreCase = true) -> JellyfinRestoreFailureReason.ServerUnreachable
+        className.contains("SocketTimeout", ignoreCase = true) ||
+            message.contains("timeout", ignoreCase = true) -> JellyfinRestoreFailureReason.ServerUnreachable
+        className.contains("ConnectException", ignoreCase = true) ||
+            className.contains("NoRouteToHost", ignoreCase = true) ||
+            message.contains("failed to connect", ignoreCase = true) ||
+            message.contains("unable to resolve host", ignoreCase = true) -> JellyfinRestoreFailureReason.ServerUnreachable
+        className.contains("SSL", ignoreCase = true) ||
+            className.contains("Cert", ignoreCase = true) ||
+            message.contains("certificate", ignoreCase = true) -> JellyfinRestoreFailureReason.ServerUnreachable
+        className.contains("InvalidStatusException") -> JellyfinRestoreFailureReason.ServerError
+        else -> JellyfinRestoreFailureReason.UnknownError
+    }
+    val userMessage = when (reason) {
+        JellyfinRestoreFailureReason.ServerUnreachable -> "Could not reach your saved Jellyfin server"
+        JellyfinRestoreFailureReason.NetworkUnavailable -> "Network unavailable"
+        JellyfinRestoreFailureReason.AuthExpired -> "This profile needs to sign in again"
+        JellyfinRestoreFailureReason.Unauthorized -> "This profile is not authorized on this server"
+        JellyfinRestoreFailureReason.InvalidServerUrl -> "Saved server address is invalid"
+        JellyfinRestoreFailureReason.ServerError -> "The saved server responded with an error"
+        JellyfinRestoreFailureReason.UnknownError -> "Could not restore this saved profile"
+    }
+    return JellyfinSessionRestoreFailure(reason, userMessage, this)
 }
 
 private class AuthenticationException(message: String) : RuntimeException(message)

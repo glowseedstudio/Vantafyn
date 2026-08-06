@@ -23,9 +23,11 @@ import dev.vantafyn.core.jellyfin.JellyfinQuickConnectRepository
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectSession
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
+import dev.vantafyn.core.jellyfin.JellyfinRestoreFailureReason
 import dev.vantafyn.core.jellyfin.JellyfinSearchRepository
 import dev.vantafyn.core.jellyfin.JellyfinSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinServerConfig
+import dev.vantafyn.core.jellyfin.JellyfinSessionRestoreFailure
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences
 import dev.vantafyn.core.jellyfin.JellyfinAdminUserDetail
@@ -36,6 +38,7 @@ import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
+import dev.vantafyn.core.ombi.OmbiRepository
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,6 +60,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val adminRepository: JellyfinAdminRepository = repositories.adminRepository
     private val userPreferencesRepository: JellyfinUserPreferencesRepository = repositories.userPreferencesRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
+    private val ombiRepository = OmbiRepository(application)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
     private var searchJob: Job? = null
@@ -67,6 +71,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     init {
         loadSavedProfiles()
+        refreshOmbiRequestsAvailability()
     }
 
     fun onServerUrlChanged(value: String) {
@@ -148,6 +153,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     publicUsers = emptyList(),
                     manageProfiles = false,
                     pendingRemoval = null,
+                    restoreFailureProfile = null,
+                    restoreFailureReason = null,
+                    restoreFailureMessage = null,
                     errorMessage = null,
                 )
             }
@@ -340,24 +348,136 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadFavorites(result.value)
                 }
                 is JellyfinResult.Failure -> {
+                    handleRestoreFailure(profile, result)
+                }
+            }
+        }
+    }
+
+    fun retryFailedRestore() {
+        val profile = _state.value.restoreFailureProfile ?: return
+        selectProfile(profile)
+    }
+
+    fun saveRecoveryServerAddress() {
+        val snapshot = _state.value
+        val profile = snapshot.restoreFailureProfile ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoading = true, errorMessage = null) }
+            when (val result = authRepository.updateSavedServerUrl(profile.id, snapshot.serverUrl)) {
+                is JellyfinResult.Success -> {
                     _state.update {
                         it.copy(
-                            step = VantafynSetupStep.Login,
+                            step = VantafynSetupStep.Home,
                             selectedProfileId = profile.id,
                             isLoading = false,
-                            server = JellyfinServerConfig(
-                                url = profile.serverUrl,
-                                name = profile.serverName,
-                                localId = profile.serverRef,
-                            ),
-                            serverUrl = profile.serverUrl,
-                            username = profile.displayName,
+                            session = result.value,
+                            server = result.value.server,
+                            serverUrl = result.value.server.url,
+                            username = result.value.user.name,
                             password = "",
-                            errorMessage = "This profile needs to sign in again.",
+                            restoreFailureProfile = null,
+                            restoreFailureReason = null,
+                            restoreFailureMessage = null,
+                            failedProfileIds = it.failedProfileIds - profile.id,
+                            homeLayout = readHomeLayout(result.value.profileId),
+                            themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
+                            themeMusicVolume = readThemeMusicVolume(result.value.profileId),
+                            selectedBackground = readSelectedBackground(result.value.profileId),
+                            configuredSmartRows = readSmartRows(result.value.profileId),
                         )
+                    }
+                    refreshSavedProfiles()
+                    loadLibraries(result.value)
+                    loadFavorites(result.value)
+                }
+                is JellyfinResult.Failure -> {
+                    val reason = (result.cause as? JellyfinSessionRestoreFailure)?.reason
+                    if (reason == JellyfinRestoreFailureReason.AuthExpired || reason == JellyfinRestoreFailureReason.Unauthorized) {
+                        routeProfileToLogin(profile, snapshot.serverUrl, "Sign in again to use this server address.")
+                    } else {
+                        _state.update {
+                            it.copy(
+                                isLoading = false,
+                                restoreFailureReason = reason ?: JellyfinRestoreFailureReason.UnknownError,
+                                restoreFailureMessage = result.message,
+                                errorMessage = result.message,
+                                failedProfileIds = it.failedProfileIds + profile.id,
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+
+    fun useAnotherServerFromRecovery() {
+        _state.update {
+            it.copy(
+                step = VantafynSetupStep.ConnectServer,
+                isLoading = false,
+                serverUrl = "",
+                username = "",
+                password = "",
+                server = null,
+                publicUsers = emptyList(),
+                restoreFailureProfile = null,
+                restoreFailureReason = null,
+                restoreFailureMessage = null,
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun signInAgainFromRecovery() {
+        val profile = _state.value.restoreFailureProfile ?: return
+        routeProfileToLogin(profile, _state.value.serverUrl.ifBlank { profile.serverUrl }, "Sign in again to reconnect this profile.")
+    }
+
+    private fun routeProfileToLogin(profile: SavedProfile, serverUrl: String, message: String) {
+        _state.update {
+            it.copy(
+                step = VantafynSetupStep.Login,
+                selectedProfileId = profile.id,
+                isLoading = false,
+                server = JellyfinServerConfig(
+                    url = serverUrl,
+                    name = profile.serverName,
+                    localId = profile.serverRef,
+                ),
+                serverUrl = serverUrl,
+                username = profile.displayName,
+                password = "",
+                restoreFailureProfile = null,
+                restoreFailureReason = null,
+                restoreFailureMessage = null,
+                errorMessage = message,
+            )
+        }
+    }
+
+    private fun handleRestoreFailure(profile: SavedProfile, result: JellyfinResult.Failure) {
+        val failure = result.cause as? JellyfinSessionRestoreFailure
+        val reason = failure?.reason ?: JellyfinRestoreFailureReason.UnknownError
+        if (reason == JellyfinRestoreFailureReason.AuthExpired || reason == JellyfinRestoreFailureReason.Unauthorized) {
+            routeProfileToLogin(profile, profile.serverUrl, result.message)
+            return
+        }
+        _state.update {
+            it.copy(
+                step = VantafynSetupStep.ConnectionRecovery,
+                selectedProfileId = profile.id,
+                isLoading = false,
+                server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                serverUrl = profile.serverUrl,
+                username = profile.displayName,
+                password = "",
+                restoreFailureProfile = profile,
+                restoreFailureReason = reason,
+                restoreFailureMessage = result.message,
+                failedProfileIds = it.failedProfileIds + profile.id,
+                errorMessage = null,
+            )
         }
     }
 
@@ -414,6 +534,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun navigateMobile(destination: MobileDestination) {
+        refreshOmbiRequestsAvailability()
         _state.update {
             val previous = if (destination.isRootDestination()) {
                 it.previousMobileDestination
@@ -435,6 +556,19 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination == MobileDestination.Favorites) loadFavorites()
         if (destination == MobileDestination.Admin) loadAdminOverview()
         if (destination == MobileDestination.PlaybackPreferences) loadPlaybackPreferences()
+    }
+
+    fun refreshOmbiRequestsAvailability() {
+        val config = ombiRepository.config()
+        val hasApiKey = ombiRepository.hasApiKey()
+        _state.update {
+            it.copy(
+                ombiConfigured = config.isConfigured && hasApiKey,
+                ombiRequestsEnabledForUsers = config.isEnabledForUsers && hasApiKey,
+                ombiRequestsEnabledForAdmins = config.isEnabledForAdmins && hasApiKey,
+                pendingOmbiAccessRequestCount = ombiRepository.pendingAccessRequestCount(),
+            )
+        }
     }
 
     fun openLibrary(library: JellyfinLibrary) {
@@ -577,19 +711,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun setMediaFavorite(itemId: UUID, isFavorite: Boolean) {
         val session = _state.value.session ?: return
+        _state.update { it.withFavoriteState(itemId, isFavorite).copy(mobileMessage = null) }
         viewModelScope.launch {
             when (val result = mediaRepository.setFavorite(session, itemId, isFavorite)) {
                 is JellyfinResult.Success -> {
                     _state.update {
-                        it.copy(
-                            mediaDetail = it.mediaDetail?.takeIf { detail -> detail.id == itemId }?.copy(isFavorite = result.value) ?: it.mediaDetail,
+                        it.withFavoriteState(itemId, result.value).copy(
                             mobileMessage = if (result.value) "Added to My List" else "Removed from My List",
                         )
                     }
                     loadFavorites(session)
                     loadLibraries(session)
                 }
-                is JellyfinResult.Failure -> _state.update { it.copy(mobileMessage = result.message) }
+                is JellyfinResult.Failure -> _state.update {
+                    it.withFavoriteState(itemId, !isFavorite).copy(mobileMessage = result.message)
+                }
             }
         }
     }
@@ -1431,6 +1567,10 @@ data class VantafynHomeUiState(
     val manageProfiles: Boolean = false,
     val pendingRemoval: SavedProfile? = null,
     val selectedProfileId: String? = null,
+    val restoreFailureProfile: SavedProfile? = null,
+    val restoreFailureReason: JellyfinRestoreFailureReason? = null,
+    val restoreFailureMessage: String? = null,
+    val failedProfileIds: Set<String> = emptySet(),
     val libraries: List<JellyfinLibrary> = emptyList(),
     val home: JellyfinHome? = null,
     val homeErrorMessage: String? = null,
@@ -1485,8 +1625,39 @@ data class VantafynHomeUiState(
     val hasReportedPlaybackStart: Boolean = false,
     val quickConnectSession: JellyfinQuickConnectSession? = null,
     val quickConnectMessage: String? = null,
+    val ombiConfigured: Boolean = false,
+    val ombiRequestsEnabledForUsers: Boolean = false,
+    val ombiRequestsEnabledForAdmins: Boolean = false,
+    val pendingOmbiAccessRequestCount: Int = 0,
     val errorMessage: String? = null,
 )
+
+private fun VantafynHomeUiState.withFavoriteState(itemId: UUID, isFavorite: Boolean): VantafynHomeUiState =
+    copy(
+        home = home?.copy(
+            sections = home.sections.map { section ->
+                section.copy(
+                    items = section.items.map { item ->
+                        if (item.id == itemId) item.copy(isFavorite = isFavorite) else item
+                    },
+                )
+            },
+        ),
+        libraryItems = libraryItems.map { item ->
+            if (item.id == itemId) item.copy(isFavorite = isFavorite) else item
+        },
+        searchResults = searchResults.map { item ->
+            if (item.id == itemId) item.copy(isFavorite = isFavorite) else item
+        },
+        favorites = if (isFavorite) {
+            favorites.map { item -> if (item.id == itemId) item.copy(isFavorite = true) else item }
+        } else {
+            favorites.filterNot { it.id == itemId }
+        },
+        mediaDetail = mediaDetail?.let { detail ->
+            if (detail.id == itemId) detail.copy(isFavorite = isFavorite) else detail
+        },
+    )
 
 enum class ThemeMusicVolume(val label: String, val level: Float) {
     Soft("Soft", 0.12f),
@@ -1501,6 +1672,7 @@ enum class MobileDestination {
     Search,
     Music,
     Favorites,
+    Requests,
     Admin,
     AdminUserSettings,
     Profile,
@@ -1518,6 +1690,7 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.Search,
         MobileDestination.Music,
         MobileDestination.Favorites,
+        MobileDestination.Requests,
         MobileDestination.Admin,
         MobileDestination.Profile -> true
         MobileDestination.AdminUserSettings,
@@ -1729,5 +1902,6 @@ enum class VantafynSetupStep {
     Login,
     QuickConnect,
     ProfilePicker,
+    ConnectionRecovery,
     Home,
 }

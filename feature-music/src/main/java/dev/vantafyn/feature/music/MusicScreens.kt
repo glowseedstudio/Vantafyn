@@ -81,6 +81,7 @@ import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 
 @Composable
 fun MusicScreen(
@@ -256,6 +257,7 @@ fun MusicScreen(
         }
         state.message?.let { message ->
             AlertDialog(
+                modifier = Modifier.vantafynAnimatedModalBorder(),
                 onDismissRequest = viewModel::clearMessage,
                 confirmButton = { TextButton(onClick = viewModel::clearMessage) { Text("OK") } },
                 title = { Text(message) },
@@ -584,6 +586,7 @@ private fun NowPlayingDialog(
     if (showPlaylistName) {
         var name by remember { mutableStateOf("") }
         AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(),
             onDismissRequest = { showPlaylistName = false },
             title = { Text("Create playlist") },
             text = { VantafynTextField(value = name, onValueChange = { name = it }, label = "Playlist name") },
@@ -720,6 +723,7 @@ private fun MusicTrackContextMenu(
     onAddToPlaylist: (JellyfinMusicPlaylist) -> Unit,
 ) {
     AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {},
         containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
