@@ -3,8 +3,13 @@ package dev.vantafyn.feature.player
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,11 +21,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -39,8 +47,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
@@ -52,11 +63,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import coil3.compose.AsyncImage
+import dev.vantafyn.core.media.UpNextCandidate
+import dev.vantafyn.core.media.UpNextState
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynSubtitleTrack
 import dev.vantafyn.core.ui.VantafynButton
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGlassPanel
+import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
 import kotlinx.coroutines.delay
@@ -73,6 +89,7 @@ fun MobilePlayerScreen(
     onStarted: (Long) -> Unit,
     onProgress: (Long, Boolean) -> Unit,
     onEnded: (Long) -> Unit,
+    onPlayNext: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
@@ -97,6 +114,7 @@ fun MobilePlayerScreen(
                 onStarted = onStarted,
                 onProgress = onProgress,
                 onEnded = onEnded,
+                onPlayNext = onPlayNext,
                 onPlayerError = onPlayerError,
                 onSelectAudioTrack = onSelectAudioTrack,
                 onSelectSubtitleTrack = onSelectSubtitleTrack,
@@ -125,6 +143,7 @@ private fun PlayerSurface(
     onStarted: (Long) -> Unit,
     onProgress: (Long, Boolean) -> Unit,
     onEnded: (Long) -> Unit,
+    onPlayNext: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
@@ -137,6 +156,20 @@ private fun PlayerSurface(
     var positionMs by remember(item.streamUrl) { mutableLongStateOf(item.startPositionMs) }
     var started by remember(item.streamUrl) { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<TrackSheet?>(null) }
+    var upNextState by remember(item.itemId) { mutableStateOf<UpNextState>(UpNextState.Hidden) }
+    var upNextCancelled by remember(item.itemId) { mutableStateOf(false) }
+    var nextStarted by remember(item.itemId) { mutableStateOf(false) }
+    val upNextCandidate = item.upNextCandidate
+    val autoplaySettings = item.autoplaySettings
+    val passoutProtectionLimitReached = autoplaySettings.passoutProtectionEnabled &&
+        (System.currentTimeMillis() - item.continuousPlaybackStartedAtMs).coerceAtLeast(0L) >=
+        autoplaySettings.passoutProtectionLimitMinutes * 60_000L
+    val canUseUpNext = upNextCandidate != null &&
+        autoplaySettings.enabled &&
+        !passoutProtectionLimitReached &&
+        autoplaySettings.onlyForEpisodes &&
+        item.itemType.equals("Episode", ignoreCase = true) &&
+        !item.isLiveStream
     val player = remember(item.streamUrl) {
         ExoPlayer.Builder(context).build().apply {
             setAudioAttributes(
@@ -164,7 +197,22 @@ private fun PlayerSurface(
                             onStarted(player.currentPosition)
                         }
                     }
-                    Player.STATE_ENDED -> onEnded(player.currentPosition)
+                    Player.STATE_ENDED -> {
+                        val candidate = upNextCandidate
+                        if (
+                            candidate != null &&
+                            canUseUpNext &&
+                            autoplaySettings.playNextOnCompletion &&
+                            !upNextCancelled &&
+                            !nextStarted
+                        ) {
+                            nextStarted = true
+                            upNextState = UpNextState.PlayingNext
+                            onPlayNext(candidate, player.currentPosition)
+                        } else {
+                            onEnded(player.currentPosition)
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -217,6 +265,47 @@ private fun PlayerSurface(
         }
     }
 
+    LaunchedEffect(positionMs, durationMs, canUseUpNext, upNextCancelled, nextStarted) {
+        val candidate = upNextCandidate ?: return@LaunchedEffect
+        if (!canUseUpNext || durationMs <= 0L || nextStarted) {
+            if (upNextState is UpNextState.Available) upNextState = UpNextState.Hidden
+            return@LaunchedEffect
+        }
+        val remainingMs = (durationMs - positionMs).coerceAtLeast(0L)
+        val watchedPercent = positionMs.toFloat() / durationMs.toFloat()
+        val shouldShow = !upNextCancelled &&
+            (remainingMs <= autoplaySettings.showBeforeEndSeconds * 1_000L || watchedPercent >= autoplaySettings.showBeforeEndPercent)
+        val seekedAway = remainingMs > (autoplaySettings.showBeforeEndSeconds + 20) * 1_000L && watchedPercent < autoplaySettings.showBeforeEndPercent
+        when {
+            shouldShow && upNextState is UpNextState.Hidden -> {
+                upNextState = UpNextState.Available(candidate, autoplaySettings.countdownSeconds, autoplayEnabled = true)
+            }
+            seekedAway && upNextState is UpNextState.Available -> {
+                upNextState = UpNextState.Hidden
+            }
+        }
+    }
+
+    LaunchedEffect(upNextState, isPlaying, item.itemId) {
+        val available = upNextState as? UpNextState.Available ?: return@LaunchedEffect
+        if (!available.autoplayEnabled || !isPlaying || nextStarted) return@LaunchedEffect
+        delay(1_000L)
+        val nextSeconds = available.countdownSeconds - 1
+        if (nextSeconds <= 0) {
+            nextStarted = true
+            upNextState = UpNextState.PlayingNext
+            onPlayNext(available.candidate, player.currentPosition)
+        } else {
+            upNextState = available.copy(countdownSeconds = nextSeconds)
+        }
+    }
+
+    BackHandler(enabled = upNextState is UpNextState.Available) {
+        val candidate = (upNextState as? UpNextState.Available)?.candidate
+        upNextCancelled = true
+        upNextState = candidate?.let { UpNextState.Cancelled(it) } ?: UpNextState.Hidden
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -258,6 +347,34 @@ private fun PlayerSurface(
                 onAudio = { sheet = TrackSheet.Audio },
                 onSubtitles = { sheet = TrackSheet.Subtitles },
             )
+        }
+        AnimatedVisibility(
+            visible = upNextState is UpNextState.Available,
+            enter = fadeIn() + slideInVertically(initialOffsetY = { it / 3 }),
+            exit = fadeOut() + slideOutVertically(targetOffsetY = { it / 3 }),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(horizontal = 14.dp, vertical = if (controlsVisible) 154.dp else 24.dp),
+        ) {
+            val available = upNextState as? UpNextState.Available
+            if (available != null) {
+                UpNextOverlay(
+                    state = available,
+                    totalCountdownSeconds = autoplaySettings.countdownSeconds,
+                    onPlayNow = {
+                        if (!nextStarted) {
+                            nextStarted = true
+                            upNextState = UpNextState.PlayingNext
+                            onPlayNext(available.candidate, player.currentPosition)
+                        }
+                    },
+                    onCancel = {
+                        upNextCancelled = true
+                        upNextState = UpNextState.Cancelled(available.candidate)
+                    },
+                )
+            }
         }
     }
 
@@ -339,6 +456,125 @@ private fun PlayerControls(
                 Button(onClick = { onSeekBy(30_000L) }) { Text("+30") }
                 if (item.audioTracks.size > 1) Button(onClick = onAudio) { Text("Audio") }
                 if (item.subtitleTracks.isNotEmpty()) Button(onClick = onSubtitles) { Text("Subs") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun UpNextOverlay(
+    state: UpNextState.Available,
+    totalCountdownSeconds: Int,
+    onPlayNow: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val candidate = state.candidate
+    val progress = 1f - (state.countdownSeconds.toFloat() / totalCountdownSeconds.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+    VantafynGlassPanel(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+            ),
+        cornerRadius = 26.dp,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(26.dp)),
+        ) {
+            candidate.backdropUrl?.let { backdrop ->
+                AsyncImage(
+                    model = backdrop,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color.Black),
+                    contentScale = ContentScale.Crop,
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.92f),
+                                    Color.Black.copy(alpha = 0.76f),
+                                    Color.Black.copy(alpha = 0.90f),
+                                ),
+                            ),
+                        ),
+                )
+            }
+            Column(
+                modifier = Modifier.padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 88.dp, height = 56.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.08f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = candidate.imageUrl ?: candidate.backdropUrl,
+                            contentDescription = candidate.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("Up Next", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(candidate.seriesName ?: "Next episode", color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            "${candidate.episodeLabel} · ${candidate.title}",
+                            color = VantafynColors.Ink.copy(alpha = 0.92f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        "Playing in ${state.countdownSeconds}",
+                        color = VantafynColors.Ink,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.12f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(4.dp)
+                            .background(VantafynGradients.accentHorizontal()),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    VantafynButton("Play Now", onClick = onPlayNow, modifier = Modifier.weight(1f))
+                    TextButton(
+                        onClick = onCancel,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(48.dp),
+                    ) {
+                        Text("Keep Watching", color = VantafynColors.Ink)
+                    }
+                }
             }
         }
     }

@@ -29,6 +29,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -88,11 +91,7 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         item {
             Header(
                 title = "Requests",
-                subtitle = if (state.canUseRequests) {
-                    "Search and request movies or series through Ombi."
-                } else {
-                    "Let users request movies and TV shows through Ombi."
-                },
+                subtitle = null,
                 action = if (state.isJellyfinAdmin && state.isConfigured) "Manage Ombi" else null,
                 onAction = viewModel::manageOmbi,
             )
@@ -130,7 +129,6 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
             item { OmbiAccessNeededState(state, viewModel) }
             return@LazyColumn
         }
-        item { RequestsTrustNote(state.config.identityMode) }
         item { SearchCard(state, viewModel) }
         state.message?.let { item { MessageCard(it) } }
         if (state.isSearching) item { VantafynLoadingIndicator("Searching Ombi") }
@@ -327,14 +325,77 @@ private fun OmbiAccessNeededState(state: RequestsUiState, viewModel: RequestsVie
 
 @Composable
 private fun EmptySetupState(admin: Boolean, onSetup: () -> Unit) {
-    VantafynGlassPanel(cornerRadius = 24.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Requests aren’t set up yet", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text("Ombi is optional. When configured, Vantafyn can search and submit movie or TV requests through your Ombi server.", color = VantafynColors.Muted)
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(284.dp)
+            .clip(RoundedCornerShape(28.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF172235),
+                        Color(0xFF25234A),
+                        Color(0xFF0A0F1C),
+                    ),
+                ),
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        listOf(
+                            VantafynColors.Primary.copy(alpha = 0.28f),
+                            Color.Transparent,
+                        ),
+                        center = Offset(760f, 80f),
+                        radius = 620f,
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.075f),
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.20f),
+                        ),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(
+                    "Requests are ready when you are",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (admin) "Connect Ombi to let this home request movies and series from Vantafyn."
+                    else "Your server admin can enable movie and series requests from here.",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf("Movies", "Series", "Family queue")) { label ->
+                    TypeChip(label, selected = true, onClick = {})
+                }
+            }
             if (admin) {
                 VantafynButton("Set up Ombi", onClick = onSetup, modifier = Modifier.fillMaxWidth())
-            } else {
-                Text("Ask your server admin to enable Requests.", color = VantafynColors.Muted)
             }
         }
     }
@@ -425,11 +486,13 @@ private fun RequestsTrustNote(identityMode: OmbiIdentityMode) {
 }
 
 @Composable
-private fun Header(title: String, subtitle: String, action: String? = null, onAction: () -> Unit = {}) {
+private fun Header(title: String, subtitle: String? = null, action: String? = null, onAction: () -> Unit = {}) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = VantafynColors.Muted)
+            if (!subtitle.isNullOrBlank()) {
+                Text(subtitle, color = VantafynColors.Muted)
+            }
         }
         if (action != null) TextButton(onClick = onAction) { Text(action) }
     }

@@ -143,6 +143,11 @@ data class JellyfinMediaDetail(
     val related: List<JellyfinMediaItem> = emptyList(),
     val externalLinks: List<JellyfinExternalLink> = emptyList(),
     val themeSongUrl: String? = null,
+    val seriesId: UUID? = null,
+    val seasonId: UUID? = null,
+    val seriesName: String? = null,
+    val seasonIndexNumber: Int? = null,
+    val episodeIndexNumber: Int? = null,
 )
 
 data class JellyfinMediaInfoLine(
@@ -237,6 +242,25 @@ data class JellyfinEpisode(
     val runtimeMinutes: Int? = null,
     val indexNumber: Int?,
     val seasonIndexNumber: Int?,
+    val seriesId: UUID? = null,
+    val seasonId: UUID? = null,
+    val seriesName: String? = null,
+)
+
+data class JellyfinUpNextCandidate(
+    val itemId: UUID,
+    val seriesId: UUID?,
+    val seasonId: UUID?,
+    val title: String,
+    val seriesName: String?,
+    val seasonNumber: Int?,
+    val episodeNumber: Int?,
+    val runtimeTicks: Long?,
+    val imageUrl: String?,
+    val backdropUrl: String?,
+    val overview: String?,
+    val progress: Float?,
+    val playbackPositionTicks: Long,
 )
 
 data class JellyfinExternalLink(
@@ -498,6 +522,7 @@ interface JellyfinHomeRepository {
 interface JellyfinMediaRepository {
     suspend fun getMediaDetail(session: JellyfinSession, itemId: UUID): JellyfinResult<JellyfinMediaDetail>
     suspend fun getSeasonEpisodes(session: JellyfinSession, seriesId: UUID, seasonId: UUID?): JellyfinResult<List<JellyfinEpisode>>
+    suspend fun getNextEpisode(session: JellyfinSession, currentEpisodeId: UUID): JellyfinResult<JellyfinUpNextCandidate?>
     suspend fun setFavorite(session: JellyfinSession, itemId: UUID, isFavorite: Boolean): JellyfinResult<Boolean>
     suspend fun addFavorite(session: JellyfinSession, itemId: UUID): JellyfinResult<Boolean> =
         setFavorite(session, itemId, true)

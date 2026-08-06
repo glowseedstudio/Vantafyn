@@ -91,19 +91,25 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun playTrack(track: JellyfinMusicTrack, queue: List<JellyfinMusicTrack>) {
         val activeSession = session ?: return
         viewModelScope.launch {
-            val playbackInfo = preparePlaybackInfo(activeSession, track)
-            val preparedQueue = queue.map {
-                if (it.id == track.id && playbackInfo != null) {
-                    it.toPlaybackTrack(streamUrl = playbackInfo.streamUrl)
+            val safeQueue = queue.ifEmpty { listOf(track) }
+            val queueIds = safeQueue.map { it.id }.toSet()
+            playbackInfoByTrack.keys.removeAll { it !in queueIds }
+            val preparedQueue = safeQueue.map { queuedTrack ->
+                val playbackInfo = preparePlaybackInfo(activeSession, queuedTrack)
+                if (playbackInfo != null) {
+                    playbackInfoByTrack[queuedTrack.id] = playbackInfo
+                    queuedTrack.toPlaybackTrack(streamUrl = playbackInfo.streamUrl)
                 } else {
-                    it.toPlaybackTrack()
+                    queuedTrack.toPlaybackTrack()
                 }
             }
-            playbackInfo?.let { playbackInfoByTrack[track.id] = it }
-            Log.d("VantafynMusic", "Starting track '${track.title.take(80)}' queueSize=${queue.size} prepared=${playbackInfo != null}")
+            Log.d(
+                "VantafynMusic",
+                "Starting track '${track.title.take(80)}' queueSize=${safeQueue.size} prepared=${preparedQueue.count { it.id in playbackInfoByTrack }}",
+            )
             playbackController.playQueue(
                 queue = preparedQueue,
-                startIndex = queue.indexOfFirst { it.id == track.id }.coerceAtLeast(0),
+                startIndex = safeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0),
             )
         }
     }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -163,6 +165,25 @@ data class VantafynPermissionUiState(
         get() = status == VantafynPermissionStatus.PermanentlyDenied
 }
 
+object VantafynGlassPalette {
+    val NavyCore = Color(0xFF10182A)
+    val NavyLift = Color(0xFF17233B)
+    val IndigoLift = Color(0xFF252A4F)
+    val VioletLift = Color(0xFF332456)
+    val CyanSpecular = Color(0xFF67DCFF)
+    val BlueSpecular = Color(0xFF5B8CFF)
+    val VioletSpecular = Color(0xFF9B62FF)
+    val EdgeWhite = Color(0xFFF3F8FF)
+}
+
+object VantafynGlassElevation {
+    val Panel = 0.24f
+    val Card = 0.20f
+    val Chip = 0.12f
+    val Modal = 0.30f
+    val Button = 0.18f
+}
+
 private fun VantafynGlassVariant.defaultRadius() = when (this) {
     VantafynGlassVariant.Panel -> 24.dp
     VantafynGlassVariant.Card -> 20.dp
@@ -172,50 +193,68 @@ private fun VantafynGlassVariant.defaultRadius() = when (this) {
     VantafynGlassVariant.Button -> 18.dp
 }
 
-private fun VantafynGlassVariant.surfaceBrush(selected: Boolean, enabled: Boolean): Brush {
+private fun VantafynGlassVariant.depthAlpha(): Float =
+    when (this) {
+        VantafynGlassVariant.Panel -> VantafynGlassElevation.Panel
+        VantafynGlassVariant.Card -> VantafynGlassElevation.Card
+        VantafynGlassVariant.Dock -> 0.46f
+        VantafynGlassVariant.Chip -> VantafynGlassElevation.Chip
+        VantafynGlassVariant.Modal -> VantafynGlassElevation.Modal
+        VantafynGlassVariant.Button -> VantafynGlassElevation.Button
+    }
+
+private fun VantafynGlassVariant.surfaceBrush(selected: Boolean, focused: Boolean, enabled: Boolean): Brush {
     val enabledAlpha = if (enabled) 1f else 0.54f
-    val primaryLift = if (selected) 0.12f else 0.04f
     if (this == VantafynGlassVariant.Dock) {
         return VantafynNavDockBrush(enabled)
     }
+    val activeLift = when {
+        focused -> 1f
+        selected -> 0.76f
+        else -> 0f
+    }
+    val density = when (this) {
+        VantafynGlassVariant.Panel -> 0.86f
+        VantafynGlassVariant.Card -> 0.74f
+        VantafynGlassVariant.Chip -> 0.54f
+        VantafynGlassVariant.Modal -> 0.92f
+        VantafynGlassVariant.Button -> 0.66f
+        VantafynGlassVariant.Dock -> 0.84f
+    }
     return Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.105f * enabledAlpha),
-            VantafynColors.Primary.copy(alpha = primaryLift * enabledAlpha),
-            VantafynColors.SurfaceHigh.copy(alpha = when (this) {
-                VantafynGlassVariant.Dock -> 0.82f
-                VantafynGlassVariant.Modal -> 0.90f
-                VantafynGlassVariant.Chip -> 0.48f
-                VantafynGlassVariant.Button -> 0.62f
-                else -> 0.60f
-            } * enabledAlpha),
-            VantafynColors.Graphite.copy(alpha = when (this) {
-                VantafynGlassVariant.Dock -> 0.72f
-                VantafynGlassVariant.Modal -> 0.82f
-                else -> 0.50f
-            } * enabledAlpha),
+        colorStops = arrayOf(
+            0.00f to VantafynGlassPalette.EdgeWhite.copy(alpha = (0.115f + activeLift * 0.045f) * enabledAlpha),
+            0.12f to VantafynGlassPalette.IndigoLift.copy(alpha = (0.22f + activeLift * 0.12f) * enabledAlpha),
+            0.42f to VantafynGlassPalette.NavyLift.copy(alpha = density * enabledAlpha),
+            0.72f to VantafynGlassPalette.VioletLift.copy(alpha = (0.18f + activeLift * 0.11f) * enabledAlpha),
+            1.00f to VantafynColors.Graphite.copy(alpha = (0.58f + density * 0.16f) * enabledAlpha),
         ),
+        start = Offset(0f, 0f),
+        end = Offset(520f, 760f),
     )
 }
 
 private fun VantafynGlassVariant.borderBrush(selected: Boolean, focused: Boolean, enabled: Boolean): Brush {
     val lift = when {
-        !enabled -> 0.42f
-        focused -> 1.0f
-        selected -> 0.82f
+        !enabled -> 0.34f
+        focused -> 1.14f
+        selected -> 0.98f
         this == VantafynGlassVariant.Dock -> 1.0f
-        else -> 0.56f
+        else -> 0.64f
     }
     if (this == VantafynGlassVariant.Dock) {
         return VantafynNavDockBorder(enabled)
     }
     return Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.24f * lift),
-            VantafynColors.Secondary.copy(alpha = 0.16f * lift),
-            VantafynColors.Primary.copy(alpha = 0.20f * lift),
-            Color.White.copy(alpha = 0.07f * lift),
+        colorStops = arrayOf(
+            0.00f to VantafynGlassPalette.EdgeWhite.copy(alpha = 0.30f * lift),
+            0.24f to VantafynGlassPalette.CyanSpecular.copy(alpha = 0.18f * lift),
+            0.58f to VantafynGlassPalette.BlueSpecular.copy(alpha = 0.18f * lift),
+            0.82f to VantafynGlassPalette.VioletSpecular.copy(alpha = 0.14f * lift),
+            1.00f to Color.White.copy(alpha = 0.055f * lift),
         ),
+        start = Offset.Zero,
+        end = Offset(640f, 900f),
     )
 }
 
@@ -231,24 +270,39 @@ fun VantafynGlassSurface(
     content: @Composable BoxScope.() -> Unit,
 ) {
     val shape = RoundedCornerShape(cornerRadius)
+    val active = selected || focused
     Box(
         modifier = modifier
             .drawBehind {
                 val radius = cornerRadius.toPx()
+                val shadowAlpha = variant.depthAlpha() * if (enabled) 1f else 0.46f
                 drawRoundRect(
-                    color = Color.Black.copy(alpha = if (variant == VantafynGlassVariant.Dock) 0.46f else 0.22f),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
-                    topLeft = androidx.compose.ui.geometry.Offset(0f, if (variant == VantafynGlassVariant.Dock) 7.dp.toPx() else 5.dp.toPx()),
+                    color = Color.Black.copy(alpha = shadowAlpha * 0.42f),
+                    cornerRadius = CornerRadius(radius, radius),
+                    topLeft = Offset(0f, if (variant == VantafynGlassVariant.Dock) 9.dp.toPx() else 7.dp.toPx()),
                 )
-                if (selected || focused) {
+                drawRoundRect(
+                    color = Color(0xFF02040A).copy(alpha = shadowAlpha * 0.30f),
+                    cornerRadius = CornerRadius(radius, radius),
+                    topLeft = Offset(0f, if (variant == VantafynGlassVariant.Dock) 15.dp.toPx() else 12.dp.toPx()),
+                    size = Size(size.width, size.height),
+                )
+                if (active) {
                     drawRoundRect(
-                        color = VantafynColors.Primary.copy(alpha = if (focused) 0.20f else 0.12f),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
+                        color = VantafynGlassPalette.BlueSpecular.copy(alpha = if (focused) 0.16f else 0.10f),
+                        cornerRadius = CornerRadius(radius, radius),
+                        topLeft = Offset(-3.dp.toPx(), -2.dp.toPx()),
+                        size = Size(size.width + 6.dp.toPx(), size.height + 7.dp.toPx()),
+                    )
+                    drawRoundRect(
+                        color = VantafynGlassPalette.VioletSpecular.copy(alpha = if (focused) 0.10f else 0.07f),
+                        cornerRadius = CornerRadius(radius, radius),
+                        topLeft = Offset(2.dp.toPx(), 3.dp.toPx()),
                     )
                 }
             }
             .clip(shape)
-            .background(variant.surfaceBrush(selected = selected, enabled = enabled))
+            .background(variant.surfaceBrush(selected = selected, focused = focused, enabled = enabled))
             .border(BorderStroke(if (focused) 1.4.dp else 1.dp, variant.borderBrush(selected, focused, enabled)), shape),
     ) {
         Box(
@@ -264,17 +318,62 @@ fun VantafynGlassSurface(
                             ),
                         )
                     } else {
-                        Brush.linearGradient(
-                            listOf(
-                                Color.White.copy(alpha = if (enabled) 0.075f else 0.035f),
-                                Color.Transparent,
-                                VantafynColors.Secondary.copy(alpha = if (selected || focused) 0.055f else 0.020f),
+                        Brush.radialGradient(
+                            colors = listOf(
+                                VantafynGlassPalette.CyanSpecular.copy(
+                                    alpha = if (enabled) {
+                                        0.075f + if (active) 0.040f else 0f
+                                    } else {
+                                        0.028f
+                                    },
+                                ),
+                                VantafynGlassPalette.BlueSpecular.copy(
+                                    alpha = if (enabled) {
+                                        0.040f + if (active) 0.030f else 0f
+                                    } else {
+                                        0.016f
+                                    },
+                                ),
                                 Color.Transparent,
                             ),
+                            center = Offset(90f, 20f),
+                            radius = 520f,
                         )
                     },
                 ),
         )
+        if (variant != VantafynGlassVariant.Dock) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.White.copy(alpha = if (enabled) 0.105f else 0.040f),
+                                0.18f to Color.White.copy(alpha = if (enabled) 0.030f else 0.012f),
+                                0.58f to Color.Transparent,
+                                1.00f to Color.Black.copy(alpha = if (enabled) 0.055f else 0.030f),
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.linearGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.White.copy(alpha = if (enabled) 0.030f else 0.010f),
+                                0.22f to Color.Transparent,
+                                0.78f to VantafynGlassPalette.VioletSpecular.copy(alpha = if (active) 0.060f else 0.020f),
+                                1.00f to Color.Transparent,
+                            ),
+                            start = Offset.Zero,
+                            end = Offset(720f, 520f),
+                        ),
+                    ),
+            )
+        }
         if (variant == VantafynGlassVariant.Dock) {
             Box(
                 modifier = Modifier
@@ -353,6 +452,116 @@ fun VantafynGlassDock(
     contentPadding = contentPadding,
     content = content,
 )
+
+@Composable
+fun VantafynGlassChip(
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    content: @Composable BoxScope.() -> Unit,
+) {
+    VantafynInteractiveGlass(
+        modifier = modifier,
+        variant = VantafynGlassVariant.Chip,
+        selected = selected,
+        enabled = enabled,
+        cornerRadius = 999.dp,
+        contentPadding = contentPadding,
+        onClick = onClick,
+        content = content,
+    )
+}
+
+@Composable
+fun VantafynGlassPill(
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    onClick: (() -> Unit)? = null,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+    content: @Composable BoxScope.() -> Unit,
+) {
+    if (onClick == null) {
+        VantafynGlassSurface(
+            modifier = modifier,
+            variant = VantafynGlassVariant.Chip,
+            selected = selected,
+            enabled = enabled,
+            cornerRadius = 999.dp,
+            contentPadding = contentPadding,
+            content = content,
+        )
+    } else {
+        VantafynGlassChip(
+            modifier = modifier,
+            selected = selected,
+            enabled = enabled,
+            onClick = onClick,
+            contentPadding = contentPadding,
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun VantafynGlassTile(
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+    cornerRadius: Dp = 18.dp,
+    contentPadding: PaddingValues = PaddingValues(VantafynSpacing.md),
+    onClick: () -> Unit,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    VantafynInteractiveGlass(
+        modifier = modifier,
+        variant = VantafynGlassVariant.Button,
+        selected = selected,
+        enabled = enabled,
+        cornerRadius = cornerRadius,
+        contentPadding = contentPadding,
+        onClick = onClick,
+        content = content,
+    )
+}
+
+@Composable
+private fun VantafynInteractiveGlass(
+    modifier: Modifier,
+    variant: VantafynGlassVariant,
+    selected: Boolean,
+    enabled: Boolean,
+    cornerRadius: Dp,
+    contentPadding: PaddingValues,
+    onClick: () -> Unit,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.985f else 1f,
+        animationSpec = tween(durationMillis = VantafynMotion.Quick),
+        label = "vantafynGlassPressedScale",
+    )
+    VantafynGlassSurface(
+        modifier = modifier
+            .scale(scale)
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        variant = variant,
+        selected = selected || pressed,
+        enabled = enabled,
+        cornerRadius = cornerRadius,
+        contentPadding = contentPadding,
+        content = content,
+    )
+}
 
 @Composable
 fun Modifier.vantafynAnimatedModalBorder(
@@ -575,13 +784,58 @@ fun VantafynTextField(
     tvKeyboardRequiresClick: Boolean = false,
 ) {
     var editing by remember { mutableStateOf(!tvKeyboardRequiresClick) }
+    var focused by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     val interactionSource = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(VantafynRadii.sheet)
     val textFieldModifier = modifier
         .fillMaxWidth()
+        .drawWithContent {
+            drawContent()
+            if (focused && enabled) {
+                val stroke = 3.dp.toPx()
+                val glowStroke = 6.dp.toPx()
+                val halfStroke = stroke / 2f
+                val corner = 16.dp.toPx()
+                val brush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF21D8FF),
+                        Color(0xFF3E63FF),
+                        Color(0xFF8B35FF),
+                        Color(0xFFFF36C7),
+                    ),
+                    startX = 0f,
+                    endX = size.width,
+                )
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF21D8FF).copy(alpha = 0.28f),
+                            Color(0xFF3E63FF).copy(alpha = 0.24f),
+                            Color(0xFF8B35FF).copy(alpha = 0.26f),
+                            Color(0xFFFF36C7).copy(alpha = 0.28f),
+                        ),
+                        startX = 0f,
+                        endX = size.width,
+                    ),
+                    topLeft = Offset(glowStroke / 2f, glowStroke / 2f),
+                    size = Size(size.width - glowStroke, size.height - glowStroke),
+                    cornerRadius = CornerRadius(corner, corner),
+                    style = Stroke(width = glowStroke),
+                )
+                drawRoundRect(
+                    brush = brush,
+                    topLeft = Offset(halfStroke, halfStroke),
+                    size = Size(size.width - stroke, size.height - stroke),
+                    cornerRadius = CornerRadius(corner, corner),
+                    style = Stroke(width = stroke),
+                )
+            }
+        }
         .focusRequester(focusRequester)
         .onFocusChanged {
+            focused = it.isFocused
             if (!it.isFocused && tvKeyboardRequiresClick) {
                 editing = false
             }
@@ -633,25 +887,24 @@ fun VantafynTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = textFieldModifier,
-        label = { Text(label) },
-        placeholder = placeholder?.let { { Text(it) } },
+        placeholder = { Text(placeholder ?: label) },
         singleLine = true,
         enabled = enabled,
         readOnly = tvKeyboardRequiresClick && !editing,
         keyboardOptions = keyboardOptions,
         visualTransformation = visualTransformation,
-        shape = RoundedCornerShape(VantafynRadii.sheet),
+        shape = shape,
         colors = OutlinedTextFieldDefaults.colors(
             focusedTextColor = VantafynColors.Ink,
             unfocusedTextColor = VantafynColors.Ink,
             disabledTextColor = VantafynColors.Muted,
-            focusedContainerColor = VantafynColors.Surface.copy(alpha = 0.58f),
-            unfocusedContainerColor = VantafynColors.Surface.copy(alpha = 0.46f),
-            disabledContainerColor = VantafynColors.Surface.copy(alpha = 0.34f),
-            cursorColor = VantafynColors.Primary,
-            focusedBorderColor = VantafynColors.Primary,
-            unfocusedBorderColor = VantafynColors.Border,
-            disabledBorderColor = VantafynColors.Border.copy(alpha = 0.56f),
+            focusedContainerColor = VantafynGlassPalette.NavyLift.copy(alpha = 0.72f),
+            unfocusedContainerColor = VantafynGlassPalette.NavyCore.copy(alpha = 0.58f),
+            disabledContainerColor = VantafynGlassPalette.NavyCore.copy(alpha = 0.36f),
+            cursorColor = VantafynGlassPalette.CyanSpecular,
+            focusedBorderColor = Color.Transparent,
+            unfocusedBorderColor = Color.White.copy(alpha = 0.13f),
+            disabledBorderColor = Color.White.copy(alpha = 0.065f),
             focusedLabelColor = VantafynColors.Ink,
             unfocusedLabelColor = VantafynColors.Muted,
             focusedPlaceholderColor = VantafynColors.Muted.copy(alpha = 0.78f),

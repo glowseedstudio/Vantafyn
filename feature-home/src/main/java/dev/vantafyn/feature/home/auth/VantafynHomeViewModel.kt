@@ -31,12 +31,15 @@ import dev.vantafyn.core.jellyfin.JellyfinSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinServerConfig
 import dev.vantafyn.core.jellyfin.JellyfinSessionRestoreFailure
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.jellyfin.JellyfinUpNextCandidate
 import dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences
 import dev.vantafyn.core.jellyfin.JellyfinAdminUserDetail
 import dev.vantafyn.core.jellyfin.JellyfinUserPreferencesRepository
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.media.VantafynAudioTrack
+import dev.vantafyn.core.media.AutoplaySettings
 import dev.vantafyn.core.media.MusicPlaybackController
+import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
@@ -69,7 +72,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var searchJob: Job? = null
     private var quickConnectJob: Job? = null
 
-    private val _state = MutableStateFlow(VantafynHomeUiState())
+    private val _state = MutableStateFlow(
+        VantafynHomeUiState(
+            autoplayCountdownSeconds = appPreferences.getInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, 10)
+                .takeIf { value -> value in AUTOPLAY_COUNTDOWN_OPTIONS }
+                ?: 10,
+            passoutProtectionLimitMinutes = appPreferences.getInt(KEY_PASSOUT_PROTECTION_LIMIT_MINUTES, 180)
+                .takeIf { value -> value in PASSOUT_PROTECTION_LIMIT_OPTIONS }
+                ?: 180,
+        ),
+    )
     val state: StateFlow<VantafynHomeUiState> = _state.asStateFlow()
 
     init {
@@ -227,6 +239,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
+                            autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
+                            passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
+                            passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
                         )
                     }
                     refreshSavedProfiles()
@@ -344,6 +359,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
+                            autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
+                            passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
+                            passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
                         )
                     }
                     refreshSavedProfiles()
@@ -388,6 +406,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
+                            autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
+                            passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
+                            passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
                         )
                     }
                     refreshSavedProfiles()
@@ -1049,6 +1070,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 title = episode.title,
                 subtitle = listOfNotNull(detail?.title, episode.subtitle).joinToString(" · ").ifBlank { null },
                 startTicks = if (fromBeginning) 0L else episode.playbackPositionTicks.takeIf { (episode.progress ?: 0f) > 0.05f && !episode.isPlayed } ?: 0L,
+                itemType = "Episode",
+                seriesId = episode.seriesId ?: detail?.id,
+                seasonId = episode.seasonId,
+                seriesName = episode.seriesName ?: detail?.title,
+                seasonNumber = episode.seasonIndexNumber,
+                episodeNumber = episode.indexNumber,
             ),
             forceTranscode = false,
             audioStreamIndex = null,
@@ -1062,13 +1089,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         forceTranscode: Boolean,
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
+        previousStopPositionTicks: Long? = null,
+        continuousPlaybackStartedAtMs: Long? = null,
     ) {
         viewModelScope.launch {
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.VideoPlayback)
             val previousInfo = _state.value.playbackInfo
+            val autoplayWindowStartedAtMs = continuousPlaybackStartedAtMs ?: System.currentTimeMillis()
             if (previousInfo != null) {
-                playbackRepository.reportStopped(session, previousInfo, target.startTicks)
+                playbackRepository.reportStopped(session, previousInfo, previousStopPositionTicks ?: previousInfo.startPositionTicks)
             }
+            val upNextCandidate = loadUpNextCandidate(session, target)
             _state.update {
                 it.copy(
                     previousMobileDestination = if (it.mobileDestination == MobileDestination.Player) {
@@ -1105,7 +1136,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         it.copy(
                             isPlaybackLoading = false,
                             playbackInfo = result.value,
-                            playbackItem = result.value.toPlaybackItem(),
+                            playbackItem = result.value.toPlaybackItem(
+                                target = target,
+                                upNextCandidate = upNextCandidate,
+                                autoplaySettings = it.autoplaySettings(),
+                                continuousPlaybackStartedAtMs = autoplayWindowStartedAtMs,
+                            ),
                             playbackError = null,
                             canTryPlaybackTranscode = result.value.fallbackStreamUrl != null,
                         )
@@ -1165,6 +1201,69 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             viewModelScope.launch {
                 playbackRepository.reportStopped(session, info, info.startPositionTicks)
             }
+        }
+    }
+
+    fun playNextEpisode(candidate: UpNextCandidate, currentPositionMs: Long) {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val id = runCatching { UUID.fromString(candidate.itemId) }.getOrNull() ?: return
+        _state.update { it.copy(mobileMessage = null) }
+        startPlaybackTarget(
+            session = session,
+            target = PlaybackTarget(
+                id = id,
+                title = candidate.title,
+                subtitle = listOfNotNull(candidate.seriesName, candidate.episodeLabel).joinToString(" · ").ifBlank { null },
+                startTicks = candidate.playbackPositionMs.toTicks(),
+                itemType = "Episode",
+                seriesId = candidate.seriesId?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                seasonId = candidate.seasonId?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                seriesName = candidate.seriesName,
+                seasonNumber = candidate.seasonNumber,
+                episodeNumber = candidate.episodeNumber,
+            ),
+            forceTranscode = false,
+            audioStreamIndex = null,
+            subtitleStreamIndex = null,
+            previousStopPositionTicks = currentPositionMs.toTicks(),
+            continuousPlaybackStartedAtMs = snapshot.playbackItem?.continuousPlaybackStartedAtMs,
+        )
+    }
+
+    fun setAutoplayCountdownSeconds(seconds: Int) {
+        if (seconds !in AUTOPLAY_COUNTDOWN_OPTIONS) return
+        _state.update { state ->
+            val editor = appPreferences.edit().putInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, seconds)
+            state.session?.profileId?.let { profileId ->
+                editor.putInt("${KEY_AUTOPLAY_COUNTDOWN_SECONDS}_$profileId", seconds)
+            }
+            editor.apply()
+            state.copy(autoplayCountdownSeconds = seconds)
+        }
+    }
+
+    fun togglePassoutProtection() {
+        _state.update { state ->
+            val enabled = !state.passoutProtectionEnabled
+            val editor = appPreferences.edit().putBoolean(KEY_PASSOUT_PROTECTION_ENABLED, enabled)
+            state.session?.profileId?.let { profileId ->
+                editor.putBoolean("${KEY_PASSOUT_PROTECTION_ENABLED}_$profileId", enabled)
+            }
+            editor.apply()
+            state.copy(passoutProtectionEnabled = enabled)
+        }
+    }
+
+    fun setPassoutProtectionLimitMinutes(minutes: Int) {
+        if (minutes !in PASSOUT_PROTECTION_LIMIT_OPTIONS) return
+        _state.update { state ->
+            val editor = appPreferences.edit().putInt(KEY_PASSOUT_PROTECTION_LIMIT_MINUTES, minutes)
+            state.session?.profileId?.let { profileId ->
+                editor.putInt("${KEY_PASSOUT_PROTECTION_LIMIT_MINUTES}_$profileId", minutes)
+            }
+            editor.apply()
+            state.copy(passoutProtectionLimitMinutes = minutes)
         }
     }
 
@@ -1251,7 +1350,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             forceTranscode = forceTranscode,
             audioStreamIndex = audioStreamIndex,
             subtitleStreamIndex = subtitleStreamIndex,
+            previousStopPositionTicks = positionMs?.toTicks(),
+            continuousPlaybackStartedAtMs = _state.value.playbackItem?.continuousPlaybackStartedAtMs,
         )
+    }
+
+    private suspend fun loadUpNextCandidate(session: JellyfinSession, target: PlaybackTarget): UpNextCandidate? {
+        if (target.isLiveTv || !target.itemType.equals("Episode", ignoreCase = true)) return null
+        return when (val result = mediaRepository.getNextEpisode(session, target.id)) {
+            is JellyfinResult.Success -> result.value?.toUpNextCandidate()
+            is JellyfinResult.Failure -> null
+        }
     }
 
     fun clearMobileMessage() {
@@ -1375,6 +1484,30 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             ?: homeLayoutStorage.getString("background_app", null)
         return key?.let { runCatching { VantafynAppBackground.valueOf(it) }.getOrNull() }
             ?: VantafynAppBackground.Nebula
+    }
+
+    private fun readAutoplayCountdownSeconds(profileId: String?): Int {
+        val profileKey = profileId?.let { "${KEY_AUTOPLAY_COUNTDOWN_SECONDS}_$it" }
+        return profileKey?.let { appPreferences.getInt(it, -1) }
+            ?.takeIf { it in AUTOPLAY_COUNTDOWN_OPTIONS }
+            ?: appPreferences.getInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, 10)
+                .takeIf { it in AUTOPLAY_COUNTDOWN_OPTIONS }
+            ?: 10
+    }
+
+    private fun readPassoutProtectionEnabled(profileId: String?): Boolean {
+        val profileKey = profileId?.let { "${KEY_PASSOUT_PROTECTION_ENABLED}_$it" }
+        return profileKey?.takeIf { appPreferences.contains(it) }?.let { appPreferences.getBoolean(it, false) }
+            ?: appPreferences.getBoolean(KEY_PASSOUT_PROTECTION_ENABLED, false)
+    }
+
+    private fun readPassoutProtectionLimitMinutes(profileId: String?): Int {
+        val profileKey = profileId?.let { "${KEY_PASSOUT_PROTECTION_LIMIT_MINUTES}_$it" }
+        return profileKey?.let { appPreferences.getInt(it, -1) }
+            ?.takeIf { it in PASSOUT_PROTECTION_LIMIT_OPTIONS }
+            ?: appPreferences.getInt(KEY_PASSOUT_PROTECTION_LIMIT_MINUTES, 180)
+                .takeIf { it in PASSOUT_PROTECTION_LIMIT_OPTIONS }
+            ?: 180
     }
 
     private fun readSmartRows(profileId: String?): List<String> {
@@ -1543,6 +1676,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     themeMusicVolume = readThemeMusicVolume(jellyfinSession.profileId),
                                     selectedBackground = readSelectedBackground(jellyfinSession.profileId),
                                     configuredSmartRows = readSmartRows(jellyfinSession.profileId),
+                                    autoplayCountdownSeconds = readAutoplayCountdownSeconds(jellyfinSession.profileId),
+                                    passoutProtectionEnabled = readPassoutProtectionEnabled(jellyfinSession.profileId),
+                                    passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(jellyfinSession.profileId),
                                 )
                             }
                             refreshSavedProfiles()
@@ -1611,6 +1747,9 @@ data class VantafynHomeUiState(
     val adminError: String? = null,
     val playbackPreferences: JellyfinUserPlaybackPreferences? = null,
     val editablePlaybackPreferences: JellyfinUserPlaybackPreferences? = null,
+    val autoplayCountdownSeconds: Int = 10,
+    val passoutProtectionEnabled: Boolean = false,
+    val passoutProtectionLimitMinutes: Int = 180,
     val isPlaybackPreferencesLoading: Boolean = false,
     val isPlaybackPreferencesSaving: Boolean = false,
     val playbackPreferencesError: String? = null,
@@ -1819,6 +1958,12 @@ data class PlaybackTarget(
     val subtitle: String?,
     val startTicks: Long,
     val isLiveTv: Boolean = false,
+    val itemType: String? = null,
+    val seriesId: UUID? = null,
+    val seasonId: UUID? = null,
+    val seriesName: String? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
 )
 
 private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): PlaybackTarget? =
@@ -1829,6 +1974,12 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
                 title = it.title,
                 subtitle = listOfNotNull(title, it.subtitle).joinToString(" · ").ifBlank { null },
                 startTicks = 0L,
+                itemType = "Episode",
+                seriesId = id,
+                seasonId = it.seasonId,
+                seriesName = title,
+                seasonNumber = it.seasonIndexNumber,
+                episodeNumber = it.indexNumber,
             )
         }
     } else {
@@ -1839,6 +1990,12 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
             startTicks = positionMs?.toTicks()
                 ?: playbackPositionTicks.takeIf { (progress ?: 0f) > 0.05f && !isPlayed }
                 ?: 0L,
+            itemType = itemType,
+            seriesId = seriesId,
+            seasonId = seasonId,
+            seriesName = seriesName,
+            seasonNumber = seasonIndexNumber,
+            episodeNumber = episodeIndexNumber,
         )
     }
 
@@ -1853,6 +2010,12 @@ private fun JellyfinMediaDetail.beginningPlaybackTarget(selectedEpisodes: List<J
             title = episode.title,
             subtitle = listOfNotNull(title, episode.subtitle).joinToString(" · ").ifBlank { null },
             startTicks = 0L,
+            itemType = "Episode",
+            seriesId = episode.seriesId ?: id,
+            seasonId = episode.seasonId,
+            seriesName = episode.seriesName ?: title,
+            seasonNumber = episode.seasonIndexNumber,
+            episodeNumber = episode.indexNumber,
         )
     } else {
         PlaybackTarget(
@@ -1860,6 +2023,12 @@ private fun JellyfinMediaDetail.beginningPlaybackTarget(selectedEpisodes: List<J
             title = title,
             subtitle = subtitle,
             startTicks = 0L,
+            itemType = itemType,
+            seriesId = seriesId,
+            seasonId = seasonId,
+            seriesName = seriesName,
+            seasonNumber = seasonIndexNumber,
+            episodeNumber = episodeIndexNumber,
         )
     }
 
@@ -1871,7 +2040,12 @@ private fun JellyfinMediaDetail.defaultSeasonId(): UUID? {
     return seasons.firstOrNull { it.indexNumber == nextEpisode?.seasonIndexNumber }?.id ?: seasons.firstOrNull()?.id
 }
 
-private fun JellyfinPlaybackInfo.toPlaybackItem(): VantafynPlaybackItem =
+private fun JellyfinPlaybackInfo.toPlaybackItem(
+    target: PlaybackTarget,
+    upNextCandidate: UpNextCandidate?,
+    autoplaySettings: AutoplaySettings,
+    continuousPlaybackStartedAtMs: Long,
+): VantafynPlaybackItem =
     VantafynPlaybackItem(
         itemId = itemId.toString(),
         title = title,
@@ -1903,7 +2077,43 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(): VantafynPlaybackItem =
                 isDefault = it.isDefault,
             )
         },
+        itemType = target.itemType,
+        isLiveStream = isLiveStream || target.isLiveTv,
+        upNextCandidate = upNextCandidate,
+        autoplaySettings = autoplaySettings,
+        continuousPlaybackStartedAtMs = continuousPlaybackStartedAtMs,
     )
+
+private fun JellyfinUpNextCandidate.toUpNextCandidate(): UpNextCandidate =
+    UpNextCandidate(
+        itemId = itemId.toString(),
+        seriesId = seriesId?.toString(),
+        seasonId = seasonId?.toString(),
+        title = title,
+        seriesName = seriesName,
+        seasonNumber = seasonNumber,
+        episodeNumber = episodeNumber,
+        runtimeMs = runtimeTicks?.let { it / 10_000L },
+        imageUrl = imageUrl,
+        backdropUrl = backdropUrl,
+        overview = overview,
+        progress = progress,
+        playbackPositionMs = playbackPositionTicks / 10_000L,
+    )
+
+private fun VantafynHomeUiState.autoplaySettings(): AutoplaySettings =
+    AutoplaySettings(
+        enabled = playbackPreferences?.enableNextEpisodeAutoPlay ?: true,
+        countdownSeconds = autoplayCountdownSeconds,
+        passoutProtectionEnabled = passoutProtectionEnabled,
+        passoutProtectionLimitMinutes = passoutProtectionLimitMinutes,
+    )
+
+private val AUTOPLAY_COUNTDOWN_OPTIONS = setOf(5, 10, 15, 30)
+private val PASSOUT_PROTECTION_LIMIT_OPTIONS = setOf(60, 120, 180, 240, 300)
+private const val KEY_AUTOPLAY_COUNTDOWN_SECONDS = "autoplay_countdown_seconds"
+private const val KEY_PASSOUT_PROTECTION_ENABLED = "passout_protection_enabled"
+private const val KEY_PASSOUT_PROTECTION_LIMIT_MINUTES = "passout_protection_limit_minutes"
 
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L

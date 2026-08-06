@@ -1,6 +1,12 @@
 package dev.vantafyn.feature.music
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -25,6 +31,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -59,6 +66,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -96,6 +104,10 @@ fun MusicScreen(
     val state by viewModel.state.collectAsState()
     var actionTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
     val startMusic: (() -> Unit) -> Unit = { action -> onRequestMusicControlsPermission(action) }
+    val showInitialLoading = state.isLoading &&
+        state.home == null &&
+        state.searchResults.isEmpty() &&
+        state.screen == MusicScreenState.Home
     LaunchedEffect(session?.profileId) {
         viewModel.bindSession(session)
     }
@@ -117,7 +129,6 @@ fun MusicScreen(
             item {
                 MusicHomeHeader()
             }
-            if (state.isLoading) item { VantafynLoadingIndicator("Loading music") }
             state.errorMessage?.let { message ->
                 item { VantafynErrorCard(message) { VantafynButton("Retry", onClick = viewModel::loadHome) } }
             }
@@ -128,6 +139,9 @@ fun MusicScreen(
                     label = "Search music",
                     placeholder = "Songs, albums, artists",
                 )
+            }
+            if (showInitialLoading) {
+                item(key = "music-loading-skeleton") { MusicLoadingSkeleton() }
             }
             when (val screen = state.screen) {
                 MusicScreenState.Home -> {
@@ -295,9 +309,133 @@ fun MusicScreen(
 @Composable
 private fun MusicHomeHeader() {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Text("Music", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-        Text("Albums, artists, songs, playlists, and lyrics from Jellyfin.", color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(
+            "Music",
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
+}
+
+@Composable
+private fun MusicLoadingSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg)) {
+        MusicSkeletonTrackList()
+        MusicSkeletonArtworkRow(labelWidth = 116.dp)
+        MusicSkeletonArtworkRow(labelWidth = 82.dp)
+        MusicSkeletonArtworkRow(labelWidth = 94.dp)
+    }
+}
+
+@Composable
+private fun MusicSkeletonTrackList() {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            modifier = Modifier
+                .width(132.dp)
+                .height(18.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(musicSkeletonBrush()),
+        )
+        repeat(4) { index ->
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(10.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(musicSkeletonBrush()),
+                    )
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(if (index % 2 == 0) 0.82f else 0.64f)
+                                .height(14.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(musicSkeletonBrush()),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(if (index % 2 == 0) 0.48f else 0.56f)
+                                .height(12.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(musicSkeletonBrush()),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicSkeletonArtworkRow(labelWidth: androidx.compose.ui.unit.Dp) {
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        Box(
+            modifier = Modifier
+                .width(labelWidth)
+                .height(18.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(musicSkeletonBrush()),
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(4) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.width(128.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(128.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(musicSkeletonBrush()),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.88f)
+                            .height(13.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(musicSkeletonBrush()),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.58f)
+                            .height(11.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(musicSkeletonBrush()),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun musicSkeletonBrush(): Brush {
+    val transition = rememberInfiniteTransition(label = "musicSkeleton")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "musicSkeletonShift",
+    )
+    return Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.050f),
+            Color.White.copy(alpha = 0.105f),
+            Color.White.copy(alpha = 0.045f),
+        ),
+        start = Offset(-260f + shift * 520f, 0f),
+        end = Offset(shift * 520f, 220f),
+    )
 }
 
 @Composable

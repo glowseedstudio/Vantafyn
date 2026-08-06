@@ -6,6 +6,7 @@
 - `core-jellyfin` owns Jellyfin playback API access through `JellyfinPlaybackRepository`.
 - `feature-player` owns the Media3 player surface, custom dark controls, progress UI, error overlay, and basic track sheets.
 - `feature-home` owns navigation and coordinates playback lifecycle reporting through the repository.
+- Mobile episode playback now supports a premium Up Next overlay with countdown autoplay.
 - Live TV channel/program taps now enter the same mobile player path.
 - Live TV now has an explicit `openLiveStream(...)` fallback after playback-info auto-open failures.
 - TV playback is not implemented yet, but `app-tv` still builds.
@@ -16,6 +17,8 @@
 - `PlayStateApi.reportPlaybackStart(PlaybackStartInfo)` for playback start reporting, including position ticks.
 - `PlayStateApi.reportPlaybackProgress(PlaybackProgressInfo)` for periodic progress, pause, and seek reporting.
 - `PlayStateApi.reportPlaybackStopped(PlaybackStopInfo)` for exit/completion reporting.
+- `UserLibraryApi.getItem(userId, itemId)` for current and candidate episode metadata.
+- `TvShowsApi.getEpisodes(GetEpisodesRequest)` for same-series next episode lookup.
 - `MediaInfoApi.closeLiveStream(liveStreamId)` when Jellyfin marks the stream as live and returns a live stream id.
 - `MediaInfoApi.openLiveStream(...)` as the explicit Live TV fallback when playback-info auto-open does not provide a playable stream.
 
@@ -44,6 +47,10 @@ Series playback chooses an episode target rather than trying to play the series 
 Progress is reported every seven seconds during playback and also on pause/seek/background. Stop is reported when the player is closed or reaches completion. Jellyfin remains responsible for deciding watched thresholds.
 
 When playback closes, the detail item and home libraries are refreshed so Continue Watching/resume state can update from Jellyfin.
+
+For Up Next, the next episode transition calls back into the same ViewModel playback startup path. The current episode is reported stopped with the current player position before playback info is requested for the next episode. The next episode then reports playback start from the normal `STATE_READY` callback. A local guard prevents countdown completion and player completion from starting the next item twice.
+
+If next episode startup fails, the existing playback error overlay is used with retry/transcode options where available.
 
 ## Tracks
 
@@ -74,6 +81,9 @@ Logs include playback method, whether media/play/live stream ids are present, se
 ## Known Limitations
 
 - TV playback UI remains TODO.
+- TV Up Next UI remains TODO, though the shared model and Jellyfin lookup are reusable.
+- Up Next lookup currently uses ordered same-series episodes instead of a dedicated server-side adjacent-episode endpoint.
+- If autoplay is disabled, Vantafyn finishes normally instead of showing a non-countdown next episode prompt.
 - External subtitle sidecar attachment handling is limited to URLs Jellyfin exposes in playback info.
 - Subtitle formats that require burn-in depend on Jellyfin transcoding.
 - Quality/source selection beyond direct vs transcode is not yet a full UI.

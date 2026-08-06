@@ -3,7 +3,9 @@ package dev.vantafyn.feature.home
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -13,6 +15,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
@@ -21,6 +24,7 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -59,10 +63,18 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CollectionsBookmark
+import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -120,6 +132,7 @@ import dev.vantafyn.core.jellyfin.JellyfinSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinHeroMediaItem
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.media.MusicPlaybackController
+import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import dev.vantafyn.core.ui.MobilePosterSpec
 import dev.vantafyn.core.ui.PosterCard
@@ -129,9 +142,12 @@ import dev.vantafyn.core.ui.VantafynBottomScrim
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynErrorCard
 import dev.vantafyn.core.ui.VantafynGlassCard
+import dev.vantafyn.core.ui.VantafynGlassChip
 import dev.vantafyn.core.ui.VantafynGlassDock
 import dev.vantafyn.core.ui.VantafynGlassPanel
+import dev.vantafyn.core.ui.VantafynGlassPill
 import dev.vantafyn.core.ui.VantafynGlassSurface
+import dev.vantafyn.core.ui.VantafynGlassTile
 import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
@@ -302,12 +318,16 @@ fun VantafynAppContent(
                 onPlaybackStarted = viewModel::reportPlaybackStarted,
                 onPlaybackProgress = viewModel::reportPlaybackProgress,
                 onPlaybackEnded = viewModel::exitPlayback,
+                onPlayNextEpisode = viewModel::playNextEpisode,
                 onPlayerError = viewModel::handlePlayerError,
                 onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
                 onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
                 onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
                 onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
                 onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
+                onSetAutoplayCountdownSeconds = viewModel::setAutoplayCountdownSeconds,
+                onTogglePassoutProtection = viewModel::togglePassoutProtection,
+                onSetPassoutProtectionLimitMinutes = viewModel::setPassoutProtectionLimitMinutes,
                 onChangePassword = viewModel::changeCurrentUserPassword,
                 onOpenAdminUser = viewModel::openAdminUser,
                 onCloseAdminUser = viewModel::closeAdminUser,
@@ -1056,12 +1076,16 @@ private fun HomeScreen(
     onPlaybackStarted: (Long) -> Unit,
     onPlaybackProgress: (Long, Boolean) -> Unit,
     onPlaybackEnded: (Long) -> Unit,
+    onPlayNextEpisode: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
     onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
     onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
+    onSetAutoplayCountdownSeconds: (Int) -> Unit,
+    onTogglePassoutProtection: () -> Unit,
+    onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onChangePassword: (String, String) -> Unit,
     onOpenAdminUser: (java.util.UUID) -> Unit,
     onCloseAdminUser: () -> Unit,
@@ -1120,12 +1144,16 @@ private fun HomeScreen(
             onPlaybackStarted = onPlaybackStarted,
             onPlaybackProgress = onPlaybackProgress,
             onPlaybackEnded = onPlaybackEnded,
+            onPlayNextEpisode = onPlayNextEpisode,
             onPlayerError = onPlayerError,
             onSelectPlaybackAudioTrack = onSelectPlaybackAudioTrack,
             onSelectPlaybackSubtitleTrack = onSelectPlaybackSubtitleTrack,
             onStartLiveTvPlayback = onStartLiveTvPlayback,
             onEditPlaybackPreferences = onEditPlaybackPreferences,
             onSavePlaybackPreferences = onSavePlaybackPreferences,
+            onSetAutoplayCountdownSeconds = onSetAutoplayCountdownSeconds,
+            onTogglePassoutProtection = onTogglePassoutProtection,
+            onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
             onChangePassword = onChangePassword,
             onOpenAdminUser = onOpenAdminUser,
             onCloseAdminUser = onCloseAdminUser,
@@ -1226,12 +1254,16 @@ private fun MobileShellScreen(
     onPlaybackStarted: (Long) -> Unit,
     onPlaybackProgress: (Long, Boolean) -> Unit,
     onPlaybackEnded: (Long) -> Unit,
+    onPlayNextEpisode: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
     onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
     onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
+    onSetAutoplayCountdownSeconds: (Int) -> Unit,
+    onTogglePassoutProtection: () -> Unit,
+    onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onChangePassword: (String, String) -> Unit,
     onOpenAdminUser: (java.util.UUID) -> Unit,
     onCloseAdminUser: () -> Unit,
@@ -1305,6 +1337,7 @@ private fun MobileShellScreen(
                     onStarted = onPlaybackStarted,
                     onProgress = onPlaybackProgress,
                     onEnded = onPlaybackEnded,
+                    onPlayNext = onPlayNextEpisode,
                     onPlayerError = onPlayerError,
                     onSelectAudioTrack = onSelectPlaybackAudioTrack,
                     onSelectSubtitleTrack = onSelectPlaybackSubtitleTrack,
@@ -1353,6 +1386,9 @@ private fun MobileShellScreen(
                             onBack = onNavigateBack,
                             onEdit = onEditPlaybackPreferences,
                             onSave = onSavePlaybackPreferences,
+                            onSetAutoplayCountdownSeconds = onSetAutoplayCountdownSeconds,
+                            onTogglePassoutProtection = onTogglePassoutProtection,
+                            onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
                         )
                         MobileDestination.HomeLayout -> HomeLayoutScreen(
                             state = state,
@@ -1497,18 +1533,45 @@ private fun MobileHomeContent(
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onPlaybackComingSoon: () -> Unit,
 ) {
+    val hero = state.home?.heroItems.orEmpty()
+    val hasHomeSections = state.home?.sections.orEmpty().any { it.items.isNotEmpty() }
+    val showEmptyHome = !state.isHomeLoading &&
+        hero.isEmpty() &&
+        state.libraries.isEmpty() &&
+        state.favorites.isEmpty() &&
+        !hasHomeSections &&
+        state.homeErrorMessage == null
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 4.dp, bottom = 118.dp),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
-            item {
-                val hero = state.home?.heroItems.orEmpty()
-                if (hero.isNotEmpty()) {
-                    HeroCarousel(items = hero, onOpen = { onOpenMedia(it.id) })
-                } else {
-                    HomeFallbackHero(state)
+            var revealIndex = 0
+            when {
+                hero.isNotEmpty() -> {
+                    val index = revealIndex++
+                    item(key = "home-hero") {
+                        HomeContentReveal(index = index) {
+                            HeroCarousel(items = hero, onOpen = { onOpenMedia(it.id) })
+                        }
+                    }
+                }
+                state.isHomeLoading -> {
+                    val index = revealIndex++
+                    item(key = "home-hero-skeleton") {
+                        HomeContentReveal(index = index) {
+                            HomeHeroSkeleton()
+                        }
+                    }
+                }
+                showEmptyHome -> {
+                    val index = revealIndex++
+                    item(key = "home-empty") {
+                        HomeContentReveal(index = index) {
+                            HomeFallbackHero(state)
+                        }
+                    }
                 }
             }
             state.homeLayout
@@ -1517,103 +1580,154 @@ private fun MobileHomeContent(
                 .forEach { preference ->
                 when (preference.type) {
                     HomeSectionType.MediaBar -> Unit
-                    HomeSectionType.MyMedia -> item {
-                        HomeRowInset { LibraryShowcaseRow("My Media", mainLibraries(state.libraries), onOpenLibrary) }
+                    HomeSectionType.MyMedia -> {
+                        val libraries = mainLibraries(state.libraries)
+                        if (libraries.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-my-media") {
+                                HomeContentReveal(index = index) {
+                                    HomeRowInset {
+                                        LibraryShowcaseRow(
+                                            title = "My Media",
+                                            libraries = libraries,
+                                            onOpenLibrary = onOpenLibrary,
+                                            showTileSubtext = false,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     HomeSectionType.ContinueWatching -> homeSection(state, "Continue")?.let { section ->
-                        item {
-                            HomeRowInset {
-                                HomeMediaSection(
-                                    section = section,
-                                    preference = preference,
-                                    onOpenMedia = onOpenMedia,
-                                    onMediaLongPress = onMediaLongPress,
-                                    onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
-                                    onPlaybackComingSoon = onPlaybackComingSoon,
-                                )
+                        if (section.items.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-section-${section.title}") {
+                            HomeContentReveal(index = index) {
+                                HomeRowInset {
+                                    HomeMediaSection(
+                                        section = section,
+                                        preference = preference,
+                                        onOpenMedia = onOpenMedia,
+                                        onMediaLongPress = onMediaLongPress,
+                                        onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
+                                        onPlaybackComingSoon = onPlaybackComingSoon,
+                                    )
+                                }
                             }
+                        }
                         }
                     }
                     HomeSectionType.RecentlyAddedMovies -> homeSection(state, "Movies")?.let { section ->
-                        item {
-                            HomeRowInset {
-                                HomeMediaSection(
-                                    section = section,
-                                    preference = preference,
-                                    onOpenMedia = onOpenMedia,
-                                    onMediaLongPress = onMediaLongPress,
-                                    onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
-                                    onPlaybackComingSoon = onPlaybackComingSoon,
-                                )
+                        if (section.items.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-section-${section.title}") {
+                            HomeContentReveal(index = index) {
+                                HomeRowInset {
+                                    HomeMediaSection(
+                                        section = section,
+                                        preference = preference,
+                                        onOpenMedia = onOpenMedia,
+                                        onMediaLongPress = onMediaLongPress,
+                                        onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
+                                        onPlaybackComingSoon = onPlaybackComingSoon,
+                                    )
+                                }
                             }
+                        }
                         }
                     }
                     HomeSectionType.RecentlyAddedTv -> homeSection(state, "TV")?.let { section ->
-                        item {
-                            HomeRowInset {
-                                HomeMediaSection(
-                                    section = section,
-                                    preference = preference,
-                                    onOpenMedia = onOpenMedia,
-                                    onMediaLongPress = onMediaLongPress,
-                                    onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
-                                    onPlaybackComingSoon = onPlaybackComingSoon,
-                                )
+                        if (section.items.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-section-${section.title}") {
+                            HomeContentReveal(index = index) {
+                                HomeRowInset {
+                                    HomeMediaSection(
+                                        section = section,
+                                        preference = preference,
+                                        onOpenMedia = onOpenMedia,
+                                        onMediaLongPress = onMediaLongPress,
+                                        onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
+                                        onPlaybackComingSoon = onPlaybackComingSoon,
+                                    )
+                                }
                             }
+                        }
                         }
                     }
                     HomeSectionType.LiveTvChannels -> homeSection(state, "Live TV")?.let { section ->
-                        item {
-                            HomeRowInset {
-                                HomeMediaSection(
-                                    section = section,
-                                    preference = preference,
-                                    onOpenMedia = { id ->
-                                        val channel = state.home?.liveTvChannels.orEmpty().firstOrNull { it.id == id }
-                                        val program = state.home?.liveTvPrograms.orEmpty().firstOrNull { it.id == id }
-                                        when {
-                                            channel != null -> onStartLiveTvPlayback(channel.id, channel.name, channel.currentProgramName)
-                                            program?.channelId != null -> program.channelId?.let { channelId ->
-                                                onStartLiveTvPlayback(channelId, program.title, program.subtitle)
-                                            } ?: onPlaybackComingSoon()
-                                            else -> onPlaybackComingSoon()
-                                        }
-                                    },
-                                    onMediaLongPress = onMediaLongPress,
-                                    onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
-                                    onPlaybackComingSoon = onPlaybackComingSoon,
-                                )
+                        if (section.items.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-section-${section.title}") {
+                            HomeContentReveal(index = index) {
+                                HomeRowInset {
+                                    HomeMediaSection(
+                                        section = section,
+                                        preference = preference,
+                                        onOpenMedia = { id ->
+                                            val channel = state.home?.liveTvChannels.orEmpty().firstOrNull { it.id == id }
+                                            val program = state.home?.liveTvPrograms.orEmpty().firstOrNull { it.id == id }
+                                            when {
+                                                channel != null -> onStartLiveTvPlayback(channel.id, channel.name, channel.currentProgramName)
+                                                program?.channelId != null -> program.channelId?.let { channelId ->
+                                                    onStartLiveTvPlayback(channelId, program.title, program.subtitle)
+                                                } ?: onPlaybackComingSoon()
+                                                else -> onPlaybackComingSoon()
+                                            }
+                                        },
+                                        onMediaLongPress = onMediaLongPress,
+                                        onOpenLibrary = { libraryId -> state.libraries.firstOrNull { it.id == libraryId }?.let(onOpenLibrary) },
+                                        onPlaybackComingSoon = onPlaybackComingSoon,
+                                    )
+                                }
                             }
                         }
+                        }
                     }
-                    HomeSectionType.SmartRows -> item {
-                        HomeRowInset {
-                            SmartRowsSection(
-                                state = state,
-                                preference = preference,
-                                onOpenMedia = onOpenMedia,
-                                onMediaLongPress = onMediaLongPress,
-                                onPlaybackComingSoon = onPlaybackComingSoon,
-                            )
+                    HomeSectionType.SmartRows -> {
+                        val smartSections = smartRowsFor(state)
+                        if (smartSections.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-smart-rows") {
+                                HomeContentReveal(index = index) {
+                                    HomeRowInset {
+                                        SmartRowsSection(
+                                            sections = smartSections,
+                                            preference = preference,
+                                            onOpenMedia = onOpenMedia,
+                                            onMediaLongPress = onMediaLongPress,
+                                            onPlaybackComingSoon = onPlaybackComingSoon,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     HomeSectionType.OtherLibraries -> {
                         val other = otherLibraries(state.libraries)
-                        if (other.isNotEmpty()) item {
-                            HomeRowInset { LibraryShowcaseRow("More Libraries", other, onOpenLibrary) }
+                        if (other.isNotEmpty()) {
+                            val index = revealIndex++
+                            item(key = "home-more-libraries") {
+                                HomeContentReveal(index = index) {
+                                    HomeRowInset { LibraryShowcaseRow("More Libraries", other, onOpenLibrary) }
+                                }
+                            }
                         }
                     }
                 }
             }
             if (state.favorites.isNotEmpty()) {
-                item {
-                    HomeRowInset {
-                        MyListHomeRow(items = state.favorites.take(16), onOpenMedia = onOpenMedia, onMediaLongPress = onMediaLongPress)
+                val index = revealIndex++
+                item(key = "home-my-list") {
+                    HomeContentReveal(index = index) {
+                        HomeRowInset {
+                            MyListHomeRow(items = state.favorites.take(16), onOpenMedia = onOpenMedia, onMediaLongPress = onMediaLongPress)
+                        }
                     }
                 }
             }
-            if (state.isHomeLoading) {
-                item { HomeRowInset { HomeLoadingShelf() } }
+            if (state.isHomeLoading && !hasHomeSections && state.libraries.isEmpty() && state.favorites.isEmpty()) {
+                item(key = "home-skeleton-rows") { HomeRowInset { HomeLoadingShelf() } }
             }
             state.homeErrorMessage?.let { message ->
                 item {
@@ -1685,11 +1799,8 @@ private fun MobileHomeProfileAvatar(state: VantafynHomeUiState, onProfile: () ->
 
 @Composable
 private fun GlassAction(text: String, onClick: () -> Unit = {}) {
-    VantafynGlassSurface(
-        modifier = Modifier
-            .clickable(onClick = onClick),
-        variant = VantafynGlassVariant.Chip,
-        cornerRadius = 999.dp,
+    VantafynGlassChip(
+        onClick = onClick,
         contentPadding = PaddingValues(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
     ) {
         Text(text, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge)
@@ -1899,35 +2010,135 @@ private fun HomeFallbackHero(state: VantafynHomeUiState) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(260.dp)
-            .clip(RoundedCornerShape(24.dp))
+            .height(230.dp)
             .background(Brush.linearGradient(listOf(Color(0xFF172037), Color(0xFF302A52), VantafynColors.Graphite)))
             .padding(VantafynSpacing.lg),
         contentAlignment = Alignment.BottomStart,
     ) {
         Column {
-            Text("Welcome back, ${state.session?.user?.name.orEmpty()}", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium)
-            Text("Your Jellyfin library is ready.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+            Text("Your library is ready", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Text("Add media to Jellyfin and Vantafyn will bring it to life here.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
         }
     }
 }
 
 @Composable
 private fun HomeLoadingShelf() {
-    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-        Text("Loading your home", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-            items(4) {
-                Box(
-                    modifier = Modifier
-                        .width(146.dp)
-                        .height(220.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(VantafynColors.SurfaceHigh.copy(alpha = 0.72f)),
-                )
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg)) {
+        repeat(3) { row ->
+            HomeSkeletonRow(row)
+        }
+    }
+}
+
+@Composable
+private fun HomeHeroSkeleton() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(292.dp)
+            .background(VantafynColors.Graphite),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF101624),
+                            Color(0xFF202844),
+                            Color(0xFF0B0F19),
+                        ),
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = VantafynSpacing.xl, bottom = 42.dp)
+                .width(210.dp)
+                .height(22.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(homeSkeletonBrush()),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = VantafynSpacing.xl, bottom = 78.dp)
+                .width(156.dp)
+                .height(54.dp)
+                .clip(RoundedCornerShape(18.dp))
+                .background(homeSkeletonBrush()),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(70.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, VantafynColors.Graphite),
+                    ),
+                ),
+        )
+    }
+}
+
+@Composable
+private fun HomeSkeletonRow(index: Int) {
+    StaggeredSearchReveal(index = index) {
+        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+            Box(
+                modifier = Modifier
+                    .width(if (index == 0) 96.dp else 142.dp)
+                    .height(18.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(homeSkeletonBrush()),
+            )
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+                items(4) {
+                    Box(
+                        modifier = Modifier
+                            .width(if (index == 0) 210.dp else 142.dp)
+                            .height(if (index == 0) 118.dp else 214.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(homeSkeletonBrush()),
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun homeSkeletonBrush(): Brush {
+    val transition = rememberInfiniteTransition(label = "homeSkeleton")
+    val shift by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "homeSkeletonShift",
+    )
+    return Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.050f),
+            Color.White.copy(alpha = 0.105f),
+            Color.White.copy(alpha = 0.045f),
+        ),
+        start = Offset(-260f + shift * 520f, 0f),
+        end = Offset(shift * 520f, 220f),
+    )
+}
+
+@Composable
+private fun HomeContentReveal(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    content()
 }
 
 @Composable
@@ -1935,6 +2146,7 @@ private fun LibraryShowcaseRow(
     title: String,
     libraries: List<JellyfinLibrary>,
     onOpenLibrary: (JellyfinLibrary) -> Unit,
+    showTileSubtext: Boolean = true,
 ) {
     if (libraries.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
@@ -1956,7 +2168,9 @@ private fun LibraryShowcaseRow(
                             .height(118.dp),
                     )
                     Text(library.name, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
-                    Text(library.collectionType?.replaceFirstChar(Char::titlecase) ?: "Library", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                    if (showTileSubtext) {
+                        Text(library.collectionType?.replaceFirstChar(Char::titlecase) ?: "Library", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                    }
                 }
             }
         }
@@ -1972,6 +2186,7 @@ private fun HomeMediaSection(
     onOpenLibrary: (java.util.UUID) -> Unit,
     onPlaybackComingSoon: () -> Unit,
 ) {
+    if (section.items.isEmpty()) return
     val spacing = preference.spacing.toDp()
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
         Text(section.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
@@ -2022,33 +2237,22 @@ private fun previewImagesFor(state: VantafynHomeUiState, type: HomeSectionType):
         HomeSectionType.OtherLibraries -> otherLibraries(state.libraries).mapNotNull { it.imageUrl }
     }
 
-@Composable
-private fun SmartRowsPlaceholder() {
-    GlassPanel {
-        Text("Smart Rows", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Text(
-            "Add real metadata rows such as New in Crime, Highly Rated, and Recently Released from Home Sections. Rows stay hidden until backed by Jellyfin results.",
-            color = VantafynColors.Muted,
-        )
+private fun smartRowsFor(state: VantafynHomeUiState): List<JellyfinHomeSection> =
+    state.home?.sections.orEmpty().filter {
+        it.title in state.configuredSmartRows && it.items.isNotEmpty()
     }
-}
 
 @Composable
 private fun SmartRowsSection(
-    state: VantafynHomeUiState,
+    sections: List<JellyfinHomeSection>,
     preference: HomeSectionPreference,
     onOpenMedia: (java.util.UUID) -> Unit,
     onMediaLongPress: (MediaActionTarget) -> Unit,
     onPlaybackComingSoon: () -> Unit,
 ) {
-    val smartSections = state.home?.sections.orEmpty().filter {
-        it.title in state.configuredSmartRows
-    }
-    if (smartSections.isEmpty()) {
-        SmartRowsPlaceholder()
-    } else {
-        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg)) {
-            smartSections.forEach { section ->
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg)) {
+        sections.forEachIndexed { index, section ->
+            HomeContentReveal(index = index) {
                 HomeMediaSection(
                     section = section,
                     preference = preference,
@@ -2111,6 +2315,7 @@ private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPre
     val width = preference?.cardWidth(wide) ?: if (wide) 226.dp else 142.dp
     val height = preference?.cardHeight(wide) ?: if (wide) 128.dp else 214.dp
     val corner = preference?.cardCorner() ?: 16.dp
+    val artworkUrl = item.resolveArtwork(preference, wide)
     Column(
         modifier = Modifier.width(width),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
@@ -2123,12 +2328,15 @@ private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPre
                 .background(Brush.linearGradient(listOf(Color(0xFF24304D), Color(0xFF393456), VantafynColors.SurfaceHigh)))
                 .combinedClickable(onClick = onClick, onLongClick = onLongPress),
         ) {
-            AsyncImage(
-                model = item.resolveArtwork(preference, wide),
-                contentDescription = item.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-            )
+            MissingArtworkFallback(title = item.title, wide = wide)
+            if (artworkUrl != null) {
+                AsyncImage(
+                    model = artworkUrl,
+                    contentDescription = item.title,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop,
+                )
+            }
             if (progress != null && progress > 0f) {
                 Box(
                     modifier = Modifier
@@ -2219,12 +2427,15 @@ private fun ArtworkBox(
             .background(Brush.linearGradient(listOf(Color(0xFF24304D), Color(0xFF393456), VantafynColors.SurfaceHigh)))
             .combinedClickable(onClick = onClick, onLongClick = onLongPress),
     ) {
-        AsyncImage(
-            model = imageUrl,
-            contentDescription = title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop,
-        )
+        MissingArtworkFallback(title = title, wide = wide)
+        if (imageUrl != null) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        }
         if (progress != null && progress > 0f) {
             Box(
                 modifier = Modifier
@@ -2238,6 +2449,49 @@ private fun ArtworkBox(
 }
 
 @Composable
+private fun MissingArtworkFallback(title: String, wide: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF1C253A),
+                        Color(0xFF2D3150),
+                        Color(0xFF151A26),
+                    ),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            drawCircle(
+                color = Color(0xFF62D6FF).copy(alpha = 0.08f),
+                radius = size.minDimension * 0.42f,
+                center = Offset(size.width * 0.28f, size.height * 0.18f),
+            )
+            drawCircle(
+                color = Color(0xFF8EA2FF).copy(alpha = 0.10f),
+                radius = size.minDimension * 0.34f,
+                center = Offset(size.width * 0.76f, size.height * 0.72f),
+            )
+        }
+        Text(
+            initials(title),
+            color = VantafynColors.Ink.copy(alpha = 0.78f),
+            style = if (wide) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.065f))
+                .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
+                .padding(horizontal = if (wide) 18.dp else 14.dp, vertical = if (wide) 12.dp else 10.dp),
+        )
+    }
+}
+
+@Composable
 private fun LibrariesScreen(state: VantafynHomeUiState, onOpenLibrary: (JellyfinLibrary) -> Unit) {
     LazyColumn(
         modifier = Modifier
@@ -2246,7 +2500,14 @@ private fun LibrariesScreen(state: VantafynHomeUiState, onOpenLibrary: (Jellyfin
         contentPadding = PaddingValues(bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
-        item { ScreenTitle("Libraries", "Browse every Jellyfin view available to this profile.") }
+        item {
+            Text(
+                "Libraries",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
         if (state.isLibrariesLoading) item { HomeLoadingShelf() }
         state.errorMessage?.let { item { VantafynErrorCard(it) } }
         if (!state.isLibrariesLoading && state.libraries.isEmpty()) {
@@ -2489,9 +2750,10 @@ private fun SearchScreen(
     onMediaLongPress: (MediaActionTarget) -> Unit,
 ) {
     var selectedType by remember { mutableStateOf<String?>(null) }
+    val trimmedQuery = state.searchQuery.trim()
     val groupedResults = state.searchResults.groupBy { it.itemType?.ifBlank { "Other" } ?: "Other" }
     val typeFilters = groupedResults.keys.sorted()
-    val visibleGroups = if (selectedType == null) groupedResults else groupedResults.filterKeys { it == selectedType }
+    val visibleGroups = if (selectedType == null) groupedResults else groupedResults.filterKeys { it.matchesSearchType(selectedType) }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -2511,7 +2773,7 @@ private fun SearchScreen(
             )
         }
         if (typeFilters.isNotEmpty()) {
-            item {
+            item(key = "search-filters") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
                     item { SelectableChip("All", selectedType == null) { selectedType = null } }
                     items(typeFilters, key = { it }) { type ->
@@ -2520,25 +2782,39 @@ private fun SearchScreen(
                 }
             }
         }
-        if (state.searchQuery.trim().length < 2) {
-            item { EmptyState("Start typing", "Search runs after a short pause.") }
+        if (trimmedQuery.length < 2) {
+            item(key = "search-idle") {
+                EmptySearchState(
+                    selectedType = selectedType,
+                    onSelectType = { selectedType = it },
+                )
+            }
         }
-        if (state.isSearchLoading) item { VantafynLoadingIndicator("Searching") }
-        state.searchError?.let { item { VantafynErrorCard(it) } }
-        if (!state.isSearchLoading && state.searchQuery.trim().length >= 2 && state.searchResults.isEmpty() && state.searchError == null) {
-            item { EmptyState("No results", "Try a different title or person.") }
+        if (state.isSearchLoading) {
+            item(key = "search-loading") { SearchLoadingState() }
         }
-        visibleGroups.toSortedMap().forEach { (type, results) ->
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        state.searchError?.let { item(key = "search-error") { VantafynErrorCard(it) } }
+        if (!state.isSearchLoading && trimmedQuery.length >= 2 && state.searchResults.isEmpty() && state.searchError == null) {
+            item(key = "search-no-results-$trimmedQuery") {
+                NoSearchResultsState(
+                    selectedType = selectedType,
+                    onClearSearch = { onSearchQueryChanged("") },
+                )
+            }
+        }
+        visibleGroups.toSortedMap().entries.forEachIndexed { sectionIndex, (type, results) ->
+            item(key = "search-section-$type-$trimmedQuery") {
+                AnimatedSearchSection(index = sectionIndex) {
                     Text(type.searchGroupLabel(), color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-                        items(results, key = { it.id }) { result ->
-                            SearchResultCard(
-                                item = result,
-                                onClick = { onOpenMedia(result.id) },
-                                onLongPress = { onMediaLongPress(result.toMediaActionTarget()) },
-                            )
+                        itemsIndexed(results, key = { _, item -> item.id }) { cardIndex, result ->
+                            AnimatedSearchResultCard(index = cardIndex) {
+                                SearchResultCard(
+                                    item = result,
+                                    onClick = { onOpenMedia(result.id) },
+                                    onLongPress = { onMediaLongPress(result.toMediaActionTarget()) },
+                                )
+                            }
                         }
                     }
                 }
@@ -2547,14 +2823,254 @@ private fun SearchScreen(
     }
 }
 
+private data class SearchQuickFilter(
+    val label: String,
+    val type: String,
+    val icon: ImageVector,
+)
+
+private val searchQuickFilters = listOf(
+    SearchQuickFilter("Movies", "Movie", Icons.Rounded.Movie),
+    SearchQuickFilter("TV Shows", "Series", Icons.Rounded.Tv),
+    SearchQuickFilter("Episodes", "Episode", Icons.Rounded.PlayArrow),
+    SearchQuickFilter("People", "Person", Icons.Rounded.Person),
+    SearchQuickFilter("Music", "Music", Icons.Rounded.MusicNote),
+    SearchQuickFilter("Collections", "BoxSet", Icons.Rounded.CollectionsBookmark),
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EmptySearchState(
+    selectedType: String?,
+    onSelectType: (String?) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = VantafynSpacing.sm),
+        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "Search your universe",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Find movies, shows, music, people, and more.",
+                    color = VantafynColors.Muted.copy(alpha = 0.88f),
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+            }
+            SubtleSearchSparkle()
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+        ) {
+            searchQuickFilters.forEachIndexed { index, chip ->
+                StaggeredSearchReveal(index = index) {
+                    SearchQuickChip(
+                        label = chip.label,
+                        icon = chip.icon,
+                        selected = selectedType == chip.type,
+                        onClick = { onSelectType(if (selectedType == chip.type) null else chip.type) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SearchQuickChip(
+    label: String,
+    icon: ImageVector,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val glow by animateFloatAsState(
+        targetValue = if (selected) 1f else 0f,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "searchChipGlow",
+    )
+    VantafynGlassChip(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF31D7FF).copy(alpha = 0.05f + glow * 0.10f),
+                        Color(0xFF8B5CFF).copy(alpha = 0.04f + glow * 0.12f),
+                    ),
+                ),
+            ),
+        selected = selected,
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 9.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = if (selected) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.82f),
+                modifier = Modifier.size(17.dp),
+            )
+            Text(
+                label,
+                color = if (selected) VantafynColors.Ink else VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SearchLoadingState() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = VantafynSpacing.xs),
+        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SubtleSearchSparkle()
+        Text("Searching", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+private fun NoSearchResultsState(
+    selectedType: String?,
+    onClearSearch: () -> Unit,
+) {
+    StaggeredSearchReveal(index = 0) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = VantafynSpacing.lg),
+            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            SubtleSearchSparkle()
+            Text("No results", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(
+                "Try another title, actor, artist, or keyword.",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+            if (selectedType != null) {
+                Text("Filtered by ${selectedType.searchGroupLabel()}", color = VantafynColors.Muted.copy(alpha = 0.72f), style = MaterialTheme.typography.bodyLarge)
+            }
+            Text(
+                "Clear search",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(onClick = onClearSearch)
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnimatedSearchSection(
+    index: Int,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    StaggeredSearchReveal(index = index) {
+        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md), content = content)
+    }
+}
+
+@Composable
+private fun AnimatedSearchResultCard(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    StaggeredSearchReveal(index = index.coerceAtMost(8), content = content)
+}
+
+@Composable
+private fun StaggeredSearchReveal(
+    index: Int,
+    content: @Composable () -> Unit,
+) {
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(index) {
+        delay((index * 34L).coerceAtMost(220L))
+        visible = true
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)) +
+            slideInVertically(
+                animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 5 },
+            ),
+    ) {
+        content()
+    }
+}
+
+@Composable
+private fun SubtleSearchSparkle() {
+    val transition = rememberInfiniteTransition(label = "searchSparkle")
+    val pulse by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "searchSparklePulse",
+    )
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                Brush.radialGradient(
+                    listOf(
+                        Color(0xFF62D6FF).copy(alpha = 0.14f * pulse),
+                        Color(0xFF8EA2FF).copy(alpha = 0.08f * pulse),
+                        Color.Transparent,
+                    ),
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.AutoAwesome,
+            contentDescription = null,
+            tint = VantafynColors.Secondary.copy(alpha = 0.48f + 0.24f * pulse),
+            modifier = Modifier.size(18.dp),
+        )
+        Icon(
+            imageVector = Icons.Rounded.Search,
+            contentDescription = null,
+            tint = VantafynColors.Ink.copy(alpha = 0.70f),
+            modifier = Modifier.size(15.dp),
+        )
+    }
+}
+
 @Composable
 private fun SelectableChip(text: String, selected: Boolean, onClick: () -> Unit) {
-    VantafynGlassSurface(
-        modifier = Modifier
-            .clickable(onClick = onClick),
-        variant = VantafynGlassVariant.Chip,
+    VantafynGlassChip(
         selected = selected,
-        cornerRadius = 999.dp,
+        onClick = onClick,
         contentPadding = PaddingValues(horizontal = 13.dp, vertical = 8.dp),
     ) {
         Text(
@@ -2603,10 +3119,19 @@ private fun FavoritesScreen(
         item {
             Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("My List", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                GlassAction("Refresh", onClick = onLoadFavorites)
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "Refresh My List",
+                    tint = VantafynColors.Ink.copy(alpha = 0.86f),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onLoadFavorites)
+                        .padding(8.dp),
+                )
             }
         }
-        if (state.isFavoritesLoading) item { HomeLoadingShelf() }
+        if (state.isFavoritesLoading) item { MyListLoadingSkeleton() }
         state.favoritesError?.let { item { VantafynErrorCard(it) } }
         if (!state.isFavoritesLoading && state.favorites.isEmpty() && state.favoritesError == null) {
             item { EmptyState("Your list is empty", "Add movies and shows from their detail pages.") }
@@ -2624,6 +3149,64 @@ private fun FavoritesScreen(
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MyListLoadingSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xl)) {
+        MyListSkeletonRow(labelWidth = 128.dp, wide = false)
+        MyListSkeletonRow(labelWidth = 92.dp, wide = true)
+        MyListSkeletonRow(labelWidth = 112.dp, wide = false)
+    }
+}
+
+@Composable
+private fun MyListSkeletonRow(labelWidth: androidx.compose.ui.unit.Dp, wide: Boolean) {
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        Box(
+            modifier = Modifier
+                .width(labelWidth)
+                .height(18.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(homeSkeletonBrush()),
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+            items(4) { index ->
+                Column(
+                    modifier = Modifier.width(if (wide) 210.dp else 142.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(if (wide) 118.dp else 214.dp),
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(homeSkeletonBrush()),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(if (index % 2 == 0) 0.86f else 0.66f)
+                            .height(13.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(homeSkeletonBrush()),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(if (index % 2 == 0) 0.52f else 0.44f)
+                            .height(11.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(homeSkeletonBrush()),
+                    )
                 }
             }
         }
@@ -3230,6 +3813,9 @@ private fun PlaybackPreferencesScreen(
     onBack: () -> Unit,
     onEdit: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSave: () -> Unit,
+    onSetAutoplayCountdownSeconds: (Int) -> Unit,
+    onTogglePassoutProtection: () -> Unit,
+    onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
 ) {
     val preferences = state.editablePlaybackPreferences
     LazyColumn(
@@ -3289,8 +3875,31 @@ private fun PlaybackPreferencesScreen(
                     PremiumToggleRow("Remember audio selections", "Saved through Jellyfin user configuration.", preferences.rememberAudioSelections) {
                         onEdit { it.copy(rememberAudioSelections = !it.rememberAudioSelections) }
                     }
-                    PremiumToggleRow("Next episode autoplay", "Controls Jellyfin's user-level next episode setting.", preferences.enableNextEpisodeAutoPlay) {
+                    PremiumToggleRow("Autoplay next episode", "Show Up Next near the end of an episode and continue automatically.", preferences.enableNextEpisodeAutoPlay) {
                         onEdit { it.copy(enableNextEpisodeAutoPlay = !it.enableNextEpisodeAutoPlay) }
+                    }
+                    Text("Up Next countdown", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                        items(listOf(5, 10, 15, 30)) { seconds ->
+                            SelectableChip("${seconds}s", state.autoplayCountdownSeconds == seconds) {
+                                onSetAutoplayCountdownSeconds(seconds)
+                            }
+                        }
+                    }
+                    PremiumToggleRow(
+                        "Passout protection",
+                        "Stop autoplay after your selected continuous watching limit.",
+                        state.passoutProtectionEnabled,
+                        onTogglePassoutProtection,
+                    )
+                    Text("Continue playing limit", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                        items(listOf(1, 2, 3, 4, 5)) { hours ->
+                            val minutes = hours * 60
+                            SelectableChip(hours.toHourLimitLabel(), state.passoutProtectionLimitMinutes == minutes) {
+                                onSetPassoutProtectionLimitMinutes(minutes)
+                            }
+                        }
                     }
                 }
             }
@@ -3995,18 +4604,20 @@ private fun DetailActionPanel(
 
 @Composable
 private fun DetailAction(icon: String, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .height(70.dp)
-            .clip(RoundedCornerShape(18.dp))
-            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.56f))
-            .clickable(onClick = onClick)
-            .padding(vertical = VantafynSpacing.sm),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
+    VantafynGlassTile(
+        modifier = modifier.height(72.dp),
+        onClick = onClick,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(vertical = VantafynSpacing.sm),
     ) {
-        Text(icon, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, maxLines = 1)
-        Text(label, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text(icon, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, maxLines = 1)
+            Text(label, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -4027,19 +4638,50 @@ private fun DetailOverview(detail: JellyfinMediaDetail) {
 private fun DetailChipRow(values: List<String>) {
     if (values.isEmpty()) return
     FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(7.dp, Alignment.CenterHorizontally),
         verticalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         values.forEach { value ->
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color.White.copy(alpha = 0.07f))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            val tone = detailChipTone(value)
+            VantafynGlassPill(
+                selected = tone != null,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
             ) {
-                Text(value, color = VantafynColors.Ink.copy(alpha = 0.88f), style = MaterialTheme.typography.bodyLarge, maxLines = 1)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    tone?.let {
+                        Box(
+                            modifier = Modifier
+                                .size(5.dp)
+                                .background(it.copy(alpha = 0.90f), RoundedCornerShape(999.dp)),
+                        )
+                    }
+                    Text(
+                        value,
+                        color = tone ?: VantafynColors.Ink.copy(alpha = 0.88f),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (tone != null) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                    )
+                }
             }
         }
+    }
+}
+
+private fun detailChipTone(value: String): Color? {
+    val normalized = value.lowercase()
+    return when {
+        "hdr" in normalized || "dolby vision" in normalized || "dv" == normalized -> Color(0xFFFFD36A)
+        "4k" in normalized || "2160" in normalized || "uhd" in normalized -> Color(0xFF8FE7FF)
+        "1080" in normalized || "720" in normalized -> Color(0xFF6FA8FF)
+        "sub" in normalized || "cc" == normalized || "caption" in normalized -> Color(0xFFC892FF)
+        "eng" == normalized || "english" in normalized || "audio" in normalized -> Color(0xFF7CE7C8)
+        "atmos" in normalized || "dts" in normalized || "aac" in normalized || "flac" in normalized || "truehd" in normalized -> Color(0xFFFF8AD8)
+        else -> null
     }
 }
 
@@ -4139,14 +4781,12 @@ private fun DetailActionSheet(
 
 @Composable
 private fun DetailSheetAction(icon: String, label: String, onClick: () -> Unit, enabled: Boolean = true) {
-    VantafynGlassSurface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(enabled = enabled, onClick = onClick),
-        variant = VantafynGlassVariant.Card,
+    VantafynGlassTile(
+        modifier = Modifier.fillMaxWidth(),
         enabled = enabled,
         cornerRadius = 18.dp,
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        onClick = onClick,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(icon, color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.5f))
@@ -4324,10 +4964,10 @@ private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onM
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            CompactBackButton(onClick = onBack)
+            DetailFlatBackButton(onClick = onBack)
             Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs)) {
-                FloatingCircleButton(if (detail.isFavorite) "♥" else "♡", onFavorite)
-                FloatingCircleButton("⋯", onMore)
+                DetailFlatIconButton(if (detail.isFavorite) "♥" else "♡", onFavorite)
+                DetailFlatIconButton("⋯", onMore)
             }
         }
         Column(
@@ -4364,35 +5004,39 @@ private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onM
 }
 
 @Composable
-private fun CompactBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun DetailFlatBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
             .size(40.dp)
             .clip(RoundedCornerShape(999.dp))
-            .background(VantafynColors.Surface.copy(alpha = 0.66f))
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(modifier = Modifier.size(18.dp)) {
-            val stroke = 2.35.dp.toPx()
+        Canvas(modifier = Modifier.size(20.dp)) {
+            val stroke = 2.55.dp.toPx()
             drawLine(
-                color = VantafynColors.Ink,
-                start = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 3.dp.toPx()),
-                end = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(12.5.dp.toPx(), 3.5.dp.toPx()),
+                end = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 10.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round,
             )
             drawLine(
-                color = VantafynColors.Ink,
-                start = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
-                end = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 15.dp.toPx()),
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 10.dp.toPx()),
+                end = androidx.compose.ui.geometry.Offset(12.5.dp.toPx(), 16.5.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round,
             )
             drawLine(
-                color = VantafynColors.Ink,
-                start = androidx.compose.ui.geometry.Offset(5.5.dp.toPx(), 9.dp.toPx()),
-                end = androidx.compose.ui.geometry.Offset(16.dp.toPx(), 9.dp.toPx()),
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(5.8.dp.toPx(), 10.dp.toPx()),
+                end = androidx.compose.ui.geometry.Offset(18.dp.toPx(), 10.dp.toPx()),
                 strokeWidth = stroke,
                 cap = StrokeCap.Round,
             )
@@ -4401,42 +5045,140 @@ private fun CompactBackButton(onClick: () -> Unit, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun FloatingCircleButton(label: String, onClick: () -> Unit) {
+private fun DetailFlatIconButton(label: String, onClick: () -> Unit) {
+    val interactionSource = remember { MutableInteractionSource() }
     Box(
         modifier = Modifier
             .size(42.dp)
             .clip(RoundedCornerShape(999.dp))
-            .background(VantafynColors.Surface.copy(alpha = 0.62f))
-            .clickable(onClick = onClick),
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(
+            label,
+            color = Color.White,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
+private fun CompactBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    VantafynGlassTile(
+        modifier = modifier
+            .size(40.dp),
+        onClick = onClick,
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Canvas(modifier = Modifier.size(18.dp)) {
+                val stroke = 2.35.dp.toPx()
+                drawLine(
+                    color = VantafynColors.Ink,
+                    start = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 3.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = VantafynColors.Ink,
+                    start = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 15.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = VantafynColors.Ink,
+                    start = androidx.compose.ui.geometry.Offset(5.5.dp.toPx(), 9.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(16.dp.toPx(), 9.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingCircleButton(label: String, onClick: () -> Unit) {
+    VantafynGlassTile(
+        modifier = Modifier.size(42.dp),
+        onClick = onClick,
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(label, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
 @Composable
 private fun LibraryListCard(library: JellyfinLibrary, onClick: () -> Unit) {
-    Row(
+    VantafynGlassTile(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.58f))
-            .clickable(onClick = onClick)
-            .padding(VantafynSpacing.md),
-        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-        verticalAlignment = Alignment.CenterVertically,
+            .drawWithContent {
+                drawContent()
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.035f),
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.18f),
+                        ),
+                    ),
+                    cornerRadius = CornerRadius(22.dp.toPx(), 22.dp.toPx()),
+                )
+            },
+        onClick = onClick,
+        cornerRadius = 22.dp,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 11.dp),
     ) {
-        ArtworkBox(
-            imageUrl = library.imageUrl,
-            title = library.name,
-            wide = true,
-            progress = null,
-            onClick = onClick,
-            modifier = Modifier.width(112.dp).height(72.dp),
-        )
-        Column {
-            Text(library.name, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-            Text(library.collectionType?.replaceFirstChar(Char::titlecase) ?: "Library", color = VantafynColors.Muted)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(104.dp)
+                    .height(66.dp)
+                    .clip(RoundedCornerShape(17.dp))
+                    .background(Color.Black.copy(alpha = 0.24f))
+                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(17.dp)),
+            ) {
+                ArtworkBox(
+                    imageUrl = library.imageUrl,
+                    title = library.name,
+                    wide = true,
+                    progress = null,
+                    onClick = onClick,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.045f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.18f),
+                                ),
+                            ),
+                        ),
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(library.name, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }
@@ -4533,11 +5275,14 @@ private fun MobileBottomNav(
             ) {
                 tabs.forEach { destination ->
                     val tabSelected = selected == destination || (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile)
+                    val interactionSource = remember { MutableInteractionSource() }
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxSize()
                             .combinedClickable(
+                                interactionSource = interactionSource,
+                                indication = null,
                                 onClick = { onSelected(destination) },
                                 onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
                             ),
@@ -5153,6 +5898,19 @@ private fun String.searchGroupLabel(): String =
         "livetvchannel", "livetvprogram" -> "Live TV"
         else -> replaceFirstChar(Char::titlecase)
     }
+
+private fun String.matchesSearchType(selectedType: String?): Boolean {
+    if (selectedType == null) return true
+    val type = lowercase()
+    return when (selectedType.lowercase()) {
+        "music" -> type in setOf("audio", "musicalbum", "musicartist")
+        "boxset" -> type == "boxset"
+        else -> type == selectedType.lowercase()
+    }
+}
+
+private fun Int.toHourLimitLabel(): String =
+    if (this == 1) "1 hour" else "$this hours"
 
 private fun JellyfinMediaDetail.primaryActionLabel(): String {
     val watchedProgress = progress

@@ -54,6 +54,7 @@ import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.SearchHint
 import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.PlayMethod
+import org.jellyfin.sdk.model.api.PlayAccess
 import org.jellyfin.sdk.model.api.PlaybackInfoDto
 import org.jellyfin.sdk.model.api.PlaybackOrder
 import org.jellyfin.sdk.model.api.PlaybackProgressInfo
@@ -440,6 +441,39 @@ class SdkJellyfinMediaRepository(
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
                 JellyfinResult.Success(fetchEpisodes(api, session, seriesId, seasonId, limit = 200))
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getNextEpisode(
+        session: JellyfinSession,
+        currentEpisodeId: java.util.UUID,
+    ): JellyfinResult<JellyfinUpNextCandidate?> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val current by api.userLibraryApi.getItem(userId = session.user.id, itemId = currentEpisodeId)
+                if (current.type != BaseItemKind.EPISODE) return@withContext JellyfinResult.Success(null)
+                val seriesId = current.seriesId ?: return@withContext JellyfinResult.Success(null)
+                val currentSeason = current.parentIndexNumber ?: Int.MAX_VALUE
+                val currentEpisode = current.indexNumber ?: Int.MAX_VALUE
+                val episodes = fetchEpisodes(api, session, seriesId, seasonId = null, limit = 1000)
+                    .filter { candidate ->
+                        candidate.id != currentEpisodeId &&
+                            candidate.indexNumber != null &&
+                            candidate.seasonIndexNumber != null
+                    }
+                    .sortedWith(compareBy<JellyfinEpisode> { it.seasonIndexNumber ?: Int.MAX_VALUE }.thenBy { it.indexNumber ?: Int.MAX_VALUE })
+                val next = episodes.firstOrNull { episode ->
+                    val season = episode.seasonIndexNumber ?: return@firstOrNull false
+                    val index = episode.indexNumber ?: return@firstOrNull false
+                    season > currentSeason || (season == currentSeason && index > currentEpisode)
+                } ?: return@withContext JellyfinResult.Success(null)
+                val nextItem by api.userLibraryApi.getItem(userId = session.user.id, itemId = next.id)
+                if (nextItem.playAccess == PlayAccess.NONE) return@withContext JellyfinResult.Success(null)
+                if (nextItem.mediaSources.orEmpty().isEmpty()) return@withContext JellyfinResult.Success(null)
+                JellyfinResult.Success(nextItem.toUpNextCandidate(api))
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
@@ -1728,8 +1762,9 @@ class SdkJellyfinHomeRepository(
                     if (latestMovies.isNotEmpty()) add(JellyfinHomeSection("Recently Added Movies", latestMovies.map { it.toCard(api, JellyfinMediaCardShape.Poster) }))
                     if (latestTv.isNotEmpty()) add(JellyfinHomeSection("Recently Added TV", latestTv.map { it.toCard(api, JellyfinMediaCardShape.Wide) }))
                     if (liveTvChannels.isNotEmpty() || liveTvPrograms.isNotEmpty()) {
+                        val channelImagesById = liveTvChannels.associate { it.id to it.imageUrl }
                         val channelCards = liveTvChannels.map { it.toCard() }
-                        val programCards = liveTvPrograms.map { it.toCard() }
+                        val programCards = liveTvPrograms.map { it.toCard(channelImagesById[it.channelId]) }
                         add(JellyfinHomeSection("Live TV Channels", (programCards + channelCards).take(24)))
                     }
                     addAll(smartSections)
@@ -2102,6 +2137,11 @@ private fun BaseItemDto.toDetail(
             JellyfinExternalLink(name, href)
         },
         themeSongUrl = themeSongUrl,
+        seriesId = seriesId,
+        seasonId = seasonId,
+        seriesName = seriesName,
+        seasonIndexNumber = parentIndexNumber,
+        episodeIndexNumber = indexNumber,
     )
 
 private fun BaseItemDto.toEpisode(api: ApiClient): JellyfinEpisode =
@@ -2117,6 +2157,26 @@ private fun BaseItemDto.toEpisode(api: ApiClient): JellyfinEpisode =
         runtimeMinutes = runTimeTicks?.let { (it / 600_000_000L).toInt() },
         indexNumber = indexNumber,
         seasonIndexNumber = parentIndexNumber,
+        seriesId = seriesId,
+        seasonId = seasonId,
+        seriesName = seriesName,
+    )
+
+private fun BaseItemDto.toUpNextCandidate(api: ApiClient): JellyfinUpNextCandidate =
+    JellyfinUpNextCandidate(
+        itemId = id,
+        seriesId = seriesId,
+        seasonId = seasonId,
+        title = name ?: "Episode ${indexNumber ?: ""}".trim(),
+        seriesName = seriesName,
+        seasonNumber = parentIndexNumber,
+        episodeNumber = indexNumber,
+        runtimeTicks = runTimeTicks,
+        imageUrl = thumbImageUrl(api, 640) ?: primaryImageUrl(api, 420),
+        backdropUrl = backdropImageUrl(api, 1000) ?: thumbImageUrl(api, 1000),
+        overview = overview,
+        progress = userData.progress(),
+        playbackPositionTicks = userData?.playbackPositionTicks ?: 0L,
     )
 
 private fun BaseItemDto.mediaInfoLines(): List<JellyfinMediaInfoLine> =
@@ -2293,20 +2353,22 @@ private fun JellyfinLiveTvChannel.toCard(): JellyfinMediaCard =
         shape = JellyfinMediaCardShape.Wide,
     )
 
-private fun JellyfinLiveTvProgram.toCard(): JellyfinMediaCard =
-    JellyfinMediaCard(
+private fun JellyfinLiveTvProgram.toCard(channelImageUrl: String?): JellyfinMediaCard {
+    val resolvedImageUrl = imageUrl ?: channelImageUrl
+    return JellyfinMediaCard(
         id = id,
         title = title,
         subtitle = subtitle ?: "On now",
         year = null,
         itemType = "LiveTvProgram",
-        imageUrl = imageUrl,
-        backdropUrl = imageUrl,
-        thumbUrl = imageUrl,
+        imageUrl = resolvedImageUrl,
+        backdropUrl = resolvedImageUrl,
+        thumbUrl = resolvedImageUrl,
         logoUrl = null,
         progress = null,
         shape = JellyfinMediaCardShape.Wide,
     )
+}
 
 private fun org.jellyfin.sdk.model.api.BaseItemPerson.toPerson(api: ApiClient): JellyfinPerson =
     JellyfinPerson(
