@@ -2,6 +2,7 @@ package dev.vantafyn.feature.home.auth
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
@@ -13,6 +14,7 @@ import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
+import dev.vantafyn.core.jellyfin.JellyfinMediaCard
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinMediaItem
 import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
@@ -39,6 +41,7 @@ import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
 import dev.vantafyn.core.ombi.OmbiRepository
+import java.net.URI
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -688,21 +691,23 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val session = snapshot.session ?: return
         val detail = snapshot.mediaDetail ?: return
         val target = !detail.isFavorite
-        _state.update { it.copy(mediaDetail = detail.copy(isFavorite = target), mobileMessage = null) }
+        val optimisticItem = detail.toFavoriteMediaItem(target)
+        logFavoriteAction("detail_toggle", detail.id, detail.itemType, session, "start target=$target")
+        _state.update { it.withFavoriteState(detail.id, target, optimisticItem).copy(mobileMessage = null) }
         viewModelScope.launch {
             when (val result = mediaRepository.setFavorite(session, detail.id, target)) {
                 is JellyfinResult.Success -> {
+                    logFavoriteAction("detail_toggle", detail.id, detail.itemType, session, "success isFavorite=${result.value}")
                     _state.update { state ->
-                        state.copy(mediaDetail = state.mediaDetail?.copy(isFavorite = result.value))
+                        state.withFavoriteState(detail.id, result.value, detail.toFavoriteMediaItem(result.value))
                     }
                     loadFavorites(session)
                 }
                 is JellyfinResult.Failure -> {
+                    logFavoriteAction("detail_toggle", detail.id, detail.itemType, session, "failure")
                     _state.update {
-                        it.copy(
-                            mediaDetail = it.mediaDetail?.copy(isFavorite = detail.isFavorite),
-                            mobileMessage = result.message,
-                        )
+                        it.withFavoriteState(detail.id, detail.isFavorite, detail.toFavoriteMediaItem(detail.isFavorite))
+                            .copy(mobileMessage = result.message)
                     }
                 }
             }
@@ -710,21 +715,28 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun setMediaFavorite(itemId: UUID, isFavorite: Boolean) {
-        val session = _state.value.session ?: return
-        _state.update { it.withFavoriteState(itemId, isFavorite).copy(mobileMessage = null) }
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val previousFavorite = snapshot.isItemFavorite(itemId)
+        val target = snapshot.favoriteMediaItem(itemId, isFavorite)
+        logFavoriteAction("set_media_favorite", itemId, target?.itemType, session, "start target=$isFavorite previous=$previousFavorite")
+        _state.update { it.withFavoriteState(itemId, isFavorite, target).copy(mobileMessage = null) }
         viewModelScope.launch {
             when (val result = mediaRepository.setFavorite(session, itemId, isFavorite)) {
                 is JellyfinResult.Success -> {
+                    logFavoriteAction("set_media_favorite", itemId, target?.itemType, session, "success isFavorite=${result.value}")
                     _state.update {
-                        it.withFavoriteState(itemId, result.value).copy(
-                            mobileMessage = if (result.value) "Added to My List" else "Removed from My List",
-                        )
+                        it.withFavoriteState(itemId, result.value, target?.copy(isFavorite = result.value)).copy(mobileMessage = null)
                     }
                     loadFavorites(session)
                     loadLibraries(session)
                 }
-                is JellyfinResult.Failure -> _state.update {
-                    it.withFavoriteState(itemId, !isFavorite).copy(mobileMessage = result.message)
+                is JellyfinResult.Failure -> {
+                    logFavoriteAction("set_media_favorite", itemId, target?.itemType, session, "failure")
+                    _state.update {
+                        it.withFavoriteState(itemId, previousFavorite, target?.copy(isFavorite = previousFavorite))
+                            .copy(mobileMessage = result.message)
+                    }
                 }
             }
         }
@@ -1632,7 +1644,11 @@ data class VantafynHomeUiState(
     val errorMessage: String? = null,
 )
 
-private fun VantafynHomeUiState.withFavoriteState(itemId: UUID, isFavorite: Boolean): VantafynHomeUiState =
+private fun VantafynHomeUiState.withFavoriteState(
+    itemId: UUID,
+    isFavorite: Boolean,
+    favoriteItem: JellyfinMediaItem? = null,
+): VantafynHomeUiState =
     copy(
         home = home?.copy(
             sections = home.sections.map { section ->
@@ -1650,7 +1666,12 @@ private fun VantafynHomeUiState.withFavoriteState(itemId: UUID, isFavorite: Bool
             if (item.id == itemId) item.copy(isFavorite = isFavorite) else item
         },
         favorites = if (isFavorite) {
-            favorites.map { item -> if (item.id == itemId) item.copy(isFavorite = true) else item }
+            val updated = favorites.map { item -> if (item.id == itemId) item.copy(isFavorite = true) else item }
+            if (updated.any { it.id == itemId } || favoriteItem == null) {
+                updated
+            } else {
+                listOf(favoriteItem.copy(isFavorite = true)) + updated
+            }
         } else {
             favorites.filterNot { it.id == itemId }
         },
@@ -1658,6 +1679,94 @@ private fun VantafynHomeUiState.withFavoriteState(itemId: UUID, isFavorite: Bool
             if (detail.id == itemId) detail.copy(isFavorite = isFavorite) else detail
         },
     )
+
+private fun VantafynHomeUiState.isItemFavorite(itemId: UUID): Boolean {
+    mediaDetail?.takeIf { it.id == itemId }?.let { return it.isFavorite }
+    return favorites.any { it.id == itemId } ||
+        libraryItems.any { it.id == itemId && it.isFavorite } ||
+        searchResults.any { it.id == itemId && it.isFavorite } ||
+        home?.sections.orEmpty().flatMap { it.items }.any { it.id == itemId && it.isFavorite }
+}
+
+private fun VantafynHomeUiState.favoriteMediaItem(itemId: UUID, isFavorite: Boolean): JellyfinMediaItem? =
+    mediaDetail?.takeIf { it.id == itemId }?.toFavoriteMediaItem(isFavorite)
+        ?: favorites.firstOrNull { it.id == itemId }?.copy(isFavorite = isFavorite)
+        ?: libraryItems.firstOrNull { it.id == itemId }?.copy(isFavorite = isFavorite)
+        ?: searchResults.firstOrNull { it.id == itemId }?.toMediaItem(isFavorite)
+        ?: home?.sections.orEmpty()
+            .flatMap { it.items }
+            .firstOrNull { it.id == itemId }
+            ?.toMediaItem(isFavorite)
+
+private fun JellyfinMediaDetail.toFavoriteMediaItem(isFavorite: Boolean): JellyfinMediaItem =
+    JellyfinMediaItem(
+        id = id,
+        title = title,
+        subtitle = subtitle,
+        year = year,
+        itemType = itemType,
+        imageUrl = imageUrl,
+        backdropUrl = backdropUrl,
+        thumbUrl = null,
+        logoUrl = logoUrl,
+        progress = progress,
+        shape = dev.vantafyn.core.jellyfin.JellyfinMediaCardShape.Poster,
+        isFavorite = isFavorite,
+    )
+
+private fun JellyfinMediaCard.toMediaItem(isFavorite: Boolean): JellyfinMediaItem =
+    JellyfinMediaItem(
+        id = id,
+        title = title,
+        subtitle = subtitle,
+        year = year,
+        itemType = itemType,
+        imageUrl = imageUrl,
+        backdropUrl = backdropUrl,
+        thumbUrl = thumbUrl,
+        logoUrl = logoUrl,
+        progress = progress,
+        shape = shape,
+        isFavorite = isFavorite,
+    )
+
+private fun JellyfinSearchResult.toMediaItem(isFavorite: Boolean): JellyfinMediaItem =
+    JellyfinMediaItem(
+        id = id,
+        title = title,
+        subtitle = subtitle,
+        year = year,
+        itemType = itemType,
+        imageUrl = imageUrl,
+        backdropUrl = backdropUrl,
+        thumbUrl = null,
+        logoUrl = null,
+        progress = null,
+        shape = shape,
+        isFavorite = isFavorite,
+    )
+
+private fun logFavoriteAction(
+    action: String,
+    itemId: UUID,
+    itemType: String?,
+    session: JellyfinSession,
+    result: String,
+) {
+    Log.d(
+        "VantafynFavorites",
+        "action=$action itemId=$itemId itemType=${itemType ?: "unknown"} server=${session.server.url.safeHostForLog()} repository=JellyfinMediaRepository result=$result",
+    )
+}
+
+private fun String.safeHostForLog(): String =
+    runCatching {
+        URI(this).let { uri ->
+            listOfNotNull(uri.scheme, uri.host ?: uri.authority)
+                .joinToString("://")
+                .ifBlank { "unknown" }
+        }
+    }.getOrDefault("unknown")
 
 enum class ThemeMusicVolume(val label: String, val level: Float) {
     Soft("Soft", 0.12f),

@@ -3,6 +3,7 @@ package dev.vantafyn.core.jellyfin
 import android.content.Context
 import android.provider.Settings
 import android.util.Log
+import java.net.URI
 import java.net.URLEncoder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -450,16 +451,28 @@ class SdkJellyfinMediaRepository(
         isFavorite: Boolean,
     ): JellyfinResult<Boolean> =
         withContext(ioDispatcher) {
+            val action = if (isFavorite) "add" else "remove"
+            val host = session.server.url.safeHostForLog()
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                val userData by if (isFavorite) {
+                Log.d("VantafynFavorites", "Jellyfin favorite $action requested itemId=$itemId server=$host repository=SdkJellyfinMediaRepository")
+                if (isFavorite) {
                     api.userLibraryApi.markFavoriteItem(session.user.id, itemId)
                 } else {
                     api.userLibraryApi.unmarkFavoriteItem(session.user.id, itemId)
                 }
-                JellyfinResult.Success(userData.isFavorite == true)
+                val verifiedUserData by api.itemsApi.getItemUserData(session.user.id, itemId)
+                val verifiedFavorite = verifiedUserData.isFavorite == true
+                if (verifiedFavorite == isFavorite) {
+                    Log.d("VantafynFavorites", "Jellyfin favorite $action succeeded itemId=$itemId server=$host isFavorite=$verifiedFavorite")
+                    JellyfinResult.Success(verifiedFavorite)
+                } else {
+                    Log.w("VantafynFavorites", "Jellyfin favorite $action verification mismatch itemId=$itemId server=$host expected=$isFavorite actual=$verifiedFavorite")
+                    JellyfinResult.Failure("Couldn't update My List. Check your server connection and try again.")
+                }
             } catch (throwable: Throwable) {
-                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+                Log.w("VantafynFavorites", "Jellyfin favorite $action failed itemId=$itemId server=$host reason=${throwable.javaClass.simpleName}")
+                JellyfinResult.Failure(toFavoriteUserMessage(throwable), throwable)
             }
         }
 
@@ -1702,7 +1715,7 @@ class SdkJellyfinHomeRepository(
                 }
                 val heroSeed = System.currentTimeMillis() / 3_600_000L
                 val heroItems = (resumeItems + latestMovies + nextUpItems + latestTv)
-                    .distinctBy { it.id }
+                    .distinctBy { it.heroDedupeKey() }
                     .shuffled(kotlin.random.Random(heroSeed))
                     .map { it.toHero(api) }
                     .filter { it.backdropUrl != null || it.posterUrl != null }
@@ -2362,6 +2375,24 @@ private fun BaseItemDto.displayTitle(): String =
         else -> name ?: "Untitled"
     }
 
+private fun BaseItemDto.heroDedupeKey(): String {
+    val titleKey = when {
+        type == BaseItemKind.EPISODE && !seriesName.isNullOrBlank() -> seriesName.orEmpty()
+        type == BaseItemKind.SERIES && !name.isNullOrBlank() -> name.orEmpty()
+        else -> displayTitle()
+    }
+        .lowercase()
+        .replace(Regex("\\s+"), " ")
+        .trim()
+    val kind = when (type) {
+        BaseItemKind.EPISODE, BaseItemKind.SERIES -> "series"
+        BaseItemKind.MOVIE -> "movie"
+        else -> type?.serialName ?: "media"
+    }
+    val yearPart = if (kind == "series") "" else ":${productionYear ?: 0}"
+    return "$kind$yearPart:$titleKey"
+}
+
 private fun BaseItemDto.subtitle(): String? =
     when {
         type == BaseItemKind.EPISODE -> listOfNotNull(
@@ -2599,6 +2630,29 @@ private fun itemImageUrl(
 
 private fun profileId(serverUrl: String, userId: java.util.UUID): String =
     "${serverUrl.hashCode().toUInt()}-$userId"
+
+private fun String.safeHostForLog(): String =
+    runCatching {
+        URI(this).let { uri ->
+            listOfNotNull(uri.scheme, uri.host ?: uri.authority)
+                .joinToString("://")
+                .ifBlank { "unknown" }
+        }
+    }.getOrDefault("unknown")
+
+private fun toFavoriteUserMessage(throwable: Throwable): String {
+    val className = throwable.javaClass.name
+    val message = throwable.message.orEmpty()
+    return when {
+        className.contains("InvalidStatusException") && message.contains("401") -> "Session expired. Please sign in again."
+        className.contains("InvalidStatusException") && message.contains("403") -> "Couldn't update My List. This profile is not allowed to change favorites."
+        className.contains("SocketTimeout", ignoreCase = true) ||
+            message.contains("timeout", ignoreCase = true) -> "Couldn't reach Jellyfin. Check your server connection and try again."
+        className.contains("UnknownHost", ignoreCase = true) ||
+            className.contains("ConnectException", ignoreCase = true) -> "Couldn't reach Jellyfin. Check your server connection and try again."
+        else -> "Couldn't update My List. Check your server connection and try again."
+    }
+}
 
 private fun toUserMessage(throwable: Throwable): String {
     val className = throwable.javaClass.name

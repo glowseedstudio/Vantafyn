@@ -90,6 +90,62 @@ enum class VantafynPermissionStatus {
     Unsupported,
 }
 
+object VantafynGradients {
+    val AccentColors = listOf(
+        Color(0xFF31D7FF),
+        Color(0xFF5B8CFF),
+        Color(0xFF8B5CFF),
+        Color(0xFFC05CFF),
+    )
+
+    fun accentHorizontal(): Brush = Brush.horizontalGradient(AccentColors)
+
+    fun accentLinear(
+        start: Offset = Offset.Zero,
+        end: Offset = Offset(1f, 1f),
+        tileMode: TileMode = TileMode.Clamp,
+    ): Brush = Brush.linearGradient(
+        colors = AccentColors,
+        start = start,
+        end = end,
+        tileMode = tileMode,
+    )
+}
+
+fun VantafynNavDockBrush(enabled: Boolean = true): Brush {
+    val alpha = if (enabled) 1f else 0.54f
+    return Brush.linearGradient(
+        listOf(
+            Color(0xFF101525).copy(alpha = 0.84f * alpha),
+            Color(0xFF141A2B).copy(alpha = 0.80f * alpha),
+            Color(0xFF0B1020).copy(alpha = 0.86f * alpha),
+        ),
+    )
+}
+
+fun VantafynNavDockBorder(enabled: Boolean = true): Brush {
+    val alpha = if (enabled) 1f else 0.54f
+    return Brush.linearGradient(
+        listOf(
+            Color.White.copy(alpha = 0.16f * alpha),
+            Color(0xFF5B8CFF).copy(alpha = 0.12f * alpha),
+            Color(0xFF8B5CFF).copy(alpha = 0.10f * alpha),
+            Color.White.copy(alpha = 0.08f * alpha),
+        ),
+    )
+}
+
+fun VantafynNavSelectedBrush(): Brush = VantafynGradients.accentHorizontal()
+
+fun VantafynBottomScrim(): Brush =
+    Brush.verticalGradient(
+        listOf(
+            Color.Transparent,
+            Color(0xFF050812).copy(alpha = 0.28f),
+            Color(0xFF050812).copy(alpha = 0.56f),
+        ),
+    )
+
 data class VantafynPermissionUiState(
     val status: VantafynPermissionStatus = VantafynPermissionStatus.Unsupported,
     val dismissed: Boolean = false,
@@ -120,15 +176,7 @@ private fun VantafynGlassVariant.surfaceBrush(selected: Boolean, enabled: Boolea
     val enabledAlpha = if (enabled) 1f else 0.54f
     val primaryLift = if (selected) 0.12f else 0.04f
     if (this == VantafynGlassVariant.Dock) {
-        return Brush.verticalGradient(
-            listOf(
-                Color.White.copy(alpha = 0.205f * enabledAlpha),
-                Color.White.copy(alpha = 0.145f * enabledAlpha),
-                VantafynColors.Primary.copy(alpha = (if (selected) 0.16f else 0.085f) * enabledAlpha),
-                VantafynColors.SurfaceHigh.copy(alpha = 0.86f * enabledAlpha),
-                VantafynColors.Surface.copy(alpha = 0.82f * enabledAlpha),
-            ),
-        )
+        return VantafynNavDockBrush(enabled)
     }
     return Brush.linearGradient(
         listOf(
@@ -155,7 +203,11 @@ private fun VantafynGlassVariant.borderBrush(selected: Boolean, focused: Boolean
         !enabled -> 0.42f
         focused -> 1.0f
         selected -> 0.82f
+        this == VantafynGlassVariant.Dock -> 1.0f
         else -> 0.56f
+    }
+    if (this == VantafynGlassVariant.Dock) {
+        return VantafynNavDockBorder(enabled)
     }
     return Brush.linearGradient(
         listOf(
@@ -184,9 +236,9 @@ fun VantafynGlassSurface(
             .drawBehind {
                 val radius = cornerRadius.toPx()
                 drawRoundRect(
-                    color = Color.Black.copy(alpha = if (variant == VantafynGlassVariant.Dock) 0.30f else 0.22f),
+                    color = Color.Black.copy(alpha = if (variant == VantafynGlassVariant.Dock) 0.46f else 0.22f),
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
-                    topLeft = androidx.compose.ui.geometry.Offset(0f, 5.dp.toPx()),
+                    topLeft = androidx.compose.ui.geometry.Offset(0f, if (variant == VantafynGlassVariant.Dock) 7.dp.toPx() else 5.dp.toPx()),
                 )
                 if (selected || focused) {
                     drawRoundRect(
@@ -203,18 +255,24 @@ fun VantafynGlassSurface(
             modifier = Modifier
                 .matchParentSize()
                 .background(
-                    Brush.linearGradient(
-                        listOf(
-                            Color.White.copy(alpha = if (enabled) 0.075f else 0.035f),
-                            Color.Transparent,
-                            VantafynColors.Secondary.copy(alpha = when {
-                                selected || focused -> 0.055f
-                                variant == VantafynGlassVariant.Dock -> 0.040f
-                                else -> 0.020f
-                            }),
-                            Color.Transparent,
-                        ),
-                    ),
+                    if (variant == VantafynGlassVariant.Dock) {
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = if (enabled) 0.095f else 0.04f),
+                                Color.White.copy(alpha = if (enabled) 0.030f else 0.014f),
+                                Color.Transparent,
+                            ),
+                        )
+                    } else {
+                        Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = if (enabled) 0.075f else 0.035f),
+                                Color.Transparent,
+                                VantafynColors.Secondary.copy(alpha = if (selected || focused) 0.055f else 0.020f),
+                                Color.Transparent,
+                            ),
+                        )
+                    },
                 ),
         )
         if (variant == VantafynGlassVariant.Dock) {
@@ -222,11 +280,11 @@ fun VantafynGlassSurface(
                 modifier = Modifier
                     .matchParentSize()
                     .background(
-                        Brush.verticalGradient(
+                        Brush.linearGradient(
                             listOf(
-                                Color.White.copy(alpha = 0.14f),
-                                Color.White.copy(alpha = 0.055f),
+                                Color(0xFF31D7FF).copy(alpha = 0.035f),
                                 Color.Transparent,
+                                Color(0xFF8B5CFF).copy(alpha = 0.040f),
                             ),
                         ),
                     ),
@@ -320,12 +378,7 @@ fun Modifier.vantafynAnimatedModalBorder(
         val end = Offset(size.width * (1f - shift), size.height * (1f - shift))
         drawRoundRect(
             brush = Brush.linearGradient(
-                colors = listOf(
-                    Color(0xFF00D6FF),
-                    Color(0xFF2B7CFF),
-                    Color(0xFF8D4DFF),
-                    Color(0xFF00D6FF),
-                ),
+                colors = VantafynGradients.AccentColors + VantafynGradients.AccentColors.first(),
                 start = start,
                 end = end,
                 tileMode = TileMode.Repeated,
@@ -462,13 +515,7 @@ fun VantafynGradientButton(
     )
     val shape = RoundedCornerShape(20.dp)
     val gradient = if (enabled) {
-        Brush.horizontalGradient(
-            listOf(
-                Color(0xFF6EA8FF),
-                Color(0xFF8B7DFF),
-                Color(0xFFB06CFF),
-            ),
-        )
+        VantafynGradients.accentHorizontal()
     } else {
         Brush.horizontalGradient(
             listOf(

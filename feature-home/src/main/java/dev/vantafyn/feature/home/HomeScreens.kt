@@ -96,6 +96,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
@@ -124,6 +125,7 @@ import dev.vantafyn.core.ui.MobilePosterSpec
 import dev.vantafyn.core.ui.PosterCard
 import dev.vantafyn.core.ui.TvPosterSpec
 import dev.vantafyn.core.ui.VantafynButton
+import dev.vantafyn.core.ui.VantafynBottomScrim
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynErrorCard
 import dev.vantafyn.core.ui.VantafynGlassCard
@@ -131,8 +133,10 @@ import dev.vantafyn.core.ui.VantafynGlassDock
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassVariant
+import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynLogoHeader
+import dev.vantafyn.core.ui.VantafynNavSelectedBrush
 import dev.vantafyn.core.ui.VantafynOnboardingBackground
 import dev.vantafyn.core.ui.VantafynPermissionUiState
 import dev.vantafyn.core.ui.VantafynProfileCard
@@ -1406,22 +1410,38 @@ private fun MobileShellScreen(
         }
     }
     state.mobileMessage?.let { message ->
-        AlertDialog(
-            modifier = Modifier.vantafynAnimatedModalBorder(),
-            onDismissRequest = onClearMessage,
-            confirmButton = {
-                TextButton(onClick = onClearMessage) { Text("OK") }
-            },
-            title = { Text(message) },
-            text = {
-                Text(
-                    when {
-                        message.contains("My List", ignoreCase = true) -> "Your Jellyfin favorite status has been updated for this profile."
-                        else -> "The action has been completed."
-                    },
-                )
-            },
-        )
+        val isMyListError = (
+            message.contains("My List", ignoreCase = true) ||
+                message.contains("Couldn't reach Jellyfin", ignoreCase = true) ||
+                message.contains("Session expired", ignoreCase = true)
+            ) && (
+            message.contains("couldn't", ignoreCase = true) ||
+                message.contains("session expired", ignoreCase = true) ||
+                message.contains("not allowed", ignoreCase = true)
+            )
+        if (isMyListError) {
+            VantafynToast(
+                message = message,
+                onDismiss = onClearMessage,
+            )
+        } else {
+            AlertDialog(
+                modifier = Modifier.vantafynAnimatedModalBorder(),
+                onDismissRequest = onClearMessage,
+                confirmButton = {
+                    TextButton(onClick = onClearMessage) { Text("OK") }
+                },
+                title = { Text(message) },
+                text = {
+                    Text(
+                        when {
+                            message.contains("My List", ignoreCase = true) -> "Your Jellyfin favorite status has been updated for this profile."
+                            else -> "The action has been completed."
+                        },
+                    )
+                },
+            )
+        }
     }
     if (state.confirmLogout) {
         AlertDialog(
@@ -1677,23 +1697,57 @@ private fun GlassAction(text: String, onClick: () -> Unit = {}) {
 }
 
 @Composable
+private fun VantafynToast(
+    message: String,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LaunchedEffect(message) {
+        delay(3_800)
+        onDismiss()
+    }
+    Popup(alignment = Alignment.BottomCenter) {
+        VantafynGlassSurface(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = VantafynSpacing.lg, vertical = 118.dp),
+            variant = VantafynGlassVariant.Card,
+            cornerRadius = 22.dp,
+            contentPadding = PaddingValues(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
+        ) {
+            Text(
+                message,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+            )
+        }
+    }
+}
+
+@Composable
 private fun HeroCarousel(
     items: List<JellyfinHeroMediaItem>,
     onOpen: (JellyfinHeroMediaItem) -> Unit,
 ) {
+    val carouselItems = remember(items) {
+        items.distinctBy { it.heroCarouselKey() }
+    }
+    if (carouselItems.isEmpty()) return
     val listState = rememberLazyListState()
-    LaunchedEffect(items.size) {
-        if (items.size > 1) {
+    val carouselKeys = remember(carouselItems) { carouselItems.map { it.id } }
+    LaunchedEffect(carouselKeys) {
+        if (carouselItems.size > 1) {
             while (true) {
                 delay(5_500)
-                val next = (listState.firstVisibleItemIndex + 1) % items.size
+                val next = (listState.firstVisibleItemIndex + 1) % carouselItems.size
                 listState.animateScrollToItem(next)
             }
         }
     }
     Box(modifier = Modifier.fillMaxWidth()) {
         LazyRow(state = listState, horizontalArrangement = Arrangement.spacedBy(0.dp)) {
-            items(items, key = { it.id }) { item ->
+            items(carouselItems, key = { it.id }) { item ->
                 CinematicHero(
                     item = item,
                     onOpen = { onOpen(item) },
@@ -1707,7 +1761,7 @@ private fun HeroCarousel(
                 .padding(end = VantafynSpacing.xl, bottom = VantafynSpacing.lg),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            items.take(6).forEachIndexed { index, _ ->
+            carouselItems.take(6).forEachIndexed { index, _ ->
                 val selected = index == listState.firstVisibleItemIndex.coerceAtMost(5)
                 Box(
                     modifier = Modifier
@@ -1720,6 +1774,12 @@ private fun HeroCarousel(
         }
     }
 }
+
+private fun JellyfinHeroMediaItem.heroCarouselKey(): String =
+    title
+        .lowercase()
+        .replace(Regex("\\s+"), " ")
+        .trim()
 
 @Composable
 private fun CinematicHero(
@@ -1736,22 +1796,7 @@ private fun CinematicHero(
         AsyncImage(
             model = item.backdropUrl ?: item.posterUrl,
             contentDescription = item.title,
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-                .drawWithContent {
-                    drawContent()
-                    drawRect(
-                        brush = Brush.verticalGradient(
-                            colorStops = arrayOf(
-                                0.00f to Color.White,
-                                0.70f to Color.White,
-                                1.00f to Color.Transparent,
-                            ),
-                        ),
-                        blendMode = BlendMode.DstIn,
-                    )
-                },
+            modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop,
         )
         Box(
@@ -1831,6 +1876,21 @@ private fun CinematicHero(
                 }
             }
         }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(58.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to Color.Transparent,
+                            0.42f to VantafynColors.Graphite.copy(alpha = 0.28f),
+                            1.00f to VantafynColors.Graphite,
+                        ),
+                    ),
+                ),
+        )
     }
 }
 
@@ -2819,7 +2879,7 @@ private fun AdminSessionProgress(session: dev.vantafyn.core.jellyfin.JellyfinAdm
                     modifier = Modifier
                         .fillMaxWidth(progress)
                         .fillMaxSize()
-                        .background(Brush.horizontalGradient(listOf(Color(0xFF6D7CFF), Color(0xFF00D6FF)))),
+                        .background(VantafynGradients.accentHorizontal()),
                 )
             }
         }
@@ -4228,8 +4288,8 @@ private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onM
                             0.00f to Color(0xD8070A12),
                             0.22f to Color(0x44070A12),
                             0.58f to Color.Transparent,
-                            0.82f to Color(0xDD070A12),
-                            1.00f to Color(0xFF070A12),
+                            0.82f to VantafynColors.Graphite.copy(alpha = 0.84f),
+                            1.00f to VantafynColors.Graphite.copy(alpha = 0.98f),
                         ),
                     ),
                 ),
@@ -4238,6 +4298,22 @@ private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onM
             modifier = Modifier
                 .fillMaxSize()
                 .background(Brush.horizontalGradient(listOf(Color(0xB8070A12), Color(0x44070A12), Color.Transparent))),
+        )
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(118.dp)
+                .background(
+                    Brush.verticalGradient(
+                        colorStops = arrayOf(
+                            0.00f to Color.Transparent,
+                            0.38f to VantafynColors.Graphite.copy(alpha = 0.30f),
+                            0.76f to VantafynColors.Graphite.copy(alpha = 0.82f),
+                            1.00f to VantafynColors.Graphite,
+                        ),
+                    ),
+                ),
         )
         Row(
             modifier = Modifier
@@ -4431,61 +4507,62 @@ private fun MobileBottomNav(
     pendingOmbiAccessRequestCount: Int,
     modifier: Modifier = Modifier,
 ) {
-    val tabs = if (isAdmin) {
-        listOf(
-            MobileDestination.Home,
-            MobileDestination.Libraries,
-            MobileDestination.Search,
-            MobileDestination.Requests,
-            MobileDestination.Admin,
-            MobileDestination.Profile,
-        )
-    } else {
-        buildList {
-            add(MobileDestination.Home)
-            add(MobileDestination.Libraries)
-            add(MobileDestination.Search)
-            if (requestsVisible) add(MobileDestination.Requests)
-            add(MobileDestination.Profile)
-        }
+    val tabs = buildList {
+        add(MobileDestination.Home)
+        add(MobileDestination.Libraries)
+        add(MobileDestination.Search)
+        add(MobileDestination.Music)
+        add(MobileDestination.Favorites)
+        if (requestsVisible || isAdmin) add(MobileDestination.Requests)
+        if (isAdmin) add(MobileDestination.Admin)
     }
-    VantafynGlassDock(
+    Box(
         modifier = modifier
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .fillMaxWidth()
+            .background(VantafynBottomScrim())
             .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(54.dp),
-            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            tabs.forEach { destination ->
-                val tabSelected = selected == destination || (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxSize()
-                        .combinedClickable(
-                            onClick = { onSelected(destination) },
-                            onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    MiniNavIcon(destination, tabSelected)
-                    if (
-                        pendingOmbiAccessRequestCount > 0 &&
-                        (destination == MobileDestination.Admin || destination == MobileDestination.Requests)
+        VantafynGlassDock(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                tabs.forEach { destination ->
+                    val tabSelected = selected == destination || (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .combinedClickable(
+                                onClick = { onSelected(destination) },
+                                onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
+                            ),
+                        contentAlignment = Alignment.Center,
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .padding(top = 8.dp, end = 10.dp)
-                                .size(7.dp)
-                                .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
-                        )
+                        if (tabSelected) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .background(Color(0xFF5B8CFF).copy(alpha = 0.10f), RoundedCornerShape(999.dp)),
+                            )
+                        }
+                        MiniNavIcon(destination, tabSelected)
+                        if (
+                            pendingOmbiAccessRequestCount > 0 &&
+                            (destination == MobileDestination.Requests || destination == MobileDestination.Admin)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(top = 8.dp, end = 10.dp)
+                                    .size(7.dp)
+                                    .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                            )
+                        }
                     }
                 }
             }
@@ -4618,7 +4695,7 @@ private fun MiniMusicProgress(playback: VantafynMusicPlaybackState) {
                 modifier = Modifier
                     .fillMaxWidth(progress)
                     .fillMaxSize()
-                    .background(Brush.horizontalGradient(listOf(Color(0xFF00D6FF), Color(0xFF7A4DFF)))),
+                    .background(VantafynGradients.accentHorizontal()),
             )
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -4638,13 +4715,7 @@ private fun MiniPlayerIconControl(icon: ImageVector, contentDescription: String,
             .clip(RoundedCornerShape(999.dp))
             .background(
                 if (emphasized) {
-                    Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFF00D6FF).copy(alpha = 0.96f),
-                            Color(0xFF2B7CFF).copy(alpha = 0.94f),
-                            Color(0xFF7A4DFF).copy(alpha = 0.96f),
-                        ),
-                    )
+                    VantafynGradients.accentHorizontal()
                 } else {
                     Brush.horizontalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.06f)))
                 },
@@ -4754,15 +4825,7 @@ private fun MiniNavIcon(destination: MobileDestination, selected: Boolean) {
             cap = StrokeCap.Round,
             join = StrokeJoin.Round,
         )
-        val selectedBrush = Brush.linearGradient(
-            listOf(
-                Color(0xFF00D6FF),
-                Color(0xFF4D6BFF),
-                Color(0xFF8A3DFF),
-            ),
-            start = androidx.compose.ui.geometry.Offset.Zero,
-            end = androidx.compose.ui.geometry.Offset(size.width, size.height),
-        )
+        val selectedBrush = VantafynNavSelectedBrush()
         fun drawIconPath(path: Path) {
             if (selected) drawPath(path = path, brush = selectedBrush, style = outline) else drawPath(path, color, style = outline)
         }

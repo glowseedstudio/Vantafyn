@@ -2,6 +2,7 @@ package dev.vantafyn.feature.music
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +26,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
@@ -78,6 +80,7 @@ import dev.vantafyn.core.ui.VantafynGlassDock
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassVariant
+import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
@@ -468,15 +471,15 @@ private fun MusicMiniPlayer(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .height(3.dp)
+                    .height(4.dp)
                     .clip(RoundedCornerShape(999.dp))
                     .background(VantafynColors.Ink.copy(alpha = 0.12f)),
             ) {
                 Box(
                     Modifier
                         .fillMaxWidth(progress.coerceIn(0f, 1f))
-                        .height(3.dp)
-                        .background(VantafynColors.Ink.copy(alpha = 0.78f)),
+                        .height(4.dp)
+                        .background(VantafynGradients.accentHorizontal()),
                 )
             }
         }
@@ -533,11 +536,10 @@ private fun NowPlayingDialog(
                 }
             }
             item {
-                Slider(
-                    value = state.playback.positionMs.toFloat().coerceAtMost(state.playback.durationMs.toFloat().coerceAtLeast(1f)),
-                    onValueChange = { viewModel.seekTo(it.toLong()) },
-                    valueRange = 0f..state.playback.durationMs.toFloat().coerceAtLeast(1f),
-                    modifier = Modifier.fillMaxWidth(),
+                MusicScrubber(
+                    positionMs = state.playback.positionMs,
+                    durationMs = state.playback.durationMs,
+                    onSeek = viewModel::seekTo,
                 )
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(state.playback.positionMs.formatTime(), color = VantafynColors.Muted)
@@ -571,13 +573,13 @@ private fun NowPlayingDialog(
                 }
             }
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    item { IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true } }
                     state.home?.playlists?.firstOrNull()?.let { playlist ->
-                        IconPill(Icons.Rounded.Add, "Add to ${playlist.name.take(10)}") { viewModel.addCurrentToPlaylist(playlist) }
+                        item { IconPill(Icons.Rounded.Add, "Add to ${playlist.name.take(10)}") { viewModel.addCurrentToPlaylist(playlist) } }
                     }
-                    IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
-                    IconPill(Icons.Rounded.MoreHoriz, "More") {}
+                    item { IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics) }
+                    item { IconPill(Icons.Rounded.MoreHoriz, "More") {} }
                 }
             }
             item { QueuePanel(state.playback.queue, state.playback.queueIndex) }
@@ -821,14 +823,26 @@ private fun RoundIconButton(icon: ImageVector, contentDescription: String, onCli
         modifier = Modifier
             .size(size.dp)
     ) {
-        VantafynGlassSurface(
-            modifier = Modifier.fillMaxSize(),
-            variant = VantafynGlassVariant.Chip,
-            selected = selected,
-            cornerRadius = 999.dp,
-        ) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Icon(icon, contentDescription = contentDescription, tint = VantafynColors.Ink)
+        if (selected) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(VantafynGradients.accentHorizontal())
+                    .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(999.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = contentDescription, tint = VantafynColors.Ink, modifier = Modifier.size((size * 0.48f).dp))
+            }
+        } else {
+            VantafynGlassSurface(
+                modifier = Modifier.fillMaxSize(),
+                variant = VantafynGlassVariant.Chip,
+                cornerRadius = 999.dp,
+            ) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Icon(icon, contentDescription = contentDescription, tint = VantafynColors.Ink)
+                }
             }
         }
     }
@@ -850,6 +864,45 @@ private fun IconPill(icon: ImageVector, label: String, onClick: () -> Unit) {
             Icon(icon, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(18.dp))
             Text(label, color = VantafynColors.Ink, maxLines = 1)
         }
+    }
+}
+
+@Composable
+private fun MusicScrubber(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) {
+    val duration = durationMs.toFloat().coerceAtLeast(1f)
+    val value = positionMs.toFloat().coerceIn(0f, duration)
+    Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .height(8.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.12f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth((value / duration).coerceIn(0f, 1f))
+                    .fillMaxSize()
+                    .background(VantafynGradients.accentHorizontal()),
+            )
+        }
+        Slider(
+            value = value,
+            onValueChange = { onSeek(it.toLong()) },
+            valueRange = 0f..duration,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .alpha(0.94f),
+            colors = SliderDefaults.colors(
+                thumbColor = Color(0xFF31D7FF),
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent,
+            ),
+        )
     }
 }
 
