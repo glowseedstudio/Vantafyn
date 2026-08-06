@@ -25,9 +25,9 @@ class VantafynMusicPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         createMusicPlaybackChannel()
-        startForegroundImmediately()
 
         val controller = MusicPlaybackController.get(this)
+        startForegroundImmediately(controller.state.value.currentTrack)
         mediaSession = MediaSession.Builder(this, controller.sessionPlayer)
             .setSessionActivity(createLaunchPendingIntent())
             .build()
@@ -55,6 +55,16 @@ class VantafynMusicPlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? =
         mediaSession
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        createMusicPlaybackChannel()
+        if (mediaSession == null) {
+            startForegroundImmediately(MusicPlaybackController.get(this).state.value.currentTrack)
+        } else {
+            triggerNotificationUpdate()
+        }
+        return super.onStartCommand(intent, flags, startId)
+    }
+
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
         super.onUpdateNotification(session, startInForegroundRequired)
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -76,11 +86,15 @@ class VantafynMusicPlaybackService : MediaSessionService() {
         onUpdateNotification(session, startInForegroundRequired = true)
     }
 
-    private fun startForegroundImmediately() {
+    private fun startForegroundImmediately(track: VantafynMusicTrack? = null) {
+        val subtitle = listOfNotNull(track?.artist, track?.album)
+            .filter { it.isNotBlank() }
+            .joinToString(" - ")
+            .ifBlank { "Music controls" }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("Vantafyn")
-            .setContentText("Preparing music playback")
+            .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "Vantafyn Music")
+            .setContentText(subtitle)
             .setContentIntent(createLaunchPendingIntent())
             .setOngoing(true)
             .setSilent(true)
@@ -116,7 +130,7 @@ class VantafynMusicPlaybackService : MediaSessionService() {
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Music playback",
-            NotificationManager.IMPORTANCE_DEFAULT,
+            NotificationManager.IMPORTANCE_LOW,
         ).apply {
             description = "Playback controls for music playing in Vantafyn"
             setSound(null, null)
@@ -128,7 +142,7 @@ class VantafynMusicPlaybackService : MediaSessionService() {
     }
 
     companion object {
-        const val CHANNEL_ID = "vantafyn_music_controls"
+        const val CHANNEL_ID = "vantafyn_music_controls_v2"
         private const val NOTIFICATION_ID = 4207
     }
 }

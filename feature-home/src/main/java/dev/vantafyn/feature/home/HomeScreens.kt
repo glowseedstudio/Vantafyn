@@ -121,6 +121,7 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
+import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
 import dev.vantafyn.core.jellyfin.JellyfinHomeSection
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
@@ -187,6 +188,8 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun VantafynAppContent(
@@ -285,6 +288,9 @@ fun VantafynAppContent(
                 onNavigateMobile = viewModel::navigateMobile,
                 onOpenLibrary = viewModel::openLibrary,
                 onRetryLibrary = viewModel::retryLibraryItems,
+                onPreviousLibraryPage = viewModel::previousLibraryItemsPage,
+                onNextLibraryPage = viewModel::nextLibraryItemsPage,
+                onRefreshAdmin = viewModel::pollAdminOverview,
                 onOpenMedia = viewModel::openMedia,
                 onRetryMedia = viewModel::retryMediaDetail,
                 onSearchQueryChanged = viewModel::onSearchQueryChanged,
@@ -334,6 +340,10 @@ fun VantafynAppContent(
                 onCreateAdminUser = viewModel::createAdminUser,
                 onUpdateAdminUser = viewModel::updateSelectedAdminUser,
                 onResetAdminPassword = viewModel::resetSelectedAdminPassword,
+                onScanAdminLibrary = viewModel::scanAdminLibrary,
+                onSetAdminPluginEnabled = viewModel::setAdminPluginEnabled,
+                onRunAdminTask = viewModel::runAdminTask,
+                onStopAdminTask = viewModel::stopAdminTask,
                 onNavigateBack = viewModel::navigateMobileBack,
                 notificationPermissionState = notificationPermissionState,
                 onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -355,6 +365,8 @@ fun SplashScreen(tv: Boolean, modifier: Modifier = Modifier, backgroundResId: In
             Text("Vantafyn", color = VantafynColors.Ink, style = MaterialTheme.typography.displayLarge)
             Spacer(modifier = Modifier.height(VantafynSpacing.sm))
             Text(message, color = VantafynColors.Muted, style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(VantafynSpacing.lg))
+            VantafynLoadingIndicator("Signing in")
         }
     }
 }
@@ -1043,6 +1055,9 @@ private fun HomeScreen(
     onNavigateMobile: (MobileDestination) -> Unit,
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onRetryLibrary: () -> Unit,
+    onPreviousLibraryPage: () -> Unit,
+    onNextLibraryPage: () -> Unit,
+    onRefreshAdmin: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onRetryMedia: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
@@ -1092,6 +1107,10 @@ private fun HomeScreen(
     onCreateAdminUser: (String, String) -> Unit,
     onUpdateAdminUser: (Boolean?, Boolean?, Boolean?, Boolean?, List<java.util.UUID>?) -> Unit,
     onResetAdminPassword: (String) -> Unit,
+    onScanAdminLibrary: () -> Unit,
+    onSetAdminPluginEnabled: (java.util.UUID, String?, Boolean) -> Unit,
+    onRunAdminTask: (String) -> Unit,
+    onStopAdminTask: (String) -> Unit,
     onNavigateBack: () -> Unit,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
@@ -1111,6 +1130,9 @@ private fun HomeScreen(
             onNavigate = onNavigateMobile,
             onOpenLibrary = onOpenLibrary,
             onRetryLibrary = onRetryLibrary,
+            onPreviousLibraryPage = onPreviousLibraryPage,
+            onNextLibraryPage = onNextLibraryPage,
+            onRefreshAdmin = onRefreshAdmin,
             onOpenMedia = onOpenMedia,
             onRetryMedia = onRetryMedia,
             onSearchQueryChanged = onSearchQueryChanged,
@@ -1160,6 +1182,10 @@ private fun HomeScreen(
             onCreateAdminUser = onCreateAdminUser,
             onUpdateAdminUser = onUpdateAdminUser,
             onResetAdminPassword = onResetAdminPassword,
+            onScanAdminLibrary = onScanAdminLibrary,
+            onSetAdminPluginEnabled = onSetAdminPluginEnabled,
+            onRunAdminTask = onRunAdminTask,
+            onStopAdminTask = onStopAdminTask,
             onNavigateBack = onNavigateBack,
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -1221,6 +1247,9 @@ private fun MobileShellScreen(
     onNavigate: (MobileDestination) -> Unit,
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onRetryLibrary: () -> Unit,
+    onPreviousLibraryPage: () -> Unit,
+    onNextLibraryPage: () -> Unit,
+    onRefreshAdmin: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onRetryMedia: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
@@ -1270,6 +1299,10 @@ private fun MobileShellScreen(
     onCreateAdminUser: (String, String) -> Unit,
     onUpdateAdminUser: (Boolean?, Boolean?, Boolean?, Boolean?, List<java.util.UUID>?) -> Unit,
     onResetAdminPassword: (String) -> Unit,
+    onScanAdminLibrary: () -> Unit,
+    onSetAdminPluginEnabled: (java.util.UUID, String?, Boolean) -> Unit,
+    onRunAdminTask: (String) -> Unit,
+    onStopAdminTask: (String) -> Unit,
     onNavigateBack: () -> Unit,
     notificationPermissionState: VantafynPermissionUiState,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
@@ -1356,7 +1389,16 @@ private fun MobileShellScreen(
                         )
                         MobileDestination.Favorites -> FavoritesScreen(state, onLoadFavorites, onOpenMedia, onRemoveFromMyList = { onSetMediaFavorite(it, false) }, onMediaLongPress = { mediaActionTarget = it })
                         MobileDestination.Requests -> RequestsScreen(session = state.session)
-                        MobileDestination.Admin -> AdminScreen(state, onOpenUser = onOpenAdminUser, onCreateUser = onCreateAdminUser)
+                        MobileDestination.Admin -> AdminScreen(
+                            state = state,
+                            onOpenUser = onOpenAdminUser,
+                            onCreateUser = onCreateAdminUser,
+                            onRefresh = onRefreshAdmin,
+                            onScanLibrary = onScanAdminLibrary,
+                            onSetPluginEnabled = onSetAdminPluginEnabled,
+                            onRunTask = onRunAdminTask,
+                            onStopTask = onStopAdminTask,
+                        )
                         MobileDestination.AdminUserSettings -> AdminUserSettingsScreen(
                             state = state,
                             onBack = onCloseAdminUser,
@@ -1407,6 +1449,8 @@ private fun MobileShellScreen(
                             state = state,
                             onBack = onNavigateBack,
                             onRetry = onRetryLibrary,
+                            onPreviousPage = onPreviousLibraryPage,
+                            onNextPage = onNextLibraryPage,
                             onOpenMedia = onOpenMedia,
                             onMediaLongPress = { mediaActionTarget = it },
                             onStartLiveTvPlayback = onStartLiveTvPlayback,
@@ -2524,6 +2568,8 @@ private fun LibraryDetailScreen(
     state: VantafynHomeUiState,
     onBack: () -> Unit,
     onRetry: () -> Unit,
+    onPreviousPage: () -> Unit,
+    onNextPage: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onMediaLongPress: (MediaActionTarget) -> Unit,
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
@@ -2554,6 +2600,16 @@ private fun LibraryDetailScreen(
                 LibraryFilterChips(
                     selected = filterMode,
                     onSelected = { filterMode = it },
+                )
+            }
+        }
+        state.libraryItemsPage?.let { page ->
+            item {
+                LibraryPageControls(
+                    page = page,
+                    loading = state.isLibraryItemsLoading,
+                    onPrevious = onPreviousPage,
+                    onNext = onNextPage,
                 )
             }
         }
@@ -2591,10 +2647,13 @@ private fun LibraryDetailScreen(
             itemsIndexed(rows, key = { index, row -> "${row.firstOrNull()?.id}-$index" }) { _, row ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                    horizontalArrangement = if (row.size == 1) Arrangement.Center else Arrangement.spacedBy(VantafynSpacing.md),
                 ) {
                     row.forEach { item ->
-                        Box(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = if (row.size == 1) Modifier else Modifier.weight(1f),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             MediaItemCard(
                                 item = item,
                                 onClick = {
@@ -2612,9 +2671,6 @@ private fun LibraryDetailScreen(
                             )
                         }
                     }
-                    if (row.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
                 }
             }
         }
@@ -2627,6 +2683,64 @@ private fun LibraryFilterChips(selected: LibraryFilterMode, onSelected: (Library
         items(LibraryFilterMode.entries, key = { it.name }) { mode ->
             SelectableChip(mode.label, selected == mode) { onSelected(mode) }
         }
+    }
+}
+
+@Composable
+private fun LibraryPageControls(
+    page: JellyfinLibraryPage,
+    loading: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val firstItem = if (page.totalItems == 0) 0 else page.startIndex + 1
+    val lastItem = (page.startIndex + page.items.size).coerceAtMost(page.totalItems)
+    VantafynGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        variant = VantafynGlassVariant.Chip,
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Page ${page.currentPage} of ${page.totalPages} - $firstItem-$lastItem of ${page.totalItems}",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                LibraryPageAction("Prev", enabled = page.hasPrevious && !loading, onClick = onPrevious)
+                LibraryPageAction("Next", enabled = page.hasNext && !loading, onClick = onNext)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryPageAction(text: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text,
+            color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.42f),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
@@ -3218,11 +3332,23 @@ private fun AdminScreen(
     state: VantafynHomeUiState,
     onOpenUser: (java.util.UUID) -> Unit,
     onCreateUser: (String, String) -> Unit,
+    onRefresh: () -> Unit,
+    onScanLibrary: () -> Unit,
+    onSetPluginEnabled: (java.util.UUID, String?, Boolean) -> Unit,
+    onRunTask: (String) -> Unit,
+    onStopTask: (String) -> Unit,
 ) {
     val overview = state.adminOverview
+    val adminUser = overview?.users?.firstOrNull { it.id == state.session?.user?.id }
     var addUserExpanded by remember { mutableStateOf(false) }
     var newUsername by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(5_000L)
+            onRefresh()
+        }
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -3234,78 +3360,7 @@ private fun AdminScreen(
         if (state.isAdminLoading) item { VantafynLoadingIndicator("Loading admin dashboard") }
         state.adminError?.let { item { VantafynErrorCard(it) } }
         if (overview != null) {
-            item {
-                GlassPanel {
-                    Text(overview.serverName ?: "Jellyfin Server", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                    Text(listOfNotNull(overview.serverVersion?.let { "Jellyfin $it" }, overview.operatingSystem).joinToString(" · "), color = VantafynColors.Muted)
-                }
-            }
-            item {
-                GlassPanel {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text("User Management", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                            Text("Create and manage Jellyfin profiles from Vantafyn.", color = VantafynColors.Muted)
-                        }
-                        GlassAction(
-                            text = if (addUserExpanded) "Close" else "Add",
-                            onClick = {
-                                addUserExpanded = !addUserExpanded
-                                newUsername = ""
-                                newPassword = ""
-                            },
-                        )
-                    }
-                    if (addUserExpanded) {
-                        VantafynGlassCard(
-                            modifier = Modifier.fillMaxWidth(),
-                            cornerRadius = 18.dp,
-                            contentPadding = PaddingValues(VantafynSpacing.md),
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
-                                VantafynTextField(
-                                    value = newUsername,
-                                    onValueChange = { newUsername = it },
-                                    label = "User name",
-                                )
-                                VantafynTextField(
-                                    value = newPassword,
-                                    onValueChange = { newPassword = it },
-                                    label = "Temporary password",
-                                    visualTransformation = PasswordVisualTransformation(),
-                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                                )
-                                VantafynButton(
-                                    if (state.isAdminUserSaving) "Creating" else "Create User",
-                                    onClick = {
-                                        onCreateUser(newUsername, newPassword)
-                                        newUsername = ""
-                                        newPassword = ""
-                                        addUserExpanded = false
-                                    },
-                                    enabled = newUsername.isNotBlank() && newPassword.length >= 6 && !state.isAdminUserSaving,
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                                Text(
-                                    "The password is sent only to Jellyfin for user creation.",
-                                    color = VantafynColors.Muted.copy(alpha = 0.72f),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            item {
-                Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), modifier = Modifier.fillMaxWidth()) {
-                    AdminStatCard("Version", overview.serverVersion ?: "Unknown", Modifier.weight(1f))
-                    AdminStatCard("Libraries", overview.libraryCount.toString(), Modifier.weight(1f))
-                }
-            }
+            item { AdminHeroCard(state = state, overview = overview, adminImageUrl = adminUser?.imageUrl) }
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), modifier = Modifier.fillMaxWidth()) {
                     AdminStatCard("Playing", overview.activeSessions.size.toString(), Modifier.weight(1f))
@@ -3313,24 +3368,150 @@ private fun AdminScreen(
                 }
             }
             item {
-                GlassPanel {
-                    Text("Statistics", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Total items: ${overview.totalItems?.toString() ?: "Unavailable"}", color = VantafynColors.Muted)
-                    Text("Movies: ${overview.moviesCount?.toString() ?: "Unavailable"}", color = VantafynColors.Muted)
-                    Text("Series: ${overview.seriesCount?.toString() ?: "Unavailable"}", color = VantafynColors.Muted)
-                    Text("Episodes: ${overview.episodesCount?.toString() ?: "Unavailable"}", color = VantafynColors.Muted)
-                    Text("Music: ${overview.musicCount?.toString() ?: "Unavailable"}", color = VantafynColors.Muted)
-                    overview.unavailableStats.forEach { Text(it, color = VantafynColors.Muted.copy(alpha = 0.78f)) }
+                Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), modifier = Modifier.fillMaxWidth()) {
+                    AdminStatCard("Libraries", overview.libraryCount.toString(), Modifier.weight(1f))
+                    AdminStatCard("Sessions", overview.connectedSessionCount.toString(), Modifier.weight(1f))
                 }
             }
-            item { AdminSessionsSection(overview.activeSessions) }
-            item { AdminUsersSection(overview.users, onOpenUser) }
             item {
-                GlassPanel {
-                    Text("More / Server Tools", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    listOf("Activity Log", "Devices / Sessions", "Plugins", "Scheduled Tasks", "System Info", "Server Logs").forEach {
-                        Text("$it · Coming soon", color = VantafynColors.Muted)
-                    }
+                AdminUserManagementCard(
+                    expanded = addUserExpanded,
+                    isSaving = state.isAdminUserSaving,
+                    username = newUsername,
+                    password = newPassword,
+                    onToggle = {
+                        addUserExpanded = !addUserExpanded
+                        newUsername = ""
+                        newPassword = ""
+                    },
+                    onUsername = { newUsername = it },
+                    onPassword = { newPassword = it },
+                    onCreate = {
+                        onCreateUser(newUsername, newPassword)
+                        newUsername = ""
+                        newPassword = ""
+                        addUserExpanded = false
+                    },
+                )
+            }
+            item { AdminUsersSection(overview.users, onOpenUser) }
+            item { AdminStatisticsPanel(overview) }
+            item { AdminSessionsSection(overview.activeSessions) }
+            item {
+                AdminServerToolsSection(
+                    overview = overview,
+                    isActionRunning = state.isAdminActionRunning,
+                    onScanLibrary = onScanLibrary,
+                    onSetPluginEnabled = onSetPluginEnabled,
+                    onRunTask = onRunTask,
+                    onStopTask = onStopTask,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminHeroCard(
+    state: VantafynHomeUiState,
+    overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview,
+    adminImageUrl: String?,
+) {
+    VantafynGlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawWithContent {
+                drawContent()
+                drawRoundRect(
+                    brush = Brush.radialGradient(
+                        listOf(Color(0xFF6B7DFF).copy(alpha = 0.16f), Color.Transparent),
+                        center = Offset(size.width * 0.92f, size.height * 0.12f),
+                        radius = size.width * 0.9f,
+                    ),
+                    cornerRadius = CornerRadius(26.dp.toPx(), 26.dp.toPx()),
+                )
+            },
+        cornerRadius = 26.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ProfileAvatar(
+                name = state.session?.user?.name ?: "Admin",
+                imageUrl = adminImageUrl,
+                modifier = Modifier
+                    .size(58.dp)
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp)),
+            )
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    overview.serverName ?: state.server?.name ?: "Jellyfin Server",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    listOfNotNull(overview.serverVersion?.let { "Jellyfin $it" }, overview.operatingSystem).joinToString(" - "),
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            SoftBadge("Admin")
+        }
+    }
+}
+
+@Composable
+private fun AdminUserManagementCard(
+    expanded: Boolean,
+    isSaving: Boolean,
+    username: String,
+    password: String,
+    onToggle: () -> Unit,
+    onUsername: (String) -> Unit,
+    onPassword: (String) -> Unit,
+    onCreate: () -> Unit,
+) {
+    GlassPanel {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("User Management", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            GlassAction(text = if (expanded) "Close" else "Add User", onClick = onToggle)
+        }
+        if (expanded) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(VantafynSpacing.md),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                    VantafynTextField(
+                        value = username,
+                        onValueChange = onUsername,
+                        label = "User name",
+                    )
+                    VantafynTextField(
+                        value = password,
+                        onValueChange = onPassword,
+                        label = "Temporary password",
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    )
+                    VantafynButton(
+                        if (isSaving) "Creating" else "Create User",
+                        onClick = onCreate,
+                        enabled = username.isNotBlank() && password.length >= 6 && !isSaving,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
                 }
             }
         }
@@ -3339,21 +3520,412 @@ private fun AdminScreen(
 
 @Composable
 private fun AdminStatCard(label: String, value: String, modifier: Modifier = Modifier) {
-    GlassPanel(modifier = modifier) {
-        Text(value, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Text(label, color = VantafynColors.Muted)
+    VantafynGlassCard(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(value, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Text(label, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+private fun AdminStatisticsPanel(overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview) {
+    val stats = listOf(
+        "Movies" to overview.moviesCount,
+        "Series" to overview.seriesCount,
+        "Episodes" to overview.episodesCount,
+        "Music" to overview.musicCount,
+    )
+    val maxValue = stats.mapNotNull { it.second }.maxOrNull()?.coerceAtLeast(1) ?: 1
+    GlassPanel {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Statistics", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("${overview.totalItems?.toString() ?: "Requires plugin"} items", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+        }
+        stats.forEach { (label, value) ->
+            AdminMetricBar(label = label, value = value, maxValue = maxValue)
+        }
+        overview.unavailableStats.firstOrNull()?.let {
+            Text("Watch time requires plugin later.", color = VantafynColors.Muted.copy(alpha = 0.72f), style = MaterialTheme.typography.bodyLarge)
+        }
+    }
+}
+
+@Composable
+private fun AdminMetricBar(label: String, value: Int?, maxValue: Int) {
+    val fraction = ((value ?: 0).toFloat() / maxValue.toFloat()).coerceIn(0.06f, 1f)
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+            Text(value?.toString() ?: "Requires plugin", color = VantafynColors.Muted)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(7.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.10f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction)
+                    .height(7.dp)
+                    .background(VantafynGradients.accentHorizontal()),
+            )
+        }
     }
 }
 
 @Composable
 private fun AdminSessionsSection(sessions: List<dev.vantafyn.core.jellyfin.JellyfinAdminSession>) {
     GlassPanel {
-        Text("Active Sessions", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Text("Active Sessions", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            SoftBadge("${sessions.size} live")
+        }
         if (sessions.isEmpty()) {
-            EmptyState("Nothing playing", "Active playback will appear here with artwork, device, progress, and stream mode.")
+            AdminEmptySessionsCard()
         }
         sessions.take(12).forEach { session ->
             AdminSessionCard(session)
+        }
+    }
+}
+
+@Composable
+private fun AdminServerToolsSection(
+    overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview,
+    isActionRunning: Boolean,
+    onScanLibrary: () -> Unit,
+    onSetPluginEnabled: (java.util.UUID, String?, Boolean) -> Unit,
+    onRunTask: (String) -> Unit,
+    onStopTask: (String) -> Unit,
+) {
+    GlassPanel {
+        Text("Server Tools", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        AdminToolSummaryGrid(overview)
+        AdminLibraryScanCard(
+            isActionRunning = isActionRunning,
+            onScanLibrary = onScanLibrary,
+        )
+        AdminPluginsPanel(
+            plugins = overview.plugins,
+            isActionRunning = isActionRunning,
+            onSetPluginEnabled = onSetPluginEnabled,
+        )
+        AdminTasksPanel(
+            tasks = overview.tasks,
+            isActionRunning = isActionRunning,
+            onRunTask = onRunTask,
+            onStopTask = onStopTask,
+        )
+        AdminActivityPanel(overview.recentActivity)
+        AdminDevicesPanel(overview.devices)
+        AdminLogsPanel(overview.serverLogs)
+    }
+}
+
+@Composable
+private fun AdminToolSummaryGrid(overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview) {
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), modifier = Modifier.fillMaxWidth()) {
+            MiniStat("Plugins", overview.plugins.size.toString(), Modifier.weight(1f))
+            MiniStat("Tasks", overview.tasks.size.toString(), Modifier.weight(1f))
+            MiniStat("Devices", overview.devices.size.toString(), Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), modifier = Modifier.fillMaxWidth()) {
+            MiniStat("Activity", overview.recentActivity.size.toString(), Modifier.weight(1f))
+            MiniStat("Logs", overview.serverLogs.size.toString(), Modifier.weight(1f))
+            MiniStat("System", overview.operatingSystem ?: "Server", Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun AdminLibraryScanCard(isActionRunning: Boolean, onScanLibrary: () -> Unit) {
+    VantafynGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(VantafynGradients.accentHorizontal()),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("Library Scan", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Refresh Jellyfin media folders and metadata.",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            AdminToolAction(
+                label = if (isActionRunning) "Starting" else "Scan",
+                enabled = !isActionRunning,
+                onClick = onScanLibrary,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminPluginsPanel(
+    plugins: List<dev.vantafyn.core.jellyfin.JellyfinAdminPlugin>,
+    isActionRunning: Boolean,
+    onSetPluginEnabled: (java.util.UUID, String?, Boolean) -> Unit,
+) {
+    AdminToolPanel(title = "Plugins", empty = plugins.isEmpty(), emptyText = "No plugins returned") {
+        plugins.take(8).forEach { plugin ->
+            val status = plugin.status.orEmpty()
+            val isActive = status.equals("Active", ignoreCase = true) || status.equals("ACTIVE", ignoreCase = true)
+            val isDisabled = status.equals("Disabled", ignoreCase = true) || status.equals("DISABLED", ignoreCase = true)
+            val canToggle = !isActionRunning && plugin.version?.isNotBlank() == true && (isActive || isDisabled)
+            AdminToolRow(
+                title = plugin.name,
+                meta = listOfNotNull(plugin.version?.let { "v$it" }, plugin.status).joinToString(" - "),
+                trailing = if (plugin.canUninstall) "Managed" else "Core",
+                actionLabel = if (isActive) "Disable" else "Enable",
+                actionEnabled = canToggle,
+                onAction = { onSetPluginEnabled(plugin.id, plugin.version, !isActive) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminTasksPanel(
+    tasks: List<dev.vantafyn.core.jellyfin.JellyfinAdminTask>,
+    isActionRunning: Boolean,
+    onRunTask: (String) -> Unit,
+    onStopTask: (String) -> Unit,
+) {
+    AdminToolPanel(title = "Scheduled Tasks", empty = tasks.isEmpty(), emptyText = "No scheduled tasks returned") {
+        tasks.take(8).forEach { task ->
+            val isRunning = task.state.equals("Running", ignoreCase = true) || task.state.equals("RUNNING", ignoreCase = true)
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                AdminToolRow(
+                    title = task.name,
+                    meta = listOfNotNull(task.category, task.lastStatus).joinToString(" - "),
+                    trailing = task.state ?: "",
+                    actionLabel = if (isRunning) "Stop" else "Run",
+                    actionEnabled = !isActionRunning && task.id.isNotBlank(),
+                    onAction = { if (isRunning) onStopTask(task.id) else onRunTask(task.id) },
+                )
+                if (isRunning || task.progress != null) {
+                    AdminTaskProgressBar(progress = task.progress, isRunning = isRunning)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminTaskProgressBar(progress: Double?, isRunning: Boolean) {
+    val safeProgress = progress?.toFloat()?.coerceIn(0f, 100f)
+    val transition = rememberInfiniteTransition(label = "adminTaskProgress")
+    val activeAlpha by transition.animateFloat(
+        initialValue = 0.46f,
+        targetValue = 0.92f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "adminTaskProgressAlpha",
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                if (isRunning) "Running" else "Last progress",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                safeProgress?.let { "${it.toInt()}%" } ?: "In progress",
+                color = VantafynColors.Ink.copy(alpha = 0.86f),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(7.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.10f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(if (safeProgress != null) (safeProgress / 100f).coerceIn(0.03f, 1f) else 1f)
+                    .height(7.dp)
+                    .graphicsLayer(alpha = if (safeProgress == null && isRunning) activeAlpha else 1f)
+                    .background(VantafynGradients.accentHorizontal()),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminActivityPanel(activity: List<dev.vantafyn.core.jellyfin.JellyfinAdminActivity>) {
+    AdminToolPanel(title = "Activity", empty = activity.isEmpty(), emptyText = "No recent activity returned") {
+        activity.take(6).forEach { entry ->
+            AdminToolRow(
+                title = entry.name,
+                meta = listOfNotNull(entry.shortOverview, entry.date).joinToString(" - "),
+                trailing = entry.severity ?: "",
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminDevicesPanel(devices: List<dev.vantafyn.core.jellyfin.JellyfinAdminDevice>) {
+    AdminToolPanel(title = "Devices", empty = devices.isEmpty(), emptyText = "No devices returned") {
+        devices.take(8).forEach { device ->
+            AdminToolRow(
+                title = device.name,
+                meta = listOfNotNull(device.appName, device.appVersion, device.lastUserName).joinToString(" - "),
+                trailing = "",
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminLogsPanel(logs: List<dev.vantafyn.core.jellyfin.JellyfinAdminLogFile>) {
+    AdminToolPanel(title = "Server Logs", empty = logs.isEmpty(), emptyText = "No log files returned") {
+        logs.take(6).forEach { log ->
+            AdminToolRow(
+                title = log.name,
+                meta = log.modified.orEmpty(),
+                trailing = log.sizeBytes.toFileSizeLabel(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdminToolPanel(title: String, empty: Boolean, emptyText: String, content: @Composable ColumnScope.() -> Unit) {
+    VantafynGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            if (empty) {
+                Text(emptyText, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+            } else {
+                content()
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminToolRow(
+    title: String,
+    meta: String,
+    trailing: String,
+    actionLabel: String? = null,
+    actionEnabled: Boolean = true,
+    onAction: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (meta.isNotBlank()) {
+                Text(meta, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (trailing.isNotBlank()) {
+            SoftBadge(trailing)
+        }
+        if (actionLabel != null && onAction != null) {
+            AdminToolAction(label = actionLabel, enabled = actionEnabled, onClick = onAction)
+        }
+    }
+}
+
+@Composable
+private fun AdminToolAction(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (enabled) VantafynColors.Ink.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.05f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 13.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.5f),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+private fun Long.toFileSizeLabel(): String =
+    when {
+        this >= 1_000_000_000L -> "%.1f GB".format(this / 1_000_000_000.0)
+        this >= 1_000_000L -> "%.1f MB".format(this / 1_000_000.0)
+        this >= 1_000L -> "%.1f KB".format(this / 1_000.0)
+        else -> "$this B"
+    }
+
+@Composable
+private fun AdminEmptySessionsCard() {
+    VantafynGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = 22.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(VantafynGradients.accentHorizontal())
+                    .padding(1.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(VantafynColors.Graphite.copy(alpha = 0.88f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("0", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Text("No active playback", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text("Streams will appear here automatically.", color = VantafynColors.Muted, textAlign = TextAlign.Center)
         }
     }
 }
@@ -3430,13 +4002,6 @@ private fun AdminSessionCard(session: dev.vantafyn.core.jellyfin.JellyfinAdminSe
                         Text(listOfNotNull(session.client, session.deviceName).joinToString(" · "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
-                AdminSessionTechnicalLine(session)
-                session.transcodeReasons.takeIf { it.isNotEmpty() }?.let { reasons ->
-                    Text("Reason: ${reasons.joinToString(", ")}", color = VantafynColors.Muted.copy(alpha = 0.78f), style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                }
-                session.lastPlaybackCheckIn?.let {
-                    Text("Updated $it", color = VantafynColors.Muted.copy(alpha = 0.62f), style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
             }
         }
     }
@@ -3491,25 +4056,20 @@ private fun AdminSessionTechnicalLine(session: dev.vantafyn.core.jellyfin.Jellyf
 private fun AdminUsersSection(users: List<dev.vantafyn.core.jellyfin.JellyfinAdminUser>, onOpenUser: (java.util.UUID) -> Unit) {
     GlassPanel {
         Text("Users", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        users.take(10).forEach { user ->
-            Row(
+        users.forEach { user ->
+            VantafynGlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .clickable { onOpenUser(user.id) }
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
-                verticalAlignment = Alignment.CenterVertically,
+                    .clickable { onOpenUser(user.id) },
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(12.dp),
             ) {
-                ProfileAvatar(name = user.name, imageUrl = user.imageUrl, modifier = Modifier.size(42.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(user.name, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        listOfNotNull(if (user.isAdministrator) "Admin" else "User", if (user.isDisabled) "Disabled" else null, if (user.isHidden) "Hidden" else null, user.lastActivity?.let { "Active $it" }).joinToString(" · "),
-                        color = VantafynColors.Muted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ProfileAvatar(name = user.name, imageUrl = user.imageUrl, modifier = Modifier.size(48.dp))
+                    Text(user.name, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 }
             }
         }
@@ -3981,10 +4541,7 @@ private fun AdminUserSettingsScreen(
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
                 CompactBackButton(onClick = onBack)
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.weight(1f)) {
-                    Text("User Settings", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                    Text("Admin controls", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
-                }
+                Text("User Settings", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
             }
         }
 
@@ -4011,23 +4568,20 @@ private fun AdminUserSettingsScreen(
             item {
                 GlassPanel {
                     Text("Access", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    PremiumToggleRow(
+                    AdminToggleRow(
                         title = "Account enabled",
-                        subtitle = "Allow this user to sign in to Jellyfin.",
                         checked = !detail.user.isDisabled,
                     ) {
                         onUpdate(null, !detail.user.isDisabled, null, null, null)
                     }
-                    PremiumToggleRow(
+                    AdminToggleRow(
                         title = "Administrator",
-                        subtitle = "Grant full Jellyfin server administration rights.",
                         checked = detail.user.isAdministrator,
                     ) {
                         onUpdate(null, null, !detail.user.isAdministrator, null, null)
                     }
-                    PremiumToggleRow(
+                    AdminToggleRow(
                         title = "Hidden from login",
-                        subtitle = "Hide this user from public login and profile screens.",
                         checked = detail.user.isHidden,
                     ) {
                         onUpdate(!detail.user.isHidden, null, null, null, null)
@@ -4037,9 +4591,8 @@ private fun AdminUserSettingsScreen(
             item {
                 GlassPanel {
                     Text("Library Access", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    PremiumToggleRow(
+                    AdminToggleRow(
                         title = "All libraries",
-                        subtitle = "Allow access to every current and future Jellyfin library.",
                         checked = detail.enableAllFolders,
                     ) {
                         onUpdate(null, null, null, !detail.enableAllFolders, null)
@@ -4049,13 +4602,8 @@ private fun AdminUserSettingsScreen(
                     } else {
                         state.libraries.forEach { library ->
                             val libraryEnabled = detail.enableAllFolders || library.id in detail.enabledFolderIds
-                            PremiumToggleRow(
+                            AdminToggleRow(
                                 title = library.name,
-                                subtitle = if (detail.enableAllFolders) {
-                                    "Included by All libraries"
-                                } else {
-                                    library.collectionType?.replaceFirstChar { it.titlecase() } ?: "Jellyfin folder access"
-                                },
                                 checked = libraryEnabled,
                             ) {
                                 if (!detail.enableAllFolders) {
@@ -4134,31 +4682,54 @@ private fun AdminUserProfileCard(detail: dev.vantafyn.core.jellyfin.JellyfinAdmi
                     )
                     if (detail.user.isAdministrator) SoftBadge("Admin")
                 }
-                Text(adminUserStatusLine(detail), color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(
-                    listOfNotNull(detail.user.lastLogin?.let { "Last login $it" }, detail.user.lastActivity?.let { "Active $it" })
-                        .ifEmpty { listOf("No recent activity reported") }
-                        .joinToString(" · "),
-                    color = VantafynColors.Muted.copy(alpha = 0.72f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), modifier = Modifier.fillMaxWidth()) {
-            MiniStat("Status", if (detail.user.isDisabled) "Disabled" else "Enabled", Modifier.weight(1f))
-            MiniStat("Visibility", if (detail.user.isHidden) "Hidden" else "Visible", Modifier.weight(1f))
-            MiniStat("Libraries", if (detail.enableAllFolders) "All" else detail.enabledFolderIds.size.toString(), Modifier.weight(1f))
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 18.dp,
+            contentPadding = PaddingValues(14.dp),
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Profile picture", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                Text("Unavailable", color = VantafynColors.Muted)
+            }
         }
     }
 }
 
-private fun adminUserStatusLine(detail: dev.vantafyn.core.jellyfin.JellyfinAdminUserDetail): String =
-    listOf(
-        if (detail.user.isAdministrator) "Administrator" else "Standard user",
-        if (detail.user.isDisabled) "Sign-in disabled" else "Sign-in enabled",
-        if (detail.user.isHidden) "Hidden from login" else "Visible on login",
-    ).joinToString(" · ")
+@Composable
+private fun AdminToggleRow(title: String, checked: Boolean, onClick: () -> Unit) {
+    VantafynGlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(VantafynSpacing.md),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Box(
+                modifier = Modifier
+                    .width(52.dp)
+                    .height(30.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (checked) Color(0xFF7B8DFF).copy(alpha = 0.78f) else Color.White.copy(alpha = 0.12f))
+                    .padding(4.dp),
+                contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.94f)),
+                )
+            }
+        }
+    }
+}
 
 private fun Long?.toTimeLabel(): String {
     val totalSeconds = (this ?: return "--:--") / 10_000_000L
@@ -4907,6 +5478,7 @@ private fun ExternalLinksSection(detail: JellyfinMediaDetail, onOpen: () -> Unit
 
 @Composable
 private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onMore: () -> Unit, onFavorite: () -> Unit) {
+    val finishAtLabel = rememberFinishAtLabel(detail)
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -4991,6 +5563,7 @@ private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onM
                 listOfNotNull(
                     detail.year?.toString(),
                     detail.runtimeMinutes?.let { "${it}m" },
+                    finishAtLabel,
                     detail.officialRating,
                     detail.communityRating?.let { "★ ${"%.1f".format(it)}" },
                     detail.subtitle,
@@ -5000,6 +5573,21 @@ private fun MediaDetailHero(detail: JellyfinMediaDetail, onBack: () -> Unit, onM
                 DetailChipRow(detail.genres.take(4))
             }
         }
+    }
+}
+
+@Composable
+private fun rememberFinishAtLabel(detail: JellyfinMediaDetail): String? {
+    if ((detail.runtimeMinutes ?: 0) <= 0) return null
+    var nowMs by remember(detail.id) { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(detail.id, detail.runtimeMinutes, detail.playbackPositionTicks, detail.isPlayed) {
+        while (true) {
+            nowMs = System.currentTimeMillis()
+            delay(15_000L)
+        }
+    }
+    return remember(detail.id, detail.runtimeMinutes, detail.playbackPositionTicks, detail.isPlayed, nowMs) {
+        detail.finishAtLabel(nowMs)
     }
 }
 
@@ -5070,38 +5658,40 @@ private fun DetailFlatIconButton(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun CompactBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
-    VantafynGlassTile(
+    Box(
         modifier = modifier
-            .size(40.dp),
-        onClick = onClick,
-        cornerRadius = 999.dp,
-        contentPadding = PaddingValues(0.dp),
+            .size(40.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Canvas(modifier = Modifier.size(18.dp)) {
-                val stroke = 2.35.dp.toPx()
-                drawLine(
-                    color = VantafynColors.Ink,
-                    start = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 3.dp.toPx()),
-                    end = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-                drawLine(
-                    color = VantafynColors.Ink,
-                    start = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
-                    end = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 15.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-                drawLine(
-                    color = VantafynColors.Ink,
-                    start = androidx.compose.ui.geometry.Offset(5.5.dp.toPx(), 9.dp.toPx()),
-                    end = androidx.compose.ui.geometry.Offset(16.dp.toPx(), 9.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-            }
+        Canvas(modifier = Modifier.size(19.dp)) {
+            val stroke = 2.35.dp.toPx()
+            drawLine(
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 3.dp.toPx()),
+                end = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(5.dp.toPx(), 9.dp.toPx()),
+                end = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 15.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Color.White,
+                start = androidx.compose.ui.geometry.Offset(5.5.dp.toPx(), 9.dp.toPx()),
+                end = androidx.compose.ui.geometry.Offset(16.dp.toPx(), 9.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
         }
     }
 }
@@ -5192,10 +5782,7 @@ private fun FilterChips(labels: List<String>) {
 
 @Composable
 private fun ScreenTitle(title: String, subtitle: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs)) {
-        Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-        Text(subtitle, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
-    }
+    Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
 }
 
 @Composable
@@ -5920,4 +6507,20 @@ private fun JellyfinMediaDetail.primaryActionLabel(): String {
         itemType.equals("Episode", ignoreCase = true) && subtitle != null -> "Play $subtitle"
         else -> "Play"
     }
+}
+
+private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
+    val runtimeMs = runtimeMinutes
+        ?.takeIf { it > 0 }
+        ?.toLong()
+        ?.times(60_000L)
+        ?: return null
+    val resumeMs = if (!isPlayed && (progress ?: 0f) > 0.05f) {
+        (playbackPositionTicks / 10_000L).coerceIn(0L, runtimeMs)
+    } else {
+        0L
+    }
+    val remainingMs = (runtimeMs - resumeMs).coerceAtLeast(60_000L)
+    val finishTime = Date(nowMs + remainingMs)
+    return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }

@@ -12,6 +12,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMusicHome
 import dev.vantafyn.core.jellyfin.JellyfinMusicPlaylist
 import dev.vantafyn.core.jellyfin.JellyfinMusicRepository
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
+import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackMethod
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
@@ -35,6 +36,7 @@ import java.util.UUID
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val repositories = JellyfinRepositoryProvider(application)
     private val musicRepository: JellyfinMusicRepository = repositories.musicRepository
+    private val mediaRepository: JellyfinMediaRepository = repositories.mediaRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
     private val playbackController = MusicPlaybackController.get(application)
     private var session: JellyfinSession? = null
@@ -235,6 +237,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun togglePlayPause() = playbackController.togglePlayPause()
     fun next() = playbackController.next()
     fun previous() = playbackController.previous()
+    fun playQueueIndex(index: Int) = playbackController.playQueueIndex(index)
     fun seekTo(positionMs: Long) = playbackController.seekTo(positionMs)
     fun toggleShuffle() = playbackController.toggleShuffle()
     fun cycleRepeat() = playbackController.cycleRepeatMode()
@@ -246,6 +249,67 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun addToQueue(track: JellyfinMusicTrack) {
         playbackController.addToQueue(track.toPlaybackTrack())
         _state.update { it.copy(message = "Added to queue") }
+    }
+
+    fun playCurrentNext() {
+        val current = playbackController.state.value.currentTrack ?: return
+        playbackController.playNext(current)
+        _state.update { it.copy(message = "Queued next") }
+    }
+
+    fun addCurrentToQueue() {
+        val current = playbackController.state.value.currentTrack ?: return
+        playbackController.addToQueue(current)
+        _state.update { it.copy(message = "Added to queue") }
+    }
+
+    fun openCurrentAlbum() {
+        val current = playbackController.state.value.currentTrack ?: return
+        val albumId = current.albumId ?: return
+        val activeSession = session ?: return
+        val album = _state.value.home?.albums?.firstOrNull { it.id == albumId }
+            ?: JellyfinMusicAlbum(
+                id = albumId,
+                title = current.album ?: "Album",
+                artist = current.artist,
+                year = null,
+                artworkUrl = current.artworkUrl,
+            )
+        viewModelScope.launch {
+            when (val result = musicRepository.getAlbumTracks(activeSession, albumId)) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(screen = MusicScreenState.Album(album, result.value), showNowPlaying = false)
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+            }
+        }
+    }
+
+    fun openCurrentArtist() {
+        val current = playbackController.state.value.currentTrack ?: return
+        val artist = _state.value.home?.artists?.firstOrNull { it.name.equals(current.artist, ignoreCase = true) } ?: return
+        openArtist(artist)
+        closeNowPlaying()
+    }
+
+    fun toggleCurrentFavorite() {
+        val activeSession = session ?: return
+        val current = playbackController.state.value.currentTrack ?: return
+        val targetFavorite = !current.isFavorite
+        viewModelScope.launch {
+            when (val result = mediaRepository.setFavorite(activeSession, current.id, targetFavorite)) {
+                is JellyfinResult.Success -> {
+                    playbackController.updateFavorite(current.id, result.value)
+                    _state.update { state ->
+                        state.copy(
+                            home = state.home?.copyWithFavorite(current.id, result.value),
+                            message = if (result.value) "Added to My List" else "Removed from My List",
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+            }
+        }
     }
 
     fun createPlaylistWithCurrent(name: String) {
@@ -441,9 +505,11 @@ private fun JellyfinMusicTrack.toPlaybackTrack(streamUrl: String = this.streamUr
         title = title,
         artist = artist,
         album = album,
+        albumId = albumId,
         durationMs = durationMs,
         streamUrl = streamUrl,
         artworkUrl = artworkUrl,
+        isFavorite = isFavorite,
     )
 
 private fun VantafynMusicTrack.toFallbackPlaybackInfo(): JellyfinPlaybackInfo =
@@ -466,6 +532,15 @@ private fun VantafynMusicTrack.toFallbackPlaybackInfo(): JellyfinPlaybackInfo =
         sourceLabel = "Universal audio",
         isLiveStream = false,
     )
+
+private fun JellyfinMusicHome.copyWithFavorite(trackId: UUID, isFavorite: Boolean): JellyfinMusicHome =
+    copy(
+        recentlyAdded = recentlyAdded.mapFavorite(trackId, isFavorite),
+        songs = songs.mapFavorite(trackId, isFavorite),
+    )
+
+private fun List<JellyfinMusicTrack>.mapFavorite(trackId: UUID, isFavorite: Boolean): List<JellyfinMusicTrack> =
+    map { if (it.id == trackId) it.copy(isFavorite = isFavorite) else it }
 
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L

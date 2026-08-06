@@ -118,9 +118,9 @@ fun VantafynNavDockBrush(enabled: Boolean = true): Brush {
     val alpha = if (enabled) 1f else 0.54f
     return Brush.linearGradient(
         listOf(
-            Color(0xFF101525).copy(alpha = 0.84f * alpha),
-            Color(0xFF141A2B).copy(alpha = 0.80f * alpha),
-            Color(0xFF0B1020).copy(alpha = 0.86f * alpha),
+            Color(0xFF101525).copy(alpha = 0.91f * alpha),
+            Color(0xFF141A2B).copy(alpha = 0.88f * alpha),
+            Color(0xFF0B1020).copy(alpha = 0.93f * alpha),
         ),
     )
 }

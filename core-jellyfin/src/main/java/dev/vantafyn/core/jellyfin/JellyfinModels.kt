@@ -96,6 +96,22 @@ data class JellyfinMediaItem(
     val isFavorite: Boolean = false,
 )
 
+data class JellyfinLibraryPage(
+    val items: List<JellyfinMediaItem>,
+    val startIndex: Int,
+    val pageSize: Int,
+    val totalItems: Int,
+) {
+    val currentPage: Int
+        get() = if (pageSize <= 0) 1 else (startIndex / pageSize) + 1
+    val totalPages: Int
+        get() = if (pageSize <= 0 || totalItems <= 0) 1 else ((totalItems - 1) / pageSize) + 1
+    val hasPrevious: Boolean
+        get() = startIndex > 0
+    val hasNext: Boolean
+        get() = startIndex + items.size < totalItems
+}
+
 data class JellyfinLiveTvChannel(
     val id: UUID,
     val name: String,
@@ -297,6 +313,7 @@ data class JellyfinMusicTrack(
     val hasLyrics: Boolean,
     val streamUrl: String,
     val playlistItemId: String? = null,
+    val isFavorite: Boolean = false,
 )
 
 data class JellyfinMusicAlbum(
@@ -371,7 +388,57 @@ data class JellyfinAdminOverview(
     val seriesCount: Int?,
     val episodesCount: Int?,
     val musicCount: Int?,
+    val plugins: List<JellyfinAdminPlugin> = emptyList(),
+    val tasks: List<JellyfinAdminTask> = emptyList(),
+    val recentActivity: List<JellyfinAdminActivity> = emptyList(),
+    val devices: List<JellyfinAdminDevice> = emptyList(),
+    val serverLogs: List<JellyfinAdminLogFile> = emptyList(),
     val unavailableStats: List<String>,
+)
+
+data class JellyfinAdminPlugin(
+    val id: UUID,
+    val name: String,
+    val version: String?,
+    val description: String?,
+    val status: String?,
+    val hasImage: Boolean,
+    val canUninstall: Boolean,
+)
+
+data class JellyfinAdminTask(
+    val id: String,
+    val name: String,
+    val category: String?,
+    val state: String?,
+    val progress: Double?,
+    val lastStatus: String?,
+    val lastEnded: String?,
+)
+
+data class JellyfinAdminActivity(
+    val id: Long,
+    val name: String,
+    val shortOverview: String?,
+    val type: String?,
+    val date: String?,
+    val severity: String?,
+)
+
+data class JellyfinAdminDevice(
+    val id: String,
+    val name: String,
+    val appName: String?,
+    val appVersion: String?,
+    val lastUserName: String?,
+    val lastActivity: String?,
+    val iconUrl: String?,
+)
+
+data class JellyfinAdminLogFile(
+    val name: String,
+    val sizeBytes: Long,
+    val modified: String?,
 )
 
 data class JellyfinAdminSession(
@@ -513,6 +580,12 @@ interface JellyfinAuthRepository {
 interface JellyfinLibraryRepository {
     suspend fun getLibraries(session: JellyfinSession): JellyfinResult<List<JellyfinLibrary>>
     suspend fun getLibraryItems(session: JellyfinSession, library: JellyfinLibrary, limit: Int = 60): JellyfinResult<List<JellyfinMediaItem>>
+    suspend fun getLibraryItemsPage(
+        session: JellyfinSession,
+        library: JellyfinLibrary,
+        startIndex: Int,
+        limit: Int = 60,
+    ): JellyfinResult<JellyfinLibraryPage>
 }
 
 interface JellyfinHomeRepository {
@@ -584,6 +657,9 @@ interface JellyfinAdminRepository {
         enabledFolderIds: List<UUID>? = null,
     ): JellyfinResult<JellyfinAdminUserDetail>
     suspend fun resetUserPassword(session: JellyfinSession, userId: UUID, newPassword: String): JellyfinResult<Unit>
+    suspend fun scanLibrary(session: JellyfinSession): JellyfinResult<Unit>
+    suspend fun setPluginEnabled(session: JellyfinSession, pluginId: UUID, version: String, enabled: Boolean): JellyfinResult<Unit>
+    suspend fun setScheduledTaskRunning(session: JellyfinSession, taskId: String, running: Boolean): JellyfinResult<Unit>
 }
 
 interface JellyfinUserPreferencesRepository {

@@ -13,7 +13,9 @@ import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
 import org.jellyfin.sdk.api.client.extensions.authenticateWithQuickConnect
+import org.jellyfin.sdk.api.client.extensions.activityLogApi
 import org.jellyfin.sdk.api.client.extensions.artistsApi
+import org.jellyfin.sdk.api.client.extensions.devicesApi
 import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
@@ -22,7 +24,9 @@ import org.jellyfin.sdk.api.client.extensions.lyricsApi
 import org.jellyfin.sdk.api.client.extensions.mediaInfoApi
 import org.jellyfin.sdk.api.client.extensions.playStateApi
 import org.jellyfin.sdk.api.client.extensions.playlistsApi
+import org.jellyfin.sdk.api.client.extensions.pluginsApi
 import org.jellyfin.sdk.api.client.extensions.quickConnectApi
+import org.jellyfin.sdk.api.client.extensions.scheduledTasksApi
 import org.jellyfin.sdk.api.client.extensions.searchApi
 import org.jellyfin.sdk.api.client.extensions.sessionApi
 import org.jellyfin.sdk.api.client.extensions.systemApi
@@ -377,11 +381,71 @@ class SdkJellyfinLibraryRepository(
                     val channels = fetchLiveTvChannels(api, session, limit)
                     return@withContext JellyfinResult.Success(channels.map { it.toMediaItem() })
                 }
+                val allItems = mutableListOf<JellyfinMediaItem>()
+                var startIndex = 0
+                val pageSize = limit.coerceAtLeast(200)
+                var totalRecordCount: Int? = null
+                var pageItemCount: Int
+                do {
+                    val response by api.itemsApi.getItems(
+                        GetItemsRequest(
+                            userId = session.user.id,
+                            parentId = library.id,
+                            recursive = true,
+                            startIndex = startIndex,
+                            limit = pageSize,
+                            sortBy = listOf(ItemSortBy.DATE_CREATED),
+                            sortOrder = listOf(SortOrder.DESCENDING),
+                            fields = itemFields,
+                            includeItemTypes = includeTypesFor(library.collectionType),
+                            enableUserData = true,
+                            imageTypeLimit = 2,
+                            enableImageTypes = itemImageTypes,
+                            enableImages = true,
+                            enableTotalRecordCount = true,
+                        ),
+                    )
+                    val pageItems = response.items.map { it.toMediaItem(api, shapeFor(it.type)) }
+                    pageItemCount = pageItems.size
+                    totalRecordCount = response.totalRecordCount ?: totalRecordCount
+                    allItems += pageItems
+                    startIndex += pageItemCount
+                } while (pageItemCount > 0 && allItems.size < (totalRecordCount ?: Int.MAX_VALUE))
+                JellyfinResult.Success(allItems.distinctBy { it.id })
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getLibraryItemsPage(
+        session: JellyfinSession,
+        library: JellyfinLibrary,
+        startIndex: Int,
+        limit: Int,
+    ): JellyfinResult<JellyfinLibraryPage> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                if (library.collectionType.isLiveTvCollection()) {
+                    val allChannels = fetchLiveTvChannels(api, session, limit = 1_000)
+                    val safeStart = startIndex.coerceAtLeast(0)
+                    val pageItems = allChannels.drop(safeStart).take(limit).map { it.toMediaItem() }
+                    return@withContext JellyfinResult.Success(
+                        JellyfinLibraryPage(
+                            items = pageItems,
+                            startIndex = safeStart,
+                            pageSize = limit,
+                            totalItems = allChannels.size,
+                        ),
+                    )
+                }
+                val safeStart = startIndex.coerceAtLeast(0)
                 val response by api.itemsApi.getItems(
                     GetItemsRequest(
                         userId = session.user.id,
                         parentId = library.id,
                         recursive = true,
+                        startIndex = safeStart,
                         limit = limit,
                         sortBy = listOf(ItemSortBy.DATE_CREATED),
                         sortOrder = listOf(SortOrder.DESCENDING),
@@ -391,10 +455,17 @@ class SdkJellyfinLibraryRepository(
                         imageTypeLimit = 2,
                         enableImageTypes = itemImageTypes,
                         enableImages = true,
-                        enableTotalRecordCount = false,
+                        enableTotalRecordCount = true,
                     ),
                 )
-                JellyfinResult.Success(response.items.map { it.toMediaItem(api, shapeFor(it.type)) })
+                JellyfinResult.Success(
+                    JellyfinLibraryPage(
+                        items = response.items.map { it.toMediaItem(api, shapeFor(it.type)) },
+                        startIndex = safeStart,
+                        pageSize = limit,
+                        totalItems = response.totalRecordCount,
+                    ),
+                )
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
@@ -1529,6 +1600,71 @@ class SdkJellyfinAdminRepository(
                         )
                     }
                 }.getOrDefault(emptyList())
+                val plugins = runCatching {
+                    val result by api.pluginsApi.getPlugins()
+                    result.map {
+                        JellyfinAdminPlugin(
+                            id = it.id,
+                            name = it.name,
+                            version = it.version,
+                            description = it.description,
+                            status = it.status?.serialName ?: it.status?.name,
+                            hasImage = it.hasImage,
+                            canUninstall = it.canUninstall,
+                        )
+                    }
+                }.getOrDefault(emptyList())
+                val tasks = runCatching {
+                    val result by api.scheduledTasksApi.getTasks(isHidden = false, isEnabled = null)
+                    result.map {
+                        JellyfinAdminTask(
+                            id = it.id ?: it.key ?: it.name.orEmpty(),
+                            name = it.name ?: it.key ?: "Scheduled task",
+                            category = it.category,
+                            state = it.state?.serialName ?: it.state?.name,
+                            progress = it.currentProgressPercentage,
+                            lastStatus = it.lastExecutionResult?.status?.serialName ?: it.lastExecutionResult?.status?.name,
+                            lastEnded = it.lastExecutionResult?.endTimeUtc?.toString(),
+                        )
+                    }
+                }.getOrDefault(emptyList())
+                val recentActivity = runCatching {
+                    val result by api.activityLogApi.getLogEntries(startIndex = 0, limit = 8, minDate = null, hasUserId = null)
+                    result.items.map {
+                        JellyfinAdminActivity(
+                            id = it.id,
+                            name = it.name,
+                            shortOverview = it.shortOverview ?: it.overview,
+                            type = it.type,
+                            date = it.date?.toString(),
+                            severity = it.severity?.serialName ?: it.severity?.name,
+                        )
+                    }
+                }.getOrDefault(emptyList())
+                val devices = runCatching {
+                    val result by api.devicesApi.getDevices(userId = null)
+                    result.items.map {
+                        JellyfinAdminDevice(
+                            id = it.id.orEmpty(),
+                            name = it.customName ?: it.name ?: "Unknown device",
+                            appName = it.appName,
+                            appVersion = it.appVersion,
+                            lastUserName = it.lastUserName,
+                            lastActivity = it.dateLastActivity?.toString(),
+                            iconUrl = it.iconUrl,
+                        )
+                    }
+                }.getOrDefault(emptyList())
+                val logs = runCatching {
+                    val result by api.systemApi.getServerLogs()
+                    result.map {
+                        JellyfinAdminLogFile(
+                            name = it.name,
+                            sizeBytes = it.size,
+                            modified = it.dateModified.toString(),
+                        )
+                    }
+                }.getOrDefault(emptyList())
                 JellyfinResult.Success(
                     JellyfinAdminOverview(
                         serverName = system.serverName,
@@ -1543,6 +1679,11 @@ class SdkJellyfinAdminRepository(
                         seriesCount = countItems(api, session, listOf(BaseItemKind.SERIES)),
                         episodesCount = countItems(api, session, listOf(BaseItemKind.EPISODE)),
                         musicCount = countItems(api, session, listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)),
+                        plugins = plugins,
+                        tasks = tasks,
+                        recentActivity = recentActivity,
+                        devices = devices,
+                        serverLogs = logs,
                         unavailableStats = listOf(
                             "Watch-time totals require a Jellyfin plugin or external reporting source.",
                             "Detailed historical playback analytics are not exposed by Jellyfin core here.",
@@ -1649,6 +1790,68 @@ class SdkJellyfinAdminRepository(
                         resetPassword = true,
                     ),
                 )
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun setPluginEnabled(
+        session: JellyfinSession,
+        pluginId: java.util.UUID,
+        version: String,
+        enabled: Boolean,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            if (!session.user.isAdministrator) {
+                return@withContext JellyfinResult.Failure("Admin access is not available for this user")
+            }
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                if (enabled) {
+                    api.pluginsApi.enablePlugin(pluginId, version)
+                } else {
+                    api.pluginsApi.disablePlugin(pluginId, version)
+                }
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun scanLibrary(session: JellyfinSession): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            if (!session.user.isAdministrator) {
+                return@withContext JellyfinResult.Failure("Admin access is not available for this user")
+            }
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.libraryApi.refreshLibrary()
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun setScheduledTaskRunning(
+        session: JellyfinSession,
+        taskId: String,
+        running: Boolean,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            if (!session.user.isAdministrator) {
+                return@withContext JellyfinResult.Failure("Admin access is not available for this user")
+            }
+            if (taskId.isBlank()) {
+                return@withContext JellyfinResult.Failure("Scheduled task is missing an id")
+            }
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                if (running) {
+                    api.scheduledTasksApi.startTask(taskId)
+                } else {
+                    api.scheduledTasksApi.stopTask(taskId)
+                }
                 JellyfinResult.Success(Unit)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -2070,6 +2273,7 @@ private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): 
             enableAudioVbrEncoding = true,
         ).withAccessToken(session.accessToken),
         playlistItemId = playlistItemId,
+        isFavorite = userData?.isFavorite == true,
     )
 
 private fun BaseItemDto.toMusicAlbum(api: ApiClient): JellyfinMusicAlbum =

@@ -13,6 +13,7 @@ import dev.vantafyn.core.jellyfin.JellyfinHome
 import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
+import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.JellyfinMediaCard
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
@@ -332,11 +333,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    fun selectProfile(profile: SavedProfile) {
+    fun selectProfile(profile: SavedProfile, showPickerWhileRestoring: Boolean = true) {
         viewModelScope.launch {
             _state.update {
                 it.copy(
-                    step = VantafynSetupStep.ProfilePicker,
+                    step = if (showPickerWhileRestoring) VantafynSetupStep.ProfilePicker else VantafynSetupStep.Splash,
                     selectedProfileId = profile.id,
                     isLoading = true,
                     errorMessage = null,
@@ -596,6 +597,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun openLibrary(library: JellyfinLibrary) {
+        openLibraryPage(library, startIndex = 0)
+    }
+
+    fun openLibraryPage(library: JellyfinLibrary, startIndex: Int) {
         val session = _state.value.session ?: return
         _state.update {
             it.copy(
@@ -603,15 +608,22 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 previousMobileDestination = MobileDestination.Libraries,
                 selectedLibrary = library,
                 libraryItems = emptyList(),
+                libraryItemsPage = null,
                 isLibraryItemsLoading = true,
                 libraryItemsError = null,
                 mobileMessage = null,
             )
         }
         viewModelScope.launch {
-            when (val result = libraryRepository.getLibraryItems(session, library)) {
+            when (val result = libraryRepository.getLibraryItemsPage(session, library, startIndex, LibraryItemsPageSize)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(isLibraryItemsLoading = false, libraryItems = result.value) }
+                    _state.update {
+                        it.copy(
+                            isLibraryItemsLoading = false,
+                            libraryItems = result.value.items,
+                            libraryItemsPage = result.value,
+                        )
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isLibraryItemsLoading = false, libraryItemsError = result.message) }
@@ -621,7 +633,23 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun retryLibraryItems() {
-        _state.value.selectedLibrary?.let(::openLibrary)
+        val state = _state.value
+        val library = state.selectedLibrary ?: return
+        openLibraryPage(library, state.libraryItemsPage?.startIndex ?: 0)
+    }
+
+    fun nextLibraryItemsPage() {
+        val state = _state.value
+        val library = state.selectedLibrary ?: return
+        val page = state.libraryItemsPage ?: return
+        if (page.hasNext) openLibraryPage(library, page.startIndex + page.pageSize)
+    }
+
+    fun previousLibraryItemsPage() {
+        val state = _state.value
+        val library = state.selectedLibrary ?: return
+        val page = state.libraryItemsPage ?: return
+        if (page.hasPrevious) openLibraryPage(library, (page.startIndex - page.pageSize).coerceAtLeast(0))
     }
 
     fun openMedia(itemId: UUID) {
@@ -848,16 +876,28 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun loadAdminOverview() {
+        refreshAdminOverview(showLoading = true)
+    }
+
+    fun pollAdminOverview() {
+        refreshAdminOverview(showLoading = false)
+    }
+
+    private fun refreshAdminOverview(showLoading: Boolean) {
         val session = _state.value.session ?: return
         if (!session.user.isAdministrator) return
         viewModelScope.launch {
-            _state.update { it.copy(isAdminLoading = true, adminError = null) }
+            if (showLoading) {
+                _state.update { it.copy(isAdminLoading = true, adminError = null) }
+            }
             when (val result = adminRepository.getOverview(session, _state.value.libraries)) {
                 is JellyfinResult.Success -> {
                     _state.update { it.copy(isAdminLoading = false, adminOverview = result.value) }
                 }
                 is JellyfinResult.Failure -> {
-                    _state.update { it.copy(isAdminLoading = false, adminError = result.message) }
+                    if (showLoading) {
+                        _state.update { it.copy(isAdminLoading = false, adminError = result.message) }
+                    }
                 }
             }
         }
@@ -1024,6 +1064,63 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             when (val result = adminRepository.resetUserPassword(session, detail.user.id, newPassword)) {
                 is JellyfinResult.Success -> _state.update { it.copy(isAdminUserSaving = false, mobileMessage = "Password reset") }
                 is JellyfinResult.Failure -> _state.update { it.copy(isAdminUserSaving = false, adminUserError = result.message) }
+            }
+        }
+    }
+
+    fun setAdminPluginEnabled(pluginId: UUID, version: String?, enabled: Boolean) {
+        val session = _state.value.session ?: return
+        if (!session.user.isAdministrator) return
+        val safeVersion = version?.takeIf { it.isNotBlank() } ?: run {
+            _state.update { it.copy(mobileMessage = "Plugin version is unavailable") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isAdminActionRunning = true, adminError = null, mobileMessage = null) }
+            when (val result = adminRepository.setPluginEnabled(session, pluginId, safeVersion, enabled)) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(isAdminActionRunning = false, mobileMessage = if (enabled) "Plugin enabled" else "Plugin disabled") }
+                    refreshAdminOverview(showLoading = false)
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(isAdminActionRunning = false, mobileMessage = result.message) }
+            }
+        }
+    }
+
+    fun scanAdminLibrary() {
+        val session = _state.value.session ?: return
+        if (!session.user.isAdministrator) return
+        viewModelScope.launch {
+            _state.update { it.copy(isAdminActionRunning = true, adminError = null, mobileMessage = null) }
+            when (val result = adminRepository.scanLibrary(session)) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(isAdminActionRunning = false, mobileMessage = "Library scan started") }
+                    refreshAdminOverview(showLoading = false)
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(isAdminActionRunning = false, mobileMessage = result.message) }
+            }
+        }
+    }
+
+    fun runAdminTask(taskId: String) {
+        setAdminTaskRunning(taskId, running = true)
+    }
+
+    fun stopAdminTask(taskId: String) {
+        setAdminTaskRunning(taskId, running = false)
+    }
+
+    private fun setAdminTaskRunning(taskId: String, running: Boolean) {
+        val session = _state.value.session ?: return
+        if (!session.user.isAdministrator) return
+        viewModelScope.launch {
+            _state.update { it.copy(isAdminActionRunning = true, adminError = null, mobileMessage = null) }
+            when (val result = adminRepository.setScheduledTaskRunning(session, taskId, running)) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(isAdminActionRunning = false, mobileMessage = if (running) "Task started" else "Task stopped") }
+                    refreshAdminOverview(showLoading = false)
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(isAdminActionRunning = false, mobileMessage = result.message) }
             }
         }
     }
@@ -1583,7 +1680,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             selectedBackground = readSelectedBackground(null),
                         )
                     }
-                    selectProfile(lastProfile)
+                    selectProfile(lastProfile, showPickerWhileRestoring = false)
                     return@launch
                 }
             }
@@ -1725,6 +1822,7 @@ data class VantafynHomeUiState(
     val mobileDestination: MobileDestination = MobileDestination.Home,
     val selectedLibrary: JellyfinLibrary? = null,
     val libraryItems: List<JellyfinMediaItem> = emptyList(),
+    val libraryItemsPage: JellyfinLibraryPage? = null,
     val isLibraryItemsLoading: Boolean = false,
     val libraryItemsError: String? = null,
     val selectedMediaId: UUID? = null,
@@ -1744,6 +1842,7 @@ data class VantafynHomeUiState(
     val favoritesError: String? = null,
     val adminOverview: JellyfinAdminOverview? = null,
     val isAdminLoading: Boolean = false,
+    val isAdminActionRunning: Boolean = false,
     val adminError: String? = null,
     val playbackPreferences: JellyfinUserPlaybackPreferences? = null,
     val editablePlaybackPreferences: JellyfinUserPlaybackPreferences? = null,
@@ -2212,6 +2311,7 @@ private fun VantafynCardSpacing.next(): VantafynCardSpacing =
     enumValues<VantafynCardSpacing>().let { it[(ordinal + 1) % it.size] }
 
 private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
+private const val LibraryItemsPageSize = 60
 
 enum class VantafynSetupStep {
     Splash,

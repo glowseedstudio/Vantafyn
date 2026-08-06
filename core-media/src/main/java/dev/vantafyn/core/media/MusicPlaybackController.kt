@@ -32,9 +32,11 @@ data class VantafynMusicTrack(
     val title: String,
     val artist: String,
     val album: String?,
+    val albumId: UUID?,
     val durationMs: Long?,
     val streamUrl: String,
     val artworkUrl: String?,
+    val isFavorite: Boolean = false,
 )
 
 enum class VantafynMusicStopReason {
@@ -87,6 +89,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var tickerJob: Job? = null
     private var lastTransitionReason: VantafynMusicStopReason = VantafynMusicStopReason.QueueChange
+    private var playbackServiceStarted = false
 
     internal val sessionPlayer: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
         setAudioAttributes(
@@ -209,7 +212,6 @@ class MusicPlaybackController private constructor(context: Context) {
             emitEvent(VantafynMusicPlaybackEvent.Stopped(previous, previousPosition, VantafynMusicStopReason.QueueChange))
         }
         lastTransitionReason = VantafynMusicStopReason.QueueChange
-        ensurePlaybackService()
         _state.update {
             it.copy(
                 queue = queue,
@@ -221,6 +223,7 @@ class MusicPlaybackController private constructor(context: Context) {
         }
         sessionPlayer.setMediaItems(queue.map { it.toMediaItem() }, safeIndex, 0L)
         sessionPlayer.prepare()
+        ensurePlaybackService()
         sessionPlayer.playWhenReady = true
         emitEvent(VantafynMusicPlaybackEvent.TrackStarted(queue[safeIndex], 0L))
     }
@@ -276,6 +279,21 @@ class MusicPlaybackController private constructor(context: Context) {
             lastTransitionReason = VantafynMusicStopReason.Skip
             sessionPlayer.seekTo(0, 0L)
             sessionPlayer.play()
+        }
+    }
+
+    fun playQueueIndex(index: Int) {
+        val safeIndex = index.takeIf { it in _state.value.queue.indices } ?: return
+        ensurePlaybackService()
+        lastTransitionReason = VantafynMusicStopReason.Skip
+        sessionPlayer.seekTo(safeIndex, 0L)
+        if (sessionPlayer.playbackState == Player.STATE_IDLE) sessionPlayer.prepare()
+        sessionPlayer.play()
+    }
+
+    fun updateFavorite(trackId: UUID, isFavorite: Boolean) {
+        _state.update { state ->
+            state.copy(queue = state.queue.map { if (it.id == trackId) it.copy(isFavorite = isFavorite) else it })
         }
     }
 
@@ -361,17 +379,23 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     private fun ensurePlaybackService() {
+        if (playbackServiceStarted) return
         val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
         runCatching {
             androidx.core.content.ContextCompat.startForegroundService(appContext, intent)
         }.recoverCatching {
             appContext.startService(intent)
+        }.onSuccess {
+            playbackServiceStarted = true
+        }.onFailure {
+            Log.d(MusicLogTag, "Unable to start music playback service: ${it.message.orEmpty().take(120)}")
         }
     }
 
     private fun stopPlaybackService() {
         val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
         runCatching { appContext.stopService(intent) }
+        playbackServiceStarted = false
     }
 
     private fun VantafynMusicTrack.toMediaItem(): MediaItem =
