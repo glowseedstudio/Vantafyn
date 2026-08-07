@@ -39,6 +39,8 @@ data class OmbiConfig(
     val isConfigured: Boolean get() = baseUrl.isNotBlank()
     val isEnabledForUsers: Boolean get() = isConfigured && accessMode == OmbiAccessMode.AllUsers
     val isEnabledForAdmins: Boolean get() = isConfigured && accessMode != OmbiAccessMode.Disabled
+    fun isAvailableFor(isAdmin: Boolean): Boolean =
+        isConfigured && (accessMode == OmbiAccessMode.AllUsers || (isAdmin && accessMode == OmbiAccessMode.AdminsOnly))
 }
 
 enum class OmbiAccessMode {
@@ -57,6 +59,7 @@ enum class OmbiLinkedAccountState {
     AccessRequested,
     AccountCreated,
     Linked,
+    TokenExpired,
     Disabled,
 }
 
@@ -85,6 +88,127 @@ data class OmbiUserMapping(
     val state: OmbiLinkedAccountState = OmbiLinkedAccountState.NotLinked,
     val updatedAt: Long = System.currentTimeMillis(),
     val note: String? = null,
+)
+
+data class OmbiUserSession(
+    val jellyfinUserId: String,
+    val ombiUserName: String,
+    val displayName: String?,
+    val ombiUserId: String?,
+    val expiresAt: String?,
+    val roles: List<String> = emptyList(),
+    val lastLoginAt: Long = System.currentTimeMillis(),
+    val lastValidatedAt: Long? = null,
+) {
+    val bestName: String get() = displayName?.takeIf { it.isNotBlank() } ?: ombiUserName
+}
+
+enum class RequestMediaType {
+    Movie,
+    Series,
+}
+
+enum class RequestState {
+    NotRequested,
+    PendingApproval,
+    Approved,
+    Processing,
+    PartiallyAvailable,
+    Available,
+    Declined,
+    Failed,
+    Unknown,
+}
+
+enum class OmbiTvRequestSelection {
+    AllSeasons,
+    FirstSeason,
+    LatestSeason,
+}
+
+data class RequestMediaSummary(
+    val externalId: String,
+    val movieDbId: String?,
+    val tvDbId: String?,
+    val imdbId: String?,
+    val mediaType: RequestMediaType,
+    val title: String,
+    val originalTitle: String?,
+    val year: Int?,
+    val posterUrl: String?,
+    val backdropUrl: String?,
+    val overview: String?,
+    val rating: Double?,
+    val state: RequestState,
+    val requestId: String?,
+    val isAvailableInJellyfin: Boolean,
+    val availableSeasonCount: Int?,
+    val totalSeasonCount: Int?,
+    val requestedBy: String? = null,
+    val requestedDate: String? = null,
+)
+
+data class RequestSeasonSummary(
+    val seasonNumber: Int,
+    val overview: String?,
+    val state: RequestState,
+    val available: Boolean,
+    val episodes: List<RequestEpisodeSummary> = emptyList(),
+)
+
+data class RequestEpisodeSummary(
+    val episodeNumber: Int,
+    val title: String?,
+    val airDate: String?,
+    val state: RequestState,
+    val available: Boolean,
+)
+
+data class RequestMediaDetail(
+    val summary: RequestMediaSummary,
+    val tagline: String?,
+    val runtimeMinutes: Int?,
+    val genres: List<String>,
+    val certification: String?,
+    val network: String?,
+    val seasons: List<RequestSeasonSummary>,
+    val similar: List<RequestMediaSummary>,
+)
+
+enum class OmbiDiscoverRailKind {
+    SearchResults,
+    PopularMovies,
+    NowPlayingMovies,
+    UpcomingMovies,
+    TopRatedMovies,
+    TrendingSeries,
+    PopularSeries,
+    AnticipatedSeries,
+    MostWatchedSeries,
+    RecentlyRequested,
+    RecentlyAvailable,
+    MyRequests,
+    FamilyQueue,
+}
+
+data class OmbiDiscoverRail(
+    val kind: OmbiDiscoverRailKind,
+    val title: String,
+    val items: List<RequestMediaSummary>,
+)
+
+data class OmbiUserCapabilities(
+    val canRequestMovies: Boolean,
+    val canRequestSeries: Boolean,
+    val canRequestSeasons: Boolean,
+    val canRequestEpisodes: Boolean,
+    val canManageOwnRequests: Boolean,
+    val canViewOtherRequests: Boolean,
+    val canManageRequests: Boolean,
+    val moviesAutoApproved: Boolean,
+    val seriesAutoApproved: Boolean,
+    val remainingMovieRequests: Int?,
+    val remainingSeriesRequests: Int?,
 )
 
 data class OmbiCapabilities(
@@ -195,6 +319,9 @@ class OmbiConfigStore(context: Context) {
     }
 
     fun clear() {
+        readSessions().forEach { session ->
+            secrets.removeSecret(session.secretKey)
+        }
         preferences.edit().clear().apply()
         secrets.removeSecret(SECRET_API_KEY)
     }
@@ -217,6 +344,49 @@ class OmbiConfigStore(context: Context) {
         preferences.edit().putString(KEY_USER_MAPPINGS, mappings.toUserMappingsJson().toString()).apply()
     }
 
+    private fun readSessions(): List<OmbiStoredUserSession> =
+        preferences.getString(KEY_USER_SESSIONS, null)
+            ?.let { runCatching { JSONArray(it).toStoredUserSessions() }.getOrDefault(emptyList()) }
+            .orEmpty()
+
+    fun readSession(jellyfinUserId: String): OmbiUserSession? {
+        val stored = readSessions().firstOrNull { it.jellyfinUserId == jellyfinUserId } ?: return null
+        if (secrets.readSecret(stored.secretKey).isNullOrBlank()) return null
+        return stored.toPublicSession()
+    }
+
+    fun readSessionToken(jellyfinUserId: String): String? {
+        val stored = readSessions().firstOrNull { it.jellyfinUserId == jellyfinUserId } ?: return null
+        return secrets.readSecret(stored.secretKey)?.takeIf { it.isNotBlank() }
+    }
+
+    fun saveSession(session: OmbiUserSession, accessToken: String) {
+        val secretKey = userTokenSecretKey(session.jellyfinUserId)
+        secrets.saveSecret(secretKey, accessToken)
+        val updated = readSessions().filterNot { it.jellyfinUserId == session.jellyfinUserId } +
+            OmbiStoredUserSession(
+                jellyfinUserId = session.jellyfinUserId,
+                ombiUserName = session.ombiUserName,
+                displayName = session.displayName,
+                ombiUserId = session.ombiUserId,
+                expiresAt = session.expiresAt,
+                roles = session.roles,
+                lastLoginAt = session.lastLoginAt,
+                lastValidatedAt = session.lastValidatedAt,
+                secretKey = secretKey,
+            )
+        preferences.edit().putString(KEY_USER_SESSIONS, updated.toStoredUserSessionsJson().toString()).apply()
+    }
+
+    fun removeSession(jellyfinUserId: String) {
+        readSessions().firstOrNull { it.jellyfinUserId == jellyfinUserId }?.let {
+            secrets.removeSecret(it.secretKey)
+        }
+        preferences.edit()
+            .putString(KEY_USER_SESSIONS, readSessions().filterNot { it.jellyfinUserId == jellyfinUserId }.toStoredUserSessionsJson().toString())
+            .apply()
+    }
+
     private companion object {
         const val KEY_ENABLED = "enabled"
         const val KEY_ACCESS_MODE = "access_mode"
@@ -234,8 +404,33 @@ class OmbiConfigStore(context: Context) {
         const val KEY_CAP_ADMIN_MODERATION = "cap_admin_moderation"
         const val KEY_ACCESS_REQUESTS = "access_requests"
         const val KEY_USER_MAPPINGS = "user_mappings"
+        const val KEY_USER_SESSIONS = "user_sessions"
         const val SECRET_API_KEY = "ombi.api_key"
     }
+}
+
+private data class OmbiStoredUserSession(
+    val jellyfinUserId: String,
+    val ombiUserName: String,
+    val displayName: String?,
+    val ombiUserId: String?,
+    val expiresAt: String?,
+    val roles: List<String>,
+    val lastLoginAt: Long,
+    val lastValidatedAt: Long?,
+    val secretKey: String,
+) {
+    fun toPublicSession(): OmbiUserSession =
+        OmbiUserSession(
+            jellyfinUserId = jellyfinUserId,
+            ombiUserName = ombiUserName,
+            displayName = displayName,
+            ombiUserId = ombiUserId,
+            expiresAt = expiresAt,
+            roles = roles,
+            lastLoginAt = lastLoginAt,
+            lastValidatedAt = lastValidatedAt,
+        )
 }
 
 class OmbiRepository(
@@ -267,6 +462,7 @@ class OmbiRepository(
     fun clearConfig() = store.clear()
     fun accessRequests(): List<OmbiAccessRequest> = store.readAccessRequests()
     fun userMappings(): List<OmbiUserMapping> = store.readMappings()
+    fun userSession(jellyfinUserId: String): OmbiUserSession? = store.readSession(jellyfinUserId)
     fun pendingAccessRequestCount(): Int =
         store.readAccessRequests().count { it.status == OmbiAccessRequestStatus.Pending }
 
@@ -337,7 +533,104 @@ class OmbiRepository(
 
     fun clearMapping(jellyfinUserId: String) {
         store.saveMappings(store.readMappings().filterNot { it.jellyfinUserId == jellyfinUserId })
+        store.removeSession(jellyfinUserId)
     }
+
+    fun unlinkUserSession(jellyfinUserId: String) {
+        store.removeSession(jellyfinUserId)
+        mappingFor(jellyfinUserId)?.let {
+            upsertMapping(it.copy(state = OmbiLinkedAccountState.AccountCreated))
+        }
+    }
+
+    fun cachedUserCapabilities(jellyfinUserId: String?): OmbiUserCapabilities {
+        val session = jellyfinUserId?.let(store::readSession)
+        val claims = session?.roles.orEmpty().map { it.lowercase() }
+        val canManage = claims.any { it.contains("admin") || it.contains("manage") || it.contains("requestadmin") }
+        return OmbiUserCapabilities(
+            canRequestMovies = claims.none { it.contains("deny") && it.contains("movie") },
+            canRequestSeries = claims.none { it.contains("deny") && (it.contains("tv") || it.contains("series")) },
+            canRequestSeasons = true,
+            canRequestEpisodes = false,
+            canManageOwnRequests = true,
+            canViewOtherRequests = canManage,
+            canManageRequests = canManage,
+            moviesAutoApproved = claims.any { it.contains("autoapprove") && it.contains("movie") },
+            seriesAutoApproved = claims.any { it.contains("autoapprove") && (it.contains("tv") || it.contains("series")) },
+            remainingMovieRequests = null,
+            remainingSeriesRequests = null,
+        )
+    }
+
+    suspend fun loginUser(
+        jellyfinUserId: String,
+        jellyfinUserName: String,
+        username: String,
+        password: String,
+    ): IntegrationResult<OmbiUserSession> =
+        runOmbiCatching(requireApiKey = false) {
+            if (username.isBlank() || password.isBlank()) {
+                throw IllegalArgumentException("Enter your Ombi username and password.")
+            }
+            val tokenJson = request(
+                path = "/api/v1/Token",
+                method = "POST",
+                body = JSONObject()
+                    .put("username", username.trim())
+                    .put("password", password)
+                    .put("rememberMe", true)
+                    .put("usePlexAdminAccount", false)
+                    .put("usePlexOAuth", false),
+                requestedBy = null,
+                auth = OmbiAuth.None,
+            ) as JSONObject
+            val token = tokenJson.optNullableString("access_token")
+                ?: tokenJson.optNullableString("accessToken")
+                ?: throw OmbiHttpException(401, "Ombi did not return an access token.")
+            val identity = request("/api/v1/Identity", "GET", null, null, OmbiAuth.Bearer(token)) as JSONObject
+            val session = identity.toUserSession(
+                jellyfinUserId = jellyfinUserId,
+                fallbackUserName = username.trim(),
+                expiresAt = tokenJson.optNullableString("expiration") ?: tokenJson.optNullableString("expires"),
+                lastLoginAt = System.currentTimeMillis(),
+            )
+            store.saveSession(session, token)
+            upsertMapping(
+                OmbiUserMapping(
+                    jellyfinUserId = jellyfinUserId,
+                    jellyfinUserName = jellyfinUserName,
+                    ombiUserName = session.ombiUserName,
+                    state = OmbiLinkedAccountState.Linked,
+                    note = "Linked from Vantafyn",
+                ),
+            )
+            updateAccessRequest(jellyfinUserId, OmbiAccessRequestStatus.Linked)
+            session
+        }
+
+    suspend fun validateUserSession(jellyfinUserId: String): IntegrationResult<OmbiUserSession> =
+        runOmbiCatching(requireApiKey = false) {
+            val token = store.readSessionToken(jellyfinUserId) ?: throw OmbiHttpException(401, "No saved Ombi session.")
+            val identity = request("/api/v1/Identity", "GET", null, null, OmbiAuth.Bearer(token)) as JSONObject
+            val previous = store.readSession(jellyfinUserId)
+            val session = identity.toUserSession(
+                jellyfinUserId = jellyfinUserId,
+                fallbackUserName = previous?.ombiUserName.orEmpty(),
+                expiresAt = previous?.expiresAt,
+                lastLoginAt = previous?.lastLoginAt ?: System.currentTimeMillis(),
+            ).copy(lastValidatedAt = System.currentTimeMillis())
+            store.saveSession(session, token)
+            mappingFor(jellyfinUserId)?.let {
+                upsertMapping(it.copy(ombiUserName = session.ombiUserName, state = OmbiLinkedAccountState.Linked))
+            }
+            session
+        }.also { result ->
+            if (result is IntegrationResult.Failure && result.reason == IntegrationFailureReason.Unauthorized) {
+                mappingFor(jellyfinUserId)?.let {
+                    upsertMapping(it.copy(state = OmbiLinkedAccountState.TokenExpired))
+                }
+            }
+        }
 
     override suspend fun testConnection(): IntegrationResult<IntegrationConnectionState.Connected> =
         when (val result = testConnectionReport()) {
@@ -376,27 +669,208 @@ class OmbiRepository(
             getJsonArray("/api/v1/Search/movie/${query.urlPath()}").mapJsonObjects { it.toSearchResult(MediaRequestType.Movie) }
         }
 
+    suspend fun searchDiscovery(query: String, jellyfinUserId: String?): IntegrationResult<List<RequestMediaSummary>> =
+        runOmbiCatching(requireApiKey = jellyfinUserId == null || store.readSessionToken(jellyfinUserId).isNullOrBlank()) {
+            val auth = userOrApiKeyAuth(jellyfinUserId)
+            val movies = runCatching {
+                getJsonArray("/api/v1/Search/movie/${query.urlPath()}", auth).mapJsonObjects { it.toRequestMediaSummary(MediaRequestType.Movie) }
+            }.getOrDefault(emptyList())
+            val series = runCatching {
+                getJsonArray("/api/v1/Search/tv/${query.urlPath()}", auth).mapJsonObjects { it.toRequestMediaSummary(MediaRequestType.Tv) }
+            }.getOrDefault(emptyList())
+            movies + series
+        }
+
+    suspend fun searchMovieForUser(jellyfinUserId: String, query: String): IntegrationResult<List<MediaRequestSearchResult>> =
+        runOmbiCatching(requireApiKey = false) {
+            getJsonArray("/api/v1/Search/movie/${query.urlPath()}", OmbiAuth.User(jellyfinUserId)).mapJsonObjects { it.toSearchResult(MediaRequestType.Movie) }
+        }
+
     override suspend fun searchTv(query: String): IntegrationResult<List<MediaRequestSearchResult>> =
         runOmbiCatching {
             getJsonArray("/api/v1/Search/tv/${query.urlPath()}").mapJsonObjects { it.toSearchResult(MediaRequestType.Tv) }
         }
 
+    suspend fun searchTvForUser(jellyfinUserId: String, query: String): IntegrationResult<List<MediaRequestSearchResult>> =
+        runOmbiCatching(requireApiKey = false) {
+            getJsonArray("/api/v1/Search/tv/${query.urlPath()}", OmbiAuth.User(jellyfinUserId)).mapJsonObjects { it.toSearchResult(MediaRequestType.Tv) }
+        }
+
     override suspend fun requestMovie(providerId: String, requestedBy: String?): IntegrationResult<Unit> =
         runOmbiCatching {
             val body = JSONObject().put("theMovieDbId", providerId.toIntOrNull() ?: providerId)
-            postJson("/api/v1/Request/movie", body, requestedBy)
+            validateRequestEngineResult(postJson("/api/v1/Request/movie", body, requestedBy))
+        }
+
+    suspend fun requestMovieForUser(jellyfinUserId: String, providerId: String): IntegrationResult<Unit> =
+        runOmbiCatching(requireApiKey = false) {
+            val body = JSONObject().put("theMovieDbId", providerId.toIntOrNull() ?: providerId)
+            validateRequestEngineResult(request("/api/v1/Request/movie", "POST", body, null, OmbiAuth.User(jellyfinUserId)))
         }
 
     override suspend fun requestTv(providerId: String, requestedBy: String?): IntegrationResult<Unit> =
+        requestTv(providerId, requestedBy, OmbiTvRequestSelection.AllSeasons)
+
+    suspend fun requestTv(providerId: String, requestedBy: String?, selection: OmbiTvRequestSelection): IntegrationResult<Unit> =
         runOmbiCatching {
-            val body = JSONObject().put("tvDbId", providerId.toIntOrNull() ?: providerId)
-            postJson("/api/v1/Request/tv", body, requestedBy)
+            val id = providerId.toIntOrNull() ?: providerId
+            val v2Body = JSONObject()
+                .put("theMovieDbId", id)
+                .put("requestAll", selection == OmbiTvRequestSelection.AllSeasons)
+                .put("latestSeason", selection == OmbiTvRequestSelection.LatestSeason)
+                .put("firstSeason", selection == OmbiTvRequestSelection.FirstSeason)
+            runCatching {
+                request("/api/v2/Requests/tv", "POST", v2Body, requestedBy, OmbiAuth.ApiKey)
+            }.getOrElse {
+                val fallbackBody = JSONObject().put("tvDbId", id)
+                request("/api/v1/Request/tv", "POST", fallbackBody, requestedBy, OmbiAuth.ApiKey)
+            }.let(::validateRequestEngineResult)
+        }
+
+    suspend fun requestTvForUser(jellyfinUserId: String, providerId: String): IntegrationResult<Unit> =
+        requestTvForUser(jellyfinUserId, providerId, OmbiTvRequestSelection.AllSeasons)
+
+    suspend fun requestTvForUser(jellyfinUserId: String, providerId: String, selection: OmbiTvRequestSelection): IntegrationResult<Unit> =
+        runOmbiCatching(requireApiKey = false) {
+            val id = providerId.toIntOrNull() ?: providerId
+            val v2Body = JSONObject()
+                .put("theMovieDbId", id)
+                .put("requestAll", selection == OmbiTvRequestSelection.AllSeasons)
+                .put("latestSeason", selection == OmbiTvRequestSelection.LatestSeason)
+                .put("firstSeason", selection == OmbiTvRequestSelection.FirstSeason)
+            runCatching {
+                request("/api/v2/Requests/tv", "POST", v2Body, null, OmbiAuth.User(jellyfinUserId))
+            }.getOrElse {
+                val fallbackBody = JSONObject().put("tvDbId", id)
+                request("/api/v1/Request/tv", "POST", fallbackBody, null, OmbiAuth.User(jellyfinUserId))
+            }.let(::validateRequestEngineResult)
         }
 
     override suspend fun getUserRequests(userName: String?): IntegrationResult<List<MediaRequestItem>> =
         runOmbiCatching {
             (getRequests("/api/v1/Request/movie", MediaRequestType.Movie) + getRequests("/api/v1/Request/tv", MediaRequestType.Tv))
                 .filter { userName.isNullOrBlank() || it.requestedBy.isNullOrBlank() || it.requestedBy.equals(userName, ignoreCase = true) }
+        }
+
+    suspend fun getLinkedUserRequests(jellyfinUserId: String): IntegrationResult<List<MediaRequestItem>> =
+        runOmbiCatching(requireApiKey = false) {
+            val session = store.readSession(jellyfinUserId)
+            val byUserId = session?.ombiUserId?.takeIf { it.isNotBlank() }?.let { ombiUserId ->
+                runCatching {
+                    getRequests("/api/v2/Requests/movie/50/0/requestedDate/desc?requestedBy=${ombiUserId.urlQuery()}", MediaRequestType.Movie, OmbiAuth.User(jellyfinUserId)) +
+                        getRequests("/api/v2/Requests/tv/50/0/requestedDate/desc?requestedBy=${ombiUserId.urlQuery()}", MediaRequestType.Tv, OmbiAuth.User(jellyfinUserId))
+                }.getOrNull()
+            }
+            byUserId ?: (
+                getRequests("/api/v1/Request/movie", MediaRequestType.Movie, OmbiAuth.User(jellyfinUserId)) +
+                    getRequests("/api/v1/Request/tv", MediaRequestType.Tv, OmbiAuth.User(jellyfinUserId))
+                )
+        }
+
+    suspend fun getMyRequestSummaries(jellyfinUserId: String?, userName: String?, isAdmin: Boolean): IntegrationResult<List<RequestMediaSummary>> =
+        runOmbiCatching(requireApiKey = jellyfinUserId == null || store.readSessionToken(jellyfinUserId).isNullOrBlank()) {
+            val auth = userOrApiKeyAuth(jellyfinUserId)
+            val session = jellyfinUserId?.let(store::readSession)
+            val byUserId = session?.ombiUserId?.takeIf { it.isNotBlank() }?.let { ombiUserId ->
+                runCatching {
+                    getRequestSummaries("/api/v2/Requests/movie/50/0/requestedDate/desc?requestedBy=${ombiUserId.urlQuery()}", RequestMediaType.Movie, auth) +
+                        getRequestSummaries("/api/v2/Requests/tv/50/0/requestedDate/desc?requestedBy=${ombiUserId.urlQuery()}", RequestMediaType.Series, auth)
+                }.getOrNull()
+            }
+            byUserId ?: (
+                getRequestSummaries("/api/v1/Request/movie", RequestMediaType.Movie, auth) +
+                    getRequestSummaries("/api/v1/Request/tv", RequestMediaType.Series, auth)
+                ).filter { isAdmin || userName.isNullOrBlank() || it.requestedBy.isNullOrBlank() || it.requestedBy.equals(userName, ignoreCase = true) }
+        }
+
+    suspend fun getDiscoveryRails(jellyfinUserId: String?, userName: String?, isAdmin: Boolean): IntegrationResult<List<OmbiDiscoverRail>> =
+        runOmbiCatching(requireApiKey = jellyfinUserId == null || store.readSessionToken(jellyfinUserId).isNullOrBlank()) {
+            val auth = userOrApiKeyAuth(jellyfinUserId)
+            buildList {
+                addDiscoveryRail(OmbiDiscoverRailKind.PopularMovies, "Popular movies") {
+                    discoverSummaries("/api/v2/Search/movie/popular/0/20", RequestMediaType.Movie, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.NowPlayingMovies, "Now playing") {
+                    discoverSummaries("/api/v2/Search/movie/nowplaying/0/20", RequestMediaType.Movie, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.UpcomingMovies, "Upcoming movies") {
+                    discoverSummaries("/api/v2/Search/movie/upcoming/0/20", RequestMediaType.Movie, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.TopRatedMovies, "Top-rated movies") {
+                    discoverSummaries("/api/v2/Search/movie/toprated/0/20", RequestMediaType.Movie, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.TrendingSeries, "Trending series") {
+                    discoverSummaries("/api/v2/Search/tv/trending/0/20", RequestMediaType.Series, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.PopularSeries, "Popular series") {
+                    discoverSummaries("/api/v2/Search/tv/popular/0/20", RequestMediaType.Series, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.AnticipatedSeries, "Anticipated series") {
+                    discoverSummaries("/api/v2/Search/tv/anticipated/0/20", RequestMediaType.Series, auth)
+                }
+                addDiscoveryRail(OmbiDiscoverRailKind.MostWatchedSeries, "Most-watched series") {
+                    discoverSummaries("/api/v2/Search/tv/mostwatched/0/20", RequestMediaType.Series, auth)
+                }
+                runCatching {
+                    getRequestSummaries("/api/v2/Requests/recentlyRequested", RequestMediaType.Movie, auth)
+                        .take(20)
+                }.getOrNull()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { add(OmbiDiscoverRail(OmbiDiscoverRailKind.RecentlyRequested, "Recently requested", it)) }
+
+                val visible = runCatching {
+                    getRequestSummaries("/api/v1/Request/movie", RequestMediaType.Movie, auth) +
+                        getRequestSummaries("/api/v1/Request/tv", RequestMediaType.Series, auth)
+                }.getOrDefault(emptyList())
+
+                val familyQueue = visible
+                    .filter { it.state in setOf(RequestState.PendingApproval, RequestState.Approved, RequestState.Processing) }
+                    .take(20)
+                if ((isAdmin || cachedUserCapabilities(jellyfinUserId).canViewOtherRequests) && familyQueue.isNotEmpty()) {
+                    add(OmbiDiscoverRail(OmbiDiscoverRailKind.FamilyQueue, "Family queue", familyQueue))
+                }
+
+                val recentlyAvailable = runCatching {
+                    getRequestSummaries("/api/v2/Requests/movie/available/20/0/requestedDate/desc", RequestMediaType.Movie, auth) +
+                        getRequestSummaries("/api/v2/Requests/tv/available/20/0/requestedDate/desc", RequestMediaType.Series, auth)
+                }.getOrDefault(visible.filter { it.state == RequestState.Available }.take(20))
+                if (recentlyAvailable.isNotEmpty()) {
+                    add(OmbiDiscoverRail(OmbiDiscoverRailKind.RecentlyAvailable, "Recently available", recentlyAvailable.take(20)))
+                }
+
+                val mine = runCatching {
+                    val session = jellyfinUserId?.let(store::readSession)
+                    val byUserId = session?.ombiUserId?.takeIf { it.isNotBlank() }?.let { ombiUserId ->
+                        getRequestSummaries("/api/v2/Requests/movie/20/0/requestedDate/desc?requestedBy=${ombiUserId.urlQuery()}", RequestMediaType.Movie, auth) +
+                            getRequestSummaries("/api/v2/Requests/tv/20/0/requestedDate/desc?requestedBy=${ombiUserId.urlQuery()}", RequestMediaType.Series, auth)
+                    }
+                    byUserId ?: visible.filter { userName.isNullOrBlank() || it.requestedBy.isNullOrBlank() || it.requestedBy.equals(userName, ignoreCase = true) }
+                }.getOrDefault(emptyList()).take(20)
+                if (mine.isNotEmpty()) {
+                    add(OmbiDiscoverRail(OmbiDiscoverRailKind.MyRequests, "My requests", mine))
+                }
+            }
+        }
+
+    suspend fun getRequestMediaDetail(item: RequestMediaSummary, jellyfinUserId: String?): IntegrationResult<RequestMediaDetail> =
+        runOmbiCatching(requireApiKey = jellyfinUserId == null || store.readSessionToken(jellyfinUserId).isNullOrBlank()) {
+            val auth = userOrApiKeyAuth(jellyfinUserId)
+            val json = when (item.mediaType) {
+                RequestMediaType.Movie -> {
+                    val id = item.movieDbId ?: item.externalId
+                    request("/api/v2/Search/movie/${id.urlPath()}", "GET", null, null, auth) as JSONObject
+                }
+                RequestMediaType.Series -> {
+                    val tvDbId = item.tvDbId ?: item.externalId
+                    runCatching {
+                        request("/api/v2/Search/tv/${tvDbId.urlPath()}", "GET", null, null, auth) as JSONObject
+                    }.getOrElse {
+                        val movieDbId = item.movieDbId ?: throw it
+                        request("/api/v2/Search/tv/moviedb/${movieDbId.urlPath()}", "GET", null, null, auth) as JSONObject
+                    }
+                }
+            }
+            json.toRequestMediaDetail(item)
         }
 
     override suspend fun getAllRequests(): IntegrationResult<List<MediaRequestItem>> =
@@ -410,12 +884,12 @@ class OmbiRepository(
     override suspend fun denyRequest(requestId: String): IntegrationResult<Unit> =
         IntegrationResult.Failure(IntegrationFailureReason.Unsupported, "Deny endpoint varies by Ombi version and is not wired yet.")
 
-    private suspend fun <T> runOmbiCatching(block: suspend () -> T): IntegrationResult<T> =
+    private suspend fun <T> runOmbiCatching(requireApiKey: Boolean = true, block: suspend () -> T): IntegrationResult<T> =
         withContext(ioDispatcher) {
             try {
                 val config = store.read()
                 val apiKey = store.readApiKey()
-                if (!config.isConfigured || apiKey.isNullOrBlank()) {
+                if (!config.isConfigured || (requireApiKey && apiKey.isNullOrBlank())) {
                     return@withContext IntegrationResult.Failure(IntegrationFailureReason.NotConfigured, "Ombi is not configured.")
                 }
                 IntegrationResult.Success(withTimeout(12_000L) { block() })
@@ -424,11 +898,17 @@ class OmbiRepository(
             }
         }
 
-    private fun getRequests(path: String, type: MediaRequestType): List<MediaRequestItem> =
-        getJsonArray(path).mapJsonObjects { it.toRequestItem(type) }
+    private fun getRequests(path: String, type: MediaRequestType, auth: OmbiAuth = OmbiAuth.ApiKey): List<MediaRequestItem> =
+        getJsonArray(path, auth).mapJsonObjects { it.toRequestItem(type) }
 
-    private fun getJsonArray(path: String): JSONArray {
-        val value = request(path, "GET", null, null)
+    private fun getRequestSummaries(path: String, type: RequestMediaType, auth: OmbiAuth): List<RequestMediaSummary> =
+        getJsonArray(path, auth).mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType()) }
+
+    private fun discoverSummaries(path: String, type: RequestMediaType, auth: OmbiAuth): List<RequestMediaSummary> =
+        getJsonArray(path, auth).mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType()) }
+
+    private fun getJsonArray(path: String, auth: OmbiAuth = OmbiAuth.ApiKey): JSONArray {
+        val value = request(path, "GET", null, null, auth)
         return when (value) {
             is JSONArray -> value
             is JSONObject -> value.optJSONArray("results") ?: value.optJSONArray("items") ?: JSONArray().put(value)
@@ -436,24 +916,32 @@ class OmbiRepository(
         }
     }
 
-    private fun getJsonArrayOrObject(path: String): Any = request(path, "GET", null, null)
+    private fun getJsonArrayOrObject(path: String): Any = request(path, "GET", null, null, OmbiAuth.ApiKey)
 
-    private fun postJson(path: String, body: JSONObject, requestedBy: String?) {
-        request(path, "POST", body, requestedBy)
-    }
+    private fun postJson(path: String, body: JSONObject, requestedBy: String?): Any =
+        request(path, "POST", body, requestedBy, OmbiAuth.ApiKey)
 
-    private fun request(path: String, method: String, body: JSONObject?, requestedBy: String?): Any {
+    private fun request(path: String, method: String, body: JSONObject?, requestedBy: String?, auth: OmbiAuth): Any {
         val config = store.read()
-        val apiKey = store.readApiKey().orEmpty()
         val connection = URL("${config.baseUrl.trimEnd('/')}$path").openConnection() as HttpURLConnection
         connection.requestMethod = method
         connection.connectTimeout = 12_000
         connection.readTimeout = 12_000
-        connection.setRequestProperty("ApiKey", apiKey)
         connection.setRequestProperty("Accept", "application/json")
         connection.setRequestProperty("Content-Type", "application/json")
-        val alias = requestedBy?.takeIf { it.isNotBlank() } ?: config.apiAlias
-        alias?.let { connection.setRequestProperty("ApiAlias", it) }
+        when (auth) {
+            OmbiAuth.ApiKey -> {
+                connection.setRequestProperty("ApiKey", store.readApiKey().orEmpty())
+                val alias = requestedBy?.takeIf { it.isNotBlank() } ?: config.apiAlias
+                alias?.let { connection.setRequestProperty("ApiAlias", it) }
+            }
+            is OmbiAuth.Bearer -> connection.setRequestProperty("Authorization", "Bearer ${auth.token}")
+            OmbiAuth.None -> Unit
+            is OmbiAuth.User -> {
+                val token = store.readSessionToken(auth.jellyfinUserId) ?: throw OmbiHttpException(401, "No saved Ombi session.")
+                connection.setRequestProperty("Authorization", "Bearer $token")
+            }
+        }
         if (body != null) {
             connection.doOutput = true
             OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
@@ -465,9 +953,37 @@ class OmbiRepository(
         if (code !in 200..299) throw OmbiHttpException(code, response.take(180))
         return response.parseJsonBody()
     }
+
+    private fun userOrApiKeyAuth(jellyfinUserId: String?): OmbiAuth =
+        if (jellyfinUserId != null && !store.readSessionToken(jellyfinUserId).isNullOrBlank()) OmbiAuth.User(jellyfinUserId) else OmbiAuth.ApiKey
 }
 
 private class OmbiHttpException(val code: Int, message: String) : RuntimeException(message)
+
+private class OmbiRequestEngineException(
+    val errorCode: String?,
+    message: String,
+) : RuntimeException(message)
+
+private class OmbiUnexpectedContentException(message: String) : RuntimeException(message)
+
+private sealed interface OmbiAuth {
+    data object ApiKey : OmbiAuth
+    data object None : OmbiAuth
+    data class Bearer(val token: String) : OmbiAuth
+    data class User(val jellyfinUserId: String) : OmbiAuth
+}
+
+private inline fun MutableList<OmbiDiscoverRail>.addDiscoveryRail(
+    kind: OmbiDiscoverRailKind,
+    title: String,
+    block: () -> List<RequestMediaSummary>,
+) {
+    runCatching { block() }
+        .getOrDefault(emptyList())
+        .takeIf { it.isNotEmpty() }
+        ?.let { add(OmbiDiscoverRail(kind, title, it)) }
+}
 
 private fun Throwable.toIntegrationFailure(): IntegrationResult.Failure {
     val className = javaClass.name
@@ -477,6 +993,10 @@ private fun Throwable.toIntegrationFailure(): IntegrationResult.Failure {
         this is OmbiHttpException && code == 401 -> IntegrationFailureReason.Unauthorized
         this is OmbiHttpException && code == 403 -> IntegrationFailureReason.Forbidden
         this is OmbiHttpException && code == 409 -> IntegrationFailureReason.AlreadyExists
+        this is OmbiRequestEngineException && errorCode?.contains("AlreadyRequested", ignoreCase = true) == true -> IntegrationFailureReason.AlreadyExists
+        this is OmbiUnexpectedContentException -> IntegrationFailureReason.InvalidConfiguration
+        this is OmbiRequestEngineException && errorCode?.contains("Quota", ignoreCase = true) == true -> IntegrationFailureReason.Forbidden
+        this is OmbiRequestEngineException && errorCode?.contains("Permission", ignoreCase = true) == true -> IntegrationFailureReason.Forbidden
         this is OmbiHttpException && code in 500..599 -> IntegrationFailureReason.ServerError
         this is OmbiHttpException -> IntegrationFailureReason.ServerError
         this is IllegalArgumentException -> IntegrationFailureReason.InvalidConfiguration
@@ -488,8 +1008,14 @@ private fun Throwable.toIntegrationFailure(): IntegrationResult.Failure {
             message.contains("certificate", ignoreCase = true) -> IntegrationFailureReason.NetworkError
         else -> IntegrationFailureReason.Unknown
     }
-    val userMessage = when (reason) {
-        IntegrationFailureReason.Unauthorized -> "Ombi did not accept this API key."
+    val userMessage = when {
+        this is OmbiRequestEngineException && errorCode?.contains("Quota", ignoreCase = true) == true -> "This Ombi account has reached its request limit."
+        this is OmbiRequestEngineException && errorCode?.contains("NoPermissions", ignoreCase = true) == true -> "This Ombi account does not have permission to request that."
+        this is OmbiRequestEngineException && errorCode?.contains("AlreadyRequested", ignoreCase = true) == true -> "This title has already been requested."
+        this is OmbiRequestEngineException && message.isNotBlank() -> message.take(180)
+        this is OmbiUnexpectedContentException -> message
+        else -> when (reason) {
+        IntegrationFailureReason.Unauthorized -> "Ombi rejected this API key."
         IntegrationFailureReason.Forbidden -> "This Ombi account does not have permission to do that."
         IntegrationFailureReason.NotConfigured -> "Ombi is not configured."
         IntegrationFailureReason.NetworkError -> "Could not reach Ombi."
@@ -498,6 +1024,7 @@ private fun Throwable.toIntegrationFailure(): IntegrationResult.Failure {
         IntegrationFailureReason.InvalidConfiguration -> "Check the Ombi server address."
         IntegrationFailureReason.AlreadyExists -> "This request already exists."
         IntegrationFailureReason.Unknown -> "The Ombi request failed."
+        }
     }
     return IntegrationResult.Failure(reason, userMessage, this)
 }
@@ -513,10 +1040,27 @@ private fun normalizeBaseUrl(value: String): String {
 private fun String.urlPath(): String =
     java.net.URLEncoder.encode(trim(), "UTF-8").replace("+", "%20")
 
+private fun String.urlQuery(): String =
+    java.net.URLEncoder.encode(trim(), "UTF-8")
+
 private fun String.parseJsonBody(): Any {
     val trimmed = trim()
     if (trimmed.isBlank()) return JSONObject()
+    if (trimmed.startsWith("<")) {
+        throw OmbiUnexpectedContentException("This address returned a web page instead of Ombi API data. Check reverse proxy/API access.")
+    }
     return if (trimmed.startsWith("[")) JSONArray(trimmed) else JSONObject(trimmed)
+}
+
+private fun validateRequestEngineResult(value: Any) {
+    val json = value as? JSONObject ?: return
+    val result = json.opt("result")
+    val isError = json.optBoolean("isError", false)
+    val errorCode = json.optNullableString("errorCode")
+    val message = json.optNullableString("errorMessage") ?: json.optNullableString("message")
+    if (isError || result == false) {
+        throw OmbiRequestEngineException(errorCode, message ?: "Ombi rejected this request.")
+    }
 }
 
 private fun <T> JSONArray.mapJsonObjects(transform: (JSONObject) -> T): List<T> =
@@ -539,6 +1083,130 @@ private fun JSONObject.toSearchResult(type: MediaRequestType): MediaRequestSearc
     )
 }
 
+private fun JSONObject.toRequestMediaSummary(type: MediaRequestType): RequestMediaSummary {
+    val requestType = if (type == MediaRequestType.Movie) RequestMediaType.Movie else RequestMediaType.Series
+    val movieJson = optJSONObject("movie")
+    val tvJson = optJSONObject("tv")
+    val movieDbId = optAnyString("theMovieDbId")
+        ?: optAnyString("tmdbId")
+        ?: optAnyString("movieDbId")
+        ?: movieJson?.optAnyString("theMovieDbId")
+        ?: movieJson?.optAnyString("tmdbId")
+        ?: tvJson?.optAnyString("theMovieDbId")
+        ?: tvJson?.optAnyString("tmdbId")
+    val tvDbId = optAnyString("theTvDbId")
+        ?: optAnyString("tvDbId")
+        ?: optAnyString("seriesId")
+        ?: tvJson?.optAnyString("theTvDbId")
+        ?: tvJson?.optAnyString("tvDbId")
+    val imdbId = optAnyString("imdbId")
+        ?: optAnyString("imdbID")
+        ?: movieJson?.optAnyString("imdbId")
+        ?: movieJson?.optAnyString("imdbID")
+        ?: tvJson?.optAnyString("imdbId")
+        ?: tvJson?.optAnyString("imdbID")
+    val externalId = when (type) {
+        MediaRequestType.Movie -> movieDbId ?: optAnyString("id")
+        MediaRequestType.Tv -> tvDbId ?: movieDbId ?: optAnyString("id")
+    }.orEmpty()
+    val title = optNullableString("title")
+        ?: optNullableString("name")
+        ?: optJSONObject("movie")?.optNullableString("title")
+        ?: optJSONObject("tv")?.optNullableString("title")
+        ?: optJSONObject("childRequests")?.optNullableString("title")
+        ?: "Untitled"
+    return RequestMediaSummary(
+        externalId = externalId,
+        movieDbId = movieDbId,
+        tvDbId = tvDbId,
+        imdbId = imdbId,
+        mediaType = requestType,
+        title = title,
+        originalTitle = optNullableString("originalTitle"),
+        year = optIntOrNull("releaseDate")
+            ?: optIntOrNull("firstAired")
+            ?: optIntOrNull("year")
+            ?: optJSONObject("movie")?.optIntOrNull("releaseDate"),
+        posterUrl = normalizeOmbiArtworkUrl(optNullableString("posterPath") ?: optNullableString("poster")),
+        backdropUrl = normalizeOmbiArtworkUrl(optNullableString("backdropPath") ?: optNullableString("background")),
+        overview = optNullableString("overview"),
+        rating = optDoubleOrNull("voteAverage") ?: optDoubleOrNull("rating"),
+        state = requestState(),
+        requestId = optAnyString("requestId") ?: optAnyString("id"),
+        isAvailableInJellyfin = optBoolean("available", false) || optBoolean("fullyAvailable", false) || optBoolean("markedAsAvailable", false),
+        availableSeasonCount = optIntOrNull("availableSeasonCount"),
+        totalSeasonCount = optIntOrNull("totalSeasons") ?: optIntOrNull("seasonCount"),
+        requestedBy = optJSONObject("requestedUser")?.optNullableString("userName")
+            ?: optNullableString("requestedByAlias")
+            ?: optNullableString("requestedUserName")
+            ?: optNullableString("requestedBy"),
+        requestedDate = optNullableString("requestedDate") ?: optNullableString("createdDate"),
+    )
+}
+
+private fun JSONObject.toRequestMediaDetail(fallback: RequestMediaSummary): RequestMediaDetail {
+    val type = fallback.mediaType
+    val summary = toRequestMediaSummary(type.toLegacyType()).let {
+        it.copy(
+            externalId = it.externalId.ifBlank { fallback.externalId },
+            movieDbId = it.movieDbId ?: fallback.movieDbId,
+            tvDbId = it.tvDbId ?: fallback.tvDbId,
+            imdbId = it.imdbId ?: fallback.imdbId,
+            posterUrl = it.posterUrl ?: fallback.posterUrl,
+            backdropUrl = it.backdropUrl ?: fallback.backdropUrl,
+            overview = it.overview ?: fallback.overview,
+            state = if (it.state == RequestState.NotRequested && fallback.state != RequestState.NotRequested) fallback.state else it.state,
+        )
+    }
+    return RequestMediaDetail(
+        summary = summary,
+        tagline = optNullableString("tagline"),
+        runtimeMinutes = optIntOrNull("runtime") ?: optNullableString("runtime")?.filter(Char::isDigit)?.toIntOrNull(),
+        genres = (optJSONArray("genres")?.toGenreNames().orEmpty())
+            .ifEmpty { optJSONArray("genre")?.toStringList().orEmpty() },
+        certification = optNullableString("certification")
+            ?: optJSONObject("releaseDates")?.optNullableString("certification"),
+        network = optJSONObject("network")?.optNullableString("name") ?: optNullableString("network"),
+        seasons = optJSONArray("seasonRequests")?.toSeasonSummaries().orEmpty(),
+        similar = optJSONObject("similar")
+            ?.optJSONArray("results")
+            ?.mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType()) }
+            .orEmpty()
+            .take(12),
+    )
+}
+
+private fun JSONArray.toSeasonSummaries(): List<RequestSeasonSummary> =
+    mapJsonObjects { season ->
+        val episodes = season.optJSONArray("episodes")?.toEpisodeSummaries().orEmpty()
+        val available = season.optBoolean("seasonAvailable", false) || episodes.isNotEmpty() && episodes.all { it.available }
+        RequestSeasonSummary(
+            seasonNumber = season.optInt("seasonNumber", 0),
+            overview = season.optNullableString("overview"),
+            state = when {
+                available -> RequestState.Available
+                episodes.any { it.state == RequestState.Processing } -> RequestState.Processing
+                episodes.any { it.state == RequestState.Approved } -> RequestState.Approved
+                episodes.any { it.state == RequestState.PendingApproval } -> RequestState.PendingApproval
+                episodes.any { it.state == RequestState.Declined } -> RequestState.Declined
+                else -> season.requestState()
+            },
+            available = available,
+            episodes = episodes,
+        )
+    }.filter { it.seasonNumber > 0 }
+
+private fun JSONArray.toEpisodeSummaries(): List<RequestEpisodeSummary> =
+    mapJsonObjects { episode ->
+        RequestEpisodeSummary(
+            episodeNumber = episode.optInt("episodeNumber", 0),
+            title = episode.optNullableString("title"),
+            airDate = episode.optNullableString("airDate") ?: episode.optNullableString("airDateDisplay"),
+            state = episode.requestState(),
+            available = episode.optBoolean("available", false),
+        )
+    }.filter { it.episodeNumber > 0 }
+
 private fun JSONObject.toRequestItem(type: MediaRequestType): MediaRequestItem =
     MediaRequestItem(
         requestId = optAnyString("id") ?: optAnyString("requestId") ?: "",
@@ -552,6 +1220,28 @@ private fun JSONObject.toRequestItem(type: MediaRequestType): MediaRequestItem =
         posterUrl = optNullableString("posterPath") ?: optNullableString("poster"),
     )
 
+private fun JSONObject.toUserSession(
+    jellyfinUserId: String,
+    fallbackUserName: String,
+    expiresAt: String?,
+    lastLoginAt: Long,
+): OmbiUserSession {
+    val username = optNullableString("userName")
+        ?: optNullableString("username")
+        ?: optNullableString("emailAddress")
+        ?: fallbackUserName
+    return OmbiUserSession(
+        jellyfinUserId = jellyfinUserId,
+        ombiUserName = username,
+        displayName = optNullableString("alias") ?: optNullableString("displayName") ?: username,
+        ombiUserId = optAnyString("id"),
+        expiresAt = expiresAt,
+        roles = optJSONArray("claims")?.toClaimLabels().orEmpty(),
+        lastLoginAt = lastLoginAt,
+        lastValidatedAt = System.currentTimeMillis(),
+    )
+}
+
 private fun JSONObject.requestStatus(): MediaRequestStatus =
     when {
         optBoolean("available", false) || optBoolean("isAvailable", false) -> MediaRequestStatus.Available
@@ -560,6 +1250,22 @@ private fun JSONObject.requestStatus(): MediaRequestStatus =
         optBoolean("processing", false) || optBoolean("isProcessing", false) -> MediaRequestStatus.Processing
         optBoolean("requested", false) || optBoolean("isRequested", false) -> MediaRequestStatus.Pending
         else -> MediaRequestStatus.NotRequested
+    }
+
+private fun JSONObject.requestState(): RequestState =
+    when {
+        optBoolean("fullyAvailable", false) || optBoolean("available", false) || optBoolean("markedAsAvailable", false) -> RequestState.Available
+        optBoolean("partlyAvailable", false) -> RequestState.PartiallyAvailable
+        optBoolean("denied", false) || optBoolean("deniedBy", false) -> RequestState.Declined
+        optNullableString("requestStatus")?.contains("fail", ignoreCase = true) == true -> RequestState.Failed
+        optBoolean("processing", false) || optBoolean("isProcessing", false) ||
+            optNullableString("requestStatus")?.contains("process", ignoreCase = true) == true -> RequestState.Processing
+        optBoolean("approved", false) || optBoolean("approvedBy", false) -> RequestState.Approved
+        optBoolean("requested", false) || optBoolean("isRequested", false) ||
+            optAnyString("requestId") != null ||
+            optNullableString("requestStatus")?.contains("pending", ignoreCase = true) == true -> RequestState.PendingApproval
+        optNullableString("requestStatus")?.isNotBlank() == true -> RequestState.Unknown
+        else -> RequestState.NotRequested
     }
 
 private fun JSONObject.optIntOrNull(name: String): Int? {
@@ -578,6 +1284,50 @@ private fun JSONObject.optAnyString(name: String): String? {
 
 private fun JSONObject.optNullableString(name: String): String? =
     optString(name).takeIf { it.isNotBlank() && it != "null" }
+
+private fun JSONObject.optDoubleOrNull(name: String): Double? {
+    val value = opt(name) ?: return null
+    return when (value) {
+        is Number -> value.toDouble()
+        is String -> value.toDoubleOrNull()
+        else -> null
+    }
+}
+
+private fun normalizeOmbiArtworkUrl(value: String?): String? {
+    val trimmed = value?.trim()?.takeIf { it.isNotBlank() && it != "null" } ?: return null
+    return when {
+        trimmed.startsWith("http://", ignoreCase = true) || trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+        trimmed.startsWith("//") -> "https:$trimmed"
+        trimmed.startsWith("/") -> "https://image.tmdb.org/t/p/w500$trimmed"
+        else -> trimmed
+    }
+}
+
+private fun RequestMediaType.toLegacyType(): MediaRequestType =
+    if (this == RequestMediaType.Movie) MediaRequestType.Movie else MediaRequestType.Tv
+
+private fun JSONArray.toClaimLabels(): List<String> =
+    mapJsonObjects {
+        it.optNullableString("value")
+            ?: it.optNullableString("type")
+            ?: it.optNullableString("claimValue")
+            ?: it.optNullableString("claimType")
+            ?: it.toString()
+    }.filter { it.isNotBlank() }.distinct()
+
+private fun JSONArray.toGenreNames(): List<String> =
+    (0 until length()).mapNotNull { index ->
+        val value = opt(index) ?: return@mapNotNull null
+        when (value) {
+            is JSONObject -> value.optNullableString("name")
+            is String -> value.takeIf { it.isNotBlank() && it != "null" }
+            else -> null
+        }
+    }
+
+private fun userTokenSecretKey(jellyfinUserId: String): String =
+    "ombi.user.${jellyfinUserId.replace(Regex("[^A-Za-z0-9_.-]"), "_")}.token"
 
 private fun String.toSuggestedOmbiUserName(): String {
     val sanitized = lowercase()
@@ -643,3 +1393,39 @@ private fun List<OmbiUserMapping>.toUserMappingsJson(): JSONArray =
             )
         }
     }
+
+private fun JSONArray.toStoredUserSessions(): List<OmbiStoredUserSession> =
+    mapJsonObjects {
+        OmbiStoredUserSession(
+            jellyfinUserId = it.optString("jellyfinUserId"),
+            ombiUserName = it.optString("ombiUserName"),
+            displayName = it.optNullableString("displayName"),
+            ombiUserId = it.optAnyString("ombiUserId"),
+            expiresAt = it.optNullableString("expiresAt"),
+            roles = it.optJSONArray("roles")?.toStringList().orEmpty(),
+            lastLoginAt = it.optLong("lastLoginAt", 0L).takeIf { value -> value > 0L } ?: System.currentTimeMillis(),
+            lastValidatedAt = it.optLong("lastValidatedAt", 0L).takeIf { value -> value > 0L },
+            secretKey = it.optString("secretKey").takeIf { value -> value.isNotBlank() } ?: userTokenSecretKey(it.optString("jellyfinUserId")),
+        )
+    }
+
+private fun List<OmbiStoredUserSession>.toStoredUserSessionsJson(): JSONArray =
+    JSONArray().also { array ->
+        forEach { session ->
+            array.put(
+                JSONObject()
+                    .put("jellyfinUserId", session.jellyfinUserId)
+                    .put("ombiUserName", session.ombiUserName)
+                    .put("displayName", session.displayName)
+                    .put("ombiUserId", session.ombiUserId)
+                    .put("expiresAt", session.expiresAt)
+                    .put("roles", JSONArray(session.roles))
+                    .put("lastLoginAt", session.lastLoginAt)
+                    .put("lastValidatedAt", session.lastValidatedAt ?: 0L)
+                    .put("secretKey", session.secretKey),
+            )
+        }
+    }
+
+private fun JSONArray.toStringList(): List<String> =
+    (0 until length()).mapNotNull { index -> optString(index).takeIf { it.isNotBlank() && it != "null" } }

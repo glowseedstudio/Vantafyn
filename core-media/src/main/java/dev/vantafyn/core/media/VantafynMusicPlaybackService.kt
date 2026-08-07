@@ -17,10 +17,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 class VantafynMusicPlaybackService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var lastNotificationTrackId: UUID? = null
+    private var lastNotificationPlaying: Boolean? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -46,8 +49,13 @@ class VantafynMusicPlaybackService : MediaSessionService() {
             }
 
         serviceScope.launch {
-            controller.state.collect {
-                triggerNotificationUpdate()
+            controller.state.collect { state ->
+                val trackId = state.currentTrack?.id
+                if (trackId != lastNotificationTrackId || state.isPlaying != lastNotificationPlaying) {
+                    lastNotificationTrackId = trackId
+                    lastNotificationPlaying = state.isPlaying
+                    triggerNotificationUpdate()
+                }
             }
         }
     }

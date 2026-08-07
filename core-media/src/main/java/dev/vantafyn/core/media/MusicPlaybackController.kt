@@ -369,7 +369,7 @@ class MusicPlaybackController private constructor(context: Context) {
                         isPlaying = sessionPlayer.isPlaying,
                     )
                 }
-                delay(500L)
+                delay(1_000L)
             }
         }
     }

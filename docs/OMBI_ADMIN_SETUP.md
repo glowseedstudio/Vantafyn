@@ -14,13 +14,16 @@ Ombi is optional. Vantafyn works as a Jellyfin client without it.
 8. Choose who can use Requests.
 9. Tap `Enable Requests`.
 
+Only Jellyfin admins can open this setup flow. Normal users cannot see or edit Ombi server URLs, API keys, setup health, access modes, identity modes, capability checks, user mappings, or reset controls.
+
 ## Ombi URL
 
-Use the address your users can reach.
+Use the address every Vantafyn device can reach. This admin-configured URL is reused for all normal users.
 
 - Home-only use: a local address such as `http://192.168.1.29:5000` can work.
 - Remote use: use your Ombi domain, such as `https://requests.example.com`.
 - For public remote access, HTTPS is recommended.
+- `localhost` only works on the device running Ombi. Phones, TVs, and Fire OS devices need a reachable IP address or domain.
 
 Local addresses usually do not work when users are away from the home network.
 
@@ -32,11 +35,11 @@ Vantafyn stores the key securely on the device using Android encrypted storage. 
 
 ## Account Model
 
-Current mode is shared API key mode.
+Shared API key mode remains the default.
 
 The configured Ombi API key is the identity used for native Ombi requests. Vantafyn may send the Jellyfin display name as `ApiAlias`, but Ombi decides how that is attributed.
 
-Per-user Ombi login is future work. It is not currently required for Vantafyn users to submit requests.
+Per-user Ombi login is also supported. The admin still configures the Ombi URL and API key for setup/testing, then users with an account-created mapping can sign in with their own Ombi account from the Requests tab.
 
 ## Access Modes
 
@@ -48,7 +51,7 @@ Per-user Ombi login is future work. It is not currently required for Vantafyn us
 
 Shared request account is the default. Requests are made through the configured Ombi API key identity.
 
-Each user links Ombi account is available as an access-tracking mode. Users can request Ombi access, and admins can manage those local tasks. Per-user credential linking is not enabled until a safe Ombi token/login endpoint is confirmed.
+Each user links Ombi account lets users request Ombi access, then sign in once their Ombi account exists. Vantafyn stores only the returned Ombi session token, not the password.
 
 ## Access Requests
 
@@ -62,6 +65,16 @@ Admin actions are manual and non-destructive:
 - clear local mapping
 
 Vantafyn does not auto-create Ombi users.
+
+After `mark account created`, the user sees an Ombi sign-in form. If no mapping exists for that Jellyfin profile, the Requests tab shows a contact-admin access message instead of a broken login form.
+
+## Setup Health
+
+Setup health is admin-only. It can show whether Ombi is reachable, whether the API key is valid, the configured URL, URL safety warnings, detected request capabilities, shared vs per-user mode, linked users, and local access requests.
+
+Normal users never see setup health, API key state, endpoint details, Swagger/audit notes, or request-engine diagnostics.
+
+Admins can also refresh the Vantafyn Jellyfin availability index from Ombi management. This matches Ombi discovery/search results to the active Jellyfin server by provider ID so available items can open directly in Vantafyn.
 
 ## Capabilities
 
@@ -84,3 +97,4 @@ Approve/deny moderation is not wired yet. Vantafyn hides moderation buttons unti
 - CORS: not relevant for Vantafyn's native API calls.
 - Local address away from home: use a remote URL or VPN.
 - Permission denied: the configured Ombi API key does not have permission for that action.
+- HTML response: the URL is likely a reverse proxy/web route instead of the Ombi API.

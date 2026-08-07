@@ -7,6 +7,10 @@ import dev.vantafyn.core.integrations.IntegrationResult
 import dev.vantafyn.core.integrations.MediaRequestItem
 import dev.vantafyn.core.integrations.MediaRequestSearchResult
 import dev.vantafyn.core.integrations.MediaRequestType
+import dev.vantafyn.core.jellyfin.JellyfinAvailabilityIndex
+import dev.vantafyn.core.jellyfin.JellyfinAvailabilityMatch
+import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
+import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.ombi.OmbiAccessMode
 import dev.vantafyn.core.ombi.OmbiAccessRequest
@@ -14,11 +18,18 @@ import dev.vantafyn.core.ombi.OmbiAccessRequestStatus
 import dev.vantafyn.core.ombi.OmbiCapabilities
 import dev.vantafyn.core.ombi.OmbiConfig
 import dev.vantafyn.core.ombi.OmbiConnectionReport
+import dev.vantafyn.core.ombi.OmbiDiscoverRail
 import dev.vantafyn.core.ombi.OmbiIdentityMode
 import dev.vantafyn.core.ombi.OmbiLinkedAccountState
 import dev.vantafyn.core.ombi.OmbiRepository
+import dev.vantafyn.core.ombi.OmbiTvRequestSelection
+import dev.vantafyn.core.ombi.OmbiUserCapabilities
+import dev.vantafyn.core.ombi.OmbiUserSession
 import dev.vantafyn.core.ombi.OmbiUserMapping
+import dev.vantafyn.core.ombi.RequestMediaDetail
+import dev.vantafyn.core.ombi.RequestMediaSummary
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -27,12 +38,15 @@ import kotlinx.coroutines.launch
 
 class RequestsViewModel(application: Application) : AndroidViewModel(application) {
     private val ombiRepository = OmbiRepository(application)
+    private val jellyfinProvider = JellyfinRepositoryProvider(application)
     private var searchJob: Job? = null
+    private var activeSession: JellyfinSession? = null
 
     private val _state = MutableStateFlow(initialState())
     val state: StateFlow<RequestsUiState> = _state.asStateFlow()
 
     fun bindSession(session: JellyfinSession?) {
+        activeSession = session
         val config = ombiRepository.config()
         _state.update {
             it.copy(
@@ -50,14 +64,27 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                 accessRequests = ombiRepository.accessRequests(),
                 userMappings = ombiRepository.userMappings(),
                 currentUserMapping = session?.user?.id?.toString()?.let(ombiRepository::mappingFor),
+                ombiUserSession = session?.user?.id?.toString()?.let(ombiRepository::userSession),
+                userCapabilities = ombiRepository.cachedUserCapabilities(session?.user?.id?.toString()),
             )
         }
-        if (config.isEnabledForAdmins && ombiRepository.hasApiKey()) {
+        val isAdmin = session?.user?.isAdministrator == true
+        val userId = session?.user?.id?.toString()
+        val canUse = canUseRequests(config, hasApiKey = ombiRepository.hasApiKey(), isAdmin = isAdmin)
+        if (canUse && config.identityMode == OmbiIdentityMode.PerUserAccount && userId != null && ombiRepository.userSession(userId) != null) {
+            validateLinkedAccount()
+        }
+        if (canUse && (config.identityMode == OmbiIdentityMode.SharedApiKey || isAdmin)) {
             loadRequests()
+            loadDiscovery()
+        }
+        if (canUse && session != null && _state.value.availabilityIndex == null) {
+            refreshAvailabilityIndex(silent = true)
         }
     }
 
     fun startSetup() {
+        if (!requireAdmin()) return
         _state.update {
             it.copy(
                 mode = RequestsScreenMode.Setup,
@@ -68,8 +95,15 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun manageOmbi() {
+        if (!requireAdmin()) return
         refreshConfig()
         _state.update { it.copy(mode = RequestsScreenMode.Manage, message = null) }
+    }
+
+    fun showSetupHealth() {
+        if (!requireAdmin()) return
+        refreshConfig()
+        _state.update { it.copy(mode = RequestsScreenMode.Health, message = null) }
     }
 
     fun showRequests() {
@@ -77,33 +111,57 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun onBaseUrlChanged(value: String) {
+        if (!_state.value.isJellyfinAdmin) return
         _state.update { it.copy(baseUrl = value, message = null) }
     }
 
     fun onApiKeyChanged(value: String) {
+        if (!_state.value.isJellyfinAdmin) return
         _state.update { it.copy(apiKey = value, message = null) }
+    }
+
+    fun onOmbiUsernameChanged(value: String) {
+        _state.update { it.copy(ombiUsername = value, message = null) }
+    }
+
+    fun onOmbiPasswordChanged(value: String) {
+        _state.update { it.copy(ombiPassword = value, message = null) }
     }
 
     fun onQueryChanged(value: String) {
         _state.update { it.copy(query = value, message = null) }
+        searchJob?.cancel()
+        if (value.trim().length >= 2 && _state.value.canSearchAndRequest) {
+            searchJob = viewModelScope.launch {
+                delay(350L)
+                search()
+            }
+        } else {
+            _state.update { it.copy(results = emptyList(), searchResults = emptyList()) }
+        }
     }
 
     fun onSearchFilterChanged(value: RequestSearchFilter) {
         _state.update { it.copy(searchFilter = value, message = null) }
+        if (_state.value.query.trim().length >= 2 && _state.value.canSearchAndRequest) {
+            search()
+        }
     }
 
     fun onAccessModeChanged(value: OmbiAccessMode) {
+        if (!_state.value.isJellyfinAdmin) return
         _state.update { it.copy(accessMode = value, message = null) }
     }
 
     fun onIdentityModeChanged(value: OmbiIdentityMode) {
+        if (!requireAdmin()) return
         ombiRepository.setIdentityMode(value)
         refreshConfig()
         _state.update {
             it.copy(
                 identityMode = value,
                 message = if (value == OmbiIdentityMode.PerUserAccount) {
-                    "Per-user account mode is enabled for access tracking. Ombi credential linking is not exposed until token support is confirmed."
+                    "Per-user Ombi login enabled. Users with an Ombi profile can link their account from Requests."
                 } else {
                     "Shared request account mode enabled."
                 },
@@ -112,6 +170,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun nextSetupStep() {
+        if (!_state.value.isJellyfinAdmin) return
         val snapshot = _state.value
         _state.update {
             it.copy(
@@ -128,6 +187,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun previousSetupStep() {
+        if (!_state.value.isJellyfinAdmin) return
         val snapshot = _state.value
         _state.update {
             it.copy(
@@ -144,6 +204,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun saveDraftAndTest() {
+        if (!requireAdmin()) return
         val snapshot = _state.value
         viewModelScope.launch {
             _state.update { it.copy(isTesting = true, message = null) }
@@ -187,6 +248,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun finishSetup() {
+        if (!requireAdmin()) return
         val snapshot = _state.value
         viewModelScope.launch {
             runCatching {
@@ -207,6 +269,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun testConnection() {
+        if (!requireAdmin()) return
         viewModelScope.launch {
             _state.update { it.copy(isTesting = true, message = null) }
             when (val result = ombiRepository.testConnectionReport()) {
@@ -228,6 +291,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun setEnabled(enabled: Boolean) {
+        if (!requireAdmin()) return
         ombiRepository.setAccessMode(if (enabled) OmbiAccessMode.AllUsers else OmbiAccessMode.Disabled)
         refreshConfig()
     }
@@ -247,7 +311,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
             it.copy(
                 currentUserMapping = ombiRepository.mappingFor(userId),
                 message = if (request.status == OmbiAccessRequestStatus.Pending) {
-                    "Your request will appear for admins on this device/server setup."
+                    "Your server admin has been notified."
                 } else {
                     "Access has already been requested."
                 },
@@ -256,26 +320,86 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun markAccessRequestAccountCreated(userId: String) {
+        if (!requireAdmin()) return
         ombiRepository.updateAccessRequest(userId, OmbiAccessRequestStatus.AccountCreated)
         refreshConfig()
     }
 
     fun markAccessRequestLinked(userId: String) {
+        if (!requireAdmin()) return
         ombiRepository.updateAccessRequest(userId, OmbiAccessRequestStatus.Linked)
         refreshConfig()
     }
 
     fun dismissAccessRequest(userId: String) {
+        if (!requireAdmin()) return
         ombiRepository.updateAccessRequest(userId, OmbiAccessRequestStatus.Dismissed)
         refreshConfig()
     }
 
     fun clearMapping(userId: String) {
+        if (!requireAdmin()) return
         ombiRepository.clearMapping(userId)
         refreshConfig()
     }
 
+    fun loginOmbiAccount() {
+        val snapshot = _state.value
+        val userId = snapshot.currentUserId ?: return
+        val userName = snapshot.currentUserName ?: "Vantafyn User"
+        viewModelScope.launch {
+            _state.update { it.copy(isLinkingOmbi = true, message = null) }
+            when (
+                val result = ombiRepository.loginUser(
+                    jellyfinUserId = userId,
+                    jellyfinUserName = userName,
+                    username = snapshot.ombiUsername.ifBlank { snapshot.currentUserMapping?.ombiUserName.orEmpty() },
+                    password = snapshot.ombiPassword,
+                )
+            ) {
+                is IntegrationResult.Success -> {
+                    refreshConfig()
+                    _state.update {
+                        it.copy(
+                            isLinkingOmbi = false,
+                            ombiPassword = "",
+                            ombiUserSession = result.value,
+                            message = "Ombi linked as ${result.value.bestName}",
+                        )
+                    }
+                    search()
+                    loadRequests()
+                    loadDiscovery()
+                }
+                is IntegrationResult.Failure -> _state.update {
+                    it.copy(
+                        isLinkingOmbi = false,
+                        ombiPassword = "",
+                        ombiUserSession = null,
+                        message = "Ombi couldn't sign you in. Check your username and password.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun unlinkOmbiAccount() {
+        val userId = _state.value.currentUserId ?: return
+        ombiRepository.unlinkUserSession(userId)
+        refreshConfig()
+        _state.update {
+            it.copy(
+                ombiUserSession = null,
+                ombiPassword = "",
+                discoveryRails = emptyList(),
+                searchResults = emptyList(),
+                message = "Ombi account unlinked from this device.",
+            )
+        }
+    }
+
     fun resetIntegration() {
+        if (!requireAdmin()) return
         ombiRepository.clearConfig()
         _state.value = initialState().copy(
             currentUserId = _state.value.currentUserId,
@@ -288,7 +412,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
 
     fun search() {
         if (!_state.value.canSearchAndRequest) {
-            _state.update { it.copy(message = "Linking Ombi accounts is not available in this build yet.") }
+            _state.update { it.copy(message = "Link your Ombi account before searching Requests.") }
             return
         }
         val query = _state.value.query.trim()
@@ -296,29 +420,97 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         searchJob?.cancel()
         searchJob = viewModelScope.launch {
             val filter = _state.value.searchFilter
-            _state.update { it.copy(isSearching = true, message = null, results = emptyList()) }
+            _state.update { it.copy(isSearching = true, message = null, results = emptyList(), searchResults = emptyList(), activeRequestsView = RequestsView.Search) }
             val results = mutableListOf<MediaRequestSearchResult>()
             val failures = mutableListOf<String>()
-            if (filter == RequestSearchFilter.All || filter == RequestSearchFilter.Movies) {
-                when (val result = ombiRepository.searchMovie(query)) {
-                    is IntegrationResult.Success -> results += result.value
-                    is IntegrationResult.Failure -> failures += result.message
+            val userId = _state.value.currentUserId
+            val perUser = _state.value.usesPerUserSession && userId != null
+            when (val discovery = ombiRepository.searchDiscovery(query, if (perUser) userId else null)) {
+                is IntegrationResult.Success -> {
+                    val filtered = discovery.value.filter {
+                        filter == RequestSearchFilter.All ||
+                            (filter == RequestSearchFilter.Movies && it.mediaType == dev.vantafyn.core.ombi.RequestMediaType.Movie) ||
+                            (filter == RequestSearchFilter.TvShows && it.mediaType == dev.vantafyn.core.ombi.RequestMediaType.Series)
+                    }
+                    _state.update {
+                        it.copy(
+                            isSearching = false,
+                    searchResults = filtered,
+                            availabilityMatches = availabilityMatchesFor(filtered),
+                            message = null,
+                        )
+                    }
+                    return@launch
                 }
-            }
-            if (filter == RequestSearchFilter.All || filter == RequestSearchFilter.TvShows) {
-                when (val result = ombiRepository.searchTv(query)) {
-                    is IntegrationResult.Success -> results += result.value
-                    is IntegrationResult.Failure -> failures += result.message
-                }
+                is IntegrationResult.Failure -> failures += discovery.message
             }
             _state.update {
                 it.copy(
                     isSearching = false,
                     results = results,
+                    searchResults = results.map { result -> result.toRequestSummary() },
+                    availabilityMatches = availabilityMatchesFor(results.map { result -> result.toRequestSummary() }),
                     message = if (results.isEmpty()) failures.firstOrNull() else null,
                 )
             }
         }
+    }
+
+    fun selectRequestsView(value: RequestsView) {
+        _state.update { it.copy(activeRequestsView = value, message = null) }
+        if (value != RequestsView.Search && _state.value.discoveryRails.isEmpty() && _state.value.canSearchAndRequest) {
+            loadDiscovery()
+        }
+        if (value == RequestsView.MyRequests && _state.value.requests.isEmpty() && _state.value.canSearchAndRequest) {
+            loadRequests()
+        }
+    }
+
+    fun openRequestItem(item: RequestMediaSummary) {
+        if (!_state.value.canSearchAndRequest) return
+        _state.update { it.copy(selectedRequestItem = item, selectedRequestDetail = null, isLoadingRequestDetail = true, requestDetailError = null, message = null) }
+        viewModelScope.launch {
+            val userId = _state.value.currentUserId?.takeIf { _state.value.usesPerUserSession }
+            when (val result = ombiRepository.getRequestMediaDetail(item, userId)) {
+                is IntegrationResult.Success -> _state.update {
+                    it.copy(
+                        selectedRequestItem = result.value.summary,
+                        selectedRequestDetail = result.value,
+                        isLoadingRequestDetail = false,
+                        availabilityMatches = it.availabilityMatches + availabilityMatchesFor(listOf(result.value.summary)),
+                    )
+                }
+                is IntegrationResult.Failure -> _state.update {
+                    it.copy(isLoadingRequestDetail = false, requestDetailError = result.message)
+                }
+            }
+        }
+    }
+
+    fun closeRequestItem() {
+        _state.update { it.copy(selectedRequestItem = null, selectedRequestDetail = null, isLoadingRequestDetail = false, requestDetailError = null) }
+    }
+
+    fun request(item: RequestMediaSummary) {
+        if (item.state != dev.vantafyn.core.ombi.RequestState.NotRequested) return
+        val legacy = MediaRequestSearchResult(
+            providerId = when (item.mediaType) {
+                dev.vantafyn.core.ombi.RequestMediaType.Movie -> item.movieDbId ?: item.externalId
+                dev.vantafyn.core.ombi.RequestMediaType.Series -> item.movieDbId ?: item.tvDbId ?: item.externalId
+            },
+            title = item.title,
+            year = item.year,
+            type = if (item.mediaType == dev.vantafyn.core.ombi.RequestMediaType.Movie) MediaRequestType.Movie else MediaRequestType.Tv,
+            overview = item.overview,
+            posterUrl = item.posterUrl,
+            backdropUrl = item.backdropUrl,
+            status = dev.vantafyn.core.integrations.MediaRequestStatus.NotRequested,
+        )
+        request(legacy)
+    }
+
+    fun onTvRequestSelectionChanged(value: OmbiTvRequestSelection) {
+        _state.update { it.copy(tvRequestSelection = value, message = null) }
     }
 
     fun request(item: MediaRequestSearchResult) {
@@ -328,15 +520,22 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch {
             _state.update { it.copy(activeRequestId = item.providerId, message = null) }
+            val userId = _state.value.currentUserId
+            val perUser = _state.value.usesPerUserSession && userId != null
             val result = when (item.type) {
-                MediaRequestType.Movie -> ombiRepository.requestMovie(item.providerId, _state.value.currentUserName)
-                MediaRequestType.Tv -> ombiRepository.requestTv(item.providerId, _state.value.currentUserName)
+                MediaRequestType.Movie -> if (perUser) ombiRepository.requestMovieForUser(userId, item.providerId) else ombiRepository.requestMovie(item.providerId, _state.value.currentUserName)
+                MediaRequestType.Tv -> if (perUser) {
+                    ombiRepository.requestTvForUser(userId, item.providerId, _state.value.tvRequestSelection)
+                } else {
+                    ombiRepository.requestTv(item.providerId, _state.value.currentUserName, _state.value.tvRequestSelection)
+                }
             }
             when (result) {
                 is IntegrationResult.Success -> {
                     _state.update { it.copy(activeRequestId = null, message = "Request sent") }
                     search()
                     loadRequests()
+                    loadDiscovery()
                 }
                 is IntegrationResult.Failure -> _state.update { it.copy(activeRequestId = null, message = result.message) }
             }
@@ -344,9 +543,13 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun loadRequests() {
+        if (!_state.value.canSearchAndRequest && !_state.value.isJellyfinAdmin) return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingRequests = true) }
-            val result = if (_state.value.isJellyfinAdmin) {
+            val userId = _state.value.currentUserId
+            val result = if (_state.value.usesPerUserSession && userId != null) {
+                ombiRepository.getLinkedUserRequests(userId)
+            } else if (_state.value.isJellyfinAdmin) {
                 ombiRepository.getAllRequests()
             } else {
                 ombiRepository.getUserRequests(_state.value.currentUserName)
@@ -356,6 +559,60 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                 is IntegrationResult.Failure -> _state.update { it.copy(isLoadingRequests = false, connectionStatus = "Connection failed", message = result.message) }
             }
         }
+    }
+
+    fun loadDiscovery() {
+        if (!_state.value.canSearchAndRequest) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingDiscovery = true, discoveryError = null) }
+            val snapshot = _state.value
+            val userId = snapshot.currentUserId?.takeIf { snapshot.usesPerUserSession }
+            when (val result = ombiRepository.getDiscoveryRails(userId, snapshot.currentUserName, snapshot.isJellyfinAdmin)) {
+                is IntegrationResult.Success -> _state.update {
+                    it.copy(
+                        isLoadingDiscovery = false,
+                        discoveryRails = result.value,
+                        availabilityMatches = availabilityMatchesFor(result.value.flatMap { rail -> rail.items }),
+                        userCapabilities = ombiRepository.cachedUserCapabilities(snapshot.currentUserId),
+                        discoveryError = null,
+                    )
+                }
+                is IntegrationResult.Failure -> _state.update {
+                    it.copy(isLoadingDiscovery = false, discoveryError = result.message)
+                }
+            }
+        }
+    }
+
+    fun refreshAvailabilityIndex(silent: Boolean = false) {
+        val session = activeSession ?: return
+        viewModelScope.launch {
+            if (!silent) _state.update { it.copy(isRefreshingAvailability = true, availabilityMessage = null) }
+            when (val result = jellyfinProvider.libraryRepository.buildAvailabilityIndex(session)) {
+                is JellyfinResult.Success -> {
+                    val allItems = _state.value.discoveryRails.flatMap { it.items } + _state.value.searchResults + listOfNotNull(_state.value.selectedRequestDetail?.summary)
+                    _state.update {
+                        it.copy(
+                            availabilityIndex = result.value,
+                            availabilityMatches = availabilityMatchesFor(allItems, result.value),
+                            isRefreshingAvailability = false,
+                            availabilityMessage = "Availability index refreshed",
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isRefreshingAvailability = false,
+                        availabilityMessage = if (silent) it.availabilityMessage else "Jellyfin availability could not be verified.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun openAvailableItem(item: RequestMediaSummary, onOpenMedia: (java.util.UUID) -> Unit) {
+        val match = _state.value.availabilityMatches[item.availabilityKey()] ?: return
+        onOpenMedia(match.itemId)
     }
 
     private fun refreshConfig() {
@@ -373,7 +630,45 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                 accessRequests = ombiRepository.accessRequests(),
                 userMappings = ombiRepository.userMappings(),
                 currentUserMapping = it.currentUserId?.let(ombiRepository::mappingFor),
+                ombiUserSession = it.currentUserId?.let(ombiRepository::userSession),
+                userCapabilities = ombiRepository.cachedUserCapabilities(it.currentUserId),
             )
+        }
+    }
+
+    private fun validateLinkedAccount() {
+        val userId = _state.value.currentUserId ?: return
+        if (!_state.value.canUseRequests) return
+        viewModelScope.launch {
+            _state.update { it.copy(isValidatingOmbiSession = true) }
+            when (val result = ombiRepository.validateUserSession(userId)) {
+                is IntegrationResult.Success -> {
+                    refreshConfig()
+                    _state.update {
+                        it.copy(
+                            isValidatingOmbiSession = false,
+                            ombiUserSession = result.value,
+                            connectionStatus = "Connected",
+                        )
+                    }
+                    loadRequests()
+                    loadDiscovery()
+                }
+                is IntegrationResult.Failure -> {
+                    refreshConfig()
+                    _state.update {
+                        it.copy(
+                            isValidatingOmbiSession = false,
+                            ombiUserSession = null,
+                            message = if (result.reason == dev.vantafyn.core.integrations.IntegrationFailureReason.Unauthorized) {
+                                "Sign in to Ombi again to continue requesting."
+                            } else {
+                                result.message
+                            },
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -391,6 +686,17 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
             accessRequests = ombiRepository.accessRequests(),
             userMappings = ombiRepository.userMappings(),
         )
+    }
+
+    private fun requireAdmin(): Boolean {
+        if (_state.value.isJellyfinAdmin) return true
+        _state.update {
+            it.copy(
+                mode = RequestsScreenMode.Requests,
+                message = "Requests settings are managed by your server admin.",
+            )
+        }
+        return false
     }
 }
 
@@ -413,6 +719,11 @@ data class RequestsUiState(
     val accessRequests: List<OmbiAccessRequest> = emptyList(),
     val userMappings: List<OmbiUserMapping> = emptyList(),
     val currentUserMapping: OmbiUserMapping? = null,
+    val ombiUserSession: OmbiUserSession? = null,
+    val ombiUsername: String = "",
+    val ombiPassword: String = "",
+    val isLinkingOmbi: Boolean = false,
+    val isValidatingOmbiSession: Boolean = false,
     val query: String = "",
     val searchFilter: RequestSearchFilter = RequestSearchFilter.All,
     val isTesting: Boolean = false,
@@ -422,9 +733,36 @@ data class RequestsUiState(
     val requests: List<MediaRequestItem> = emptyList(),
     val activeRequestId: String? = null,
     val message: String? = null,
+    val activeRequestsView: RequestsView = RequestsView.Discover,
+    val discoveryRails: List<OmbiDiscoverRail> = emptyList(),
+    val isLoadingDiscovery: Boolean = false,
+    val discoveryError: String? = null,
+    val searchResults: List<RequestMediaSummary> = emptyList(),
+    val selectedRequestItem: RequestMediaSummary? = null,
+    val selectedRequestDetail: RequestMediaDetail? = null,
+    val isLoadingRequestDetail: Boolean = false,
+    val requestDetailError: String? = null,
+    val userCapabilities: OmbiUserCapabilities = OmbiUserCapabilities(
+        canRequestMovies = true,
+        canRequestSeries = true,
+        canRequestSeasons = true,
+        canRequestEpisodes = false,
+        canManageOwnRequests = true,
+        canViewOtherRequests = false,
+        canManageRequests = false,
+        moviesAutoApproved = false,
+        seriesAutoApproved = false,
+        remainingMovieRequests = null,
+        remainingSeriesRequests = null,
+    ),
+    val availabilityIndex: JellyfinAvailabilityIndex? = null,
+    val availabilityMatches: Map<String, JellyfinAvailabilityMatch> = emptyMap(),
+    val isRefreshingAvailability: Boolean = false,
+    val availabilityMessage: String? = null,
+    val tvRequestSelection: OmbiTvRequestSelection = OmbiTvRequestSelection.AllSeasons,
 ) {
     val isConfigured: Boolean get() = config.isConfigured && hasApiKey
-    val canUseRequests: Boolean get() = isConfigured && config.isEnabledForAdmins
+    val canUseRequests: Boolean get() = canUseRequests(config, hasApiKey, isJellyfinAdmin)
     val pendingAccessRequestCount: Int get() = accessRequests.count { it.status == OmbiAccessRequestStatus.Pending }
     val hasRequestedAccess: Boolean
         get() = currentUserMapping?.state == OmbiLinkedAccountState.AccessRequested ||
@@ -436,14 +774,54 @@ data class RequestsUiState(
     val canSearchAndRequest: Boolean
         get() = canUseRequests && (
             identityMode == OmbiIdentityMode.SharedApiKey ||
-                currentUserMapping?.state == OmbiLinkedAccountState.Linked
+                (currentUserMapping?.state == OmbiLinkedAccountState.Linked && ombiUserSession != null)
             )
+    val canShowOmbiLogin: Boolean
+        get() = identityMode == OmbiIdentityMode.PerUserAccount &&
+            currentUserMapping?.state in setOf(
+                OmbiLinkedAccountState.AccountCreated,
+                OmbiLinkedAccountState.Linked,
+                OmbiLinkedAccountState.TokenExpired,
+            )
+    val usesPerUserSession: Boolean
+        get() = identityMode == OmbiIdentityMode.PerUserAccount && ombiUserSession != null
 }
+
+private fun canUseRequests(config: OmbiConfig, hasApiKey: Boolean, isAdmin: Boolean): Boolean =
+    hasApiKey && config.isAvailableFor(isAdmin)
+
+private fun RequestsViewModel.availabilityMatchesFor(
+    items: List<RequestMediaSummary>,
+    index: JellyfinAvailabilityIndex? = state.value.availabilityIndex,
+): Map<String, JellyfinAvailabilityMatch> =
+    index?.let {
+        items.mapNotNull { item -> it.find(item.providerIds())?.let { match -> item.availabilityKey() to match } }.toMap()
+    }.orEmpty()
+
+private fun RequestMediaSummary.providerIds(): Map<String, String> =
+    buildMap {
+        movieDbId?.takeIf { it.isNotBlank() }?.let {
+            put("Tmdb", it)
+            put("TheMovieDb", it)
+        }
+        tvDbId?.takeIf { it.isNotBlank() }?.let { put("Tvdb", it) }
+        imdbId?.takeIf { it.isNotBlank() }?.let { put("Imdb", it) }
+    }
+
+internal fun RequestMediaSummary.availabilityKey(): String =
+    "${mediaType.name}:${movieDbId ?: tvDbId ?: imdbId ?: externalId}"
 
 enum class RequestsScreenMode {
     Requests,
     Setup,
     Manage,
+    Health,
+}
+
+enum class RequestsView {
+    Discover,
+    Search,
+    MyRequests,
 }
 
 enum class OmbiSetupStep {
@@ -468,3 +846,32 @@ private fun OmbiConfig.statusLabel(hasApiKey: Boolean): String =
         lastSuccessfulConnectionAt != null -> "Connected"
         else -> "Configured"
     }
+
+private fun MediaRequestSearchResult.toRequestSummary(): RequestMediaSummary =
+    RequestMediaSummary(
+        externalId = providerId,
+        movieDbId = if (type == MediaRequestType.Movie) providerId else null,
+        tvDbId = if (type == MediaRequestType.Tv) providerId else null,
+        imdbId = null,
+        mediaType = if (type == MediaRequestType.Movie) dev.vantafyn.core.ombi.RequestMediaType.Movie else dev.vantafyn.core.ombi.RequestMediaType.Series,
+        title = title,
+        originalTitle = null,
+        year = year,
+        posterUrl = posterUrl,
+        backdropUrl = backdropUrl,
+        overview = overview,
+        rating = null,
+        state = when (status) {
+            dev.vantafyn.core.integrations.MediaRequestStatus.Available -> dev.vantafyn.core.ombi.RequestState.Available
+            dev.vantafyn.core.integrations.MediaRequestStatus.Pending -> dev.vantafyn.core.ombi.RequestState.PendingApproval
+            dev.vantafyn.core.integrations.MediaRequestStatus.Approved -> dev.vantafyn.core.ombi.RequestState.Approved
+            dev.vantafyn.core.integrations.MediaRequestStatus.Processing -> dev.vantafyn.core.ombi.RequestState.Processing
+            dev.vantafyn.core.integrations.MediaRequestStatus.Denied -> dev.vantafyn.core.ombi.RequestState.Declined
+            dev.vantafyn.core.integrations.MediaRequestStatus.NotRequested -> dev.vantafyn.core.ombi.RequestState.NotRequested
+            dev.vantafyn.core.integrations.MediaRequestStatus.Unknown -> dev.vantafyn.core.ombi.RequestState.Unknown
+        },
+        requestId = null,
+        isAvailableInJellyfin = status == dev.vantafyn.core.integrations.MediaRequestStatus.Available,
+        availableSeasonCount = null,
+        totalSeasonCount = null,
+    )

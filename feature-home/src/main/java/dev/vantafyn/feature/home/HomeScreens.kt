@@ -78,10 +78,10 @@ import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -115,7 +115,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -200,7 +202,7 @@ fun VantafynAppContent(
     onNotificationPermissionSettingsAction: () -> Unit = {},
     viewModel: VantafynHomeViewModel = viewModel(),
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     val backgroundResId = state.selectedBackground.drawableResId()
     AnimatedContent(
         targetState = state.step,
@@ -1313,7 +1315,7 @@ private fun MobileShellScreen(
     var showMusicQuickPlayer by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val musicController = remember(context) { MusicPlaybackController.get(context) }
-    val musicPlayback by musicController.state.collectAsState()
+    val musicPlayback by musicController.state.collectAsStateWithLifecycle()
     val handlesSystemBack = state.mobileDestination != MobileDestination.Home ||
         state.confirmLogout ||
         state.mobileMessage != null ||
@@ -1388,7 +1390,7 @@ private fun MobileShellScreen(
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
                         )
                         MobileDestination.Favorites -> FavoritesScreen(state, onLoadFavorites, onOpenMedia, onRemoveFromMyList = { onSetMediaFavorite(it, false) }, onMediaLongPress = { mediaActionTarget = it })
-                        MobileDestination.Requests -> RequestsScreen(session = state.session)
+                        MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
                         MobileDestination.Admin -> AdminScreen(
                             state = state,
                             onOpenUser = onOpenAdminUser,
@@ -1891,12 +1893,15 @@ private fun HeroCarousel(
     if (carouselItems.isEmpty()) return
     val listState = rememberLazyListState()
     val carouselKeys = remember(carouselItems) { carouselItems.map { it.id } }
-    LaunchedEffect(carouselKeys) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(carouselKeys, lifecycleOwner) {
         if (carouselItems.size > 1) {
-            while (true) {
-                delay(5_500)
-                val next = (listState.firstVisibleItemIndex + 1) % carouselItems.size
-                listState.animateScrollToItem(next)
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    delay(5_500)
+                    val next = (listState.firstVisibleItemIndex + 1) % carouselItems.size
+                    listState.animateScrollToItem(next)
+                }
             }
         }
     }
@@ -3121,10 +3126,12 @@ private fun StaggeredSearchReveal(
     index: Int,
     content: @Composable () -> Unit,
 ) {
-    var visible by remember { mutableStateOf(false) }
+    var visible by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(index) {
-        delay((index * 34L).coerceAtMost(220L))
-        visible = true
+        if (!visible) {
+            delay((index * 34L).coerceAtMost(220L))
+            visible = true
+        }
     }
     AnimatedVisibility(
         visible = visible,
@@ -3343,10 +3350,13 @@ private fun AdminScreen(
     var addUserExpanded by remember { mutableStateOf(false) }
     var newUsername by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(5_000L)
-            onRefresh()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(5_000L)
+                onRefresh()
+            }
         }
     }
     LazyColumn(
@@ -5067,7 +5077,7 @@ private fun MediaDetailScreen(
 private fun DetailThemeAudio(url: String?, enabled: Boolean, volume: ThemeMusicVolume) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val musicState by remember(context) { MusicPlaybackController.get(context).state }.collectAsState()
+    val musicState by remember(context) { MusicPlaybackController.get(context).state }.collectAsStateWithLifecycle()
     val canPlayTheme = musicState.currentTrack == null
     DisposableEffect(url, enabled, volume, lifecycleOwner, canPlayTheme) {
         if (!enabled || !canPlayTheme || url.isNullOrBlank() || volume.level <= 0f) {

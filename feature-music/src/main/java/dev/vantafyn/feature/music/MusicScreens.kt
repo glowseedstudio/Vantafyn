@@ -72,7 +72,6 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,7 +91,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.repeatOnLifecycle
 import coil3.BitmapImage
 import coil3.compose.AsyncImage
 import coil3.imageLoader
@@ -134,7 +137,7 @@ fun MusicScreen(
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
     viewModel: MusicViewModel = viewModel(),
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
     val startMusic: (() -> Unit) -> Unit = { action -> onRequestMusicControlsPermission(action) }
     val showInitialLoading = state.isLoading &&
@@ -627,6 +630,7 @@ private fun MusicMiniPlayer(
     VantafynGlassDock(
         modifier = modifier
             .fillMaxWidth()
+            .vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.5.dp)
             .clickable(onClick = onOpen),
         cornerRadius = 22.dp,
         contentPadding = PaddingValues(10.dp),
@@ -1119,7 +1123,8 @@ private fun CurrentTrackMoreSheet(
         VantafynGlassPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 104.dp)
+                .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
                 .clickable(enabled = false) {},
             cornerRadius = 30.dp,
             contentPadding = PaddingValues(18.dp),
@@ -1394,6 +1399,7 @@ private fun PlainLyricsView(text: String, modifier: Modifier = Modifier) {
     }
     var suppressAutoScrollUntil by remember(text) { mutableStateOf(0L) }
     var autoScrolling by remember(text) { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     LaunchedEffect(listState, text) {
         snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
@@ -1402,16 +1408,18 @@ private fun PlainLyricsView(text: String, modifier: Modifier = Modifier) {
             }
         }
     }
-    LaunchedEffect(lines) {
+    LaunchedEffect(lines, lifecycleOwner) {
         if (lines.isEmpty()) return@LaunchedEffect
-        while (true) {
-            delay(1_400L)
-            if (System.currentTimeMillis() < suppressAutoScrollUntil) continue
-            val next = (listState.firstVisibleItemIndex + 1).coerceAtMost(lines.lastIndex)
-            if (next == listState.firstVisibleItemIndex) continue
-            autoScrolling = true
-            listState.animateScrollToItem(next)
-            autoScrolling = false
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(1_400L)
+                if (System.currentTimeMillis() < suppressAutoScrollUntil) continue
+                val next = (listState.firstVisibleItemIndex + 1).coerceAtMost(lines.lastIndex)
+                if (next == listState.firstVisibleItemIndex) continue
+                autoScrolling = true
+                listState.animateScrollToItem(next)
+                autoScrolling = false
+            }
         }
     }
 

@@ -96,6 +96,50 @@ data class JellyfinMediaItem(
     val isFavorite: Boolean = false,
 )
 
+enum class MediaAvailabilityState {
+    AvailableInJellyfin,
+    NotAvailable,
+    Requested,
+    Pending,
+    Approved,
+    PartiallyAvailable,
+    Unknown,
+}
+
+data class JellyfinAvailabilityMatch(
+    val itemId: UUID,
+    val title: String,
+    val itemType: String?,
+    val serverId: String?,
+    val serverName: String?,
+    val matchedProvider: String,
+    val matchedProviderId: String,
+)
+
+data class JellyfinAvailabilityIndex(
+    val moviesCount: Int,
+    val seriesCount: Int,
+    val lastBuiltAt: Long,
+    val sourceServerId: String?,
+    val sourceServerName: String?,
+    val failedServers: List<String> = emptyList(),
+    val itemsByProviderId: Map<String, JellyfinAvailabilityMatch>,
+) {
+    fun find(providerIds: Map<String, String>): JellyfinAvailabilityMatch? =
+        ProviderIdMatcher.find(providerIds, itemsByProviderId)
+}
+
+object ProviderIdMatcher {
+    fun key(provider: String, id: String): String =
+        "${provider.trim().lowercase()}:${id.trim().lowercase()}"
+
+    fun find(providerIds: Map<String, String>, index: Map<String, JellyfinAvailabilityMatch>): JellyfinAvailabilityMatch? =
+        providerIds.asSequence()
+            .filter { it.key.isNotBlank() && it.value.isNotBlank() }
+            .mapNotNull { (provider, id) -> index[key(provider, id)] }
+            .firstOrNull()
+}
+
 data class JellyfinLibraryPage(
     val items: List<JellyfinMediaItem>,
     val startIndex: Int,
@@ -586,6 +630,7 @@ interface JellyfinLibraryRepository {
         startIndex: Int,
         limit: Int = 60,
     ): JellyfinResult<JellyfinLibraryPage>
+    suspend fun buildAvailabilityIndex(session: JellyfinSession): JellyfinResult<JellyfinAvailabilityIndex>
 }
 
 interface JellyfinHomeRepository {

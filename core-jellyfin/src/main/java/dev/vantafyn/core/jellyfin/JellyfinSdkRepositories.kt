@@ -470,6 +470,73 @@ class SdkJellyfinLibraryRepository(
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
+
+    override suspend fun buildAvailabilityIndex(session: JellyfinSession): JellyfinResult<JellyfinAvailabilityIndex> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val itemsByProviderId = linkedMapOf<String, JellyfinAvailabilityMatch>()
+                var moviesCount = 0
+                var seriesCount = 0
+                var startIndex = 0
+                val pageSize = 500
+                var pageItemCount: Int
+                do {
+                    val response by api.itemsApi.getItems(
+                        GetItemsRequest(
+                            userId = session.user.id,
+                            recursive = true,
+                            startIndex = startIndex,
+                            limit = pageSize,
+                            fields = listOf(ItemFields.PROVIDER_IDS),
+                            includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                            enableImages = false,
+                            enableUserData = false,
+                            enableTotalRecordCount = true,
+                        ),
+                    )
+                    pageItemCount = response.items.size
+                    response.items.forEach { item ->
+                        when (item.type) {
+                            BaseItemKind.MOVIE -> moviesCount += 1
+                            BaseItemKind.SERIES -> seriesCount += 1
+                            else -> Unit
+                        }
+                        item.providerIds.orEmpty()
+                            .mapNotNull { (provider, value) ->
+                                val safeProvider = provider?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                                val safeValue = value?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                                safeProvider to safeValue
+                            }
+                            .forEach { (provider, value) ->
+                                val match = JellyfinAvailabilityMatch(
+                                    itemId = item.id,
+                                    title = item.name ?: "Untitled",
+                                    itemType = item.type?.serialName,
+                                    serverId = session.server.serverId ?: session.server.localId,
+                                    serverName = session.server.name,
+                                    matchedProvider = provider,
+                                    matchedProviderId = value,
+                                )
+                                itemsByProviderId[ProviderIdMatcher.key(provider, value)] = match
+                            }
+                    }
+                    startIndex += pageItemCount
+                } while (pageItemCount == pageSize)
+                JellyfinResult.Success(
+                    JellyfinAvailabilityIndex(
+                        moviesCount = moviesCount,
+                        seriesCount = seriesCount,
+                        lastBuiltAt = System.currentTimeMillis(),
+                        sourceServerId = session.server.serverId ?: session.server.localId,
+                        sourceServerName = session.server.name,
+                        itemsByProviderId = itemsByProviderId,
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
 }
 
 class SdkJellyfinMediaRepository(
