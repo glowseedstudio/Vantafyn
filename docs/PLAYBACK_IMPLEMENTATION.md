@@ -4,9 +4,13 @@
 
 - Mobile playback is wired from movie/episode detail Play/Resume into a fullscreen Media3 ExoPlayer screen.
 - `core-jellyfin` owns Jellyfin playback API access through `JellyfinPlaybackRepository`.
-- `feature-player` owns the Media3 player surface, custom dark controls, progress UI, error overlay, and basic track sheets.
+- `feature-player` owns the Media3 player surface, premium dark controls, progress UI, error overlay, track sheets, playback speed sheet, screen fit/zoom controls, and safe source retry actions.
 - `feature-home` owns navigation and coordinates playback lifecycle reporting through the repository.
 - Mobile episode playback now supports a premium Up Next overlay with countdown autoplay.
+- Mobile Watch Party can create a real Jellyfin SyncPlay group and start a matched item by setting the SyncPlay queue before entering the existing player route.
+- Fixed-title Watch Party starts also send the selected item to the SyncPlay queue before entering the existing player route.
+- Watch Party playback suppresses solo Up Next countdown/autoplay to avoid independent participant advancement.
+- Watch Party invite receive is now app-wide on mobile while Vantafyn is open/connected. Accepting an invite stops music through the existing video policy before joining the SyncPlay lobby.
 - Live TV channel/program taps now enter the same mobile player path.
 - Live TV now has an explicit `openLiveStream(...)` fallback after playback-info auto-open failures.
 - TV playback is not implemented yet, but `app-tv` still builds.
@@ -19,6 +23,8 @@
 - `PlayStateApi.reportPlaybackStopped(PlaybackStopInfo)` for exit/completion reporting.
 - `UserLibraryApi.getItem(userId, itemId)` for current and candidate episode metadata.
 - `TvShowsApi.getEpisodes(GetEpisodesRequest)` for same-series next episode lookup.
+- `SyncPlayApi.syncPlayCreateGroup(...)`, `syncPlayGetGroups(...)`, `syncPlayJoinGroup(...)`, `syncPlayLeaveGroup(...)`, `syncPlayPause(...)`, `syncPlayUnpause(...)`, `syncPlaySeek(...)`, and `syncPlaySetNewQueue(...)` for Watch Party foundations.
+- `SessionApi.getSessions(...)` and `sendMessageCommand(...)` for active-session Watch Party invite delivery.
 - `MediaInfoApi.closeLiveStream(liveStreamId)` when Jellyfin marks the stream as live and returns a live stream id.
 - `MediaInfoApi.openLiveStream(...)` as the explicit Live TV fallback when playback-info auto-open does not provide a playable stream.
 
@@ -46,6 +52,10 @@ Series playback chooses an episode target rather than trying to play the series 
 
 Progress is reported every seven seconds during playback and also on pause/seek/background. Stop is reported when the player is closed or reaches completion. Jellyfin remains responsible for deciding watched thresholds.
 
+Progress also updates Vantafyn's local `playbackItem`, active playback target, and playback-info start ticks before the network report is sent. That prevents orientation changes or Activity recreation from reopening the player at an older server-reported position.
+
+`app-mobile` handles orientation/screen-size configuration changes on `MobileMainActivity`, so rotation resizes the active player surface instead of tearing down playback.
+
 When playback closes, the detail item and home libraries are refreshed so Continue Watching/resume state can update from Jellyfin.
 
 For Up Next, the next episode transition calls back into the same ViewModel playback startup path. The current episode is reported stopped with the current player position before playback info is requested for the next episode. The next episode then reports playback start from the normal `STATE_READY` callback. A local guard prevents countdown completion and player completion from starting the next item twice.
@@ -54,9 +64,23 @@ If next episode startup fails, the existing playback error overlay is used with 
 
 ## Tracks
 
-Playback info exposes audio and subtitle streams as Vantafyn-owned models. The mobile player shows Audio and Subs sheets when tracks are available. Selecting a track re-requests playback info with the selected stream index and current playback position.
+Playback info exposes audio and subtitle streams as Vantafyn-owned models. The mobile player shows Audio and Subtitle sheets when tracks are available.
 
-Current limitation: Media3 in-stream track override is not yet implemented for already-opened direct streams. Track changes restart playback through the Jellyfin playback-info flow.
+External subtitle delivery URLs from Jellyfin are preserved into `VantafynSubtitleTrack` and attached to the Media3 `MediaItem` as subtitle configurations. Supported external formats are mapped to Media3 MIME types where possible.
+
+Selecting audio/subtitles now applies an in-place Media3 track override with `TrackSelectionOverride`. Subtitle Off clears text overrides and disables text tracks. The ViewModel updates the selected Jellyfin stream indexes without restarting playback so playback reporting stays aligned with the current selection.
+
+## Screen Fit
+
+The mobile More sheet exposes real Media3 `PlayerView.resizeMode` options:
+
+- Fit
+- Fill
+- Zoom
+- Fixed Width
+- Fixed Height
+
+These options change how the active video surface is scaled. They do not request a new Jellyfin source and do not restart playback.
 
 ## Live TV
 
@@ -81,12 +105,13 @@ Logs include playback method, whether media/play/live stream ids are present, se
 ## Known Limitations
 
 - TV playback UI remains TODO.
+- Music playback is service-owned through Media3 and now exposes Android notification, lock-screen, and Android Auto browse/control paths. Video playback still uses the existing mobile fullscreen player path.
 - TV Up Next UI remains TODO, though the shared model and Jellyfin lookup are reusable.
 - Up Next lookup currently uses ordered same-series episodes instead of a dedicated server-side adjacent-episode endpoint.
 - If autoplay is disabled, Vantafyn finishes normally instead of showing a non-countdown next episode prompt.
 - External subtitle sidecar attachment handling is limited to URLs Jellyfin exposes in playback info.
 - Subtitle formats that require burn-in depend on Jellyfin transcoding.
-- Quality/source selection beyond direct vs transcode is not yet a full UI.
+- Quality/source selection beyond direct vs transcode is not yet a full UI. The More sheet exposes retry/transcode only when a real fallback is available.
 - Pre-playback media version selection is visible in Media Info but not yet selectable as a playback override.
-- Track changes restart playback rather than switching tracks in-place.
 - Explicit Live TV fallback is implemented, but Live TV behavior still depends on server tuner/provider support.
+- Watch Party now subscribes to Jellyfin websocket/session events for connection, session presence, SyncPlay commands, and group updates. Per-member exact sync, ready, and buffering status are still not claimed unless Jellyfin exposes reliable state.

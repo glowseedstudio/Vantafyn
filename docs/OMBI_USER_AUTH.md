@@ -36,3 +36,17 @@ Per-user request mode never silently falls back to the admin API key for normal-
 ## Security
 
 Passwords are never stored. Bearer tokens are stored through Android encrypted storage. Tokens, passwords, API keys, and auth headers must not be logged or shown in error UI.
+## Link Ombi Routing
+
+In per-user mode, Vantafyn checks whether the active Jellyfin profile likely has an Ombi account.
+
+Matching order:
+
+1. Exact Ombi username equals Jellyfin username.
+2. Exact email match when Jellyfin email is available.
+3. Case-insensitive username match.
+4. Normalized display-name fallback as low confidence.
+
+Jellyfin email is not currently available in `JellyfinUser`, so email matching is reserved for a later model expansion.
+
+Lookup is not required for login. If Ombi user lookup is unavailable, the user can still manually sign in.

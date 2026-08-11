@@ -52,3 +52,17 @@ Route-level safety is enforced in feature ViewModels. Hiding a button is not eno
 ## Current Providers
 
 Ombi is the first provider. It is optional and can be removed without changing Jellyfin playback, browsing, profile, or session behavior.
+## Ombi Setup Ownership
+
+Ombi setup is admin-owned. App UI calls feature view models; app screens do not call Ombi HTTP APIs directly.
+
+`core-ombi` owns:
+
+- encrypted admin API key storage
+- encrypted per-user session token storage
+- setup configuration
+- request identity mode
+- user lookup/matching
+- access-request de-duplication
+
+Normal-user routing is derived from setup state, request mode, local linked session, and access-request state.

@@ -112,6 +112,7 @@ data class VantafynSubtitleTrack(
     override val codec: String?,
     val isExternal: Boolean,
     val isDefault: Boolean,
+    val deliveryUrl: String? = null,
 ) : VantafynTrackInfo
 
 interface VantafynPlaybackController {

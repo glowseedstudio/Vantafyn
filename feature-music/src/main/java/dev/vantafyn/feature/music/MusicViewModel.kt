@@ -315,10 +315,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun createPlaylistWithCurrent(name: String) {
         val activeSession = session ?: return
         val current = playbackController.state.value.currentTrack ?: return
+        val playlistName = name.trim().ifBlank { "Vantafyn Playlist" }
+        val optimisticPlaylist = JellyfinMusicPlaylist(
+            id = UUID.randomUUID(),
+            name = playlistName,
+            imageUrl = current.artworkUrl,
+            trackCount = 1,
+        )
         viewModelScope.launch {
-            when (val result = musicRepository.createPlaylist(activeSession, name, listOf(current.id))) {
-                is JellyfinResult.Success -> loadHome()
-                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+            _state.update { it.copy(isPlaylistSaving = true, errorMessage = null, message = null) }
+            when (val result = musicRepository.createPlaylist(activeSession, playlistName, listOf(current.id))) {
+                is JellyfinResult.Success -> {
+                    val loaded = refreshHomeForPlaylist(activeSession, playlistName, result.value)
+                    if (!loaded) {
+                        _state.update { state ->
+                            state.copy(
+                                isPlaylistSaving = false,
+                                home = state.home?.let { home ->
+                                    home.copy(playlists = (home.playlists + optimisticPlaylist).distinctBy { it.name.lowercase() })
+                                },
+                                message = "Playlist created",
+                            )
+                        }
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val loaded = refreshHomeForPlaylist(activeSession, playlistName, null)
+                    if (!loaded) {
+                        _state.update { it.copy(isPlaylistSaving = false, errorMessage = result.message) }
+                    }
+                }
             }
         }
     }
@@ -330,7 +356,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = musicRepository.addToPlaylist(activeSession, playlist.id, listOf(current.id))) {
                 is JellyfinResult.Success -> {
                     Log.d("VantafynMusic", "Added current track to playlist '${playlist.name.take(80)}'")
-                    _state.update { it.copy(message = "Added to ${playlist.name}") }
+                    _state.update { it.copy(message = "Added to ${playlist.name}", home = it.home?.incrementPlaylistCount(playlist.id)) }
                 }
                 is JellyfinResult.Failure -> {
                     Log.d("VantafynMusic", "Add to playlist failed: ${result.message.take(120)}")
@@ -344,7 +370,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val activeSession = session ?: return
         viewModelScope.launch {
             when (val result = musicRepository.addToPlaylist(activeSession, playlist.id, listOf(track.id))) {
-                is JellyfinResult.Success -> _state.update { it.copy(message = "Added to ${playlist.name}") }
+                is JellyfinResult.Success -> _state.update { it.copy(message = "Added to ${playlist.name}", home = it.home?.incrementPlaylistCount(playlist.id)) }
                 is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
             }
         }
@@ -470,10 +496,40 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             Log.d("VantafynMusic", "Play-state $action failed: ${result.message.take(120)}")
         }
     }
+
+    private suspend fun refreshHomeForPlaylist(activeSession: JellyfinSession, playlistName: String, playlistId: UUID?): Boolean {
+        repeat(8) { attempt ->
+            if (attempt > 0) delay(700L)
+            when (val homeResult = musicRepository.getMusicHome(activeSession)) {
+                is JellyfinResult.Success -> {
+                    val found = homeResult.value.playlists.any { playlist ->
+                        playlist.id == playlistId || playlist.name.equals(playlistName, ignoreCase = true)
+                    }
+                    _state.update {
+                        it.copy(
+                            isPlaylistSaving = !found,
+                            home = homeResult.value,
+                            errorMessage = null,
+                            message = if (found) "Playlist created" else it.message,
+                        )
+                    }
+                    if (found) return true
+                }
+                is JellyfinResult.Failure -> {
+                    if (attempt == 7) {
+                        _state.update { it.copy(isPlaylistSaving = false, errorMessage = homeResult.message) }
+                    }
+                }
+            }
+        }
+        _state.update { it.copy(isPlaylistSaving = false) }
+        return false
+    }
 }
 
 data class MusicUiState(
     val isLoading: Boolean = false,
+    val isPlaylistSaving: Boolean = false,
     val errorMessage: String? = null,
     val message: String? = null,
     val home: JellyfinMusicHome? = null,
@@ -537,6 +593,17 @@ private fun JellyfinMusicHome.copyWithFavorite(trackId: UUID, isFavorite: Boolea
     copy(
         recentlyAdded = recentlyAdded.mapFavorite(trackId, isFavorite),
         songs = songs.mapFavorite(trackId, isFavorite),
+    )
+
+private fun JellyfinMusicHome.incrementPlaylistCount(playlistId: UUID): JellyfinMusicHome =
+    copy(
+        playlists = playlists.map { playlist ->
+            if (playlist.id == playlistId) {
+                playlist.copy(trackCount = playlist.trackCount?.plus(1))
+            } else {
+                playlist
+            }
+        },
     )
 
 private fun List<JellyfinMusicTrack>.mapFavorite(trackId: UUID, isFavorite: Boolean): List<JellyfinMusicTrack> =

@@ -51,6 +51,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
@@ -139,6 +140,8 @@ fun MusicScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
+    var playlistPickerTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
+    var showCurrentPlaylistPicker by remember { mutableStateOf(false) }
     val startMusic: (() -> Unit) -> Unit = { action -> onRequestMusicControlsPermission(action) }
     val showInitialLoading = state.isLoading &&
         state.home == null &&
@@ -188,7 +191,7 @@ fun MusicScreen(
                                 tracks = state.searchResults,
                                 playlists = state.home?.playlists.orEmpty(),
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, state.searchResults) } },
-                                onAddToPlaylist = viewModel::addTrackToPlaylist,
+                                onChoosePlaylist = { playlistPickerTrack = it },
                                 onLongPress = { actionTrack = it },
                             )
                         }
@@ -213,7 +216,7 @@ fun MusicScreen(
                                 tracks = home.songs.take(20),
                                 playlists = home.playlists,
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
-                                onAddToPlaylist = viewModel::addTrackToPlaylist,
+                                onChoosePlaylist = { playlistPickerTrack = it },
                                 onLongPress = { actionTrack = it },
                             )
                         }
@@ -231,7 +234,7 @@ fun MusicScreen(
                             tracks = screen.tracks,
                             playlists = state.home?.playlists.orEmpty(),
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onAddToPlaylist = viewModel::addTrackToPlaylist,
+                            onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
                         )
                     }
@@ -260,7 +263,7 @@ fun MusicScreen(
                             tracks = screen.tracks,
                             playlists = state.home?.playlists.orEmpty(),
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onAddToPlaylist = viewModel::addTrackToPlaylist,
+                            onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
                         )
                     }
@@ -275,7 +278,7 @@ fun MusicScreen(
                             tracks = screen.tracks,
                             playlists = state.home?.playlists.orEmpty(),
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onAddToPlaylist = viewModel::addTrackToPlaylist,
+                            onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
                         )
                     }
@@ -306,15 +309,35 @@ fun MusicScreen(
             if (state.showLyricsScreen) {
                 LyricsScreen(state = state, viewModel = viewModel)
             } else {
-                NowPlayingDialog(state = state, viewModel = viewModel, onRequestMusicControlsPermission = startMusic)
+                NowPlayingDialog(
+                    state = state,
+                    viewModel = viewModel,
+                    onRequestMusicControlsPermission = startMusic,
+                    onChoosePlaylist = { showCurrentPlaylistPicker = true },
+                )
+            }
+        }
+        if (state.isPlaylistSaving) {
+            VantafynGlassPanel(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 20.dp, end = 20.dp, bottom = 150.dp),
+                cornerRadius = 22.dp,
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+            ) {
+                VantafynLoadingIndicator("Creating playlist...")
             }
         }
         state.message?.let { message ->
-            AlertDialog(
-                modifier = Modifier.vantafynAnimatedModalBorder(),
-                onDismissRequest = viewModel::clearMessage,
-                confirmButton = { TextButton(onClick = viewModel::clearMessage) { Text("OK") } },
-                title = { Text(message) },
+            LaunchedEffect(message) {
+                delay(1_400L)
+                viewModel.clearMessage()
+            }
+            MusicSuccessToast(
+                message = message,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 20.dp, end = 20.dp, bottom = if (state.playback.currentTrack != null) 166.dp else 110.dp),
             )
         }
         actionTrack?.let { track ->
@@ -334,9 +357,29 @@ fun MusicScreen(
                     actionTrack = null
                     viewModel.addToQueue(track)
                 },
-                onAddToPlaylist = { playlist ->
+                onChoosePlaylist = {
                     actionTrack = null
+                    playlistPickerTrack = track
+                },
+            )
+        }
+        playlistPickerTrack?.let { track ->
+            MusicPlaylistPickerSheet(
+                playlists = state.home?.playlists.orEmpty(),
+                onDismiss = { playlistPickerTrack = null },
+                onPlaylist = { playlist ->
+                    playlistPickerTrack = null
                     viewModel.addTrackToPlaylist(track, playlist)
+                },
+            )
+        }
+        if (showCurrentPlaylistPicker) {
+            MusicPlaylistPickerSheet(
+                playlists = state.home?.playlists.orEmpty(),
+                onDismiss = { showCurrentPlaylistPicker = false },
+                onPlaylist = { playlist ->
+                    showCurrentPlaylistPicker = false
+                    viewModel.addCurrentToPlaylist(playlist)
                 },
             )
         }
@@ -534,7 +577,7 @@ private fun MusicTrackList(
     tracks: List<JellyfinMusicTrack>,
     playlists: List<JellyfinMusicPlaylist> = emptyList(),
     onTrack: (JellyfinMusicTrack) -> Unit,
-    onAddToPlaylist: (JellyfinMusicTrack, JellyfinMusicPlaylist) -> Unit = { _, _ -> },
+    onChoosePlaylist: (JellyfinMusicTrack) -> Unit = {},
     onLongPress: (JellyfinMusicTrack) -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -557,8 +600,8 @@ private fun MusicTrackList(
                         Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
-                    playlists.firstOrNull()?.let { playlist ->
-                        MiniControl("+") { onAddToPlaylist(track, playlist) }
+                    if (playlists.isNotEmpty()) {
+                        MiniControl("+") { onChoosePlaylist(track) }
                     }
                 }
             }
@@ -667,6 +710,7 @@ private fun NowPlayingDialog(
     state: MusicUiState,
     viewModel: MusicViewModel,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
+    onChoosePlaylist: () -> Unit,
 ) {
     var showPlaylistName by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
@@ -818,9 +862,9 @@ private fun NowPlayingDialog(
                     showMoreSheet = false
                     viewModel.addCurrentToQueue()
                 },
-                onAddToPlaylist = { playlist ->
+                onChoosePlaylist = {
                     showMoreSheet = false
-                    viewModel.addCurrentToPlaylist(playlist)
+                    onChoosePlaylist()
                 },
                 canGoToArtist = state.home?.artists?.any { it.name.equals(track.artist, ignoreCase = true) } == true,
                 onGoToAlbum = {
@@ -1107,7 +1151,7 @@ private fun CurrentTrackMoreSheet(
     onNewPlaylist: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
-    onAddToPlaylist: (JellyfinMusicPlaylist) -> Unit,
+    onChoosePlaylist: () -> Unit,
     canGoToArtist: Boolean,
     onGoToAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
@@ -1145,8 +1189,8 @@ private fun CurrentTrackMoreSheet(
                 MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
                 MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
                 MusicMenuAction(Icons.Rounded.PlaylistAdd, "New playlist", onNewPlaylist)
-                playlists.firstOrNull()?.let { playlist ->
-                    MusicMenuAction(Icons.Rounded.Add, "Add to ${playlist.name.take(24)}") { onAddToPlaylist(playlist) }
+                if (playlists.isNotEmpty()) {
+                    MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
                 }
                 if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
                 if (canGoToArtist) MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to artist", onGoToArtist)
@@ -1462,6 +1506,88 @@ private fun LyricsEmptyState(title: String, subtitle: String) {
 }
 
 @Composable
+private fun MusicSuccessToast(message: String, modifier: Modifier = Modifier) {
+    VantafynGlassSurface(
+        modifier = modifier,
+        variant = VantafynGlassVariant.Card,
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 11.dp),
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(22.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xFF1EC878).copy(alpha = 0.92f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+            }
+            Text(message, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun MusicPlaylistPickerSheet(
+    playlists: List<JellyfinMusicPlaylist>,
+    onDismiss: () -> Unit,
+    onPlaylist: (JellyfinMusicPlaylist) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.42f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.BottomCenter,
+    ) {
+        VantafynGlassPanel(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 104.dp)
+                .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
+                .clickable(enabled = false) {},
+            cornerRadius = 30.dp,
+            contentPadding = PaddingValues(18.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text("Add to playlist", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Rounded.Close, contentDescription = "Close", tint = VantafynColors.Ink)
+                    }
+                }
+                if (playlists.isEmpty()) {
+                    Text("Create a playlist from Now Playing first.", color = VantafynColors.Muted)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(320.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(playlists, key = { it.id }) { playlist ->
+                            MusicMenuAction(
+                                icon = Icons.Rounded.PlaylistAdd,
+                                label = playlist.name,
+                                onClick = { onPlaylist(playlist) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MusicTrackContextMenu(
     track: JellyfinMusicTrack,
     playlists: List<JellyfinMusicPlaylist>,
@@ -1469,7 +1595,7 @@ private fun MusicTrackContextMenu(
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
-    onAddToPlaylist: (JellyfinMusicPlaylist) -> Unit,
+    onChoosePlaylist: () -> Unit,
 ) {
     AlertDialog(
         modifier = Modifier.vantafynAnimatedModalBorder(),
@@ -1488,8 +1614,8 @@ private fun MusicTrackContextMenu(
                 MusicMenuAction(Icons.Rounded.PlayArrow, "Play", onPlay)
                 MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
                 MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
-                playlists.firstOrNull()?.let { playlist ->
-                    MusicMenuAction(Icons.Rounded.PlaylistAdd, "Add to ${playlist.name.take(18)}") { onAddToPlaylist(playlist) }
+                if (playlists.isNotEmpty()) {
+                    MusicMenuAction(Icons.Rounded.PlaylistAdd, "Add to playlist", onChoosePlaylist)
                 }
                 MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to album", onDismiss)
                 MusicMenuAction(Icons.Rounded.MoreHoriz, "More info", onDismiss)

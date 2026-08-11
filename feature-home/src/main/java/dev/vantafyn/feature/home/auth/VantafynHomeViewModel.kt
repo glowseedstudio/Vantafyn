@@ -34,9 +34,30 @@ import dev.vantafyn.core.jellyfin.JellyfinSessionRestoreFailure
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinUpNextCandidate
 import dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences
+import dev.vantafyn.core.jellyfin.JellyfinWebSocketEvent
 import dev.vantafyn.core.jellyfin.JellyfinAdminUserDetail
 import dev.vantafyn.core.jellyfin.JellyfinUserPreferencesRepository
+import dev.vantafyn.core.jellyfin.JellyfinWatchPartyRepository
 import dev.vantafyn.core.jellyfin.SavedProfile
+import dev.vantafyn.core.jellyfin.SyncPlayConnectionState
+import dev.vantafyn.core.jellyfin.SyncPlayCommand
+import dev.vantafyn.core.jellyfin.WatchPartyCandidate
+import dev.vantafyn.core.jellyfin.WatchPartyInvite
+import dev.vantafyn.core.jellyfin.WatchPartyInviteEventMapper
+import dev.vantafyn.core.jellyfin.WatchPartyInviteRecipient
+import dev.vantafyn.core.jellyfin.WatchPartyInviteStatus
+import dev.vantafyn.core.jellyfin.WatchPartyMatch
+import dev.vantafyn.core.jellyfin.WatchPartyMatchRule
+import dev.vantafyn.core.jellyfin.WatchPartyMediaScope
+import dev.vantafyn.core.jellyfin.WatchPartyMode
+import dev.vantafyn.core.jellyfin.WatchPartyPlaybackState
+import dev.vantafyn.core.jellyfin.WatchPartyRules
+import dev.vantafyn.core.jellyfin.WatchPartySelectedMedia
+import dev.vantafyn.core.jellyfin.WatchPartySession
+import dev.vantafyn.core.jellyfin.WatchPartyMemberRealtimeState
+import dev.vantafyn.core.jellyfin.WatchPartyMemberReadyStatus
+import dev.vantafyn.core.jellyfin.WatchPartyVote
+import dev.vantafyn.core.jellyfin.WatchPartyVoteValue
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.AutoplaySettings
 import dev.vantafyn.core.media.MusicPlaybackController
@@ -51,6 +72,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -67,11 +89,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val adminRepository: JellyfinAdminRepository = repositories.adminRepository
     private val userPreferencesRepository: JellyfinUserPreferencesRepository = repositories.userPreferencesRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
+    private val watchPartyRepository: JellyfinWatchPartyRepository = repositories.watchPartyRepository
+    private val realtimeClient = repositories.realtimeClient
     private val ombiRepository = OmbiRepository(application)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
     private var searchJob: Job? = null
     private var quickConnectJob: Job? = null
+    private var watchPartyRealtimeJob: Job? = null
+    private var watchPartyInviteExpiryJob: Job? = null
 
     private val _state = MutableStateFlow(
         VantafynHomeUiState(
@@ -81,6 +107,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             passoutProtectionLimitMinutes = appPreferences.getInt(KEY_PASSOUT_PROTECTION_LIMIT_MINUTES, 180)
                 .takeIf { value -> value in PASSOUT_PROTECTION_LIMIT_OPTIONS }
                 ?: 180,
+            watchPartyEnabled = appPreferences.getBoolean(KEY_WATCH_PARTY_ENABLED, true),
+            watchPartyInvitesEnabled = appPreferences.getBoolean(KEY_WATCH_PARTY_INVITES_ENABLED, true),
+            watchPartyInviteAnimationEnabled = appPreferences.getBoolean(KEY_WATCH_PARTY_INVITE_ANIMATION_ENABLED, true),
+            watchPartyInviteExpirySeconds = appPreferences.getInt(KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS, 60)
+                .takeIf { value -> value in WATCH_PARTY_INVITE_EXPIRY_OPTIONS }
+                ?: 60,
         ),
     )
     val state: StateFlow<VantafynHomeUiState> = _state.asStateFlow()
@@ -88,6 +120,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     init {
         loadSavedProfiles()
         refreshOmbiRequestsAvailability()
+    }
+
+    override fun onCleared() {
+        stopWatchPartyRealtime()
+        watchPartyInviteExpiryJob?.cancel()
+        super.onCleared()
     }
 
     fun onServerUrlChanged(value: String) {
@@ -158,6 +196,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun showProfilePicker() {
         MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
+        stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
             _state.update {
                 it.copy(
@@ -246,6 +285,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     refreshSavedProfiles()
+                    startWatchPartyRealtime(result.value)
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                 }
@@ -305,6 +345,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun logout() {
+        stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.Logout)
             authRepository.logout()
@@ -322,6 +363,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun logoutCurrentProfile() {
         val profileId = _state.value.session?.profileId ?: return
+        stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
             authRepository.removeProfile(profileId)
@@ -366,6 +408,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     refreshSavedProfiles()
+                    startWatchPartyRealtime(result.value)
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                 }
@@ -413,6 +456,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     refreshSavedProfiles()
+                    startWatchPartyRealtime(result.value)
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                 }
@@ -581,6 +625,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination == MobileDestination.Favorites) loadFavorites()
         if (destination == MobileDestination.Admin) loadAdminOverview()
         if (destination == MobileDestination.PlaybackPreferences) loadPlaybackPreferences()
+        if (destination == MobileDestination.WatchParty) {
+            loadWatchPartyRecipients()
+            if (_state.value.watchPartyCandidates.isEmpty()) loadWatchParty()
+        }
     }
 
     fun refreshOmbiRequestsAvailability() {
@@ -728,6 +776,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Player -> exitPlayback(0L)
             MobileDestination.MediaDetail -> navigateMobile(snapshot.previousMobileDestination.rootDestination())
             MobileDestination.LibraryDetail -> navigateMobile(MobileDestination.Libraries)
+            MobileDestination.WatchParty -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
             MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
             MobileDestination.AdminUserSettings -> closeAdminUser()
@@ -1276,6 +1325,607 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         )
     }
 
+    fun loadWatchParty() {
+        val session = _state.value.session ?: return
+        startWatchPartyRealtime(session)
+        viewModelScope.launch {
+            _state.update { it.copy(isWatchPartyLoading = true, watchPartyError = null) }
+            val rules = _state.value.watchPartyRules
+            when (val result = watchPartyRepository.getCandidates(session, rules, limit = 48)) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(
+                        isWatchPartyLoading = false,
+                        watchPartyCandidates = result.value,
+                        watchPartyCurrentIndex = 0,
+                        watchPartyVotes = emptyList(),
+                        watchPartyMatch = null,
+                        watchPartyError = null,
+                    )
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(isWatchPartyLoading = false, watchPartyError = result.message)
+                }
+            }
+        }
+    }
+
+    fun createWatchParty() {
+        val session = _state.value.session ?: return
+        startWatchPartyRealtime(session)
+        viewModelScope.launch {
+            _state.update { it.copy(isWatchPartyLoading = true, watchPartyError = null) }
+            val rules = _state.value.watchPartyRules
+            when (
+                val result = watchPartyRepository.createSyncPlayGroup(
+                    session = session,
+                    name = _state.value.watchPartyName,
+                    rules = rules,
+                    mode = _state.value.watchPartyMode,
+                    selectedMedia = _state.value.watchPartySelectedMedia,
+                )
+            ) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            isWatchPartyLoading = false,
+                            activeWatchParty = result.value,
+                            watchPartyError = null,
+                        )
+                    }
+                    loadWatchParty()
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isWatchPartyLoading = false,
+                        activeWatchParty = null,
+                        watchPartyError = "SyncPlay is not available from this Jellyfin session: ${result.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun leaveWatchParty() {
+        val session = _state.value.session
+        stopWatchPartyRealtime()
+        _state.update {
+            it.copy(
+                activeWatchParty = null,
+                watchPartyVotes = emptyList(),
+                watchPartyMatch = null,
+                watchPartyRealtimeMembers = emptyList(),
+                watchPartyRealtimeConnectionState = SyncPlayConnectionState.Disconnected,
+                watchPartySyncStateLabel = "Solo fallback",
+                watchPartyError = null,
+            )
+        }
+        if (session != null) {
+            viewModelScope.launch { watchPartyRepository.leaveSyncPlayGroup(session) }
+        }
+    }
+
+    fun updateWatchPartyName(value: String) {
+        _state.update { it.copy(watchPartyName = value, watchPartyError = null) }
+    }
+
+    fun startWatchPartyFromDetail(mode: WatchPartyMode) {
+        val detail = _state.value.mediaDetail ?: return
+        val selectedMedia = if (mode == WatchPartyMode.FixedTitle) detail.toWatchPartySelectedMedia() else null
+        _state.update {
+            it.copy(
+                watchPartyMode = mode,
+                watchPartySelectedMedia = selectedMedia,
+                watchPartyName = it.watchPartyName.ifBlank { "${it.session?.user?.name ?: "Vantafyn"} Watch Party" },
+                mobileDestination = MobileDestination.WatchParty,
+                previousMobileDestination = MobileDestination.MediaDetail,
+                watchPartyError = null,
+            )
+        }
+        loadWatchPartyRecipients()
+        if (mode == WatchPartyMode.SwipeToMatch && _state.value.watchPartyCandidates.isEmpty()) {
+            loadWatchParty()
+        }
+    }
+
+    fun updateWatchPartyMode(mode: WatchPartyMode) {
+        _state.update {
+            it.copy(
+                watchPartyMode = mode,
+                watchPartySelectedMedia = if (mode == WatchPartyMode.FixedTitle) it.watchPartySelectedMedia else null,
+                watchPartyError = null,
+            )
+        }
+    }
+
+    fun updateWatchPartyRules(rules: WatchPartyRules) {
+        _state.update {
+            it.copy(
+                watchPartyRules = rules,
+                watchPartyCandidates = emptyList(),
+                watchPartyCurrentIndex = 0,
+                watchPartyVotes = emptyList(),
+                watchPartyMatch = null,
+                watchPartyError = null,
+            )
+        }
+    }
+
+    fun loadWatchPartyRecipients() {
+        val session = _state.value.session ?: return
+        startWatchPartyRealtime(session)
+        viewModelScope.launch {
+            _state.update { it.copy(isWatchPartyRecipientsLoading = true, watchPartyError = null) }
+            when (val result = watchPartyRepository.getInviteRecipients(session)) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(
+                        isWatchPartyRecipientsLoading = false,
+                        watchPartyInviteRecipients = result.value,
+                        watchPartyError = null,
+                    )
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isWatchPartyRecipientsLoading = false,
+                        watchPartyInviteRecipients = emptyList(),
+                        watchPartyError = "Invite recipients are available only when Jellyfin exposes active sessions: ${result.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun toggleWatchPartyRecipient(sessionId: String) {
+        _state.update {
+            val selected = if (sessionId in it.selectedWatchPartyRecipientSessionIds) {
+                it.selectedWatchPartyRecipientSessionIds - sessionId
+            } else {
+                it.selectedWatchPartyRecipientSessionIds + sessionId
+            }
+            it.copy(selectedWatchPartyRecipientSessionIds = selected, watchPartyError = null)
+        }
+    }
+
+    fun sendWatchPartyInvites() {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        if (!snapshot.watchPartyEnabled) {
+            _state.update { it.copy(watchPartyError = "Watch Party is disabled in settings.") }
+            return
+        }
+        val party = snapshot.activeWatchParty
+        val selectedSessions = snapshot.selectedWatchPartyRecipientSessionIds
+        if (selectedSessions.isEmpty()) {
+            _state.update { it.copy(watchPartyError = "Choose at least one active recipient first.") }
+            return
+        }
+        viewModelScope.launch {
+            val ensuredParty = if (party == null) {
+                _state.update { it.copy(isWatchPartyLoading = true, watchPartyError = null) }
+                when (
+                    val created = watchPartyRepository.createSyncPlayGroup(
+                        session = session,
+                        name = snapshot.watchPartyName,
+                        rules = snapshot.watchPartyRules,
+                        mode = snapshot.watchPartyMode,
+                        selectedMedia = snapshot.watchPartySelectedMedia,
+                    )
+                ) {
+                    is JellyfinResult.Success -> created.value
+                    is JellyfinResult.Failure -> {
+                        _state.update {
+                            it.copy(
+                                isWatchPartyLoading = false,
+                                watchPartyError = "Could not create SyncPlay group before inviting: ${created.message}",
+                            )
+                        }
+                        return@launch
+                    }
+                }
+            } else {
+                party
+            }
+            val recipients = snapshot.watchPartyInviteRecipients.filter { it.sessionId in selectedSessions }
+            val now = System.currentTimeMillis()
+            val invite = WatchPartyInvite(
+                inviteId = UUID.randomUUID(),
+                partyId = ensuredParty.id,
+                serverAccountId = session.server.serverId ?: session.server.localId,
+                mode = snapshot.watchPartyMode,
+                mediaItemId = snapshot.watchPartySelectedMedia?.id,
+                mediaType = snapshot.watchPartySelectedMedia?.itemType,
+                mediaTitle = snapshot.watchPartySelectedMedia?.title,
+                mediaArtworkUrl = snapshot.watchPartySelectedMedia?.artworkUrl,
+                hostUserId = session.user.id,
+                hostDisplayName = session.user.name,
+                recipientUserId = recipients.firstOrNull()?.userId,
+                recipientDisplayName = recipients.joinToString(", ") { it.displayName },
+                createdAt = now,
+                expiresAt = now + snapshot.watchPartyInviteExpirySeconds * 1_000L,
+                status = WatchPartyInviteStatus.Pending,
+            )
+            when (val result = watchPartyRepository.sendInvite(session, invite, selectedSessions.toList())) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(
+                        isWatchPartyLoading = false,
+                        activeWatchParty = ensuredParty,
+                        sentWatchPartyInvites = it.sentWatchPartyInvites + invite,
+                        selectedWatchPartyRecipientSessionIds = emptySet(),
+                        showWatchPartyInviteSentAnimation = it.watchPartyInviteAnimationEnabled,
+                        watchPartyError = null,
+                    )
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isWatchPartyLoading = false,
+                        activeWatchParty = ensuredParty,
+                        watchPartyError = "Invite could not be delivered through Jellyfin active sessions: ${result.message}",
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearWatchPartyInviteAnimation() {
+        _state.update { it.copy(showWatchPartyInviteSentAnimation = false) }
+    }
+
+    fun toggleWatchPartyEnabled() {
+        val enabled = !_state.value.watchPartyEnabled
+        appPreferences.edit().putBoolean(KEY_WATCH_PARTY_ENABLED, enabled).apply()
+        _state.update { it.copy(watchPartyEnabled = enabled) }
+        if (!enabled) leaveWatchParty()
+    }
+
+    fun toggleWatchPartyInvitesEnabled() {
+        val enabled = !_state.value.watchPartyInvitesEnabled
+        appPreferences.edit().putBoolean(KEY_WATCH_PARTY_INVITES_ENABLED, enabled).apply()
+        _state.update {
+            it.copy(
+                watchPartyInvitesEnabled = enabled,
+                incomingWatchPartyInvites = if (enabled) it.incomingWatchPartyInvites else emptyList(),
+            )
+        }
+    }
+
+    fun toggleWatchPartyInviteAnimationEnabled() {
+        val enabled = !_state.value.watchPartyInviteAnimationEnabled
+        appPreferences.edit().putBoolean(KEY_WATCH_PARTY_INVITE_ANIMATION_ENABLED, enabled).apply()
+        _state.update { it.copy(watchPartyInviteAnimationEnabled = enabled) }
+    }
+
+    fun setWatchPartyInviteExpirySeconds(seconds: Int) {
+        val value = seconds.takeIf { it in WATCH_PARTY_INVITE_EXPIRY_OPTIONS } ?: return
+        appPreferences.edit().putInt(KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS, value).apply()
+        _state.update { it.copy(watchPartyInviteExpirySeconds = value) }
+    }
+
+    fun onAppForegrounded() {
+        _state.value.session?.let { startWatchPartyRealtime(it) }
+    }
+
+    fun onAppBackgrounded() {
+        if (_state.value.activeWatchParty == null) {
+            stopWatchPartyRealtime(clearInvites = false)
+        }
+    }
+
+    fun acceptIncomingWatchPartyInvite() {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val invite = snapshot.activeIncomingWatchPartyInvite ?: return
+        if (invite.expiresAt <= System.currentTimeMillis()) {
+            expireIncomingWatchPartyInvite(invite.inviteId)
+            return
+        }
+        viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.VideoPlayback)
+            _state.update {
+                it.copy(
+                    incomingWatchPartyInvites = it.incomingWatchPartyInvites.map { queued ->
+                        if (queued.inviteId == invite.inviteId) queued.copy(status = WatchPartyInviteStatus.Accepted) else queued
+                    },
+                    incomingWatchPartyMessage = "Joining ${invite.hostDisplayName}'s Watch Party",
+                    watchPartyError = null,
+                )
+            }
+            val rules = snapshot.watchPartyRules
+            when (val result = watchPartyRepository.joinSyncPlayGroup(session, invite.partyId, rules)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            activeWatchParty = WatchPartySession(
+                                id = invite.partyId,
+                                name = "${invite.hostDisplayName}'s Watch Party",
+                                serverId = session.server.serverId ?: session.server.localId,
+                                serverName = session.server.name,
+                                role = dev.vantafyn.core.jellyfin.WatchPartyRole.Participant,
+                                rules = rules,
+                                mode = invite.mode,
+                                selectedMedia = invite.toSelectedMedia(),
+                                members = listOf(
+                                    dev.vantafyn.core.jellyfin.WatchPartyMember(
+                                        id = session.user.id.toString(),
+                                        displayName = session.user.name,
+                                        role = dev.vantafyn.core.jellyfin.WatchPartyRole.Participant,
+                                    ),
+                                ),
+                            ),
+                            watchPartyMode = invite.mode,
+                            watchPartySelectedMedia = invite.toSelectedMedia(),
+                            mobileDestination = MobileDestination.WatchParty,
+                            incomingWatchPartyInvites = it.incomingWatchPartyInvites.filterNot { queued -> queued.inviteId == invite.inviteId },
+                            incomingWatchPartyMessage = "${invite.hostDisplayName} joined you to the lobby",
+                            watchPartyError = null,
+                        )
+                    }
+                    startWatchPartyRealtime(session)
+                    if (invite.mode == WatchPartyMode.SwipeToMatch) loadWatchParty()
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            incomingWatchPartyInvites = it.incomingWatchPartyInvites.filterNot { queued -> queued.inviteId == invite.inviteId },
+                            watchPartyError = "Could not join Watch Party: ${result.message}",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun declineIncomingWatchPartyInvite() {
+        val invite = _state.value.activeIncomingWatchPartyInvite ?: return
+        _state.update {
+            it.copy(
+                incomingWatchPartyInvites = it.incomingWatchPartyInvites.filterNot { queued -> queued.inviteId == invite.inviteId },
+                incomingWatchPartyMessage = "Invite declined",
+            )
+        }
+        _state.value.activeIncomingWatchPartyInvite?.let { scheduleInviteExpiry(it) }
+    }
+
+    fun clearIncomingWatchPartyMessage() {
+        _state.update { it.copy(incomingWatchPartyMessage = null) }
+    }
+
+    fun toggleWatchPartyReady() {
+        val userId = _state.value.session?.user?.id ?: return
+        _state.update { state ->
+            val current = state.localWatchPartyReadyStates[userId] == WatchPartyMemberReadyStatus.Ready
+            state.copy(
+                localWatchPartyReadyStates = state.localWatchPartyReadyStates + (
+                    userId to if (current) WatchPartyMemberReadyStatus.NotReady else WatchPartyMemberReadyStatus.Ready
+                    ),
+            )
+        }
+    }
+
+    private fun startWatchPartyRealtime(session: JellyfinSession) {
+        if (watchPartyRealtimeJob?.isActive == true) return
+        watchPartyRealtimeJob = viewModelScope.launch {
+            var reconnectDelayMs = 1_000L
+            while (true) {
+                realtimeClient.events(session)
+                    .catch { throwable ->
+                        _state.update {
+                            it.copy(
+                                watchPartyRealtimeConnectionState = SyncPlayConnectionState.Failed,
+                                watchPartySyncStateLabel = "Reconnect",
+                                watchPartyRealtimeError = throwable.message ?: "Realtime connection failed",
+                            )
+                        }
+                    }
+                    .collect { event ->
+                        if (event is JellyfinWebSocketEvent.ConnectionChanged && event.state == SyncPlayConnectionState.Connected) {
+                            reconnectDelayMs = 1_000L
+                        }
+                        reduceWatchPartyRealtimeEvent(event)
+                    }
+                _state.update {
+                    it.copy(
+                        watchPartyRealtimeConnectionState = SyncPlayConnectionState.Reconnecting,
+                        watchPartySyncStateLabel = "Reconnecting",
+                    )
+                }
+                delay(reconnectDelayMs)
+                reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(30_000L)
+            }
+        }
+    }
+
+    private fun stopWatchPartyRealtime(clearInvites: Boolean = false) {
+        watchPartyRealtimeJob?.cancel()
+        watchPartyRealtimeJob = null
+        if (clearInvites) {
+            watchPartyInviteExpiryJob?.cancel()
+            watchPartyInviteExpiryJob = null
+            _state.update { it.copy(incomingWatchPartyInvites = emptyList(), incomingWatchPartyMessage = null) }
+        }
+    }
+
+    private fun reduceWatchPartyRealtimeEvent(event: JellyfinWebSocketEvent) {
+        when (event) {
+            is JellyfinWebSocketEvent.ConnectionChanged -> _state.update {
+                it.copy(
+                    watchPartyRealtimeConnectionState = event.state,
+                    watchPartySyncStateLabel = when (event.state) {
+                        SyncPlayConnectionState.Connected -> if (it.activeWatchParty != null) "Watch Party active" else "Connected"
+                        SyncPlayConnectionState.Connecting,
+                        SyncPlayConnectionState.Reconnecting -> "Reconnecting"
+                        SyncPlayConnectionState.Disconnected -> "Sync unknown"
+                        SyncPlayConnectionState.Unsupported -> "Sync unavailable"
+                        SyncPlayConnectionState.Failed -> "Reconnect"
+                    },
+                    watchPartyRealtimeError = event.message,
+                )
+            }
+            is JellyfinWebSocketEvent.SessionsUpdated -> _state.update {
+                it.copy(
+                    watchPartyRealtimeMembers = event.members,
+                    watchPartySyncStateLabel = if (it.activeWatchParty != null) "Watch Party active" else it.watchPartySyncStateLabel,
+                )
+            }
+            is JellyfinWebSocketEvent.SyncPlayGroupUpdated -> _state.update {
+                val currentGroup = it.activeWatchParty?.id
+                if (event.groupId != null && currentGroup != null && event.groupId != currentGroup) {
+                    it
+                } else {
+                    it.copy(
+                        watchPartyLastGroupUpdate = event.updateType,
+                        watchPartySyncStateLabel = when (event.updateType.lowercase()) {
+                            "stateupdate", "state_update", "playqueue", "play_queue" -> "Sync state unavailable"
+                            "groupjoined", "group_joined", "userjoined", "user_joined" -> "Watch Party active"
+                            "groupleft", "group_left", "notingroup", "not_in_group" -> "Solo fallback"
+                            else -> "Watch Party active"
+                        },
+                    )
+                }
+            }
+            is JellyfinWebSocketEvent.SyncPlayCommandReceived -> _state.update {
+                it.copy(
+                    watchPartyLastSyncCommand = event.command,
+                    watchPartyPlaybackState = it.watchPartyPlaybackState.copy(
+                        itemId = event.playlistItemId,
+                        positionTicks = event.positionTicks ?: it.watchPartyPlaybackState.positionTicks,
+                        isPlaying = !event.command.equals("Pause", ignoreCase = true),
+                    ),
+                    watchPartySyncStateLabel = "Watch Party active",
+                )
+            }
+            is JellyfinWebSocketEvent.PlaystateCommandReceived -> _state.update {
+                it.copy(
+                    watchPartyLastSyncCommand = event.command,
+                    watchPartySyncStateLabel = "Watch Party active",
+                )
+            }
+            is JellyfinWebSocketEvent.GeneralCommandReceived -> _state.update {
+                if (!it.watchPartyInvitesEnabled) return@update it.copy(watchPartyLastSyncCommand = event.command)
+                val invite = WatchPartyInviteEventMapper.fromGeneralCommand(
+                    event = event,
+                    fallbackServerAccountId = it.session?.server?.serverId ?: it.session?.server?.localId,
+                    recipientUserId = it.session?.user?.id,
+                    recipientDisplayName = it.session?.user?.name ?: "You",
+                )
+                if (invite == null) {
+                    it.copy(watchPartyLastSyncCommand = event.command)
+                } else {
+                    enqueueIncomingWatchPartyInvite(it, invite)
+                }
+            }
+            is JellyfinWebSocketEvent.UnknownMessage -> Unit
+            is JellyfinWebSocketEvent.Error -> _state.update {
+                it.copy(
+                    watchPartyRealtimeConnectionState = SyncPlayConnectionState.Failed,
+                    watchPartySyncStateLabel = if (event.recoverable) "Reconnect" else "Sync unavailable",
+                    watchPartyRealtimeError = event.message,
+                )
+            }
+        }
+    }
+
+    private fun enqueueIncomingWatchPartyInvite(state: VantafynHomeUiState, invite: WatchPartyInvite): VantafynHomeUiState {
+        val accountId = state.session?.server?.serverId ?: state.session?.server?.localId
+        if (invite.serverAccountId != null && accountId != null && invite.serverAccountId != accountId) return state
+        if (invite.hostUserId == state.session?.user?.id) return state
+        if (invite.expiresAt <= System.currentTimeMillis()) return state.copy(incomingWatchPartyMessage = "Watch Party invite expired")
+        val queue = (state.incomingWatchPartyInvites.filterNot { it.inviteId == invite.inviteId } + invite)
+            .sortedBy { it.createdAt }
+        val activeInvite = state.activeIncomingWatchPartyInvite
+        if (activeInvite == null || activeInvite.inviteId == invite.inviteId) {
+            scheduleInviteExpiry(queue.first())
+        }
+        return state.copy(
+            incomingWatchPartyInvites = queue,
+            incomingWatchPartyMessage = null,
+            watchPartyLastSyncCommand = "Watch Party invite",
+        )
+    }
+
+    private fun scheduleInviteExpiry(invite: WatchPartyInvite) {
+        watchPartyInviteExpiryJob?.cancel()
+        watchPartyInviteExpiryJob = viewModelScope.launch {
+            val delayMs = (invite.expiresAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            delay(delayMs)
+            expireIncomingWatchPartyInvite(invite.inviteId)
+        }
+    }
+
+    private fun expireIncomingWatchPartyInvite(inviteId: UUID) {
+        _state.update {
+            it.copy(
+                incomingWatchPartyInvites = it.incomingWatchPartyInvites.filterNot { invite -> invite.inviteId == inviteId },
+                incomingWatchPartyMessage = "Watch Party invite expired",
+            )
+        }
+        _state.value.activeIncomingWatchPartyInvite?.let { scheduleInviteExpiry(it) }
+    }
+
+    fun voteWatchPartyCandidate(value: WatchPartyVoteValue) {
+        val snapshot = _state.value
+        val candidate = snapshot.currentWatchPartyCandidate ?: return
+        val memberId = snapshot.session?.user?.id?.toString() ?: return
+        val vote = WatchPartyVote(candidate.id, memberId, value)
+        val votes = snapshot.watchPartyVotes.filterNot { it.candidateId == candidate.id && it.memberId == memberId } + vote
+        val match = if (value == WatchPartyVoteValue.Yes && snapshot.watchPartyRules.isMatched(votes, candidate.id, memberCount = 1)) {
+            WatchPartyMatch(candidate, votes.filter { it.candidateId == candidate.id })
+        } else {
+            null
+        }
+        _state.update {
+            it.copy(
+                watchPartyVotes = votes,
+                watchPartyCurrentIndex = (it.watchPartyCurrentIndex + 1).coerceAtMost(it.watchPartyCandidates.size),
+                watchPartyMatch = match ?: it.watchPartyMatch,
+            )
+        }
+    }
+
+    fun startMatchedWatchPartyPlayback() {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val candidate = snapshot.watchPartyMatch?.candidate ?: return
+        viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.VideoPlayback)
+            watchPartyRepository.sendSyncPlayCommand(session, SyncPlayCommand.StartItem(candidate.id, 0L))
+            startPlaybackTarget(
+                session = session,
+                target = PlaybackTarget(
+                    id = candidate.id,
+                    title = candidate.title,
+                    subtitle = candidate.subtitle,
+                    startTicks = 0L,
+                    itemType = candidate.itemType,
+                ),
+                forceTranscode = false,
+                audioStreamIndex = null,
+                subtitleStreamIndex = null,
+            )
+        }
+    }
+
+    fun startFixedWatchPartyPlayback() {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val media = snapshot.watchPartySelectedMedia ?: snapshot.activeWatchParty?.selectedMedia ?: return
+        viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.VideoPlayback)
+            watchPartyRepository.sendSyncPlayCommand(session, SyncPlayCommand.StartItem(media.id, 0L))
+            startPlaybackTarget(
+                session = session,
+                target = PlaybackTarget(
+                    id = media.id,
+                    title = media.title,
+                    subtitle = media.subtitle,
+                    startTicks = 0L,
+                    itemType = media.itemType,
+                ),
+                forceTranscode = false,
+                audioStreamIndex = null,
+                subtitleStreamIndex = null,
+            )
+        }
+    }
+
     fun handlePlayerError() {
         val snapshot = _state.value
         if (!snapshot.hasPlaybackRetriedTranscode && snapshot.playbackInfo?.fallbackStreamUrl != null) {
@@ -1376,10 +2026,18 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun reportPlaybackProgress(positionMs: Long, isPaused: Boolean) {
+        val positionTicks = positionMs.toTicks()
+        _state.update { state ->
+            state.copy(
+                playbackItem = state.playbackItem?.copy(startPositionMs = positionMs.coerceAtLeast(0L)),
+                activePlaybackTarget = state.activePlaybackTarget?.copy(startTicks = positionTicks),
+                playbackInfo = state.playbackInfo?.copy(startPositionTicks = positionTicks),
+            )
+        }
         val session = _state.value.session ?: return
         val info = _state.value.playbackInfo ?: return
         viewModelScope.launch {
-            playbackRepository.reportProgress(session, info, positionMs.toTicks(), isPaused)
+            playbackRepository.reportProgress(session, info, positionTicks, isPaused)
         }
     }
 
@@ -1408,29 +2066,38 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun selectPlaybackAudioTrack(index: Int) {
-        restartActivePlayback(forceTranscode = false, audioStreamIndex = index, subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex)
+        updateActivePlaybackTrackSelection(audioStreamIndex = index, subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex)
     }
 
     fun selectPlaybackSubtitleTrack(index: Int?) {
-        restartActivePlayback(forceTranscode = false, audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex, subtitleStreamIndex = index ?: -1)
+        updateActivePlaybackTrackSelection(audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex, subtitleStreamIndex = index)
     }
 
     fun selectPlaybackAudioTrack(index: Int, positionMs: Long) {
-        restartActivePlayback(
-            forceTranscode = false,
-            audioStreamIndex = index,
-            subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex,
-            positionMs = positionMs,
-        )
+        updateActivePlaybackTrackSelection(audioStreamIndex = index, subtitleStreamIndex = _state.value.playbackInfo?.subtitleStreamIndex)
+        reportPlaybackProgress(positionMs, false)
     }
 
     fun selectPlaybackSubtitleTrack(index: Int?, positionMs: Long) {
-        restartActivePlayback(
-            forceTranscode = false,
-            audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex,
-            subtitleStreamIndex = index ?: -1,
-            positionMs = positionMs,
-        )
+        updateActivePlaybackTrackSelection(audioStreamIndex = _state.value.playbackInfo?.audioStreamIndex, subtitleStreamIndex = index)
+        reportPlaybackProgress(positionMs, false)
+    }
+
+    private fun updateActivePlaybackTrackSelection(audioStreamIndex: Int?, subtitleStreamIndex: Int?) {
+        _state.update { state ->
+            val playbackInfo = state.playbackInfo
+            val playbackItem = state.playbackItem
+            state.copy(
+                playbackInfo = playbackInfo?.copy(
+                    audioStreamIndex = audioStreamIndex,
+                    subtitleStreamIndex = subtitleStreamIndex,
+                ),
+                playbackItem = playbackItem?.copy(
+                    selectedAudioStreamIndex = audioStreamIndex,
+                    selectedSubtitleStreamIndex = subtitleStreamIndex,
+                ),
+            )
+        }
     }
 
     private fun restartActivePlayback(
@@ -1779,6 +2446,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                 )
                             }
                             refreshSavedProfiles()
+                            startWatchPartyRealtime(jellyfinSession)
                             loadLibraries(jellyfinSession)
                             loadFavorites(jellyfinSession)
                             return@launch
@@ -1879,8 +2547,44 @@ data class VantafynHomeUiState(
     val ombiRequestsEnabledForUsers: Boolean = false,
     val ombiRequestsEnabledForAdmins: Boolean = false,
     val pendingOmbiAccessRequestCount: Int = 0,
+    val activeWatchParty: WatchPartySession? = null,
+    val watchPartyName: String = "",
+    val watchPartyMode: WatchPartyMode = WatchPartyMode.SwipeToMatch,
+    val watchPartySelectedMedia: WatchPartySelectedMedia? = null,
+    val watchPartyRules: WatchPartyRules = WatchPartyRules(),
+    val watchPartyInviteRecipients: List<WatchPartyInviteRecipient> = emptyList(),
+    val selectedWatchPartyRecipientSessionIds: Set<String> = emptySet(),
+    val sentWatchPartyInvites: List<WatchPartyInvite> = emptyList(),
+    val showWatchPartyInviteSentAnimation: Boolean = false,
+    val isWatchPartyRecipientsLoading: Boolean = false,
+    val watchPartyRealtimeConnectionState: SyncPlayConnectionState = SyncPlayConnectionState.Disconnected,
+    val watchPartyRealtimeMembers: List<WatchPartyMemberRealtimeState> = emptyList(),
+    val localWatchPartyReadyStates: Map<UUID, WatchPartyMemberReadyStatus> = emptyMap(),
+    val watchPartyPlaybackState: WatchPartyPlaybackState = WatchPartyPlaybackState(null, 0L, false),
+    val watchPartySyncStateLabel: String = "Sync unknown",
+    val watchPartyLastGroupUpdate: String? = null,
+    val watchPartyLastSyncCommand: String? = null,
+    val watchPartyRealtimeError: String? = null,
+    val watchPartyCandidates: List<WatchPartyCandidate> = emptyList(),
+    val watchPartyCurrentIndex: Int = 0,
+    val watchPartyVotes: List<WatchPartyVote> = emptyList(),
+    val watchPartyMatch: WatchPartyMatch? = null,
+    val isWatchPartyLoading: Boolean = false,
+    val watchPartyError: String? = null,
+    val watchPartyEnabled: Boolean = true,
+    val watchPartyInvitesEnabled: Boolean = true,
+    val watchPartyInviteAnimationEnabled: Boolean = true,
+    val watchPartyInviteExpirySeconds: Int = 60,
+    val incomingWatchPartyInvites: List<WatchPartyInvite> = emptyList(),
+    val incomingWatchPartyMessage: String? = null,
     val errorMessage: String? = null,
-)
+) {
+    val currentWatchPartyCandidate: WatchPartyCandidate?
+        get() = watchPartyCandidates.getOrNull(watchPartyCurrentIndex)
+
+    val activeIncomingWatchPartyInvite: WatchPartyInvite?
+        get() = incomingWatchPartyInvites.firstOrNull { it.status == WatchPartyInviteStatus.Pending }
+}
 
 private fun VantafynHomeUiState.withFavoriteState(
     itemId: UUID,
@@ -2020,6 +2724,7 @@ enum class MobileDestination {
     Music,
     Favorites,
     Requests,
+    WatchParty,
     Admin,
     AdminUserSettings,
     Profile,
@@ -2038,6 +2743,7 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.Music,
         MobileDestination.Favorites,
         MobileDestination.Requests,
+        MobileDestination.WatchParty,
         MobileDestination.Admin,
         MobileDestination.Profile -> true
         MobileDestination.AdminUserSettings,
@@ -2174,6 +2880,7 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(
                 codec = it.codec,
                 isExternal = it.isExternal,
                 isDefault = it.isDefault,
+                deliveryUrl = it.deliveryUrl,
             )
         },
         itemType = target.itemType,
@@ -2211,6 +2918,37 @@ private fun VantafynHomeUiState.autoplaySettings(): AutoplaySettings =
 private val AUTOPLAY_COUNTDOWN_OPTIONS = setOf(5, 10, 15, 30)
 private val PASSOUT_PROTECTION_LIMIT_OPTIONS = setOf(60, 120, 180, 240, 300)
 private const val KEY_AUTOPLAY_COUNTDOWN_SECONDS = "autoplay_countdown_seconds"
+
+private fun WatchPartyRules.isMatched(votes: List<WatchPartyVote>, candidateId: UUID, memberCount: Int): Boolean {
+    val yesVotes = votes.count { it.candidateId == candidateId && it.vote == WatchPartyVoteValue.Yes }
+    return when (matchRule) {
+        WatchPartyMatchRule.Everyone -> yesVotes >= memberCount.coerceAtLeast(1)
+        WatchPartyMatchRule.Majority -> yesVotes > memberCount.coerceAtLeast(1) / 2
+    }
+}
+
+private fun JellyfinMediaDetail.toWatchPartySelectedMedia(): WatchPartySelectedMedia =
+    WatchPartySelectedMedia(
+        id = id,
+        title = title,
+        subtitle = subtitle,
+        itemType = itemType,
+        artworkUrl = imageUrl,
+        backdropUrl = backdropUrl,
+    )
+
+private fun WatchPartyInvite.toSelectedMedia(): WatchPartySelectedMedia? =
+    mediaItemId?.let { id ->
+        WatchPartySelectedMedia(
+            id = id,
+            title = mediaTitle ?: "Selected title",
+            subtitle = mediaType,
+            itemType = mediaType,
+            artworkUrl = mediaArtworkUrl,
+            backdropUrl = null,
+        )
+    }
+
 private const val KEY_PASSOUT_PROTECTION_ENABLED = "passout_protection_enabled"
 private const val KEY_PASSOUT_PROTECTION_LIMIT_MINUTES = "passout_protection_limit_minutes"
 
@@ -2311,6 +3049,11 @@ private fun VantafynCardSpacing.next(): VantafynCardSpacing =
     enumValues<VantafynCardSpacing>().let { it[(ordinal + 1) % it.size] }
 
 private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
+private const val KEY_WATCH_PARTY_ENABLED = "watch_party_enabled"
+private const val KEY_WATCH_PARTY_INVITES_ENABLED = "watch_party_invites_enabled"
+private const val KEY_WATCH_PARTY_INVITE_ANIMATION_ENABLED = "watch_party_invite_animation_enabled"
+private const val KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS = "watch_party_invite_expiry_seconds"
+private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 60
 
 enum class VantafynSetupStep {

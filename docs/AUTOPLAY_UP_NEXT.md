@@ -77,3 +77,7 @@ TV can reuse:
 - `JellyfinMediaRepository.getNextEpisode(...)`
 
 TV still needs its own D-pad focused overlay UI and TV player integration.
+
+## Watch Party
+
+Solo Up Next is implemented. During Watch Party playback, solo Up Next countdown/autoplay is suppressed because group playback needs host-owned SyncPlay state and ready/buffer handling before Vantafyn can safely start the next episode for everyone without risking desync.

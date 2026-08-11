@@ -57,3 +57,18 @@ Vantafyn does not store Ombi passwords.
 Vantafyn does not log Ombi API keys, passwords, tokens, auth headers, or secret URLs.
 
 Normal users cannot navigate into Ombi setup or management screens. The UI hides those routes, and the Requests ViewModel rejects setup/write actions unless the current Jellyfin profile is an admin.
+## Access Request Idempotency
+
+Request Access is keyed by:
+
+- server account id
+- Jellyfin/Vantafyn profile id
+- Ombi integration id
+
+Only one active request is shown for a profile on a server. Repeated taps return the existing pending/account-created request instead of creating duplicate cards.
+
+On Requests/Manage Ombi open, duplicate historical requests are collapsed. Vantafyn keeps the highest-priority/latest state:
+
+`Linked > AccountCreated > Pending > Seen > Dismissed`.
+
+If Ombi setup is removed, local Ombi setup and access-request data are cleared from this device, so stale setup-local cards do not reappear after reconfiguration.

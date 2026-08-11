@@ -90,6 +90,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private var tickerJob: Job? = null
     private var lastTransitionReason: VantafynMusicStopReason = VantafynMusicStopReason.QueueChange
     private var playbackServiceStarted = false
+    private val tracksByMediaId = mutableMapOf<String, VantafynMusicTrack>()
 
     internal val sessionPlayer: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
         setAudioAttributes(
@@ -221,7 +222,10 @@ class MusicPlaybackController private constructor(context: Context) {
                 errorMessage = null,
             )
         }
-        sessionPlayer.setMediaItems(queue.map { it.toMediaItem() }, safeIndex, 0L)
+        val mediaItems = queue.map { it.toMediaItem() }
+        tracksByMediaId.clear()
+        queue.forEach { track -> tracksByMediaId[track.id.toString()] = track }
+        sessionPlayer.setMediaItems(mediaItems, safeIndex, 0L)
         sessionPlayer.prepare()
         ensurePlaybackService()
         sessionPlayer.playWhenReady = true
@@ -300,11 +304,13 @@ class MusicPlaybackController private constructor(context: Context) {
     fun playNext(track: VantafynMusicTrack) {
         val insertIndex = (_state.value.queueIndex + 1).coerceAtMost(_state.value.queue.size)
         sessionPlayer.addMediaItem(insertIndex, track.toMediaItem())
+        tracksByMediaId[track.id.toString()] = track
         _state.update { it.copy(queue = it.queue.toMutableList().apply { add(insertIndex, track) }) }
     }
 
     fun addToQueue(track: VantafynMusicTrack) {
         sessionPlayer.addMediaItem(track.toMediaItem())
+        tracksByMediaId[track.id.toString()] = track
         _state.update { it.copy(queue = it.queue + track) }
     }
 
@@ -344,6 +350,24 @@ class MusicPlaybackController private constructor(context: Context) {
             VantafynMusicRepeatMode.All -> Player.REPEAT_MODE_ALL
         }
         _state.update { it.copy(repeatMode = next) }
+    }
+
+    internal fun adoptSystemQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0, startPositionMs: Long = 0L): List<MediaItem> {
+        if (queue.isEmpty()) return emptyList()
+        val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
+        tracksByMediaId.clear()
+        queue.forEach { track -> tracksByMediaId[track.id.toString()] = track }
+        _state.update {
+            it.copy(
+                queue = queue,
+                queueIndex = safeIndex,
+                positionMs = startPositionMs.coerceAtLeast(0L),
+                durationMs = queue[safeIndex].durationMs ?: 0L,
+                errorMessage = null,
+            )
+        }
+        ensurePlaybackService()
+        return queue.map { it.toMediaItem() }
     }
 
     fun release() {

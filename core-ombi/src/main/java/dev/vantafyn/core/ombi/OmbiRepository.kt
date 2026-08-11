@@ -1,6 +1,7 @@
 package dev.vantafyn.core.ombi
 
 import android.content.Context
+import android.util.Log
 import dev.vantafyn.core.integrations.EncryptedIntegrationAuthStorage
 import dev.vantafyn.core.integrations.IntegrationCapability
 import dev.vantafyn.core.integrations.IntegrationConnectionState
@@ -71,6 +72,12 @@ enum class OmbiAccessRequestStatus {
     Dismissed,
 }
 
+data class OmbiAccessRequestKey(
+    val serverAccountId: String,
+    val profileId: String,
+    val integrationId: String,
+)
+
 data class OmbiAccessRequest(
     val jellyfinUserId: String,
     val jellyfinUserName: String,
@@ -79,6 +86,28 @@ data class OmbiAccessRequest(
     val suggestedOmbiUserName: String,
     val status: OmbiAccessRequestStatus = OmbiAccessRequestStatus.Pending,
     val note: String? = null,
+    val serverAccountId: String? = null,
+    val integrationId: String? = null,
+)
+
+data class OmbiUserProfile(
+    val id: String?,
+    val userName: String,
+    val email: String?,
+    val displayName: String?,
+)
+
+enum class OmbiUserMatchState {
+    NotChecked,
+    MatchFound,
+    NoMatchFound,
+    UnknownUnavailable,
+}
+
+data class OmbiUserMatch(
+    val state: OmbiUserMatchState,
+    val user: OmbiUserProfile? = null,
+    val confidence: String? = null,
 )
 
 data class OmbiUserMapping(
@@ -460,11 +489,11 @@ class OmbiRepository(
     fun setAccessMode(mode: OmbiAccessMode) = store.setAccessMode(mode)
     fun setIdentityMode(mode: OmbiIdentityMode) = store.setIdentityMode(mode)
     fun clearConfig() = store.clear()
-    fun accessRequests(): List<OmbiAccessRequest> = store.readAccessRequests()
+    fun accessRequests(): List<OmbiAccessRequest> = cleanupAccessRequests()
     fun userMappings(): List<OmbiUserMapping> = store.readMappings()
     fun userSession(jellyfinUserId: String): OmbiUserSession? = store.readSession(jellyfinUserId)
     fun pendingAccessRequestCount(): Int =
-        store.readAccessRequests().count { it.status == OmbiAccessRequestStatus.Pending }
+        cleanupAccessRequests().count { it.status == OmbiAccessRequestStatus.Pending }
 
     fun mappingFor(jellyfinUserId: String): OmbiUserMapping? =
         store.readMappings().firstOrNull { it.jellyfinUserId == jellyfinUserId }
@@ -475,9 +504,11 @@ class OmbiRepository(
         serverName: String?,
         note: String?,
     ): OmbiAccessRequest {
-        val requests = store.readAccessRequests()
+        val config = store.read()
+        val key = accessRequestKey(jellyfinUserId, config)
+        val requests = cleanupAccessRequests()
         val existing = requests.firstOrNull {
-            it.jellyfinUserId == jellyfinUserId && it.status != OmbiAccessRequestStatus.Dismissed && it.status != OmbiAccessRequestStatus.Linked
+            it.key(config) == key && it.status != OmbiAccessRequestStatus.Dismissed && it.status != OmbiAccessRequestStatus.Linked
         }
         if (existing != null) return existing
         val request = OmbiAccessRequest(
@@ -487,6 +518,8 @@ class OmbiRepository(
             requestedAt = System.currentTimeMillis(),
             suggestedOmbiUserName = jellyfinUserName.toSuggestedOmbiUserName(),
             note = note?.takeIf { it.isNotBlank() },
+            serverAccountId = key.serverAccountId,
+            integrationId = key.integrationId,
         )
         store.saveAccessRequests(requests + request)
         upsertMapping(
@@ -502,7 +535,7 @@ class OmbiRepository(
     }
 
     fun updateAccessRequest(jellyfinUserId: String, status: OmbiAccessRequestStatus, note: String? = null) {
-        val updated = store.readAccessRequests().map {
+        val updated = cleanupAccessRequests().map {
             if (it.jellyfinUserId == jellyfinUserId) it.copy(status = status, note = note ?: it.note) else it
         }
         store.saveAccessRequests(updated)
@@ -513,7 +546,7 @@ class OmbiRepository(
             OmbiAccessRequestStatus.Linked -> OmbiLinkedAccountState.Linked
             OmbiAccessRequestStatus.Dismissed -> OmbiLinkedAccountState.NotLinked
         }
-        store.readAccessRequests().firstOrNull { it.jellyfinUserId == jellyfinUserId }?.let {
+        cleanupAccessRequests().firstOrNull { it.jellyfinUserId == jellyfinUserId }?.let {
             upsertMapping(
                 OmbiUserMapping(
                     jellyfinUserId = it.jellyfinUserId,
@@ -524,6 +557,21 @@ class OmbiRepository(
                 ),
             )
         }
+    }
+
+    fun cleanupAccessRequests(): List<OmbiAccessRequest> {
+        val config = store.read()
+        val normalized = store.readAccessRequests().map {
+            val key = it.key(config)
+            it.copy(serverAccountId = key.serverAccountId, integrationId = key.integrationId)
+        }
+        val deduped = normalized
+            .groupBy { it.key(config) }
+            .values
+            .map { group -> group.maxWith(accessRequestPriorityComparator) }
+            .sortedByDescending { it.requestedAt }
+        if (deduped != normalized) store.saveAccessRequests(deduped)
+        return deduped
     }
 
     fun upsertMapping(mapping: OmbiUserMapping) {
@@ -632,6 +680,38 @@ class OmbiRepository(
             }
         }
 
+    suspend fun findOmbiUserMatch(
+        jellyfinUserName: String?,
+        jellyfinEmail: String? = null,
+    ): IntegrationResult<OmbiUserMatch> =
+        runOmbiCatching {
+            val name = jellyfinUserName?.trim().orEmpty()
+            if (name.isBlank() && jellyfinEmail.isNullOrBlank()) {
+                return@runOmbiCatching OmbiUserMatch(OmbiUserMatchState.NoMatchFound)
+            }
+            val users = listOmbiUsers()
+            val email = jellyfinEmail?.trim()?.lowercase()
+            val exactName = users.firstOrNull { it.userName == name }
+            val exactEmail = email?.let { target -> users.firstOrNull { it.email?.lowercase() == target } }
+            val caseName = users.firstOrNull { it.userName.equals(name, ignoreCase = true) }
+            val normalizedName = name.normalizedUserMatchKey()
+            val displayFallback = users.firstOrNull {
+                normalizedName.isNotBlank() && it.displayName?.normalizedUserMatchKey() == normalizedName
+            }
+            when {
+                exactName != null -> OmbiUserMatch(OmbiUserMatchState.MatchFound, exactName, "Exact username match")
+                exactEmail != null -> OmbiUserMatch(OmbiUserMatchState.MatchFound, exactEmail, "Exact email match")
+                caseName != null -> OmbiUserMatch(OmbiUserMatchState.MatchFound, caseName, "Username match")
+                displayFallback != null -> OmbiUserMatch(OmbiUserMatchState.MatchFound, displayFallback, "Possible display-name match")
+                else -> OmbiUserMatch(OmbiUserMatchState.NoMatchFound)
+            }
+        }.let { result ->
+            when (result) {
+                is IntegrationResult.Success -> result
+                is IntegrationResult.Failure -> IntegrationResult.Success(OmbiUserMatch(OmbiUserMatchState.UnknownUnavailable))
+            }
+        }
+
     override suspend fun testConnection(): IntegrationResult<IntegrationConnectionState.Connected> =
         when (val result = testConnectionReport()) {
             is IntegrationResult.Success -> IntegrationResult.Success(IntegrationConnectionState.Connected(result.value.displayName))
@@ -712,17 +792,29 @@ class OmbiRepository(
         requestTv(providerId, requestedBy, OmbiTvRequestSelection.AllSeasons)
 
     suspend fun requestTv(providerId: String, requestedBy: String?, selection: OmbiTvRequestSelection): IntegrationResult<Unit> =
+        requestTvByIds(movieDbId = providerId, tvDbId = providerId, requestedBy = requestedBy, selection = selection)
+
+    suspend fun requestTvByIds(
+        movieDbId: String?,
+        tvDbId: String?,
+        requestedBy: String?,
+        selection: OmbiTvRequestSelection,
+    ): IntegrationResult<Unit> =
         runOmbiCatching {
-            val id = providerId.toIntOrNull() ?: providerId
+            val tmdbId = movieDbId?.takeIf { it.isNotBlank() }
+            val tvdbId = tvDbId?.takeIf { it.isNotBlank() }
+            require(!tmdbId.isNullOrBlank() || !tvdbId.isNullOrBlank()) { "Ombi did not return a usable TV identifier." }
             val v2Body = JSONObject()
-                .put("theMovieDbId", id)
+                .put("theMovieDbId", tmdbId?.toIntOrNull() ?: tmdbId)
                 .put("requestAll", selection == OmbiTvRequestSelection.AllSeasons)
                 .put("latestSeason", selection == OmbiTvRequestSelection.LatestSeason)
                 .put("firstSeason", selection == OmbiTvRequestSelection.FirstSeason)
             runCatching {
+                if (tmdbId.isNullOrBlank()) throw IllegalArgumentException("Ombi did not return a TMDb id for the v2 TV request endpoint.")
                 request("/api/v2/Requests/tv", "POST", v2Body, requestedBy, OmbiAuth.ApiKey)
             }.getOrElse {
-                val fallbackBody = JSONObject().put("tvDbId", id)
+                if (tvdbId.isNullOrBlank()) throw it
+                val fallbackBody = JSONObject().put("tvDbId", tvdbId?.toIntOrNull() ?: tvdbId)
                 request("/api/v1/Request/tv", "POST", fallbackBody, requestedBy, OmbiAuth.ApiKey)
             }.let(::validateRequestEngineResult)
         }
@@ -731,17 +823,29 @@ class OmbiRepository(
         requestTvForUser(jellyfinUserId, providerId, OmbiTvRequestSelection.AllSeasons)
 
     suspend fun requestTvForUser(jellyfinUserId: String, providerId: String, selection: OmbiTvRequestSelection): IntegrationResult<Unit> =
+        requestTvForUserByIds(jellyfinUserId = jellyfinUserId, movieDbId = providerId, tvDbId = providerId, selection = selection)
+
+    suspend fun requestTvForUserByIds(
+        jellyfinUserId: String,
+        movieDbId: String?,
+        tvDbId: String?,
+        selection: OmbiTvRequestSelection,
+    ): IntegrationResult<Unit> =
         runOmbiCatching(requireApiKey = false) {
-            val id = providerId.toIntOrNull() ?: providerId
+            val tmdbId = movieDbId?.takeIf { it.isNotBlank() }
+            val tvdbId = tvDbId?.takeIf { it.isNotBlank() }
+            require(!tmdbId.isNullOrBlank() || !tvdbId.isNullOrBlank()) { "Ombi did not return a usable TV identifier." }
             val v2Body = JSONObject()
-                .put("theMovieDbId", id)
+                .put("theMovieDbId", tmdbId?.toIntOrNull() ?: tmdbId)
                 .put("requestAll", selection == OmbiTvRequestSelection.AllSeasons)
                 .put("latestSeason", selection == OmbiTvRequestSelection.LatestSeason)
                 .put("firstSeason", selection == OmbiTvRequestSelection.FirstSeason)
             runCatching {
+                if (tmdbId.isNullOrBlank()) throw IllegalArgumentException("Ombi did not return a TMDb id for the v2 TV request endpoint.")
                 request("/api/v2/Requests/tv", "POST", v2Body, null, OmbiAuth.User(jellyfinUserId))
             }.getOrElse {
-                val fallbackBody = JSONObject().put("tvDbId", id)
+                if (tvdbId.isNullOrBlank()) throw it
+                val fallbackBody = JSONObject().put("tvDbId", tvdbId?.toIntOrNull() ?: tvdbId)
                 request("/api/v1/Request/tv", "POST", fallbackBody, null, OmbiAuth.User(jellyfinUserId))
             }.let(::validateRequestEngineResult)
         }
@@ -857,16 +961,23 @@ class OmbiRepository(
             val auth = userOrApiKeyAuth(jellyfinUserId)
             val json = when (item.mediaType) {
                 RequestMediaType.Movie -> {
-                    val id = item.movieDbId ?: item.externalId
+                    val id = item.movieDbId?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalArgumentException("Ombi did not return a usable TMDb movie identifier.")
                     request("/api/v2/Search/movie/${id.urlPath()}", "GET", null, null, auth) as JSONObject
                 }
                 RequestMediaType.Series -> {
-                    val tvDbId = item.tvDbId ?: item.externalId
-                    runCatching {
-                        request("/api/v2/Search/tv/${tvDbId.urlPath()}", "GET", null, null, auth) as JSONObject
-                    }.getOrElse {
-                        val movieDbId = item.movieDbId ?: throw it
-                        request("/api/v2/Search/tv/moviedb/${movieDbId.urlPath()}", "GET", null, null, auth) as JSONObject
+                    val tvDbId = item.tvDbId?.takeIf { it.isNotBlank() }
+                    val movieDbId = item.movieDbId?.takeIf { it.isNotBlank() }
+                    if (!tvDbId.isNullOrBlank()) {
+                        runCatching {
+                            request("/api/v2/Search/tv/${tvDbId.urlPath()}", "GET", null, null, auth) as JSONObject
+                        }.getOrElse {
+                            val id = movieDbId ?: throw it
+                            request("/api/v2/Search/tv/moviedb/${id.urlPath()}", "GET", null, null, auth) as JSONObject
+                        }
+                    } else {
+                        val id = movieDbId ?: throw IllegalArgumentException("Ombi did not return a usable TV identifier.")
+                        request("/api/v2/Search/tv/moviedb/${id.urlPath()}", "GET", null, null, auth) as JSONObject
                     }
                 }
             }
@@ -902,10 +1013,35 @@ class OmbiRepository(
         getJsonArray(path, auth).mapJsonObjects { it.toRequestItem(type) }
 
     private fun getRequestSummaries(path: String, type: RequestMediaType, auth: OmbiAuth): List<RequestMediaSummary> =
-        getJsonArray(path, auth).mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType()) }
+        getJsonArray(path, auth).mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType(), path) }
 
     private fun discoverSummaries(path: String, type: RequestMediaType, auth: OmbiAuth): List<RequestMediaSummary> =
-        getJsonArray(path, auth).mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType()) }
+        getJsonArray(path, auth).mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType(), path) }
+
+    private fun listOmbiUsers(): List<OmbiUserProfile> {
+        val endpoints = listOf(
+            "/api/v1/Identity/Users",
+            "/api/v1/Identity",
+            "/api/v1/User",
+            "/api/v1/Users",
+        )
+        endpoints.forEach { endpoint ->
+            val users = runCatching {
+                when (val value = request(endpoint, "GET", null, null, OmbiAuth.ApiKey)) {
+                    is JSONArray -> value.toOmbiUsers()
+                    is JSONObject -> {
+                        value.optJSONArray("users")?.toOmbiUsers()
+                            ?: value.optJSONArray("items")?.toOmbiUsers()
+                            ?: value.optJSONArray("results")?.toOmbiUsers()
+                            ?: emptyList()
+                    }
+                    else -> emptyList()
+                }
+            }.getOrDefault(emptyList())
+            if (users.isNotEmpty()) return users
+        }
+        throw OmbiHttpException(404, "Ombi user lookup is unavailable.")
+    }
 
     private fun getJsonArray(path: String, auth: OmbiAuth = OmbiAuth.ApiKey): JSONArray {
         val value = request(path, "GET", null, null, auth)
@@ -1069,7 +1205,7 @@ private fun <T> JSONArray.mapJsonObjects(transform: (JSONObject) -> T): List<T> 
 private fun JSONObject.toSearchResult(type: MediaRequestType): MediaRequestSearchResult {
     val providerId = when (type) {
         MediaRequestType.Movie -> optAnyString("theMovieDbId") ?: optAnyString("tmdbId") ?: optAnyString("id")
-        MediaRequestType.Tv -> optAnyString("theTvDbId") ?: optAnyString("tvDbId") ?: optAnyString("id")
+        MediaRequestType.Tv -> optAnyString("theTvDbId") ?: optAnyString("tvDbId") ?: optAnyString("theMovieDbId") ?: optAnyString("tmdbId") ?: optAnyString("id")
     }.orEmpty()
     return MediaRequestSearchResult(
         providerId = providerId,
@@ -1083,7 +1219,7 @@ private fun JSONObject.toSearchResult(type: MediaRequestType): MediaRequestSearc
     )
 }
 
-private fun JSONObject.toRequestMediaSummary(type: MediaRequestType): RequestMediaSummary {
+private fun JSONObject.toRequestMediaSummary(type: MediaRequestType, sourceEndpoint: String? = null): RequestMediaSummary {
     val requestType = if (type == MediaRequestType.Movie) RequestMediaType.Movie else RequestMediaType.Series
     val movieJson = optJSONObject("movie")
     val tvJson = optJSONObject("tv")
@@ -1107,7 +1243,7 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType): RequestMed
         ?: tvJson?.optAnyString("imdbID")
     val externalId = when (type) {
         MediaRequestType.Movie -> movieDbId ?: optAnyString("id")
-        MediaRequestType.Tv -> tvDbId ?: movieDbId ?: optAnyString("id")
+        MediaRequestType.Tv -> movieDbId ?: tvDbId ?: optAnyString("id")
     }.orEmpty()
     val title = optNullableString("title")
         ?: optNullableString("name")
@@ -1115,6 +1251,8 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType): RequestMed
         ?: optJSONObject("tv")?.optNullableString("title")
         ?: optJSONObject("childRequests")?.optNullableString("title")
         ?: "Untitled"
+    val state = requestState()
+    debugStatusResolution(sourceEndpoint, this, requestType, title, state)
     return RequestMediaSummary(
         externalId = externalId,
         movieDbId = movieDbId,
@@ -1131,8 +1269,8 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType): RequestMed
         backdropUrl = normalizeOmbiArtworkUrl(optNullableString("backdropPath") ?: optNullableString("background")),
         overview = optNullableString("overview"),
         rating = optDoubleOrNull("voteAverage") ?: optDoubleOrNull("rating"),
-        state = requestState(),
-        requestId = optAnyString("requestId") ?: optAnyString("id"),
+        state = state,
+        requestId = requestRecordId(),
         isAvailableInJellyfin = optBoolean("available", false) || optBoolean("fullyAvailable", false) || optBoolean("markedAsAvailable", false),
         availableSeasonCount = optIntOrNull("availableSeasonCount"),
         totalSeasonCount = optIntOrNull("totalSeasons") ?: optIntOrNull("seasonCount"),
@@ -1213,7 +1351,7 @@ private fun JSONObject.toRequestItem(type: MediaRequestType): MediaRequestItem =
         providerId = optAnyString(if (type == MediaRequestType.Movie) "theMovieDbId" else "theTvDbId"),
         title = optString("title", optString("name", "Untitled")),
         type = type,
-        status = requestStatus(),
+        status = requestStatus(hasGenericIdEvidence = true),
         requestedBy = optJSONObject("requestedUser")?.optNullableString("userName")
             ?: optNullableString("requestedUserName")
             ?: optNullableString("requestedBy"),
@@ -1242,31 +1380,110 @@ private fun JSONObject.toUserSession(
     )
 }
 
-private fun JSONObject.requestStatus(): MediaRequestStatus =
-    when {
-        optBoolean("available", false) || optBoolean("isAvailable", false) -> MediaRequestStatus.Available
-        optBoolean("denied", false) || optBoolean("deniedBy", false) -> MediaRequestStatus.Denied
-        optBoolean("approved", false) || optBoolean("approvedBy", false) -> MediaRequestStatus.Approved
-        optBoolean("processing", false) || optBoolean("isProcessing", false) -> MediaRequestStatus.Processing
-        optBoolean("requested", false) || optBoolean("isRequested", false) -> MediaRequestStatus.Pending
+private fun JSONObject.requestStatus(hasGenericIdEvidence: Boolean = false): MediaRequestStatus {
+    val statusText = optNullableString("requestStatus")
+    val hasRequest = hasRequestRecordEvidence(hasGenericIdEvidence)
+    return when {
+        optBoolean("available", false) || optBoolean("isAvailable", false) || optBoolean("fullyAvailable", false) || optBoolean("markedAsAvailable", false) -> MediaRequestStatus.Available
+        !hasRequest -> MediaRequestStatus.NotRequested
+        optBoolean("denied", false) || hasMeaningfulValue("deniedBy") || statusText.isRequestStatus("den") -> MediaRequestStatus.Denied
+        statusText.isRequestStatus("fail") -> MediaRequestStatus.Unknown
+        optBoolean("processing", false) || optBoolean("isProcessing", false) || statusText.isRequestStatus("process") -> MediaRequestStatus.Processing
+        optBoolean("approved", false) || hasMeaningfulValue("approvedBy") || statusText.isRequestStatus("approv") -> MediaRequestStatus.Approved
+        optBoolean("requested", false) || optBoolean("isRequested", false) || statusText.isRequestStatus("pending") -> MediaRequestStatus.Pending
+        statusText?.isNotBlank() == true -> MediaRequestStatus.Unknown
         else -> MediaRequestStatus.NotRequested
     }
+}
 
-private fun JSONObject.requestState(): RequestState =
-    when {
+private fun JSONObject.requestState(): RequestState {
+    val statusText = optNullableString("requestStatus")
+    val hasRequest = hasRequestRecordEvidence()
+    return when {
         optBoolean("fullyAvailable", false) || optBoolean("available", false) || optBoolean("markedAsAvailable", false) -> RequestState.Available
         optBoolean("partlyAvailable", false) -> RequestState.PartiallyAvailable
-        optBoolean("denied", false) || optBoolean("deniedBy", false) -> RequestState.Declined
-        optNullableString("requestStatus")?.contains("fail", ignoreCase = true) == true -> RequestState.Failed
+        !hasRequest -> RequestState.NotRequested
+        optBoolean("denied", false) || hasMeaningfulValue("deniedBy") || statusText.isRequestStatus("den") -> RequestState.Declined
+        statusText.isRequestStatus("fail") -> RequestState.Failed
         optBoolean("processing", false) || optBoolean("isProcessing", false) ||
-            optNullableString("requestStatus")?.contains("process", ignoreCase = true) == true -> RequestState.Processing
-        optBoolean("approved", false) || optBoolean("approvedBy", false) -> RequestState.Approved
+            statusText.isRequestStatus("process") -> RequestState.Processing
+        optBoolean("approved", false) || hasMeaningfulValue("approvedBy") || statusText.isRequestStatus("approv") -> RequestState.Approved
         optBoolean("requested", false) || optBoolean("isRequested", false) ||
-            optAnyString("requestId") != null ||
-            optNullableString("requestStatus")?.contains("pending", ignoreCase = true) == true -> RequestState.PendingApproval
-        optNullableString("requestStatus")?.isNotBlank() == true -> RequestState.Unknown
+            requestRecordId() != null ||
+            statusText.isRequestStatus("pending") -> RequestState.PendingApproval
+        statusText?.isNotBlank() == true -> RequestState.Unknown
         else -> RequestState.NotRequested
     }
+}
+
+private fun JSONObject.hasRequestRecordEvidence(hasGenericIdEvidence: Boolean = false): Boolean =
+    requestRecordId() != null ||
+        hasGenericIdEvidence && optAnyString("id") != null ||
+        optBoolean("requested", false) ||
+        optBoolean("isRequested", false) ||
+        hasMeaningfulValue("requestedBy") ||
+        hasMeaningfulValue("requestedByAlias") ||
+        hasMeaningfulValue("requestedUserName") ||
+        hasMeaningfulValue("requestedDate") ||
+        optJSONObject("requestedUser") != null ||
+        optJSONObject("request") != null ||
+        optNullableString("requestStatus").isKnownRequestStatus()
+
+private fun JSONObject.requestRecordId(): String? =
+    optRequestId("requestId")
+        ?: optRequestId("mediaRequestId")
+        ?: optRequestId("requestGuid")
+        ?: optJSONObject("request")?.optRequestId("id")
+        ?: optJSONObject("request")?.optRequestId("requestId")
+
+private fun JSONObject.optRequestId(name: String): String? {
+    val value = opt(name) ?: return null
+    return when (value) {
+        JSONObject.NULL -> null
+        is Number -> value.toLong().takeIf { it > 0L }?.toString()
+        is String -> value.trim().takeIf { it.isNotBlank() && it != "null" && it != "0" }
+        else -> value.toString().takeIf { it.isNotBlank() && it != "null" && it != "0" }
+    }
+}
+
+private fun JSONObject.hasMeaningfulValue(name: String): Boolean =
+    opt(name)?.let { value ->
+        when (value) {
+            JSONObject.NULL -> false
+            is Boolean -> value
+            is Number -> value.toLong() != 0L
+            is String -> value.isNotBlank() && value != "null"
+            else -> true
+        }
+    } ?: false
+
+private fun String?.isRequestStatus(fragment: String): Boolean =
+    !isNullOrBlank() &&
+        !contains("not requested", ignoreCase = true) &&
+        !contains("notrequested", ignoreCase = true) &&
+        contains(fragment, ignoreCase = true)
+
+private fun String?.isKnownRequestStatus(): Boolean =
+    listOf("pending", "approv", "den", "process", "request", "fail")
+        .any { isRequestStatus(it) }
+
+private fun debugStatusResolution(
+    sourceEndpoint: String?,
+    json: JSONObject,
+    mediaType: RequestMediaType,
+    title: String,
+    state: RequestState,
+) {
+    if (!Log.isLoggable(OMBI_STATUS_TAG, Log.DEBUG)) return
+    Log.d(
+        OMBI_STATUS_TAG,
+        "source=${sourceEndpoint ?: "detail"} type=$mediaType title=$title " +
+            "ids={tmdb=${json.optAnyString("theMovieDbId") ?: json.optAnyString("tmdbId")},tvdb=${json.optAnyString("theTvDbId") ?: json.optAnyString("tvDbId") ?: json.optAnyString("seriesId")},request=${json.requestRecordId()}} " +
+            "flags={requested=${json.opt("requested")},approved=${json.opt("approved")},denied=${json.opt("denied")},processing=${json.opt("processing")},available=${json.opt("available")},fully=${json.opt("fullyAvailable")},partial=${json.opt("partlyAvailable")},status=${json.opt("requestStatus")}} final=$state",
+    )
+}
+
+private const val OMBI_STATUS_TAG = "VantafynOmbiStatus"
 
 private fun JSONObject.optIntOrNull(name: String): Int? {
     val value = opt(name) ?: return null
@@ -1336,6 +1553,55 @@ private fun String.toSuggestedOmbiUserName(): String {
     return sanitized.ifBlank { "vantafyn.user" }.take(48)
 }
 
+private val accessRequestPriorityComparator: Comparator<OmbiAccessRequest> =
+    compareBy<OmbiAccessRequest> { it.status.priority }
+        .thenBy { it.requestedAt }
+
+private val OmbiAccessRequestStatus.priority: Int
+    get() = when (this) {
+        OmbiAccessRequestStatus.Linked -> 5
+        OmbiAccessRequestStatus.AccountCreated -> 4
+        OmbiAccessRequestStatus.Pending -> 3
+        OmbiAccessRequestStatus.Seen -> 2
+        OmbiAccessRequestStatus.Dismissed -> 1
+    }
+
+private fun accessRequestKey(jellyfinUserId: String, config: OmbiConfig): OmbiAccessRequestKey =
+    OmbiAccessRequestKey(
+        serverAccountId = config.baseUrl.ifBlank { "unknown-server" }.lowercase(),
+        profileId = jellyfinUserId,
+        integrationId = "ombi:${config.baseUrl.ifBlank { "default" }.lowercase()}",
+    )
+
+private fun OmbiAccessRequest.key(config: OmbiConfig): OmbiAccessRequestKey =
+    OmbiAccessRequestKey(
+        serverAccountId = serverAccountId ?: config.baseUrl.ifBlank { serverName ?: "unknown-server" }.lowercase(),
+        profileId = jellyfinUserId,
+        integrationId = integrationId ?: "ombi:${config.baseUrl.ifBlank { serverName ?: "default" }.lowercase()}",
+    )
+
+private fun String.normalizedUserMatchKey(): String =
+    lowercase().replace(Regex("[^a-z0-9]+"), "")
+
+private fun JSONArray.toOmbiUsers(): List<OmbiUserProfile> =
+    mapJsonObjects { it.toOmbiUserProfile() }
+
+private fun JSONObject.toOmbiUserProfile(): OmbiUserProfile =
+    OmbiUserProfile(
+        id = optAnyString("id") ?: optAnyString("userId"),
+        userName = optNullableString("userName")
+            ?: optNullableString("username")
+            ?: optNullableString("name")
+            ?: optNullableString("emailAddress")
+            ?: optNullableString("email")
+            ?: "Ombi user",
+        email = optNullableString("emailAddress") ?: optNullableString("email"),
+        displayName = optNullableString("alias")
+            ?: optNullableString("displayName")
+            ?: optNullableString("fullName")
+            ?: optNullableString("name"),
+    )
+
 private fun JSONArray.toAccessRequests(): List<OmbiAccessRequest> =
     mapJsonObjects {
         OmbiAccessRequest(
@@ -1347,6 +1613,8 @@ private fun JSONArray.toAccessRequests(): List<OmbiAccessRequest> =
             status = it.optString("status")
                 .let { value -> runCatching { OmbiAccessRequestStatus.valueOf(value) }.getOrDefault(OmbiAccessRequestStatus.Pending) },
             note = it.optNullableString("note"),
+            serverAccountId = it.optNullableString("serverAccountId"),
+            integrationId = it.optNullableString("integrationId"),
         )
     }
 
@@ -1361,7 +1629,9 @@ private fun List<OmbiAccessRequest>.toAccessRequestsJson(): JSONArray =
                     .put("requestedAt", request.requestedAt)
                     .put("suggestedOmbiUserName", request.suggestedOmbiUserName)
                     .put("status", request.status.name)
-                    .put("note", request.note),
+                    .put("note", request.note)
+                    .put("serverAccountId", request.serverAccountId)
+                    .put("integrationId", request.integrationId),
             )
         }
     }

@@ -98,3 +98,15 @@ Approve/deny moderation is not wired yet. Vantafyn hides moderation buttons unti
 - Local address away from home: use a remote URL or VPN.
 - Permission denied: the configured Ombi API key does not have permission for that action.
 - HTML response: the URL is likely a reverse proxy/web route instead of the Ombi API.
+## Current Setup Flow
+
+Admin setup is intentionally short:
+
+1. Connect Ombi with URL and admin API key.
+2. Choose request mode: server request account or per-user Ombi login.
+3. Confirm user access behavior.
+4. Open Requests.
+
+Setup Health is available from Manage Ombi under Advanced. It is not part of the normal setup path.
+
+Normal users cannot see the Ombi URL, admin API key, setup health, or setup route.

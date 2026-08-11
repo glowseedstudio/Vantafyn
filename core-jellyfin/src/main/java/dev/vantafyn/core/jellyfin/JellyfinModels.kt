@@ -1,6 +1,7 @@
 package dev.vantafyn.core.jellyfin
 
 import java.util.UUID
+import kotlinx.coroutines.flow.Flow
 
 data class JellyfinServerConfig(
     val url: String,
@@ -127,17 +128,41 @@ data class JellyfinAvailabilityIndex(
 ) {
     fun find(providerIds: Map<String, String>): JellyfinAvailabilityMatch? =
         ProviderIdMatcher.find(providerIds, itemsByProviderId)
+
+    fun find(providerIds: Map<String, String>, itemTypes: Set<String>): JellyfinAvailabilityMatch? =
+        ProviderIdMatcher.find(providerIds, itemsByProviderId, itemTypes)
 }
 
 object ProviderIdMatcher {
     fun key(provider: String, id: String): String =
         "${provider.trim().lowercase()}:${id.trim().lowercase()}"
 
+    fun typedKey(itemType: String, provider: String, id: String): String =
+        "${itemType.trim().lowercase()}:${key(provider, id)}"
+
     fun find(providerIds: Map<String, String>, index: Map<String, JellyfinAvailabilityMatch>): JellyfinAvailabilityMatch? =
         providerIds.asSequence()
             .filter { it.key.isNotBlank() && it.value.isNotBlank() }
             .mapNotNull { (provider, id) -> index[key(provider, id)] }
             .firstOrNull()
+
+    fun find(
+        providerIds: Map<String, String>,
+        index: Map<String, JellyfinAvailabilityMatch>,
+        itemTypes: Set<String>,
+    ): JellyfinAvailabilityMatch? {
+        val normalizedTypes = itemTypes.map { it.trim().lowercase() }.filter { it.isNotBlank() }.toSet()
+        val typedMatch = normalizedTypes.asSequence()
+            .flatMap { itemType ->
+                providerIds.asSequence()
+                    .filter { it.key.isNotBlank() && it.value.isNotBlank() }
+                    .mapNotNull { (provider, id) -> index[typedKey(itemType, provider, id)] }
+            }
+            .firstOrNull()
+        if (typedMatch != null) return typedMatch
+        return find(providerIds, index)
+            ?.takeIf { match -> normalizedTypes.isEmpty() || match.itemType?.lowercase() in normalizedTypes }
+    }
 }
 
 data class JellyfinLibraryPage(
@@ -321,6 +346,253 @@ data class JellyfinUpNextCandidate(
     val overview: String?,
     val progress: Float?,
     val playbackPositionTicks: Long,
+)
+
+enum class WatchPartyRole {
+    Host,
+    Participant,
+}
+
+enum class WatchPartyMatchRule {
+    Everyone,
+    Majority,
+}
+
+enum class WatchPartyMediaScope {
+    MoviesOnly,
+    TvShowsOnly,
+    MoviesAndTv,
+    ContinueWatchingOnly,
+    MyListOnly,
+    RecentlyAdded,
+}
+
+enum class WatchPartyMode {
+    FixedTitle,
+    SwipeToMatch,
+}
+
+enum class WatchPartyRuntimeLimit {
+    Under90Minutes,
+    Under2Hours,
+    AnyLength,
+}
+
+enum class WatchPartyInviteStatus {
+    Pending,
+    Accepted,
+    Declined,
+    Expired,
+    Cancelled,
+}
+
+data class WatchPartyRules(
+    val mediaScope: WatchPartyMediaScope = WatchPartyMediaScope.MoviesAndTv,
+    val matchRule: WatchPartyMatchRule = WatchPartyMatchRule.Everyone,
+    val genres: List<String> = emptyList(),
+    val runtimeLimit: WatchPartyRuntimeLimit = WatchPartyRuntimeLimit.AnyLength,
+    val unwatchedOnly: Boolean = false,
+    val kidFriendlyOnly: Boolean = false,
+    val hostControlsPlayback: Boolean = true,
+    val everyoneCanPause: Boolean = false,
+    val requireEveryoneReady: Boolean = true,
+    val autoplayNextEpisodeTogether: Boolean = false,
+    val allowTvEpisodesAfterMatchedShow: Boolean = true,
+)
+
+data class WatchPartySelectedMedia(
+    val id: UUID,
+    val title: String,
+    val subtitle: String?,
+    val itemType: String?,
+    val artworkUrl: String?,
+    val backdropUrl: String?,
+)
+
+data class WatchPartyMember(
+    val id: String,
+    val displayName: String,
+    val role: WatchPartyRole,
+    val isReady: Boolean = false,
+    val avatarUrl: String? = null,
+)
+
+data class WatchPartyReadyState(
+    val userId: UUID,
+    val ready: Boolean,
+    val deviceConnected: Boolean,
+    val playbackCapable: Boolean,
+    val lastSeenAt: Long = System.currentTimeMillis(),
+)
+
+data class WatchPartySession(
+    val id: UUID,
+    val name: String,
+    val serverId: String?,
+    val serverName: String?,
+    val role: WatchPartyRole,
+    val rules: WatchPartyRules,
+    val mode: WatchPartyMode = WatchPartyMode.SwipeToMatch,
+    val selectedMedia: WatchPartySelectedMedia? = null,
+    val members: List<WatchPartyMember> = emptyList(),
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+data class WatchPartyInviteRecipient(
+    val sessionId: String,
+    val userId: UUID?,
+    val displayName: String,
+    val client: String?,
+    val deviceName: String?,
+    val imageUrl: String?,
+    val active: Boolean,
+    val supportsRemoteControl: Boolean,
+)
+
+data class WatchPartyInvite(
+    val inviteId: UUID,
+    val partyId: UUID,
+    val serverAccountId: String?,
+    val mode: WatchPartyMode,
+    val mediaItemId: UUID?,
+    val mediaType: String?,
+    val mediaTitle: String?,
+    val mediaArtworkUrl: String?,
+    val hostUserId: UUID,
+    val hostDisplayName: String,
+    val recipientUserId: UUID?,
+    val recipientDisplayName: String,
+    val createdAt: Long,
+    val expiresAt: Long,
+    val status: WatchPartyInviteStatus,
+)
+
+data class WatchPartyLobby(
+    val partyId: UUID,
+    val mode: WatchPartyMode,
+    val host: WatchPartyMember,
+    val members: List<WatchPartyMember>,
+    val selectedMedia: WatchPartySelectedMedia?,
+    val matchedMedia: WatchPartyCandidate?,
+    val rules: WatchPartyRules,
+    val readyStates: List<WatchPartyReadyState>,
+    val playbackStartState: WatchPartyPlaybackState?,
+)
+
+enum class WatchPartyVoteValue {
+    Unseen,
+    Yes,
+    No,
+    Skipped,
+    Expired,
+}
+
+data class WatchPartyVote(
+    val candidateId: UUID,
+    val memberId: String,
+    val vote: WatchPartyVoteValue,
+    val votedAt: Long = System.currentTimeMillis(),
+)
+
+data class WatchPartyCandidate(
+    val id: UUID,
+    val serverId: String?,
+    val title: String,
+    val subtitle: String?,
+    val year: Int?,
+    val itemType: String?,
+    val overview: String?,
+    val genres: List<String>,
+    val officialRating: String?,
+    val runtimeMinutes: Int?,
+    val imageUrl: String?,
+    val backdropUrl: String?,
+    val isFavorite: Boolean,
+    val isContinueWatching: Boolean,
+)
+
+data class WatchPartyMatch(
+    val candidate: WatchPartyCandidate,
+    val votes: List<WatchPartyVote>,
+    val matchedAt: Long = System.currentTimeMillis(),
+)
+
+data class WatchPartyPlaybackState(
+    val itemId: UUID?,
+    val positionTicks: Long,
+    val isPlaying: Boolean,
+    val isBuffering: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
+enum class SyncPlayConnectionState {
+    Unsupported,
+    Disconnected,
+    Connecting,
+    Connected,
+    Reconnecting,
+    Failed,
+}
+
+enum class WatchPartyMemberPresence {
+    Unknown,
+    Online,
+    Offline,
+}
+
+enum class WatchPartyMemberReadyStatus {
+    Unknown,
+    Ready,
+    NotReady,
+}
+
+enum class WatchPartyMemberPlaybackStatus {
+    Unknown,
+    Playing,
+    Paused,
+    Buffering,
+}
+
+data class WatchPartyMemberRealtimeState(
+    val userId: UUID?,
+    val displayName: String,
+    val deviceName: String?,
+    val presence: WatchPartyMemberPresence = WatchPartyMemberPresence.Unknown,
+    val joined: Boolean? = null,
+    val ready: WatchPartyMemberReadyStatus = WatchPartyMemberReadyStatus.Unknown,
+    val playback: WatchPartyMemberPlaybackStatus = WatchPartyMemberPlaybackStatus.Unknown,
+    val playbackPositionTicks: Long? = null,
+    val lastSeenAt: Long = System.currentTimeMillis(),
+    val connectionQuality: String? = null,
+)
+
+sealed interface JellyfinWebSocketEvent {
+    data class ConnectionChanged(val state: SyncPlayConnectionState, val message: String? = null) : JellyfinWebSocketEvent
+    data class SessionsUpdated(val members: List<WatchPartyMemberRealtimeState>) : JellyfinWebSocketEvent
+    data class SyncPlayGroupUpdated(val groupId: UUID?, val updateType: String) : JellyfinWebSocketEvent
+    data class SyncPlayCommandReceived(
+        val groupId: UUID?,
+        val command: String,
+        val positionTicks: Long?,
+        val playlistItemId: UUID?,
+    ) : JellyfinWebSocketEvent
+    data class PlaystateCommandReceived(val command: String, val positionTicks: Long?, val controllingUserId: String?) : JellyfinWebSocketEvent
+    data class GeneralCommandReceived(val command: String, val arguments: Map<String, String>) : JellyfinWebSocketEvent
+    data class UnknownMessage(val messageType: String) : JellyfinWebSocketEvent
+    data class Error(val message: String, val recoverable: Boolean = true) : JellyfinWebSocketEvent
+}
+
+sealed interface SyncPlayCommand {
+    data object Pause : SyncPlayCommand
+    data object Resume : SyncPlayCommand
+    data class Seek(val positionTicks: Long) : SyncPlayCommand
+    data class StartItem(val itemId: UUID, val startPositionTicks: Long = 0L) : SyncPlayCommand
+    data object Leave : SyncPlayCommand
+}
+
+data class SyncPlayError(
+    val message: String,
+    val recoverable: Boolean = true,
 )
 
 data class JellyfinExternalLink(
@@ -719,4 +991,25 @@ interface JellyfinUserPreferencesRepository {
 interface JellyfinQuickConnectRepository {
     suspend fun initiate(server: JellyfinServerConfig): JellyfinResult<JellyfinQuickConnectSession>
     suspend fun poll(session: JellyfinQuickConnectSession): JellyfinResult<JellyfinSession?>
+}
+
+interface JellyfinWatchPartyRepository {
+    suspend fun getSyncPlayGroups(session: JellyfinSession): JellyfinResult<List<WatchPartySession>>
+    suspend fun createSyncPlayGroup(
+        session: JellyfinSession,
+        name: String,
+        rules: WatchPartyRules,
+        mode: WatchPartyMode = WatchPartyMode.SwipeToMatch,
+        selectedMedia: WatchPartySelectedMedia? = null,
+    ): JellyfinResult<WatchPartySession>
+    suspend fun joinSyncPlayGroup(session: JellyfinSession, groupId: UUID, rules: WatchPartyRules): JellyfinResult<Unit>
+    suspend fun leaveSyncPlayGroup(session: JellyfinSession): JellyfinResult<Unit>
+    suspend fun sendSyncPlayCommand(session: JellyfinSession, command: SyncPlayCommand): JellyfinResult<Unit>
+    suspend fun getCandidates(session: JellyfinSession, rules: WatchPartyRules, limit: Int = 40): JellyfinResult<List<WatchPartyCandidate>>
+    suspend fun getInviteRecipients(session: JellyfinSession): JellyfinResult<List<WatchPartyInviteRecipient>>
+    suspend fun sendInvite(session: JellyfinSession, invite: WatchPartyInvite, recipientSessionIds: List<String>): JellyfinResult<Unit>
+}
+
+interface JellyfinRealtimeClient {
+    fun events(session: JellyfinSession): Flow<JellyfinWebSocketEvent>
 }

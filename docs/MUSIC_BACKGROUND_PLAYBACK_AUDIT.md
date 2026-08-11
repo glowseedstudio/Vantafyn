@@ -3,7 +3,7 @@
 ## Current Architecture
 
 - `core-media` owns `MusicPlaybackController`, the single app-wide ExoPlayer instance for music.
-- `core-media` also declares `VantafynMusicPlaybackService`, a Media3 `MediaSessionService` with a foreground media playback notification.
+- `core-media` also declares `VantafynMusicPlaybackService`, a Media3 `MediaLibraryService` with a foreground media playback notification and Android Auto/media-browser support.
 - `feature-music` owns Jellyfin music browsing, lyrics, playback reporting, and user-facing controls.
 - Music UI observes `MusicPlaybackController.state`; it does not create its own player.
 - Logout, profile switch, and video playback explicitly stop music through `MusicPlaybackController.stop(...)`.
@@ -31,10 +31,11 @@ No passwords, access tokens, auth headers, or full stream URLs are logged.
 - On player error, skip to the next queued item when possible instead of leaving a dead player.
 - Update Media3 metadata per track using title, artist, album, and artwork URI.
 - Use Media3 network wake mode so queued network streams can transition while the screen is off.
+- Expose a real Jellyfin music browse tree for Android Auto without creating another player.
 
 ## Notification And Lock Screen
 
-The Android system player and lock-screen controls are backed by the Media3 `MediaSessionService`.
+The Android system player and lock-screen controls are backed by the Media3 `MediaLibraryService`.
 
 Expected commands:
 
@@ -45,7 +46,10 @@ Expected commands:
 
 Artwork and metadata come from each queued `MediaItem` and update on Media3 item transition.
 
+Android Auto receives albums, artists, playlists, songs, recent items, queue items, and search results through `VantafynMusicMediaLibraryProvider`.
+
 ## Remaining Notes
 
 - If Android kills the process, full persistent queue restoration is still future work.
 - Battery optimization guidance should be added later only if foreground MediaSession playback still gets killed by a specific OEM.
+- Android Auto depends on a saved Jellyfin profile; logged-out browse shows a sign-in item.

@@ -122,20 +122,22 @@ Empty rails are hidden.
 
 ## Request State Mapping
 
-`RequestState` is derived centrally from Ombi fields:
+`RequestState` is derived centrally from confirmed Ombi fields:
 
 - `available`, `fullyAvailable`, `markedAsAvailable`
 - `partlyAvailable`
-- `requested`, `requestId`
+- `requested`, non-zero `requestId`, `mediaRequestId`, `requestGuid`, or nested `request.id`
 - `approved`
 - `processing`, `requestStatus`
 - `denied`
 
-Unknown server states are mapped to `Unknown` with calm user-facing copy.
+Generic Ombi search/discovery `id` values are not treated as request records. `createdDate` is not treated as request evidence. Ombi-only availability is labelled separately from verified Jellyfin availability.
+
+Unknown server states are mapped to `Unknown` with calm user-facing copy. Ambiguous values should never become `Approved`, `Requested`, or `Available in Jellyfin`.
 
 ## Current Limitations
 
-- Native provider-ID handoff into Jellyfin is documented but not wired in this pass.
+- Native provider-ID handoff into Jellyfin is wired through the active-session availability index. It requires a typed Movie/Series provider-ID match before opening a Jellyfin item.
 - Rich movie detail calls through `/api/v2/Search/movie/{movieDbId}` are mapped for title, artwork, overview, runtime, genres, rating, tagline, and status.
 - Rich series detail calls through `/api/v2/Search/tv/{tvdbId}` and `/api/v2/Search/tv/moviedb/{moviedbid}` are mapped for title, artwork, overview, genres, network, status, and season/episode request state where Ombi returns it.
 - Season/episode display is present, but selected-season or selected-episode request submission still needs confirmation UI and request-body construction.

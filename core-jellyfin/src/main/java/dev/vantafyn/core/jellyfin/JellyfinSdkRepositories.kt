@@ -7,6 +7,7 @@ import java.net.URI
 import java.net.URLEncoder
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.jellyfin.sdk.Jellyfin
@@ -29,6 +30,7 @@ import org.jellyfin.sdk.api.client.extensions.quickConnectApi
 import org.jellyfin.sdk.api.client.extensions.scheduledTasksApi
 import org.jellyfin.sdk.api.client.extensions.searchApi
 import org.jellyfin.sdk.api.client.extensions.sessionApi
+import org.jellyfin.sdk.api.client.extensions.syncPlayApi
 import org.jellyfin.sdk.api.client.extensions.systemApi
 import org.jellyfin.sdk.api.client.extensions.tvShowsApi
 import org.jellyfin.sdk.api.client.extensions.universalAudioApi
@@ -51,11 +53,16 @@ import org.jellyfin.sdk.model.api.ImageFormat
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
+import org.jellyfin.sdk.model.api.JoinGroupRequestDto
 import org.jellyfin.sdk.model.api.MediaSourceInfo
 import org.jellyfin.sdk.model.api.MediaProtocol
 import org.jellyfin.sdk.model.api.MediaStreamProtocol
 import org.jellyfin.sdk.model.api.MediaType
+import org.jellyfin.sdk.model.api.MessageCommand
+import org.jellyfin.sdk.model.api.NewGroupRequestDto
+import org.jellyfin.sdk.model.api.PlayRequestDto
 import org.jellyfin.sdk.model.api.SearchHint
+import org.jellyfin.sdk.model.api.SeekRequestDto
 import org.jellyfin.sdk.model.api.SortOrder
 import org.jellyfin.sdk.model.api.PlayMethod
 import org.jellyfin.sdk.model.api.PlayAccess
@@ -140,6 +147,12 @@ class JellyfinRepositoryProvider(
 
     val musicRepository: JellyfinMusicRepository =
         SdkJellyfinMusicRepository(jellyfin, ioDispatcher)
+
+    val watchPartyRepository: JellyfinWatchPartyRepository =
+        SdkJellyfinWatchPartyRepository(jellyfin, ioDispatcher)
+
+    val realtimeClient: JellyfinRealtimeClient =
+        SdkJellyfinRealtimeClient(jellyfin, ioDispatcher)
 
     private fun resolveDeviceId(context: Context): String =
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -509,16 +522,20 @@ class SdkJellyfinLibraryRepository(
                                 safeProvider to safeValue
                             }
                             .forEach { (provider, value) ->
+                                val itemType = item.type?.serialName
                                 val match = JellyfinAvailabilityMatch(
                                     itemId = item.id,
                                     title = item.name ?: "Untitled",
-                                    itemType = item.type?.serialName,
+                                    itemType = itemType,
                                     serverId = session.server.serverId ?: session.server.localId,
                                     serverName = session.server.name,
                                     matchedProvider = provider,
                                     matchedProviderId = value,
                                 )
                                 itemsByProviderId[ProviderIdMatcher.key(provider, value)] = match
+                                itemType?.takeIf { it.isNotBlank() }?.let {
+                                    itemsByProviderId[ProviderIdMatcher.typedKey(it, provider, value)] = match
+                                }
                             }
                     }
                     startIndex += pageItemCount
@@ -1374,7 +1391,8 @@ class SdkJellyfinMusicRepository(
                     ),
                 )
                 val id = response.id?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
-                    ?: return@withContext JellyfinResult.Failure("Jellyfin did not return a playlist id.")
+                    ?: waitForCreatedMusicPlaylist(api, session, name.trim().ifBlank { "Vantafyn Playlist" })
+                    ?: return@withContext JellyfinResult.Failure("Jellyfin created the playlist, but it is not available yet. Please refresh Music in a moment.")
                 JellyfinResult.Success(id)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -1526,6 +1544,17 @@ class SdkJellyfinMusicRepository(
                 }
             }
         }
+    }
+
+    private suspend fun waitForCreatedMusicPlaylist(api: ApiClient, session: JellyfinSession, name: String): java.util.UUID? {
+        val normalizedName = name.trim()
+        repeat(8) { attempt ->
+            if (attempt > 0) delay(700L)
+            val playlist = getMusicPlaylists(api, session, limit = 80)
+                .firstOrNull { it.name.equals(normalizedName, ignoreCase = true) }
+            if (playlist != null) return playlist.id
+        }
+        return null
     }
 }
 
@@ -2182,6 +2211,272 @@ class SdkJellyfinQuickConnectRepository(
 
 }
 
+class SdkJellyfinWatchPartyRepository(
+    private val jellyfin: Jellyfin,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : JellyfinWatchPartyRepository {
+    override suspend fun getSyncPlayGroups(session: JellyfinSession): JellyfinResult<List<WatchPartySession>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val groups by api.syncPlayApi.syncPlayGetGroups()
+                JellyfinResult.Success(
+                    groups.map {
+                        WatchPartySession(
+                            id = it.groupId,
+                            name = it.groupName,
+                            serverId = session.server.serverId ?: session.server.localId,
+                            serverName = session.server.name,
+                            role = WatchPartyRole.Participant,
+                            rules = WatchPartyRules(),
+                            members = it.participants.map { name ->
+                                WatchPartyMember(id = name, displayName = name, role = WatchPartyRole.Participant)
+                            },
+                        )
+                    },
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun createSyncPlayGroup(
+        session: JellyfinSession,
+        name: String,
+        rules: WatchPartyRules,
+        mode: WatchPartyMode,
+        selectedMedia: WatchPartySelectedMedia?,
+    ): JellyfinResult<WatchPartySession> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val groupName = name.ifBlank { "${session.user.name}'s Watch Party" }
+                api.syncPlayApi.syncPlayCreateGroup(NewGroupRequestDto(groupName))
+                val groups by api.syncPlayApi.syncPlayGetGroups()
+                val created = groups.firstOrNull { it.groupName == groupName } ?: groups.firstOrNull()
+                    ?: throw IllegalStateException("Jellyfin created the SyncPlay group but did not return it in the group list.")
+                JellyfinResult.Success(
+                    WatchPartySession(
+                        id = created.groupId,
+                        name = created.groupName,
+                        serverId = session.server.serverId ?: session.server.localId,
+                        serverName = session.server.name,
+                        role = WatchPartyRole.Host,
+                        rules = rules,
+                        mode = mode,
+                        selectedMedia = selectedMedia,
+                        members = created.participants.map { memberName ->
+                            WatchPartyMember(
+                                id = memberName,
+                                displayName = memberName,
+                                role = if (memberName == session.user.name) WatchPartyRole.Host else WatchPartyRole.Participant,
+                            )
+                        },
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun joinSyncPlayGroup(
+        session: JellyfinSession,
+        groupId: java.util.UUID,
+        rules: WatchPartyRules,
+    ): JellyfinResult<Unit> =
+        syncPlay(session) { it.syncPlayApi.syncPlayJoinGroup(JoinGroupRequestDto(groupId)) }
+
+    override suspend fun leaveSyncPlayGroup(session: JellyfinSession): JellyfinResult<Unit> =
+        syncPlay(session) { it.syncPlayApi.syncPlayLeaveGroup() }
+
+    override suspend fun sendSyncPlayCommand(session: JellyfinSession, command: SyncPlayCommand): JellyfinResult<Unit> =
+        syncPlay(session) { api ->
+            when (command) {
+                SyncPlayCommand.Pause -> api.syncPlayApi.syncPlayPause()
+                SyncPlayCommand.Resume -> api.syncPlayApi.syncPlayUnpause()
+                is SyncPlayCommand.Seek -> api.syncPlayApi.syncPlaySeek(SeekRequestDto(command.positionTicks))
+                is SyncPlayCommand.StartItem -> api.syncPlayApi.syncPlaySetNewQueue(
+                    PlayRequestDto(
+                        playingQueue = listOf(command.itemId),
+                        playingItemPosition = 0,
+                        startPositionTicks = command.startPositionTicks,
+                    ),
+                )
+                SyncPlayCommand.Leave -> api.syncPlayApi.syncPlayLeaveGroup()
+            }
+        }
+
+    override suspend fun getCandidates(
+        session: JellyfinSession,
+        rules: WatchPartyRules,
+        limit: Int,
+    ): JellyfinResult<List<WatchPartyCandidate>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val itemTypes = when (rules.mediaScope) {
+                    WatchPartyMediaScope.MoviesOnly -> listOf(BaseItemKind.MOVIE)
+                    WatchPartyMediaScope.TvShowsOnly -> listOf(BaseItemKind.SERIES)
+                    WatchPartyMediaScope.MoviesAndTv,
+                    WatchPartyMediaScope.RecentlyAdded -> listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)
+                    WatchPartyMediaScope.ContinueWatchingOnly -> listOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE)
+                    WatchPartyMediaScope.MyListOnly -> listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)
+                }
+                val response = when (rules.mediaScope) {
+                    WatchPartyMediaScope.ContinueWatchingOnly -> {
+                        val resume by api.itemsApi.getResumeItems(
+                            GetResumeItemsRequest(
+                                userId = session.user.id,
+                                limit = limit,
+                                fields = watchPartyFields,
+                                includeItemTypes = itemTypes,
+                                enableUserData = true,
+                                imageTypeLimit = 2,
+                                enableImageTypes = itemImageTypes,
+                            ),
+                        )
+                        resume.items
+                    }
+                    else -> {
+                        val items by api.itemsApi.getItems(
+                            GetItemsRequest(
+                                userId = session.user.id,
+                                recursive = true,
+                                limit = limit,
+                                isFavorite = true.takeIf { rules.mediaScope == WatchPartyMediaScope.MyListOnly },
+                                isPlayed = false.takeIf { rules.unwatchedOnly },
+                                maxOfficialRating = "PG".takeIf { rules.kidFriendlyOnly },
+                                genres = rules.genres.takeIf { it.isNotEmpty() },
+                                sortBy = listOf(ItemSortBy.DATE_CREATED),
+                                sortOrder = listOf(SortOrder.DESCENDING),
+                                fields = watchPartyFields,
+                                includeItemTypes = itemTypes,
+                                enableUserData = true,
+                                imageTypeLimit = 2,
+                                enableImageTypes = itemImageTypes,
+                                enableImages = true,
+                                enableTotalRecordCount = false,
+                            ),
+                        )
+                        items.items
+                    }
+                }
+                JellyfinResult.Success(
+                    response
+                        .filter { it.playAccess != PlayAccess.NONE }
+                        .filter { item ->
+                            rules.runtimeLimit.maxTicks?.let { max -> (item.runTimeTicks ?: 0L) <= max } ?: true
+                        }
+                        .filterNot { it.type == BaseItemKind.EPISODE && rules.mediaScope != WatchPartyMediaScope.ContinueWatchingOnly }
+                        .map { it.toWatchPartyCandidate(api, session.server.serverId ?: session.server.localId) }
+                        .distinctBy { it.id }
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getInviteRecipients(session: JellyfinSession): JellyfinResult<List<WatchPartyInviteRecipient>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val sessions by api.sessionApi.getSessions()
+                JellyfinResult.Success(
+                    sessions
+                        .filter { it.isActive }
+                        .filter { !it.id.isNullOrBlank() }
+                        .filterNot { it.userId == session.user.id && it.client == "Vantafyn" }
+                        .map { dto ->
+                            WatchPartyInviteRecipient(
+                                sessionId = dto.id.orEmpty(),
+                                userId = dto.userId,
+                                displayName = dto.userName ?: dto.deviceName ?: "Active device",
+                                client = dto.client,
+                                deviceName = dto.deviceName,
+                                imageUrl = dto.userId?.let { publicUserImageUrl(api, it, dto.userPrimaryImageTag) },
+                                active = dto.isActive,
+                                supportsRemoteControl = dto.supportsRemoteControl,
+                            )
+                        }
+                        .distinctBy { it.sessionId },
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun sendInvite(
+        session: JellyfinSession,
+        invite: WatchPartyInvite,
+        recipientSessionIds: List<String>,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val modeText = when (invite.mode) {
+                    WatchPartyMode.FixedTitle -> "watch ${invite.mediaTitle ?: "a title"}"
+                    WatchPartyMode.SwipeToMatch -> "pick something together"
+                }
+                val payload = buildString {
+                    append("VANTAFYN_WATCH_PARTY_INVITE")
+                    append("|inviteId=").append(invite.inviteId)
+                    append("|partyId=").append(invite.partyId)
+                    append("|serverAccountId=").append(invite.serverAccountId.orEmpty())
+                    append("|mode=").append(invite.mode.name)
+                    invite.mediaItemId?.let { append("|mediaItemId=").append(it) }
+                    invite.mediaType?.let { append("|mediaType=").append(it.take(40).invitePayloadValue()) }
+                    invite.mediaTitle?.let { append("|mediaTitle=").append(it.take(80).invitePayloadValue()) }
+                    invite.mediaArtworkUrl?.let { append("|mediaArtworkUrl=").append(it.take(240).invitePayloadValue()) }
+                    append("|hostUserId=").append(invite.hostUserId)
+                    append("|host=").append(invite.hostDisplayName.take(60).invitePayloadValue())
+                    append("|createdAt=").append(invite.createdAt)
+                    append("|expiresAt=").append(invite.expiresAt)
+                }
+                val command = MessageCommand(
+                    header = "Vantafyn Watch Party",
+                    text = "${invite.hostDisplayName} invited you to $modeText.\n$payload",
+                    timeoutMs = (invite.expiresAt - invite.createdAt).coerceAtLeast(30_000L),
+                )
+                recipientSessionIds.distinct().forEach { sessionId ->
+                    api.sessionApi.sendMessageCommand(sessionId, command)
+                }
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    private suspend fun syncPlay(
+        session: JellyfinSession,
+        block: suspend (ApiClient) -> Unit,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                block(jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken))
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    private companion object {
+        val watchPartyFields = listOf(
+            ItemFields.OVERVIEW,
+            ItemFields.GENRES,
+            ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
+            ItemFields.SERIES_PRIMARY_IMAGE,
+            ItemFields.MEDIA_SOURCES,
+        )
+    }
+}
+
+private val WatchPartyRuntimeLimit.maxTicks: Long?
+    get() = when (this) {
+        WatchPartyRuntimeLimit.Under90Minutes -> 90L * 60L * 10_000_000L
+        WatchPartyRuntimeLimit.Under2Hours -> 120L * 60L * 10_000_000L
+        WatchPartyRuntimeLimit.AnyLength -> null
+    }
+
 private data class PublicSystemSummary(
     val name: String?,
     val version: String?,
@@ -2304,6 +2599,24 @@ private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShap
         progress = userData.progress(),
         shape = shape,
         isFavorite = userData?.isFavorite == true,
+    )
+
+private fun BaseItemDto.toWatchPartyCandidate(api: ApiClient, serverId: String?): WatchPartyCandidate =
+    WatchPartyCandidate(
+        id = id,
+        serverId = serverId,
+        title = displayTitle(),
+        subtitle = subtitle(),
+        year = productionYear,
+        itemType = type?.serialName,
+        overview = overview,
+        genres = genres.orEmpty(),
+        officialRating = officialRating,
+        runtimeMinutes = runTimeTicks?.let { (it / 600_000_000L).toInt() },
+        imageUrl = primaryImageUrl(api, if (type == BaseItemKind.SERIES) 540 else 360),
+        backdropUrl = backdropImageUrl(api, 900),
+        isFavorite = userData?.isFavorite == true,
+        isContinueWatching = (userData?.playedPercentage ?: 0.0) > 0.0 && userData?.played != true,
     )
 
 private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): JellyfinMusicTrack =
@@ -3008,6 +3321,9 @@ private fun toUserMessage(throwable: Throwable): String {
         else -> "Could not reach the Jellyfin server"
     }
 }
+
+private fun String.invitePayloadValue(): String =
+    URLEncoder.encode(this, Charsets.UTF_8.name())
 
 private fun Throwable.toRestoreFailure(): JellyfinSessionRestoreFailure {
     val className = javaClass.name

@@ -4,6 +4,10 @@
 
 Wholphin was inspected only as conceptual reference for end-of-episode and next-up playback behavior. No Wholphin source files, assets, layouts, or code were copied into Vantafyn.
 
+The Watch Party work follows the same boundary. Wholphin remains a conceptual reference only; Vantafyn's SyncPlay models, repository, and UI are Vantafyn code built against the installed Jellyfin Kotlin SDK.
+
+The invite implementation in this pass does not copy Wholphin behavior or source. It uses Jellyfin active-session APIs and Vantafyn-owned UI.
+
 ## Observed Behavior
 
 - Wholphin treats playback as a queue/playlist, where the current item can expose a next item.

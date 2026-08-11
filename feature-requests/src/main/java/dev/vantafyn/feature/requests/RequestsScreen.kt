@@ -1,6 +1,8 @@
 package dev.vantafyn.feature.requests
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
@@ -53,6 +56,7 @@ import dev.vantafyn.core.ombi.OmbiDiscoverRail
 import dev.vantafyn.core.ombi.OmbiIdentityMode
 import dev.vantafyn.core.ombi.OmbiLinkedAccountState
 import dev.vantafyn.core.ombi.OmbiTvRequestSelection
+import dev.vantafyn.core.ombi.OmbiUserMatchState
 import dev.vantafyn.core.ombi.OmbiUserMapping
 import dev.vantafyn.core.ombi.RequestMediaDetail
 import dev.vantafyn.core.ombi.RequestMediaSummary
@@ -99,17 +103,9 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(bottom = 164.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
-        item {
-            Header(
-                title = "Requests",
-                subtitle = null,
-                action = if (state.isJellyfinAdmin && state.isConfigured) "Manage Ombi" else null,
-                onAction = viewModel::manageOmbi,
-            )
-        }
         if (!state.isConfigured) {
             item {
                 EmptySetupState(state.isJellyfinAdmin, onSetup = viewModel::startSetup)
@@ -183,7 +179,10 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
                 if (!state.isSearching && state.searchResults.isEmpty() && state.query.length > 1) {
                     item { MessageCard("No matching request results yet.") }
                 }
-                items(state.searchResults, key = { "${it.mediaType}-${it.externalId}" }) { item ->
+                itemsIndexed(
+                    state.searchResults,
+                    key = { index, item -> "search-${item.mediaType}-${item.externalId}-${item.movieDbId.orEmpty()}-${item.tvDbId.orEmpty()}-$index" },
+                ) { _, item ->
                     RequestPosterListCard(
                         item = item,
                         loading = state.activeRequestId == item.externalId,
@@ -239,10 +238,15 @@ private fun RequestsHero(state: RequestsUiState, viewModel: RequestsViewModel, o
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(20.dp),
+                .padding(horizontal = 16.dp, vertical = 18.dp),
             verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
-            TypeChip("Native Requests", selected = true, onClick = {})
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TypeChip("Requests", selected = true, onClick = {})
+                if (state.isJellyfinAdmin && state.isConfigured) {
+                    TypeChip("Manage Ombi", selected = false, onClick = viewModel::manageOmbi)
+                }
+            }
             Text(
                 hero?.title ?: "Request movies and series",
                 color = VantafynColors.Ink,
@@ -295,7 +299,7 @@ private fun OmbiSetupWizard(state: RequestsUiState, viewModel: RequestsViewModel
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            Header("Ombi setup", "Connect Ombi so users can request movies and TV shows from inside Vantafyn.")
+            Header("Connect Ombi", "Vantafyn uses Ombi to request movies and shows from your server.")
         }
         item {
             VantafynGlassPanel(cornerRadius = 24.dp) {
@@ -303,9 +307,9 @@ private fun OmbiSetupWizard(state: RequestsUiState, viewModel: RequestsViewModel
                     StepBadge(state.setupStep.stepTitle)
                     when (state.setupStep) {
                         OmbiSetupStep.Connect -> ConnectStep(state, viewModel)
-                        OmbiSetupStep.Authentication -> AuthStep(state, viewModel)
-                        OmbiSetupStep.Test -> TestStep(state, viewModel)
-                        OmbiSetupStep.Access -> AccessStep(state, viewModel)
+                        OmbiSetupStep.Authentication -> RequestModeStep(state, viewModel)
+                        OmbiSetupStep.Test -> UserAccessStep(state, viewModel)
+                        OmbiSetupStep.Access -> UserAccessStep(state, viewModel)
                         OmbiSetupStep.Finish -> FinishStep(state, viewModel)
                     }
                 }
@@ -318,65 +322,73 @@ private fun OmbiSetupWizard(state: RequestsUiState, viewModel: RequestsViewModel
 @Composable
 private fun ConnectStep(state: RequestsUiState, viewModel: RequestsViewModel) {
     Text("Connect Ombi", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-    Text("Use the address your users can reach, such as your Ombi domain or local address.", color = VantafynColors.Muted)
+    Text("Vantafyn uses Ombi to request movies and shows from your server.", color = VantafynColors.Muted)
     VantafynTextField(
         value = state.baseUrl,
         onValueChange = viewModel::onBaseUrlChanged,
-        label = "Ombi server URL",
+        label = "Ombi URL",
         placeholder = "https://requests.example.com",
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
         enabled = !state.isTesting,
     )
-    AddressWarning(state.baseUrl)
-    VantafynButton("Continue", onClick = viewModel::nextSetupStep, enabled = state.baseUrl.isNotBlank(), modifier = Modifier.fillMaxWidth())
-}
-
-@Composable
-private fun AuthStep(state: RequestsUiState, viewModel: RequestsViewModel) {
-    Text("Authentication", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-    Text("Find this in Ombi settings. Vantafyn stores it securely on this device.", color = VantafynColors.Muted)
     VantafynTextField(
         value = state.apiKey,
         onValueChange = viewModel::onApiKeyChanged,
-        label = if (state.hasApiKey) "API key saved - enter a new key to replace" else "Ombi API key",
+        label = if (state.hasApiKey) "Admin API key saved" else "Admin API key",
         enabled = !state.isTesting,
     )
-    SecurityNotes()
-    Text("Per-user Ombi login is planned for later. For now, requests are submitted using the configured Ombi API key identity.", color = VantafynColors.Muted)
-    WizardButtons(onBack = viewModel::previousSetupStep, onNext = viewModel::nextSetupStep, nextEnabled = state.apiKey.isNotBlank() || state.hasApiKey)
-}
-
-@Composable
-private fun TestStep(state: RequestsUiState, viewModel: RequestsViewModel) {
-    Text("Test connection", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-    Text("Vantafyn checks that Ombi is reachable and that the API key can access request endpoints.", color = VantafynColors.Muted)
-    ConnectionSummary(state)
+    AddressWarning(state.baseUrl)
     VantafynButton(
         if (state.isTesting) "Testing" else "Test connection",
         onClick = viewModel::saveDraftAndTest,
         enabled = !state.isTesting && state.baseUrl.isNotBlank() && (state.apiKey.isNotBlank() || state.hasApiKey),
         modifier = Modifier.fillMaxWidth(),
     )
-    TextButton(onClick = viewModel::previousSetupStep) { Text("Back") }
 }
 
 @Composable
-private fun AccessStep(state: RequestsUiState, viewModel: RequestsViewModel) {
-    Text("Who can use Requests?", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-    AccessOption("Enabled for all users", OmbiAccessMode.AllUsers, state.accessMode, viewModel::onAccessModeChanged)
-    AccessOption("Enabled for admins only", OmbiAccessMode.AdminsOnly, state.accessMode, viewModel::onAccessModeChanged)
-    AccessOption("Disabled", OmbiAccessMode.Disabled, state.accessMode, viewModel::onAccessModeChanged)
+private fun RequestModeStep(state: RequestsUiState, viewModel: RequestsViewModel) {
+    Text("Choose request mode", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+    Text("Pick how requests are attributed in Ombi.", color = VantafynColors.Muted)
+    IdentityModeOption(
+        title = "Server request account",
+        subtitle = "Everyone requests through the server’s configured Ombi connection. Simple setup.",
+        mode = OmbiIdentityMode.SharedApiKey,
+        selected = state.identityMode,
+        onSelect = viewModel::onIdentityModeChanged,
+    )
+    IdentityModeOption(
+        title = "Per-user Ombi login",
+        subtitle = "Each person signs in with their own Ombi account. Best for families and shared servers.",
+        mode = OmbiIdentityMode.PerUserAccount,
+        selected = state.identityMode,
+        onSelect = viewModel::onIdentityModeChanged,
+    )
+    WizardButtons(onBack = viewModel::previousSetupStep, onNext = viewModel::nextSetupStep)
+}
+
+@Composable
+private fun UserAccessStep(state: RequestsUiState, viewModel: RequestsViewModel) {
+    Text("User access", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+    if (state.identityMode == OmbiIdentityMode.PerUserAccount) {
+        Text("Users will sign in with the Ombi account you created for them.", color = VantafynColors.Muted)
+        if (state.pendingAccessRequestCount > 0) {
+            MessageCard("${state.pendingAccessRequestCount} access request${if (state.pendingAccessRequestCount == 1) "" else "s"} waiting.")
+        }
+    } else {
+        Text("Requests will use the configured Ombi connection.", color = VantafynColors.Muted)
+        Text("Users will not need their own Ombi login.", color = VantafynColors.Muted)
+    }
     WizardButtons(onBack = viewModel::previousSetupStep, onNext = viewModel::nextSetupStep)
 }
 
 @Composable
 private fun FinishStep(state: RequestsUiState, viewModel: RequestsViewModel) {
-    Text("Finish", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-    Text("Ombi URL: ${state.baseUrl}", color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-    Text("Access: ${state.accessMode.label}", color = VantafynColors.Muted)
-    CapabilityList(state.capabilities)
-    SecurityNotes()
-    VantafynButton("Enable Requests", onClick = viewModel::finishSetup, modifier = Modifier.fillMaxWidth())
+    Text("Requests are ready", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+    SetupSummaryTile("Ombi connected", state.baseUrl.ifBlank { state.config.baseUrl })
+    SetupSummaryTile("Request mode", state.identityMode.label)
+    SetupSummaryTile("User access", if (state.identityMode == OmbiIdentityMode.PerUserAccount) "Users link their Ombi account" else "No user login needed")
+    VantafynButton("Open Requests", onClick = viewModel::finishSetup, modifier = Modifier.fillMaxWidth())
     TextButton(onClick = viewModel::previousSetupStep) { Text("Back") }
 }
 
@@ -386,51 +398,69 @@ private fun OmbiManageScreen(state: RequestsUiState, viewModel: RequestsViewMode
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(bottom = 164.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            Header("Ombi", "Let users request movies and TV shows through Ombi.", action = "Requests", onAction = viewModel::showRequests)
+            Header("Manage Requests", "Ombi is connected to Vantafyn.", action = "Requests", onAction = viewModel::showRequests)
         }
-        item { ReadyForRequestsChecklist(state, viewModel) }
         item {
             VantafynGlassPanel(cornerRadius = 24.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(state.connectionStatus, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text("Status", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                             Text(state.config.baseUrl.ifBlank { "No Ombi server configured" }, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                         Switch(checked = state.config.accessMode != OmbiAccessMode.Disabled, onCheckedChange = viewModel::setEnabled)
                     }
-                    Text("Current access: ${state.config.accessMode.label}", color = VantafynColors.Muted)
-                    Text("User access mode: ${state.config.identityMode.label}", color = VantafynColors.Muted)
+                    SetupSummaryTile(if (state.connectionStatus == "Connected") "Connected" else "Needs attention", state.config.version?.let { "Ombi $it" } ?: state.connectionStatus)
+                    SetupSummaryTile("Request mode", state.config.identityMode.label)
                     state.config.version?.let { Text("Ombi $it", color = VantafynColors.Muted) }
                     state.config.lastSuccessfulConnectionAt?.let {
-                        Text("Last successful test: ${DateFormat.getDateTimeInstance().format(Date(it))}", color = VantafynColors.Muted)
+                        Text("Last checked ${DateFormat.getDateTimeInstance().format(Date(it))}", color = VantafynColors.Muted)
                     }
-                    CapabilityList(state.config.capabilities)
-                    if (!state.config.capabilities.adminModeration) {
-                        MessageCard("Request moderation is not available for this Ombi version yet. Approve and deny controls are hidden until the endpoint is confirmed.")
-                    }
-                    Text("User access mode", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+        item {
+            VantafynGlassPanel(cornerRadius = 24.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Request Mode", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     IdentityModeOption(
-                        title = "Shared request account",
-                        subtitle = "Users can request media through the Ombi connection configured by the admin. Easiest for home and family setups.",
+                        title = "Server request account",
+                        subtitle = "Everyone requests through the server’s configured Ombi connection.",
                         mode = OmbiIdentityMode.SharedApiKey,
                         selected = state.config.identityMode,
                         onSelect = viewModel::onIdentityModeChanged,
                     )
                     IdentityModeOption(
-                        title = "Each user links Ombi account",
-                        subtitle = "Users sign in with their own Ombi account. Passwords are never stored; Vantafyn keeps a secure session token per Jellyfin profile.",
+                        title = "Per-user Ombi login",
+                        subtitle = "Each person signs in with their own Ombi account.",
                         mode = OmbiIdentityMode.PerUserAccount,
                         selected = state.config.identityMode,
                         onSelect = viewModel::onIdentityModeChanged,
                     )
-                    if (state.pendingAccessRequestCount > 0) {
-                        MessageCard("${state.pendingAccessRequestCount} Ombi access request${if (state.pendingAccessRequestCount == 1) "" else "s"} pending.")
+                }
+            }
+        }
+        if (state.config.identityMode == OmbiIdentityMode.PerUserAccount) {
+            item {
+                VantafynGlassPanel(cornerRadius = 24.dp) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Users", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        SetupSummaryTile("Linked users", state.userMappings.count { it.state == OmbiLinkedAccountState.Linked }.toString())
+                        SetupSummaryTile("Pending access", state.pendingAccessRequestCount.toString())
                     }
+                }
+            }
+            item { AccessRequestsSection(state.accessRequests, viewModel) }
+            item { UserMappingsSection(state.userMappings, viewModel) }
+        }
+        item {
+            VantafynGlassPanel(cornerRadius = 24.dp) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Advanced", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     VantafynButton(if (state.isTesting) "Testing" else "Test connection", onClick = viewModel::testConnection, enabled = !state.isTesting && state.isConfigured, modifier = Modifier.fillMaxWidth())
                     VantafynButton(
                         if (state.isRefreshingAvailability) "Refreshing availability" else "Refresh availability index",
@@ -444,8 +474,8 @@ private fun OmbiManageScreen(state: RequestsUiState, viewModel: RequestsViewMode
                     }
                     state.availabilityMessage?.let { Text(it, color = VantafynColors.Muted) }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        VantafynButton("Edit credentials", onClick = viewModel::startSetup, modifier = Modifier.weight(1f))
-                        VantafynButton("Setup Health", onClick = viewModel::showSetupHealth, modifier = Modifier.weight(1f))
+                        VantafynButton("Update key", onClick = viewModel::startSetup, modifier = Modifier.weight(1f))
+                        VantafynButton("Health", onClick = viewModel::showSetupHealth, modifier = Modifier.weight(1f))
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         VantafynButton("Remove", onClick = viewModel::resetIntegration, modifier = Modifier.weight(1f))
@@ -453,8 +483,6 @@ private fun OmbiManageScreen(state: RequestsUiState, viewModel: RequestsViewMode
                 }
             }
         }
-        item { AccessRequestsSection(state.accessRequests, viewModel) }
-        item { UserMappingsSection(state.userMappings, viewModel) }
         state.message?.let { item { MessageCard(it) } }
     }
 }
@@ -574,14 +602,14 @@ private fun OmbiAccessNeededState(state: RequestsUiState, viewModel: RequestsVie
         OmbiLoginState(state, viewModel)
     } else {
         UserUnavailableState(
-            title = if (state.hasRequestedAccess) "Access requested" else "Link Ombi to request",
+            title = if (state.hasRequestedAccess) "Access requested" else "Requests aren't ready yet",
             body = if (state.hasRequestedAccess) {
-                "Your server admin has been notified. Once your Ombi account is ready, you can link it here."
+                "Your admin still needs to create or confirm your Ombi account."
             } else {
-                "Use the Ombi account your server admin created for you, or request access if you do not have one yet."
+                "Your server admin has not finished setting up Requests for this profile."
             },
-            action = if (state.hasRequestedAccess) "Check again" else "Request access",
-            onAction = if (state.hasRequestedAccess) viewModel::showRequests else viewModel::requestOmbiAccess,
+            action = if (state.hasRequestedAccess) "Check again" else null,
+            onAction = viewModel::showRequests,
         )
     }
 }
@@ -590,23 +618,13 @@ private fun OmbiAccessNeededState(state: RequestsUiState, viewModel: RequestsVie
 private fun OmbiLoginState(state: RequestsUiState, viewModel: RequestsViewModel) {
     VantafynGlassPanel(cornerRadius = 24.dp) {
         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                TypeChip(
-                    when {
-                        state.isValidatingOmbiSession -> "Checking session"
-                        state.currentUserMapping?.state == OmbiLinkedAccountState.TokenExpired -> "Sign in again"
-                        else -> "Ombi profile ready"
-                    },
-                    selected = true,
-                    onClick = {},
-                )
-                state.ombiUserSession?.let {
-                    Text("Linked as ${it.bestName}", color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                }
-            }
-            Text("Sign in to Requests", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            val matchFound = state.ombiUserMatch.state == OmbiUserMatchState.MatchFound
+            TypeChip(if (matchFound) "Account found" else "Ombi login", selected = true, onClick = {})
+            Text("Link Ombi", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Text(
-                "Sign in with the Ombi account your server admin created for you. Vantafyn remembers the secure session token on this device and never stores your password.",
+                if (matchFound) "We found an Ombi account for you. Sign in to link it."
+                else if (state.ombiUserMatch.state == OmbiUserMatchState.NoMatchFound) "No Ombi account was found for this profile. You can still sign in manually."
+                else "Use the Ombi account your server admin created for you.",
                 color = VantafynColors.Muted,
                 style = MaterialTheme.typography.bodyLarge,
             )
@@ -633,8 +651,11 @@ private fun OmbiLoginState(state: RequestsUiState, viewModel: RequestsViewModel)
                     state.ombiPassword.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (!state.hasRequestedAccess) {
-                TextButton(onClick = viewModel::requestOmbiAccess) { Text("Request access") }
+            if (state.ombiUserMatch.state == OmbiUserMatchState.NoMatchFound) {
+                VantafynButton("Request access", onClick = viewModel::requestOmbiAccess, modifier = Modifier.fillMaxWidth())
+                TextButton(onClick = viewModel::checkOmbiUserMatch) { Text("I already have an account") }
+            } else {
+                TextButton(onClick = viewModel::requestOmbiAccess) { Text(if (matchFound) "Not my account / Request access" else "Request access") }
             }
             if (state.ombiUserSession != null) {
                 TextButton(onClick = viewModel::unlinkOmbiAccount) { Text("Forget Ombi session") }
@@ -752,16 +773,17 @@ private fun UnavailableState(title: String, body: String, admin: Boolean, onRetr
 
 @Composable
 private fun SearchCard(state: RequestsUiState, viewModel: RequestsViewModel) {
-    VantafynGlassPanel(cornerRadius = 24.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Find something to request", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    VantafynGlassPanel(cornerRadius = 22.dp) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             VantafynTextField(value = state.query, onValueChange = viewModel::onQueryChanged, label = "Movie or series title")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(RequestSearchFilter.entries.toList()) { filter ->
-                    TypeChip(filter.label, state.searchFilter == filter) { viewModel.onSearchFilterChanged(filter) }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.weight(1f)) {
+                    items(RequestSearchFilter.entries.toList()) { filter ->
+                        TypeChip(filter.label, state.searchFilter == filter) { viewModel.onSearchFilterChanged(filter) }
+                    }
                 }
+                VantafynButton("Search", onClick = viewModel::search, enabled = state.query.length > 1 && !state.isSearching)
             }
-            VantafynButton("Search", onClick = viewModel::search, enabled = state.query.length > 1 && !state.isSearching, modifier = Modifier.fillMaxWidth())
         }
     }
 }
@@ -777,7 +799,10 @@ private fun DiscoveryRail(
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(rail.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(rail.items, key = { "${rail.kind}-${it.mediaType}-${it.externalId}-${it.requestId.orEmpty()}" }) { item ->
+            itemsIndexed(
+                rail.items,
+                key = { index, item -> "${rail.kind}-${item.mediaType}-${item.externalId}-${item.movieDbId.orEmpty()}-${item.tvDbId.orEmpty()}-$index" },
+            ) { _, item ->
                 RequestPosterCard(
                     item = item,
                     availableMatch = state.availabilityMatches[item.availabilityKey()],
@@ -788,11 +813,12 @@ private fun DiscoveryRail(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun RequestPosterCard(item: RequestMediaSummary, availableMatch: Any?, onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            .size(width = 132.dp, height = 238.dp)
+            .size(width = 132.dp, height = 264.dp)
             .clickable(onClick = onClick),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -816,10 +842,17 @@ private fun RequestPosterCard(item: RequestMediaSummary, availableMatch: Any?, o
                     .background(Color.Black.copy(alpha = 0.58f))
                     .padding(horizontal = 8.dp, vertical = 4.dp),
             ) {
-                Text(if (availableMatch != null) "Available" else item.state.shortLabel, color = VantafynColors.Ink, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(item.resolvedShortLabel(availableMatch != null), color = VantafynColors.Ink, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
         }
-        Text(item.title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            item.title,
+            color = VantafynColors.Ink,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.basicMarquee(),
+        )
         Text(listOfNotNull(item.mediaType.label, item.year?.toString()).joinToString(" · "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -838,7 +871,7 @@ private fun RequestPosterListCard(
             Poster(item.posterUrl, item.title)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(item.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text(listOfNotNull(item.mediaType.label, item.year?.toString(), item.state.label).joinToString(" · "), color = VantafynColors.Muted)
+                Text(listOfNotNull(item.mediaType.label, item.year?.toString(), item.resolvedLabel(availableMatch != null)).joinToString(" · "), color = VantafynColors.Muted)
                 item.overview?.let { Text(it, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
             }
             VantafynButton(
@@ -888,7 +921,7 @@ private fun RequestDetailScreen(item: RequestMediaSummary, state: RequestsUiStat
                         .padding(horizontal = 8.dp, vertical = 22.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    TypeChip(display.state.label, selected = true, onClick = {})
+                    TypeChip(display.resolvedLabel(availableMatch != null), selected = true, onClick = {})
                     Text(display.title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text(
                         listOfNotNull(
@@ -948,7 +981,7 @@ private fun RequestDetailScreen(item: RequestMediaSummary, state: RequestsUiStat
                         if (availableMatch != null) {
                             Text("Available in ${availableMatch.serverName ?: "Jellyfin"} as ${availableMatch.title}.", color = VantafynColors.Muted)
                         } else if (display.state == RequestState.Available) {
-                            Text("Available according to Ombi. Vantafyn could not verify a Jellyfin provider-ID match yet.", color = VantafynColors.Muted)
+                            Text("Available according to Ombi. Vantafyn will only open it after a verified Jellyfin provider-ID match.", color = VantafynColors.Muted)
                         }
                     }
                 }
@@ -1193,6 +1226,16 @@ private fun WizardButtons(onBack: () -> Unit, onNext: () -> Unit, nextEnabled: B
 }
 
 @Composable
+private fun SetupSummaryTile(title: String, value: String) {
+    VantafynGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(14.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+            Text(value.ifBlank { "Not set" }, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
 private fun AccessOption(label: String, mode: OmbiAccessMode, selected: OmbiAccessMode, onSelect: (OmbiAccessMode) -> Unit) {
     VantafynGlassCard(
         modifier = Modifier
@@ -1338,11 +1381,10 @@ private fun MessageCard(message: String) {
 
 private val OmbiSetupStep.stepTitle: String
     get() = when (this) {
-        OmbiSetupStep.Connect -> "Step 1 of 5"
-        OmbiSetupStep.Authentication -> "Step 2 of 5"
-        OmbiSetupStep.Test -> "Step 3 of 5"
-        OmbiSetupStep.Access -> "Step 4 of 5"
-        OmbiSetupStep.Finish -> "Step 5 of 5"
+        OmbiSetupStep.Connect -> "Step 1 of 4"
+        OmbiSetupStep.Authentication -> "Step 2 of 4"
+        OmbiSetupStep.Test, OmbiSetupStep.Access -> "Step 3 of 4"
+        OmbiSetupStep.Finish -> "Step 4 of 4"
     }
 
 private val OmbiAccessMode.label: String
@@ -1354,8 +1396,8 @@ private val OmbiAccessMode.label: String
 
 private val OmbiIdentityMode.label: String
     get() = when (this) {
-        OmbiIdentityMode.SharedApiKey -> "Shared request account"
-        OmbiIdentityMode.PerUserAccount -> "Each user links Ombi account"
+        OmbiIdentityMode.SharedApiKey -> "Server request account"
+        OmbiIdentityMode.PerUserAccount -> "Per-user Ombi login"
     }
 
 private val OmbiTvRequestSelection.label: String
@@ -1411,7 +1453,7 @@ private val RequestState.label: String
         RequestState.Approved -> "Approved and queued"
         RequestState.Processing -> "Being added"
         RequestState.PartiallyAvailable -> "Some seasons available"
-        RequestState.Available -> "Available in Jellyfin"
+        RequestState.Available -> "Available according to Ombi"
         RequestState.Declined -> "Request declined"
         RequestState.Failed -> "Couldn’t complete request"
         RequestState.Unknown -> "Status unavailable"
@@ -1424,7 +1466,7 @@ private val RequestState.shortLabel: String
         RequestState.Approved -> "Approved"
         RequestState.Processing -> "Adding"
         RequestState.PartiallyAvailable -> "Partial"
-        RequestState.Available -> "Available"
+        RequestState.Available -> "Ombi available"
         RequestState.Declined -> "Declined"
         RequestState.Failed -> "Failed"
         RequestState.Unknown -> "Status"
@@ -1437,11 +1479,17 @@ private val RequestState.explainer: String
         RequestState.Approved -> "The request is approved and waiting to be added."
         RequestState.Processing -> "Ombi says this title is being added."
         RequestState.PartiallyAvailable -> "Some of this series is already available in Jellyfin."
-        RequestState.Available -> "Ombi reports this title is available in Jellyfin."
+        RequestState.Available -> "Ombi reports this title as available. Vantafyn verifies the Jellyfin item separately before opening it."
         RequestState.Declined -> "This request was declined."
         RequestState.Failed -> "Ombi reported a problem with this request."
         RequestState.Unknown -> "Ombi returned a status Vantafyn does not fully understand yet."
     }
+
+private fun RequestMediaSummary.resolvedLabel(verifiedJellyfinMatch: Boolean): String =
+    if (verifiedJellyfinMatch) "Available in Jellyfin" else state.label
+
+private fun RequestMediaSummary.resolvedShortLabel(verifiedJellyfinMatch: Boolean): String =
+    if (verifiedJellyfinMatch) "Available" else state.shortLabel
 
 private fun RequestMediaSummary.primaryActionLabel(): String =
     when (state) {
@@ -1450,7 +1498,7 @@ private fun RequestMediaSummary.primaryActionLabel(): String =
         RequestState.Approved -> "Approved"
         RequestState.Processing -> "Being added"
         RequestState.PartiallyAvailable -> "View seasons"
-        RequestState.Available -> "Open in Jellyfin"
+        RequestState.Available -> "Status"
         RequestState.Declined -> "Request declined"
         RequestState.Failed -> "Needs attention"
         RequestState.Unknown -> "View status"

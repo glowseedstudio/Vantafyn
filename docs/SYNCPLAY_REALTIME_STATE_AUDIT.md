@@ -1,0 +1,104 @@
+# SyncPlay Realtime State Audit
+
+## Current Real Commands
+
+Vantafyn already uses real Jellyfin SDK calls for Watch Party foundations:
+
+- `SyncPlayApi.syncPlayCreateGroup(...)`
+- `syncPlayGetGroups(...)`
+- `syncPlayJoinGroup(...)`
+- `syncPlayLeaveGroup(...)`
+- `syncPlayPause(...)`
+- `syncPlayUnpause(...)`
+- `syncPlaySeek(...)`
+- `syncPlaySetNewQueue(...)`
+- `SessionApi.getSessions(...)`
+- `SessionApi.sendMessageCommand(...)`
+
+## Websocket APIs Found
+
+The installed Jellyfin Kotlin SDK exposes websocket support from the authenticated `ApiClient`:
+
+- `api.webSocket.state`
+- `api.webSocket.subscribeAll()`
+- `subscribeSyncPlayCommands(...)`
+- `subscribePlayStateCommands(...)`
+- `subscribeGeneralCommands(...)`
+
+Message types confirmed in the SDK:
+
+- `SessionsMessage`
+- `SyncPlayCommandMessage`
+- `SyncPlayGroupUpdateCommandMessage`
+- `PlaystateMessage`
+- `GeneralCommandMessage`
+
+## Implemented In This Pass
+
+`core-jellyfin` now has:
+
+- `JellyfinRealtimeClient`
+- `JellyfinWebSocketEvent`
+- `SdkJellyfinRealtimeClient`
+- event mapping for socket state, sessions, SyncPlay commands, SyncPlay group updates, playstate commands, and general commands
+
+`feature-home` now:
+
+- starts realtime collection when Watch Party UI/actions need it
+- stops realtime collection when the party is left or the profile logs out
+- stores realtime connection state
+- stores active session/member state from real `SessionsMessage` data
+- shows an honest Watch Party player pill
+- shows Vantafyn lobby readiness separately from Jellyfin sync readiness
+
+## Honest State Boundaries
+
+Jellyfin websocket events confirm active session presence and SyncPlay command/group update activity. They do not, by themselves, prove every device is exactly synchronized at a shared clock position.
+
+Because of that, Vantafyn does not show `Synced` in this pass. It shows:
+
+- `Watch Party active`
+- `Sync unknown`
+- `Sync state unavailable`
+- `Reconnecting`
+- `Solo fallback`
+
+## Ready State
+
+Jellyfin SyncPlay does expose ready/buffer request commands in the SDK, but this pass does not yet have a confirmed member-ready event model suitable for reliable per-user UI.
+
+Vantafyn therefore implements only local lobby readiness:
+
+- it is labelled as Vantafyn lobby readiness
+- it is not used to claim Jellyfin playback sync
+- unknown member readiness remains unknown
+
+## Buffering State
+
+No reliable per-member buffering event is surfaced in the current implementation. The UI does not invent buffering state. Local player buffering remains handled by Media3.
+
+## Up Next
+
+Solo Up Next remains enabled.
+
+During Watch Party playback, solo Up Next countdown/autoplay is suppressed to avoid participant desync. Group-aware Up Next remains future work and must be host-owned.
+
+## Lifecycle
+
+Realtime collection is tied to the ViewModel and active Watch Party usage:
+
+- starts on Watch Party load/create/recipient discovery
+- stops on leave party
+- stops on logout/profile removal
+- cancels in `onCleared`
+
+No aggressive background polling was added.
+
+## Remaining Work
+
+- parse and display Vantafyn invite receipt from an active websocket message path if Jellyfin delivers message commands to Vantafyn as a structured websocket event
+- accept/decline feedback transport
+- member ready/buffer reconciliation if Jellyfin emits reliable state
+- host-owned group Up Next
+- player member/status sheet
+- TV UI reuse

@@ -129,3 +129,11 @@ The native TV request flow supports the confirmed Ombi v2 request flags:
 - latest season
 
 Selected episode requests are hidden until the exact request-body schema is confirmed and tested. Vantafyn does not show broken episode controls.
+## Request Identity Modes
+
+Vantafyn supports two Ombi identity modes:
+
+- Server request account: all requests use the admin-configured Ombi connection.
+- Per-user Ombi login: each Jellyfin profile links its own Ombi account and Vantafyn stores only the encrypted session token.
+
+The admin API key remains admin-only and is never displayed to normal users.
