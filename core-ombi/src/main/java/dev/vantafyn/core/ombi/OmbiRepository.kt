@@ -179,6 +179,7 @@ data class RequestMediaSummary(
 
 data class RequestSeasonSummary(
     val seasonNumber: Int,
+    val posterUrl: String?,
     val overview: String?,
     val state: RequestState,
     val available: Boolean,
@@ -968,16 +969,16 @@ class OmbiRepository(
                 RequestMediaType.Series -> {
                     val tvDbId = item.tvDbId?.takeIf { it.isNotBlank() }
                     val movieDbId = item.movieDbId?.takeIf { it.isNotBlank() }
-                    if (!tvDbId.isNullOrBlank()) {
+                    if (!movieDbId.isNullOrBlank()) {
                         runCatching {
-                            request("/api/v2/Search/tv/${tvDbId.urlPath()}", "GET", null, null, auth) as JSONObject
+                            request("/api/v2/Search/tv/moviedb/${movieDbId.urlPath()}", "GET", null, null, auth) as JSONObject
                         }.getOrElse {
-                            val id = movieDbId ?: throw it
-                            request("/api/v2/Search/tv/moviedb/${id.urlPath()}", "GET", null, null, auth) as JSONObject
+                            val id = tvDbId ?: throw it
+                            request("/api/v2/Search/tv/${id.urlPath()}", "GET", null, null, auth) as JSONObject
                         }
                     } else {
-                        val id = movieDbId ?: throw IllegalArgumentException("Ombi did not return a usable TV identifier.")
-                        request("/api/v2/Search/tv/moviedb/${id.urlPath()}", "GET", null, null, auth) as JSONObject
+                        val id = tvDbId ?: throw IllegalArgumentException("Ombi did not return a usable TV identifier.")
+                        request("/api/v2/Search/tv/${id.urlPath()}", "GET", null, null, auth) as JSONObject
                     }
                 }
             }
@@ -1223,6 +1224,7 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType, sourceEndpo
     val requestType = if (type == MediaRequestType.Movie) RequestMediaType.Movie else RequestMediaType.Series
     val movieJson = optJSONObject("movie")
     val tvJson = optJSONObject("tv")
+    val sourceLooksV2Tv = type == MediaRequestType.Tv && sourceEndpoint?.contains("/api/v2/Search/tv", ignoreCase = true) == true
     val movieDbId = optAnyString("theMovieDbId")
         ?: optAnyString("tmdbId")
         ?: optAnyString("movieDbId")
@@ -1230,6 +1232,7 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType, sourceEndpo
         ?: movieJson?.optAnyString("tmdbId")
         ?: tvJson?.optAnyString("theMovieDbId")
         ?: tvJson?.optAnyString("tmdbId")
+        ?: if (sourceLooksV2Tv) optAnyString("id") else null
     val tvDbId = optAnyString("theTvDbId")
         ?: optAnyString("tvDbId")
         ?: optAnyString("seriesId")
@@ -1305,9 +1308,10 @@ private fun JSONObject.toRequestMediaDetail(fallback: RequestMediaSummary): Requ
         certification = optNullableString("certification")
             ?: optJSONObject("releaseDates")?.optNullableString("certification"),
         network = optJSONObject("network")?.optNullableString("name") ?: optNullableString("network"),
-        seasons = optJSONArray("seasonRequests")?.toSeasonSummaries().orEmpty(),
-        similar = optJSONObject("similar")
-            ?.optJSONArray("results")
+        seasons = (optJSONArray("seasonRequests") ?: optJSONArray("seasons"))?.toSeasonSummaries().orEmpty(),
+        similar = (optJSONObject("similar")?.optJSONArray("results")
+            ?: optJSONArray("similar")
+            ?: optJSONArray("recommendations"))
             ?.mapJsonObjects { it.toRequestMediaSummary(type.toLegacyType()) }
             .orEmpty()
             .take(12),
@@ -1320,6 +1324,7 @@ private fun JSONArray.toSeasonSummaries(): List<RequestSeasonSummary> =
         val available = season.optBoolean("seasonAvailable", false) || episodes.isNotEmpty() && episodes.all { it.available }
         RequestSeasonSummary(
             seasonNumber = season.optInt("seasonNumber", 0),
+            posterUrl = normalizeOmbiArtworkUrl(season.optNullableString("posterPath") ?: season.optNullableString("poster")),
             overview = season.optNullableString("overview"),
             state = when {
                 available -> RequestState.Available

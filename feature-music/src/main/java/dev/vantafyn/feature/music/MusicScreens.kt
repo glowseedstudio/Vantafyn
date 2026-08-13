@@ -25,6 +25,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -149,6 +150,15 @@ private val VantafynModalContainerColor: Color
 
 private val MusicBottomSheetRailClearance = 112.dp
 
+private fun MusicScreenState.scrollResetKey(): String =
+    when (this) {
+        MusicScreenState.Home -> "home"
+        is MusicScreenState.Album -> "album:${album.id}"
+        is MusicScreenState.Artist -> "artist:${artist.id}"
+        is MusicScreenState.Playlist -> "playlist:${playlist.id}"
+        is MusicScreenState.Songs -> "songs"
+    }
+
 @Composable
 fun MusicScreen(
     session: JellyfinSession?,
@@ -166,6 +176,11 @@ fun MusicScreen(
         state.home == null &&
         state.searchResults.isEmpty() &&
         state.screen == MusicScreenState.Home
+    val musicListState = rememberLazyListState()
+    val screenScrollKey = state.screen.scrollResetKey()
+    LaunchedEffect(screenScrollKey) {
+        musicListState.scrollToItem(0)
+    }
     var homeRevealActive by remember(session?.profileId) { mutableStateOf(true) }
     LaunchedEffect(session?.profileId) {
         homeRevealActive = true
@@ -202,6 +217,7 @@ fun MusicScreen(
     }
     Box(modifier.fillMaxSize()) {
         LazyColumn(
+            state = musicListState,
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
@@ -1716,9 +1732,8 @@ private fun SyncedLyricsView(
         if (lines.isEmpty()) return@LaunchedEffect
         delay(80L)
         val targetIndex = lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0)
-        val target = if (targetIndex <= 0) 0 else (targetIndex - 4).coerceAtLeast(0)
         programmaticScroll = true
-        listState.scrollToItem(target)
+        listState.scrollToItem(targetIndex.coerceAtMost(lines.lastIndex))
         programmaticScroll = false
         lastPlaybackMs = playbackMs
     }
@@ -1758,36 +1773,39 @@ private fun SyncedLyricsView(
         val suppressAutoFollow = System.currentTimeMillis() < suppressAutoFollowUntil
         if (rewound && !suppressAutoFollow) suppressAutoFollowUntil = 0L
         if (!suppressAutoFollow) {
-            val target = if (activeIndex <= 0) 0 else (activeIndex - 4).coerceAtLeast(0)
             programmaticScroll = true
             try {
-                listState.animateScrollToItem(target)
+                listState.animateScrollToItem(activeIndex.coerceAtMost(lines.lastIndex))
             } finally {
                 programmaticScroll = false
             }
         }
     }
 
-    LazyColumn(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .fillMaxHeight(),
-        state = listState,
-        contentPadding = PaddingValues(top = 72.dp, bottom = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        itemsIndexed(lines, key = { index, line -> "${line.startMs}-${line.text}-$index" }) { index, line ->
-            SyncedLyricLine(
-                line = line,
-                active = index == activeIndex,
-                onClick = {
-                    line.startMs?.let {
-                        suppressAutoFollowUntil = 0L
-                        lastPlaybackMs = it
-                        onSeek(it)
-                    }
-                },
-            )
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(top = maxHeight * 0.42f, bottom = maxHeight * 0.48f),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            itemsIndexed(lines, key = { index, line -> "${line.startMs}-${line.text}-$index" }) { index, line ->
+                SyncedLyricLine(
+                    line = line,
+                    active = index == activeIndex,
+                    onClick = {
+                        line.startMs?.let {
+                            suppressAutoFollowUntil = 0L
+                            lastPlaybackMs = it
+                            onSeek(it)
+                        }
+                    },
+                )
+            }
         }
     }
 }

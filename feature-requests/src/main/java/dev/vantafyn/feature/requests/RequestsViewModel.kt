@@ -873,7 +873,12 @@ private fun RequestMediaSummary.providerIds(): Map<String, String> =
     }
 
 internal fun RequestMediaSummary.availabilityKey(): String =
-    "${mediaType.name}:${movieDbId ?: tvDbId ?: imdbId ?: externalId}"
+    when {
+        !movieDbId.isNullOrBlank() -> "${mediaType.name}:tmdb:$movieDbId"
+        !tvDbId.isNullOrBlank() -> "${mediaType.name}:tvdb:$tvDbId"
+        !imdbId.isNullOrBlank() -> "${mediaType.name}:imdb:$imdbId"
+        else -> "${mediaType.name}:external:$externalId"
+    }
 
 private fun RequestMediaSummary.jellyfinItemTypes(): Set<String> =
     when (mediaType) {

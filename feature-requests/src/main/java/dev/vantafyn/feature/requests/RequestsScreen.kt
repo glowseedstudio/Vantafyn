@@ -447,7 +447,10 @@ private fun OmbiSetupWizard(state: RequestsUiState, viewModel: RequestsViewModel
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(
+            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
+            bottom = 108.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -739,7 +742,10 @@ private fun OmbiSetupHealthScreen(state: RequestsUiState, viewModel: RequestsVie
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(
+            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
+            bottom = 108.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item { Header("Setup Health", "Admin checks for Requests readiness.", action = "Ombi", onAction = viewModel::manageOmbi) }
@@ -1231,21 +1237,14 @@ private fun RequestDetailScreen(item: RequestMediaSummary, state: RequestsUiStat
                     Text("Overview", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     Text(it, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
                 }
-                VantafynGlassPanel(cornerRadius = 22.dp) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Request status", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-                        Text(display.state.explainer, color = VantafynColors.Muted)
-                        if (display.mediaType == RequestMediaType.Series) {
-                            Text("Use the series request action for the whole show. Season-level controls are shown below when Ombi returns a season graph for this title.", color = VantafynColors.Muted)
-                        }
-                        if (availableMatch != null) {
-                            Text("Available in ${availableMatch.serverName ?: "Jellyfin"} as ${availableMatch.title}.", color = VantafynColors.Muted)
-                        } else if (display.state == RequestState.Available) {
-                            Text("Available according to Ombi. Vantafyn will only open it after a verified Jellyfin provider-ID match.", color = VantafynColors.Muted)
-                        }
-                    }
-                }
-                detail?.let { RequestDetailMetadata(it) }
+                RequestStatusSummary(
+                    display = display,
+                    verifiedAvailable = availableMatch != null,
+                    serverName = availableMatch?.serverName,
+                    matchedTitle = availableMatch?.title,
+                )
+                detail?.let { RequestDetailMetadataChips(it) }
+                RequestArtworkSection(display, detail)
                 if (detail != null && detail.seasons.isNotEmpty()) {
                     SeriesSeasonSection(detail)
                 }
@@ -1271,31 +1270,78 @@ private fun TvRequestOptions(selected: OmbiTvRequestSelection, onSelect: (OmbiTv
                 TypeChip(option.label, selected == option) { onSelect(option) }
             }
         }
-        Text(
-            "Season and episode-specific requests are hidden until Ombi's episode request body is confirmed. These options use the confirmed TV request flags.",
-            color = VantafynColors.Muted,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
 @Composable
-private fun RequestDetailMetadata(detail: RequestMediaDetail) {
-    VantafynGlassPanel(cornerRadius = 22.dp) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Details", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-            Text(
-                listOfNotNull(
-                    detail.summary.mediaType.label,
-                    detail.summary.year?.toString(),
-                    detail.runtimeMinutes?.let { "${it} minutes" },
-                    detail.certification,
-                    detail.network,
-                ).joinToString(" · ").ifBlank { "Details are limited from Ombi for this title." },
-                color = VantafynColors.Muted,
-            )
+private fun RequestStatusSummary(
+    display: RequestMediaSummary,
+    verifiedAvailable: Boolean,
+    serverName: String?,
+    matchedTitle: String?,
+) {
+    VantafynGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(14.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                TypeChip(display.resolvedLabel(verifiedAvailable), selected = true, onClick = {})
+                if (verifiedAvailable) {
+                    TypeChip("Verified", selected = true, onClick = {})
+                } else if (display.state == RequestState.Available) {
+                    TypeChip("Ombi available", selected = true, onClick = {})
+                }
+            }
+            val statusLine = when {
+                verifiedAvailable -> "Matched in ${serverName ?: "Jellyfin"}${matchedTitle?.takeIf { it.isNotBlank() }?.let { " as $it" }.orEmpty()}."
+                display.state == RequestState.Available -> "Ombi has marked this title available. Vantafyn will only open a verified Jellyfin match."
+                display.requestedBy != null -> "Requested by ${display.requestedBy}."
+                else -> display.state.explainer
+            }
+            Text(statusLine, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun RequestDetailMetadataChips(detail: RequestMediaDetail) {
+    val values = listOfNotNull(
+        detail.summary.mediaType.label,
+        detail.summary.year?.toString(),
+        detail.runtimeMinutes?.let { "${it} min" },
+        detail.certification,
+        detail.network,
+    )
+    if (values.isEmpty()) return
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(values) { value -> TypeChip(value, selected = true, onClick = {}) }
+    }
+}
+
+@Composable
+private fun RequestArtworkSection(display: RequestMediaSummary, detail: RequestMediaDetail?) {
+    val artwork = listOfNotNull(
+        display.posterUrl?.let { "Poster" to it },
+        display.backdropUrl?.let { "Backdrop" to it },
+        detail?.summary?.posterUrl?.let { "Poster" to it },
+        detail?.summary?.backdropUrl?.let { "Backdrop" to it },
+    ).distinctBy { it.second }
+    if (artwork.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Artwork", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(artwork) { (label, url) ->
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = if (label == "Backdrop") 210.dp else 120.dp, height = 160.dp)
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.64f)),
+                    ) {
+                        AsyncImage(model = url, contentDescription = "$label artwork", modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                        Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.58f)))))
+                        Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.BottomStart).padding(10.dp))
+                    }
+                }
+            }
         }
     }
 }
@@ -1306,21 +1352,24 @@ private fun SeriesSeasonSection(detail: RequestMediaDetail) {
         Text("Seasons", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         detail.seasons.forEach { season ->
             VantafynGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(14.dp)) {
-                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Season ${season.seasonNumber}", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                        TypeChip(season.state.shortLabel, selected = season.state != RequestState.NotRequested, onClick = {})
-                    }
-                    season.overview?.let { Text(it, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
-                    if (season.episodes.isNotEmpty()) {
-                        Text(
-                            season.episodes.take(4).joinToString(" · ") { episode ->
-                                "E${episode.episodeNumber} ${episode.state.shortLabel}"
-                            },
-                            color = VantafynColors.Muted,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    season.posterUrl?.let { Poster(it, "Season ${season.seasonNumber}", small = true) }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text("Season ${season.seasonNumber}", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                            TypeChip(season.state.shortLabel, selected = season.state != RequestState.NotRequested, onClick = {})
+                        }
+                        season.overview?.let { Text(it, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                        if (season.episodes.isNotEmpty()) {
+                            Text(
+                                season.episodes.take(4).joinToString(" · ") { episode ->
+                                    "E${episode.episodeNumber} ${episode.state.shortLabel}"
+                                },
+                                color = VantafynColors.Muted,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
                     }
                 }
             }

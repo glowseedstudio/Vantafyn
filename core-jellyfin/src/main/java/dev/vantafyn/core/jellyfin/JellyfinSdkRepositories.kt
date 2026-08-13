@@ -1949,7 +1949,12 @@ class SdkJellyfinAdminRepository(
             plugin.name.contains("Playback Reporting", ignoreCase = true) &&
                 !plugin.status.equals("Disabled", ignoreCase = true)
         }
-        val userImages = users.associate { it.id.toString().lowercase(Locale.US) to it.imageUrl }
+        val userImages = buildMap {
+            users.forEach { user ->
+                put(user.id.toString().lowercase(Locale.US), user.imageUrl)
+                put(user.name.lowercase(Locale.US), user.imageUrl)
+            }
+        }
         val endDate = playbackReportingEndDate()
         val timezoneOffset = playbackReportingTimezoneOffset()
         val fallback = JellyfinStatisticsOverview(
@@ -2016,7 +2021,8 @@ class SdkJellyfinAdminRepository(
                 JellyfinUserWatchStats(
                     userId = userId,
                     displayName = row.optString("user_name").ifBlank { "Unknown user" },
-                    avatarUrl = userIdText?.lowercase(Locale.US)?.let { userImages[it] },
+                    avatarUrl = userIdText?.lowercase(Locale.US)?.let { userImages[it] }
+                        ?: row.optString("user_name").takeIf { it.isNotBlank() }?.lowercase(Locale.US)?.let { userImages[it] },
                     totalWatchTimeSeconds = seconds,
                     playCount = row.optInt("total_count", 0),
                     lastWatchedAt = row.optString("latest_date").takeIf { it.isNotBlank() },

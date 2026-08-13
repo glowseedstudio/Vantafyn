@@ -1214,11 +1214,11 @@ fun VantafynSetupHeader(
     ) {
         Box(
             modifier = Modifier
-                .size(if (tv) 58.dp else 48.dp)
-                .clip(RoundedCornerShape(14.dp))
+                .size(if (tv) 92.dp else 76.dp)
+                .clip(RoundedCornerShape(20.dp))
                 .background(Color.White.copy(alpha = 0.06f))
-                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(14.dp))
-                .padding(7.dp),
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(20.dp))
+                .padding(if (tv) 12.dp else 10.dp),
             contentAlignment = Alignment.Center,
         ) {
             Image(

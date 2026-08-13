@@ -2798,7 +2798,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     private fun loadSavedProfiles() {
         viewModelScope.launch {
-            _state.update { it.copy(step = VantafynSetupStep.Splash, isLoading = true) }
+            _state.update { it.copy(isStartupResolved = false, isLoading = false) }
             val profiles = authRepository.savedProfiles()
             val autoLogin = readAutoLoginLastProfile()
             if (autoLogin) {
@@ -2810,6 +2810,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             autoLoginLastProfile = true,
                             selectedBackground = readSelectedBackground(null),
                             videoPlayerPreference = readVideoPlayerPreference(null),
+                            isStartupResolved = true,
                         )
                     }
                     selectProfile(lastProfile, showPickerWhileRestoring = false)
@@ -2824,6 +2825,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     autoLoginLastProfile = autoLogin,
                     selectedBackground = readSelectedBackground(null),
                     videoPlayerPreference = readVideoPlayerPreference(null),
+                    isStartupResolved = true,
                 )
             }
         }
@@ -2934,6 +2936,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
 data class VantafynHomeUiState(
     val step: VantafynSetupStep = VantafynSetupStep.Splash,
+    val isStartupResolved: Boolean = false,
     val isLoading: Boolean = false,
     val isLibrariesLoading: Boolean = false,
     val isHomeLoading: Boolean = false,
