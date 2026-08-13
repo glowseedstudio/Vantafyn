@@ -222,7 +222,7 @@ fun MusicScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
-            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 8.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
+            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
             item {
@@ -982,16 +982,22 @@ private fun NowPlayingDialog(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             item {
-                Row(
+                Box(
                     Modifier
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.safeDrawing),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Spacer(Modifier.size(44.dp))
-                    Text("Now Playing", color = VantafynColors.Ink.copy(alpha = 0.90f), fontWeight = FontWeight.SemiBold)
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        "Now Playing",
+                        color = VantafynColors.Ink.copy(alpha = 0.90f),
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.align(Alignment.Center),
+                    )
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterEnd),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         GoogleCastRouteButton(modifier = Modifier.size(44.dp))
                         FlatMusicIconButton(Icons.Rounded.Close, "Close", viewModel::closeNowPlaying, size = 44)
                     }

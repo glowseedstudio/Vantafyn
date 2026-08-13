@@ -3580,7 +3580,7 @@ private fun LibrariesScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -3658,7 +3658,7 @@ private fun LibraryDetailScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -3962,7 +3962,7 @@ private fun SearchScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -4334,7 +4334,7 @@ private fun FavoritesScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -4586,6 +4586,7 @@ private fun AdminScreen(
     val adminUser = overview?.users?.firstOrNull { it.id == state.session?.user?.id }
     var addUserExpanded by remember { mutableStateOf(false) }
     var usersExpanded by rememberSaveable { mutableStateOf(true) }
+    var mediaStatsExpanded by rememberSaveable { mutableStateOf(true) }
     var statisticsExpanded by rememberSaveable { mutableStateOf(false) }
     var newUsername by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
@@ -4622,7 +4623,7 @@ private fun AdminScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 116.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 116.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item { HomeContentReveal(index = 0, animate = revealActive) { ScreenTitle("Admin", overview?.serverName ?: state.server?.name ?: "Jellyfin Server") } }
@@ -4635,11 +4636,20 @@ private fun AdminScreen(
                     AdminLibraryScanCard(
                         scanTask = overview.tasks.firstOrNull { it.isLibraryScanTask() },
                         isActionRunning = state.isAdminActionRunning,
+                        isScanTracking = state.isLibraryScanTracking,
                         onScanLibrary = onScanLibrary,
                     )
                 }
             }
-            item { HomeContentReveal(index = 3, animate = revealActive) { AdminMediaStatsPanel(overview) } }
+            item {
+                HomeContentReveal(index = 3, animate = revealActive) {
+                    AdminMediaStatsPanel(
+                        overview = overview,
+                        expanded = mediaStatsExpanded,
+                        onToggle = { mediaStatsExpanded = !mediaStatsExpanded },
+                    )
+                }
+            }
             item {
                 HomeContentReveal(index = 4, animate = revealActive) {
                     AdminUsersManagementPanel(
@@ -4852,14 +4862,39 @@ private fun AdminUsersManagementPanel(
 }
 
 @Composable
-private fun AdminMediaStatsPanel(overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview) {
+private fun AdminMediaStatsPanel(
+    overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+) {
     GlassPanel {
-        AdminSectionHeader(title = "Media Stats", icon = Icons.Rounded.CollectionsBookmark)
-        AdminMediaStatRow("Total media", overview.totalItems.countOrUnavailable(), Icons.Rounded.CollectionsBookmark)
-        AdminMediaStatRow("Movies", overview.moviesCount.countOrUnavailable(), Icons.Rounded.Movie)
-        AdminMediaStatRow("Series", overview.seriesCount.countOrUnavailable(), Icons.Rounded.Tv)
-        AdminMediaStatRow("Episodes", overview.episodesCount.countOrUnavailable(), Icons.Rounded.PlayArrow)
-        AdminMediaStatRow("Music", overview.musicCount.countOrUnavailable(), Icons.Rounded.MusicNote)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .clickable(onClick = onToggle),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AdminSectionHeader(
+                title = "Media Stats",
+                icon = Icons.Rounded.CollectionsBookmark,
+                modifier = Modifier.weight(1f),
+            )
+            Icon(
+                imageVector = if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                contentDescription = if (expanded) "Collapse media stats" else "Expand media stats",
+                tint = VantafynColors.Ink,
+                modifier = Modifier.size(28.dp),
+            )
+        }
+        if (expanded) {
+            AdminMediaStatRow("Total media", overview.totalItems.countOrUnavailable(), Icons.Rounded.CollectionsBookmark)
+            AdminMediaStatRow("Movies", overview.moviesCount.countOrUnavailable(), Icons.Rounded.Movie)
+            AdminMediaStatRow("Series", overview.seriesCount.countOrUnavailable(), Icons.Rounded.Tv)
+            AdminMediaStatRow("Episodes", overview.episodesCount.countOrUnavailable(), Icons.Rounded.PlayArrow)
+            AdminMediaStatRow("Music", overview.musicCount.countOrUnavailable(), Icons.Rounded.MusicNote)
+        }
     }
 }
 
@@ -5512,10 +5547,11 @@ private fun AdminSessionsSection(sessions: List<dev.vantafyn.core.jellyfin.Jelly
 private fun AdminLibraryScanCard(
     scanTask: dev.vantafyn.core.jellyfin.JellyfinAdminTask?,
     isActionRunning: Boolean,
+    isScanTracking: Boolean,
     onScanLibrary: () -> Unit,
 ) {
     val scanRunning = scanTask?.isRunning() == true
-    val showProgress = isActionRunning || scanRunning || scanTask?.progress != null
+    val showProgress = isActionRunning || isScanTracking || scanRunning || scanTask?.progress != null
     VantafynGlassCard(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 20.dp,
@@ -5540,14 +5576,14 @@ private fun AdminLibraryScanCard(
                     Text("Library Scan", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 }
                 AdminToolAction(
-                    label = if (isActionRunning) "Starting" else if (scanRunning) "Running" else "Scan",
-                    enabled = !isActionRunning && !scanRunning,
+                    label = if (isActionRunning || (isScanTracking && !scanRunning)) "Starting" else if (scanRunning) "Running" else "Scan",
+                    enabled = !isActionRunning && !isScanTracking && !scanRunning,
                     gradientBorder = true,
                     onClick = onScanLibrary,
                 )
             }
             if (showProgress) {
-                AdminTaskProgressBar(progress = scanTask?.progress, isRunning = isActionRunning || scanRunning)
+                AdminTaskProgressBar(progress = scanTask?.progress, isRunning = isActionRunning || isScanTracking || scanRunning)
             }
         }
     }
@@ -7042,7 +7078,7 @@ private fun ProfileSettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -7607,7 +7643,7 @@ private fun PlaybackPreferencesScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -7824,7 +7860,7 @@ private fun AdminUserSettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {

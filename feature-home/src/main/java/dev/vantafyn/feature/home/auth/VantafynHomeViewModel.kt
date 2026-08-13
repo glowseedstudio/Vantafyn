@@ -8,6 +8,7 @@ import dev.vantafyn.core.cast.PlaybackOutputCoordinator
 import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
 import dev.vantafyn.core.jellyfin.JellyfinAdminOverview
 import dev.vantafyn.core.jellyfin.JellyfinAdminRepository
+import dev.vantafyn.core.jellyfin.JellyfinAdminTask
 import dev.vantafyn.core.jellyfin.JellyfinFavoritesRepository
 import dev.vantafyn.core.jellyfin.JellyfinHome
 import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
@@ -1107,7 +1108,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             when (val result = adminRepository.getOverview(session, _state.value.libraries)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(isAdminLoading = false, adminOverview = result.value) }
+                    _state.update { state ->
+                        val tracking = state.libraryScanTrackingAfter(result.value)
+                        state.copy(
+                            isAdminLoading = false,
+                            adminOverview = result.value,
+                            isLibraryScanTracking = tracking.isTracking,
+                            libraryScanTrackingStartedAt = if (tracking.isTracking) {
+                                state.libraryScanTrackingStartedAt
+                            } else {
+                                0L
+                            },
+                            hasObservedLibraryScanRunning = tracking.hasObservedRunning,
+                        )
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     if (showLoading) {
@@ -1462,13 +1476,30 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val session = _state.value.session ?: return
         if (!session.user.isAdministrator) return
         viewModelScope.launch {
-            _state.update { it.copy(isAdminActionRunning = true, adminError = null, mobileMessage = null) }
+            _state.update {
+                it.copy(
+                    isAdminActionRunning = true,
+                    isLibraryScanTracking = true,
+                    libraryScanTrackingStartedAt = System.currentTimeMillis(),
+                    hasObservedLibraryScanRunning = false,
+                    adminError = null,
+                    mobileMessage = null,
+                )
+            }
             when (val result = adminRepository.scanLibrary(session)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(isAdminActionRunning = false, mobileMessage = "Library scan started") }
+                    _state.update { it.copy(isAdminActionRunning = false, mobileMessage = null) }
                     refreshAdminOverview(showLoading = false)
                 }
-                is JellyfinResult.Failure -> _state.update { it.copy(isAdminActionRunning = false, mobileMessage = result.message) }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isAdminActionRunning = false,
+                        isLibraryScanTracking = false,
+                        libraryScanTrackingStartedAt = 0L,
+                        hasObservedLibraryScanRunning = false,
+                        mobileMessage = result.message,
+                    )
+                }
             }
         }
     }
@@ -3044,6 +3075,9 @@ data class VantafynHomeUiState(
     val adminOverview: JellyfinAdminOverview? = null,
     val isAdminLoading: Boolean = false,
     val isAdminActionRunning: Boolean = false,
+    val isLibraryScanTracking: Boolean = false,
+    val libraryScanTrackingStartedAt: Long = 0L,
+    val hasObservedLibraryScanRunning: Boolean = false,
     val adminError: String? = null,
     val playbackPreferences: JellyfinUserPlaybackPreferences? = null,
     val editablePlaybackPreferences: JellyfinUserPlaybackPreferences? = null,
@@ -3611,6 +3645,35 @@ private fun VantafynCardSize.next(): VantafynCardSize =
 private fun VantafynCardSpacing.next(): VantafynCardSpacing =
     enumValues<VantafynCardSpacing>().let { it[(ordinal + 1) % it.size] }
 
+private data class LibraryScanTrackingResult(
+    val isTracking: Boolean,
+    val hasObservedRunning: Boolean,
+)
+
+private fun VantafynHomeUiState.libraryScanTrackingAfter(overview: JellyfinAdminOverview): LibraryScanTrackingResult {
+    if (!isLibraryScanTracking) return LibraryScanTrackingResult(isTracking = false, hasObservedRunning = false)
+    val scanTask = overview.tasks.firstOrNull { it.looksLikeLibraryScanTask() }
+    val isActive = scanTask?.isActiveTask() == true
+    val observedRunning = hasObservedLibraryScanRunning || isActive
+    val inStartGrace = libraryScanTrackingStartedAt > 0L &&
+        System.currentTimeMillis() - libraryScanTrackingStartedAt < LibraryScanStartGraceMs
+    return LibraryScanTrackingResult(
+        isTracking = scanTask == null || isActive || (!observedRunning && inStartGrace),
+        hasObservedRunning = observedRunning,
+    )
+}
+
+private fun JellyfinAdminTask.isActiveTask(): Boolean =
+    progress?.let { it in 0.0..99.99 } == true ||
+        state.equals("Running", ignoreCase = true) ||
+        state.equals("Queued", ignoreCase = true) ||
+        state.equals("Cancelling", ignoreCase = true)
+
+private fun JellyfinAdminTask.looksLikeLibraryScanTask(): Boolean {
+    val haystack = listOf(id, name, category).joinToString(" ").lowercase()
+    return "library" in haystack && ("scan" in haystack || "refresh" in haystack)
+}
+
 private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
 private const val KEY_SETUP_COMPLETED = "setup_completed"
 private const val KEY_WATCH_PARTY_ENABLED = "watch_party_enabled"
@@ -3618,6 +3681,7 @@ private const val KEY_WATCH_PARTY_INVITES_ENABLED = "watch_party_invites_enabled
 private const val KEY_WATCH_PARTY_INVITE_ANIMATION_ENABLED = "watch_party_invite_animation_enabled"
 private const val KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS = "watch_party_invite_expiry_seconds"
 private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
+private const val LibraryScanStartGraceMs = 20_000L
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 60
 
