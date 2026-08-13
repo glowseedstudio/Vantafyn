@@ -117,6 +117,7 @@ import dev.vantafyn.core.media.VantafynTrackInfo
 import dev.vantafyn.core.ui.VantafynButton
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassCard
+import dev.vantafyn.core.ui.VantafynGlassModalPanel
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynSpacing
@@ -1220,7 +1221,7 @@ private fun PlayerOptionsSheet(
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
-            VantafynGlassPanel(
+            VantafynGlassModalPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = maxHeight * 0.86f),

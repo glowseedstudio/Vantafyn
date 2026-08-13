@@ -3,11 +3,14 @@ package dev.vantafyn.core.media
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -101,6 +104,7 @@ class MusicPlaybackController private constructor(context: Context) {
         )
         setHandleAudioBecomingNoisy(true)
         setWakeMode(C.WAKE_MODE_NETWORK)
+        enableCompatibleAudioOffload()
         addListener(
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -394,6 +398,18 @@ class MusicPlaybackController private constructor(context: Context) {
 
     private fun emitEvent(event: VantafynMusicPlaybackEvent) {
         _events.tryEmit(event)
+    }
+
+    @OptIn(UnstableApi::class)
+    private fun ExoPlayer.enableCompatibleAudioOffload() {
+        val audioOffloadPreferences = AudioOffloadPreferences.Builder()
+            .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
+            .setIsGaplessSupportRequired(true)
+            .build()
+        trackSelectionParameters = trackSelectionParameters
+            .buildUpon()
+            .setAudioOffloadPreferences(audioOffloadPreferences)
+            .build()
     }
 
     private fun ensurePlaybackService() {

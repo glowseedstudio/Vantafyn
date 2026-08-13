@@ -4585,8 +4585,8 @@ private fun AdminScreen(
     val overview = state.adminOverview
     val adminUser = overview?.users?.firstOrNull { it.id == state.session?.user?.id }
     var addUserExpanded by remember { mutableStateOf(false) }
-    var usersExpanded by rememberSaveable { mutableStateOf(true) }
-    var mediaStatsExpanded by rememberSaveable { mutableStateOf(true) }
+    var usersExpanded by rememberSaveable { mutableStateOf(false) }
+    var mediaStatsExpanded by rememberSaveable { mutableStateOf(false) }
     var statisticsExpanded by rememberSaveable { mutableStateOf(false) }
     var newUsername by remember { mutableStateOf("") }
     var newPassword by remember { mutableStateOf("") }
