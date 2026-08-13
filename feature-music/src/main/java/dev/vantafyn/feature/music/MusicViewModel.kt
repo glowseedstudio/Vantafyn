@@ -1,7 +1,6 @@
 package dev.vantafyn.feature.music
 
 import android.app.Application
-import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.vantafyn.core.jellyfin.JellyfinLyricLine
@@ -122,10 +121,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         queuedTrack.toPlaybackTrack()
                     }
                 }
-                Log.d(
-                    "VantafynMusic",
-                    "Starting track '${track.title.take(80)}' queueSize=${safeQueue.size} prepared=${preparedQueue.count { it.id in playbackInfoByTrack }}",
-                )
                 playbackController.playQueue(
                     queue = preparedQueue,
                     startIndex = safeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0),
@@ -144,7 +139,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = musicRepository.getAlbumTracks(activeSession, album.id)) {
                 is JellyfinResult.Success -> {
-                    Log.d("VantafynMusic", "Loaded album '${album.title.take(80)}' tracks=${result.value.size}")
                     _state.update {
                         it.copy(
                             screen = MusicScreenState.Album(album, result.value),
@@ -154,7 +148,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     result.value.firstOrNull()?.let { playTrack(it, result.value) }
                 }
                 is JellyfinResult.Failure -> {
-                    Log.d("VantafynMusic", "Album load failed: ${result.message.take(120)}")
                     _state.update { it.copy(errorMessage = result.message) }
                 }
             }
@@ -166,7 +159,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
                 is JellyfinResult.Success -> {
-                    Log.d("VantafynMusic", "Loaded playlist '${playlist.name.take(80)}' tracks=${result.value.size}")
                     _state.update {
                         it.copy(
                             screen = MusicScreenState.Playlist(playlist, result.value),
@@ -176,7 +168,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     result.value.firstOrNull()?.let { playTrack(it, result.value) }
                 }
                 is JellyfinResult.Failure -> {
-                    Log.d("VantafynMusic", "Playlist load failed: ${result.message.take(120)}")
                     _state.update { it.copy(errorMessage = result.message) }
                 }
             }
@@ -403,11 +394,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = musicRepository.addToPlaylist(activeSession, playlist.id, listOf(current.id))) {
                 is JellyfinResult.Success -> {
-                    Log.d("VantafynMusic", "Added current track to playlist '${playlist.name.take(80)}'")
                     _state.update { it.copy(message = "Added to ${playlist.name}", home = it.home?.incrementPlaylistCount(playlist.id)) }
                 }
                 is JellyfinResult.Failure -> {
-                    Log.d("VantafynMusic", "Add to playlist failed: ${result.message.take(120)}")
                     _state.update { it.copy(errorMessage = result.message) }
                 }
             }
@@ -434,7 +423,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun pauseForBackground() {
         if (playbackController.state.value.isPlaying) {
-            Log.d("VantafynMusic", "Pausing music for app background")
             playbackController.pause()
         }
     }
@@ -452,12 +440,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(lyricsTrackId = trackId, lyrics = null, isLyricsLoading = true) }
             when (val result = musicRepository.getLyrics(activeSession, trackId)) {
                 is JellyfinResult.Success -> _state.update {
-                    Log.d("VantafynMusic", "Lyrics ${if (result.value == null) "missing" else "loaded"} for track=$trackId")
                     cacheLyrics(cacheKey, result.value)
                     it.copy(isLyricsLoading = false, lyrics = result.value)
                 }
                 is JellyfinResult.Failure -> _state.update {
-                    Log.d("VantafynMusic", "Lyrics load failed: ${result.message.take(120)}")
                     it.copy(isLyricsLoading = false, lyrics = null)
                 }
             }
@@ -473,13 +459,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         lyricsPrefetchJob = viewModelScope.launch {
             when (val result = musicRepository.getLyrics(activeSession, trackId)) {
                 is JellyfinResult.Success -> {
-                    Log.d("VantafynMusic", "Lyrics prefetched for track=$trackId")
                     cacheLyrics(cacheKey, result.value)
                     if (_state.value.showLyricsScreen && playbackController.state.value.currentTrack?.id == trackId) {
                         _state.update { it.copy(lyricsTrackId = trackId, lyrics = result.value, isLyricsLoading = false) }
                     }
                 }
-                is JellyfinResult.Failure -> Log.d("VantafynMusic", "Lyrics prefetch failed: ${result.message.take(120)}")
+                is JellyfinResult.Failure -> Unit
             }
         }
     }
@@ -503,10 +488,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             )
         ) {
             is JellyfinResult.Success -> result.value.also {
-                Log.d("VantafynMusic", "Prepared playback info mediaSource=${it.mediaSourceId != null} playSession=${it.playSessionId != null}")
             }
             is JellyfinResult.Failure -> {
-                Log.d("VantafynMusic", "Music playback prepare failed, using universal audio URL: ${result.message.take(120)}")
                 null
             }
         }
@@ -548,7 +531,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val info = playbackInfoByTrack[track.id] ?: track.toFallbackPlaybackInfo()
         reportedTrackId = track.id
         lastPausedState = false
-        Log.d("VantafynMusic", "Reporting start '${track.title.take(80)}' playSession=${info.playSessionId != null}")
         viewModelScope.launch {
             reportResult("start", playbackRepository.reportStarted(activeSession, info, safePosition.toTicks()))
         }
@@ -575,7 +557,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val info = playbackInfoByTrack[track.id] ?: track.toFallbackPlaybackInfo()
         reportedTrackId = null
         playbackInfoByTrack.remove(track.id)
-        Log.d("VantafynMusic", "Reporting stop '${track.title.take(80)}' reason=$reason")
         viewModelScope.launch {
             reportResult("stop", playbackRepository.reportStopped(activeSession, info, positionMs.toTicks()))
         }
@@ -583,7 +564,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun reportResult(action: String, result: JellyfinResult<Unit>) {
         if (result is JellyfinResult.Failure) {
-            Log.d("VantafynMusic", "Play-state $action failed: ${result.message.take(120)}")
         }
     }
 

@@ -666,11 +666,8 @@ class SdkJellyfinMediaRepository(
         isFavorite: Boolean,
     ): JellyfinResult<Boolean> =
         withContext(ioDispatcher) {
-            val action = if (isFavorite) "add" else "remove"
-            val host = session.server.url.safeHostForLog()
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                Log.d("VantafynFavorites", "Jellyfin favorite $action requested itemId=$itemId server=$host repository=SdkJellyfinMediaRepository")
                 if (isFavorite) {
                     api.userLibraryApi.markFavoriteItem(itemId, session.user.id)
                 } else {
@@ -679,14 +676,11 @@ class SdkJellyfinMediaRepository(
                 val verifiedUserData by api.itemsApi.getItemUserData(itemId, session.user.id)
                 val verifiedFavorite = verifiedUserData.isFavorite == true
                 if (verifiedFavorite == isFavorite) {
-                    Log.d("VantafynFavorites", "Jellyfin favorite $action succeeded itemId=$itemId server=$host isFavorite=$verifiedFavorite")
                     JellyfinResult.Success(verifiedFavorite)
                 } else {
-                    Log.w("VantafynFavorites", "Jellyfin favorite $action verification mismatch itemId=$itemId server=$host expected=$isFavorite actual=$verifiedFavorite")
                     JellyfinResult.Failure("Couldn't update My List. Check your server connection and try again.")
                 }
             } catch (throwable: Throwable) {
-                Log.w("VantafynFavorites", "Jellyfin favorite $action failed itemId=$itemId server=$host reason=${throwable.javaClass.simpleName}")
                 JellyfinResult.Failure(toFavoriteUserMessage(throwable), throwable)
             }
         }
@@ -849,7 +843,6 @@ class SdkJellyfinPlaybackRepository(
                     )
                 } catch (throwable: Throwable) {
                     if (!isLiveTv) throw throwable
-                    Log.d("VantafynPlayback", "Live TV auto-open playback failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty().take(120)}")
                     getExplicitLiveStreamInfo(
                         api = api,
                         session = session,
@@ -862,13 +855,8 @@ class SdkJellyfinPlaybackRepository(
                         subtitleStreamIndex = subtitleStreamIndex,
                     )
                 }
-                Log.d(
-                    "VantafynPlayback",
-                    "Prepared ${info.method} live=${info.isLiveStream} mediaSource=${info.mediaSourceId != null} playSession=${info.playSessionId != null} liveStream=${info.liveStreamId != null} audio=${info.audioStreamIndex} subtitle=${info.subtitleStreamIndex}",
-                )
                 JellyfinResult.Success(info)
             } catch (throwable: Throwable) {
-                Log.d("VantafynPlayback", "Playback prepare failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty().take(120)}")
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
@@ -919,13 +907,8 @@ class SdkJellyfinPlaybackRepository(
                         maxAudioChannels = 6,
                     )
                 }
-                Log.d(
-                    "VantafynPlayback",
-                    "Prepared Cast ${info.method} live=${info.isLiveStream} mediaSource=${info.mediaSourceId != null} playSession=${info.playSessionId != null}",
-                )
                 JellyfinResult.Success(info)
             } catch (throwable: Throwable) {
-                Log.d("VantafynPlayback", "Cast playback prepare failed: ${throwable.javaClass.simpleName}: ${throwable.message.orEmpty().take(120)}")
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
@@ -1611,10 +1594,7 @@ class SdkJellyfinMusicRepository(
                     ),
                 )
                 playlistItems.items
-            }.getOrElse {
-                Log.d("VantafynMusic", "Playlist classification failed for '${playlist.name.orEmpty().take(80)}': ${it.javaClass.simpleName}")
-                emptyList()
-            }
+            }.getOrElse { emptyList() }
             val hasItems = items.isNotEmpty()
             val audioCount = items.count { it.type == BaseItemKind.AUDIO || it.mediaType == MediaType.AUDIO }
             val videoCount = items.count {
@@ -1623,14 +1603,8 @@ class SdkJellyfinMusicRepository(
             }
             when {
                 hasItems && audioCount > 0 && videoCount == 0 -> playlist.toMusicPlaylist(api, audioCount)
-                hasItems -> {
-                    Log.d("VantafynMusic", "Hiding non-music playlist '${playlist.name.orEmpty().take(80)}' audio=$audioCount video=$videoCount")
-                    null
-                }
-                else -> {
-                    Log.d("VantafynMusic", "Hiding empty/unknown playlist '${playlist.name.orEmpty().take(80)}' from Music")
-                    null
-                }
+                hasItems -> null
+                else -> null
             }
         }
     }
@@ -1847,7 +1821,10 @@ class SdkJellyfinAdminRepository(
                             canUninstall = it.canUninstall,
                         )
                     }
-                }.getOrDefault(emptyList())
+                }.getOrElse { sdkThrowable ->
+                    Log.w("VantafynAdmin", "SDK plugin list failed, falling back to /Plugins: ${sdkThrowable.javaClass.simpleName}")
+                    fetchPluginsFallback(session)
+                }
                 val tasks = runCatching {
                     val result by api.scheduledTasksApi.getTasks(isHidden = false, isEnabled = null)
                     result.map {
@@ -1900,6 +1877,7 @@ class SdkJellyfinAdminRepository(
                     }
                 }.getOrDefault(emptyList())
                 val statistics = loadPlaybackReportingStatistics(
+                    api = api,
                     session = session,
                     users = users,
                     plugins = plugins,
@@ -1938,7 +1916,8 @@ class SdkJellyfinAdminRepository(
             }
         }
 
-    private fun loadPlaybackReportingStatistics(
+    private suspend fun loadPlaybackReportingStatistics(
+        api: ApiClient,
         session: JellyfinSession,
         users: List<JellyfinAdminUser>,
         plugins: List<JellyfinAdminPlugin>,
@@ -1987,7 +1966,7 @@ class SdkJellyfinAdminRepository(
             )
             val usersStats = parsePlaybackReportingUsers(userActivity, userImages)
             val trend = loadPlaybackReportingTrend(session, days, endDate, timezoneOffset)
-            val media = loadPlaybackReportingMediaBreakdown(session, days, endDate, timezoneOffset)
+            val media = loadPlaybackReportingMediaBreakdown(api, session, days, endDate, timezoneOffset)
             val totalWatchTimeSeconds = usersStats.sumOf { it.totalWatchTimeSeconds }
             val totalPlayCount = usersStats.sumOf { it.playCount }
             JellyfinStatisticsOverview(
@@ -2070,7 +2049,8 @@ class SdkJellyfinAdminRepository(
                 }
         }.getOrDefault(emptyList())
 
-    private fun loadPlaybackReportingMediaBreakdown(
+    private suspend fun loadPlaybackReportingMediaBreakdown(
+        api: ApiClient,
         session: JellyfinSession,
         days: Int,
         endDate: String,
@@ -2081,14 +2061,15 @@ class SdkJellyfinAdminRepository(
                 session = session,
                 pathAndQuery = "user_usage_stats/ItemName/BreakdownReport?days=$days&endDate=$endDate&timezoneOffset=$timezoneOffset",
             )
-            (0 until rows.length())
+            val stats = (0 until rows.length())
                 .mapNotNull { index -> rows.optJSONObject(index) }
                 .mapNotNull { row ->
                     val title = row.firstString("label", "name", "item_name", "ItemName", "Name").takeIf { it.isNotBlank() }
                         ?: return@mapNotNull null
+                    val itemId = row.firstString("id", "item_id", "ItemId", "Id")
+                        .let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
                     JellyfinMediaWatchStats(
-                        itemId = row.firstString("id", "item_id", "ItemId", "Id")
-                            .let { runCatching { java.util.UUID.fromString(it) }.getOrNull() },
+                        itemId = itemId,
                         title = title,
                         type = row.firstString("type", "item_type", "Type").takeIf { it.isNotBlank() },
                         posterUrl = null,
@@ -2100,7 +2081,35 @@ class SdkJellyfinAdminRepository(
                 }
                 .sortedWith(compareByDescending<JellyfinMediaWatchStats> { it.totalWatchTimeSeconds }.thenByDescending { it.playCount })
                 .take(12)
+            val artworkById = loadPlaybackReportingArtwork(api, session, stats.mapNotNull { it.itemId })
+            stats.map { item -> item.copy(posterUrl = item.itemId?.let { artworkById[it] }) }
         }.getOrDefault(emptyList())
+
+    private suspend fun loadPlaybackReportingArtwork(
+        api: ApiClient,
+        session: JellyfinSession,
+        itemIds: List<java.util.UUID>,
+    ): Map<java.util.UUID, String?> {
+        val ids = itemIds.distinct().take(24)
+        if (ids.isEmpty()) return emptyMap()
+        return runCatching {
+            val result by api.itemsApi.getItems(
+                GetItemsRequest(
+                    userId = session.user.id,
+                    ids = ids,
+                    fields = itemFields,
+                    imageTypeLimit = 2,
+                    enableImageTypes = itemImageTypes,
+                    enableImages = true,
+                    enableUserData = false,
+                    enableTotalRecordCount = false,
+                ),
+            )
+            result.items.associate { item ->
+                item.id to (item.primaryImageUrl(api, 260) ?: item.thumbImageUrl(api, 360) ?: item.backdropImageUrl(api, 360))
+            }
+        }.getOrDefault(emptyMap())
+    }
 
     private fun playbackReportingJsonArray(session: JellyfinSession, pathAndQuery: String): JSONArray {
         val text = playbackReportingGet(session, pathAndQuery)
@@ -2112,7 +2121,42 @@ class SdkJellyfinAdminRepository(
         }
     }
 
+    private fun fetchPluginsFallback(session: JellyfinSession): List<JellyfinAdminPlugin> =
+        runCatching {
+            val text = authenticatedJsonGet(session, "Plugins")
+            val plugins = when {
+                text.trim().startsWith("[") -> JSONArray(text)
+                else -> JSONObject(text).optJSONArray("Items")
+                    ?: JSONObject(text).optJSONArray("items")
+                    ?: JSONArray()
+            }
+            (0 until plugins.length())
+                .mapNotNull { index -> plugins.optJSONObject(index) }
+                .mapNotNull { plugin ->
+                    val id = plugin.firstString("Id", "id")
+                        .let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
+                        ?: return@mapNotNull null
+                    JellyfinAdminPlugin(
+                        id = id,
+                        name = plugin.firstString("Name", "name").ifBlank { "Plugin" },
+                        version = plugin.firstString("Version", "version").takeIf { it.isNotBlank() },
+                        description = plugin.firstString("Description", "description").takeIf { it.isNotBlank() },
+                        status = plugin.firstString("Status", "status").takeIf { it.isNotBlank() },
+                        hasImage = plugin.optBoolean("HasImage", plugin.optBoolean("hasImage", false)),
+                        canUninstall = plugin.optBoolean("CanUninstall", plugin.optBoolean("canUninstall", false)),
+                    )
+                }
+                .sortedWith(compareByDescending<JellyfinAdminPlugin> { it.isEnabled }.thenBy { it.name.lowercase(Locale.US) })
+        }.getOrElse { throwable ->
+            Log.w("VantafynAdmin", "Plugin fallback failed: ${throwable.javaClass.simpleName}")
+            emptyList()
+        }
+
     private fun playbackReportingGet(session: JellyfinSession, pathAndQuery: String): String {
+        return authenticatedJsonGet(session, pathAndQuery).also { }
+    }
+
+    private fun authenticatedJsonGet(session: JellyfinSession, pathAndQuery: String): String {
         val base = session.server.url.trimEnd('/')
         val connection = URL("$base/$pathAndQuery").openConnection() as HttpURLConnection
         connection.requestMethod = "GET"
@@ -2125,7 +2169,7 @@ class SdkJellyfinAdminRepository(
         val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
         connection.disconnect()
         if (code !in 200..299) {
-            throw IllegalStateException("Playback Reporting request failed with HTTP $code")
+            throw IllegalStateException("Jellyfin request failed with HTTP $code")
         }
         return body
     }
@@ -3767,15 +3811,6 @@ private fun itemImageUrl(
 
 private fun profileId(serverUrl: String, userId: java.util.UUID): String =
     "${serverUrl.hashCode().toUInt()}-$userId"
-
-private fun String.safeHostForLog(): String =
-    runCatching {
-        URI(this).let { uri ->
-            listOfNotNull(uri.scheme, uri.host ?: uri.authority)
-                .joinToString("://")
-                .ifBlank { "unknown" }
-        }
-    }.getOrDefault("unknown")
 
 private fun toFavoriteUserMessage(throwable: Throwable): String {
     val className = throwable.javaClass.name

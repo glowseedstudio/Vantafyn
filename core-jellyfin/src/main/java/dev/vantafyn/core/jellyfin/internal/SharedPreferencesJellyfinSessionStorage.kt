@@ -1,10 +1,18 @@
 package dev.vantafyn.core.jellyfin
 
 import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.security.KeyStore
 import java.util.UUID
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
 
 class SharedPreferencesJellyfinSessionStorage(
     context: Context,
@@ -14,6 +22,7 @@ class SharedPreferencesJellyfinSessionStorage(
         "vantafyn_jellyfin_session",
         Context.MODE_PRIVATE,
     )
+    private val secrets = JellyfinEncryptedSessionSecrets(context.applicationContext)
 
     override suspend fun read(): StoredJellyfinSession? =
         withContext(ioDispatcher) {
@@ -47,9 +56,10 @@ class SharedPreferencesJellyfinSessionStorage(
                 .putString(key(session.profileId, KEY_USER_ID), session.userId.toString())
                 .putString(key(session.profileId, KEY_USER_NAME), session.userName)
                 .putString(key(session.profileId, KEY_USER_IMAGE_TAG), session.userImageTag)
-                .putString(key(session.profileId, KEY_ACCESS_TOKEN), session.accessToken)
+                .remove(key(session.profileId, KEY_ACCESS_TOKEN))
                 .putLong(key(session.profileId, KEY_LAST_USED_AT), session.lastUsedAt)
                 .apply()
+            secrets.saveAccessToken(session.profileId, session.accessToken)
         }
     }
 
@@ -70,12 +80,14 @@ class SharedPreferencesJellyfinSessionStorage(
                 .remove(key(profileId, KEY_ACCESS_TOKEN))
                 .remove(key(profileId, KEY_LAST_USED_AT))
                 .apply()
+            secrets.removeAccessToken(profileId)
         }
     }
 
     override suspend fun clear() {
         withContext(ioDispatcher) {
             preferences.edit().clear().apply()
+            secrets.clear()
         }
     }
 
@@ -92,7 +104,7 @@ class SharedPreferencesJellyfinSessionStorage(
         val serverUrl = preferences.getString(key(profileId, KEY_SERVER_URL), null) ?: return null
         val userId = preferences.getString(key(profileId, KEY_USER_ID), null)?.let(UUID::fromString) ?: return null
         val userName = preferences.getString(key(profileId, KEY_USER_NAME), null) ?: return null
-        val accessToken = preferences.getString(key(profileId, KEY_ACCESS_TOKEN), null) ?: return null
+        val accessToken = readAccessToken(profileId) ?: return null
         return StoredJellyfinSession(
             profileId = profileId,
             serverUrl = serverUrl,
@@ -105,6 +117,14 @@ class SharedPreferencesJellyfinSessionStorage(
             accessToken = accessToken,
             lastUsedAt = preferences.getLong(key(profileId, KEY_LAST_USED_AT), 0L),
         )
+    }
+
+    private fun readAccessToken(profileId: String): String? {
+        secrets.readAccessToken(profileId)?.let { return it }
+        val legacyToken = preferences.getString(key(profileId, KEY_ACCESS_TOKEN), null)?.takeIf { it.isNotBlank() } ?: return null
+        secrets.saveAccessToken(profileId, legacyToken)
+        preferences.edit().remove(key(profileId, KEY_ACCESS_TOKEN)).apply()
+        return legacyToken
     }
 
     private fun migrateLegacySessionIfNeeded() {
@@ -124,9 +144,10 @@ class SharedPreferencesJellyfinSessionStorage(
             .putString(key(profileId, KEY_SERVER_ID), preferences.getString(KEY_SERVER_ID, null))
             .putString(key(profileId, KEY_USER_ID), userId.toString())
             .putString(key(profileId, KEY_USER_NAME), userName)
-            .putString(key(profileId, KEY_ACCESS_TOKEN), accessToken)
+            .remove(KEY_ACCESS_TOKEN)
             .putLong(key(profileId, KEY_LAST_USED_AT), System.currentTimeMillis())
             .apply()
+        secrets.saveAccessToken(profileId, accessToken)
     }
 
     private companion object {
@@ -144,5 +165,63 @@ class SharedPreferencesJellyfinSessionStorage(
 
         fun key(profileId: String, field: String): String = "profile.$profileId.$field"
         fun profileId(serverUrl: String, userId: UUID): String = "${serverUrl.hashCode().toUInt()}-$userId"
+    }
+}
+
+private class JellyfinEncryptedSessionSecrets(context: Context) {
+    private val preferences = context.getSharedPreferences("vantafyn_jellyfin_session_secrets", Context.MODE_PRIVATE)
+
+    fun saveAccessToken(profileId: String, token: String) {
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getOrCreateKey())
+        val encrypted = cipher.doFinal(token.toByteArray(Charsets.UTF_8))
+        preferences.edit()
+            .putString("$profileId.iv", Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .putString("$profileId.value", Base64.encodeToString(encrypted, Base64.NO_WRAP))
+            .apply()
+    }
+
+    fun readAccessToken(profileId: String): String? {
+        val iv = preferences.getString("$profileId.iv", null)
+            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
+            ?: return null
+        val encrypted = preferences.getString("$profileId.value", null)
+            ?.let { runCatching { Base64.decode(it, Base64.NO_WRAP) }.getOrNull() }
+            ?: return null
+        return runCatching {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, getOrCreateKey(), GCMParameterSpec(128, iv))
+            String(cipher.doFinal(encrypted), Charsets.UTF_8)
+        }.getOrElse {
+            removeAccessToken(profileId)
+            null
+        }
+    }
+
+    fun removeAccessToken(profileId: String) {
+        preferences.edit().remove("$profileId.iv").remove("$profileId.value").apply()
+    }
+
+    fun clear() {
+        preferences.edit().clear().apply()
+    }
+
+    private fun getOrCreateKey(): SecretKey {
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (keyStore.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        generator.init(
+            KeyGenParameterSpec.Builder(KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setRandomizedEncryptionRequired(true)
+                .build(),
+        )
+        return generator.generateKey()
+    }
+
+    private companion object {
+        const val KEY_ALIAS = "vantafyn_jellyfin_session_secret_key"
+        const val TRANSFORMATION = "AES/GCM/NoPadding"
     }
 }

@@ -3,7 +3,6 @@ package dev.vantafyn.core.media
 import android.content.Context
 import android.net.Uri
 import android.os.Bundle
-import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
@@ -79,10 +78,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             val activeSession = session ?: return@runBlocking 0
             val results = when (val result = repositories.musicRepository.searchMusic(activeSession, clean, 50)) {
                 is JellyfinResult.Success -> result.value
-                is JellyfinResult.Failure -> {
-                    Log.d(LOG_TAG, "Auto search failed: ${result.message.take(120)}")
-                    emptyList()
-                }
+                is JellyfinResult.Failure -> emptyList()
             }
             searchResults[clean.lowercase()] = results
             results.size
@@ -115,24 +111,26 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     private suspend fun ensureReady(): Boolean {
         if (session != null && home != null) return true
         return withTimeoutOrNull(12_000L) {
-            val profile = repositories.authRepository.savedProfiles().firstOrNull() ?: return@withTimeoutOrNull false
-            val restored = when (val result = repositories.authRepository.restoreSession(profile.id)) {
-                is JellyfinResult.Success -> result.value
-                is JellyfinResult.Failure -> {
-                    Log.d(LOG_TAG, "Auto session restore failed: ${result.message.take(120)}")
-                    return@withTimeoutOrNull false
+            val profiles = repositories.authRepository.savedProfiles()
+            if (profiles.isEmpty()) return@withTimeoutOrNull false
+            profiles
+                .sortedByDescending { it.lastUsedAt }
+                .firstNotNullOfOrNull { profile ->
+                    val restored = when (val result = repositories.authRepository.restoreSession(profile.id)) {
+                        is JellyfinResult.Success -> result.value
+                        is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+                    }
+                    val loadedHome = when (val result = repositories.musicRepository.getMusicHome(restored)) {
+                        is JellyfinResult.Success -> result.value
+                        is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+                    }
+                    restored to loadedHome
                 }
-            }
-            val loadedHome = when (val result = repositories.musicRepository.getMusicHome(restored)) {
-                is JellyfinResult.Success -> result.value
-                is JellyfinResult.Failure -> {
-                    Log.d(LOG_TAG, "Auto music home failed: ${result.message.take(120)}")
-                    return@withTimeoutOrNull false
-                }
-            }
-            session = restored
-            home = loadedHome
-            true
+                ?.let { (restored, loadedHome) ->
+                    session = restored
+                    home = loadedHome
+                    true
+                } ?: false
         } == true
     }
 
@@ -316,6 +314,5 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
         const val SEARCH_PREFIX = "vf-search:"
         const val TRACK_PREFIX = "vf-track"
         const val EXTRA_TRACK_ID = "dev.vantafyn.media.TRACK_ID"
-        private const val LOG_TAG = "VantafynMusicAuto"
     }
 }

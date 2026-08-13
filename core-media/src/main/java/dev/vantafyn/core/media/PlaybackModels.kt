@@ -63,6 +63,7 @@ data class VantafynPlaybackItem(
     val itemType: String? = null,
     val isLiveStream: Boolean = false,
     val isCastResolved: Boolean = false,
+    val previousCandidate: UpNextCandidate? = null,
     val upNextCandidate: UpNextCandidate? = null,
     val autoplaySettings: AutoplaySettings = AutoplaySettings(),
     val continuousPlaybackStartedAtMs: Long = System.currentTimeMillis(),

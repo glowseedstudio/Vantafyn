@@ -3,7 +3,6 @@ package dev.vantafyn.core.media
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -122,10 +121,6 @@ class MusicPlaybackController private constructor(context: Context) {
                         Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> lastTransitionReason
                         else -> lastTransitionReason
                     }
-                    Log.d(
-                        MusicLogTag,
-                        "Media item transition reason=$reason queueIndex=$currentIndex mediaId=${mediaItem?.mediaId.orEmpty().take(36)}",
-                    )
                     _state.update { state ->
                         state.copy(
                             queueIndex = currentIndex,
@@ -149,10 +144,6 @@ class MusicPlaybackController private constructor(context: Context) {
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
-                    Log.d(
-                        MusicLogTag,
-                        "Player state=$playbackState queueIndex=${sessionPlayer.currentMediaItemIndex} count=${sessionPlayer.mediaItemCount} playing=${sessionPlayer.isPlaying}",
-                    )
                     _state.update { state ->
                         state.copy(
                             durationMs = duration.takeIf { it > 0 } ?: state.durationMs,
@@ -172,10 +163,6 @@ class MusicPlaybackController private constructor(context: Context) {
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    Log.d(
-                        MusicLogTag,
-                        "Player error=${error.errorCodeName} queueIndex=${sessionPlayer.currentMediaItemIndex} hasNext=${sessionPlayer.hasNextMediaItem()}",
-                    )
                     val failedTrack = _state.value.currentTrack
                     val failedPosition = currentPosition.coerceAtLeast(0L)
                     if (sessionPlayer.hasNextMediaItem()) {
@@ -208,7 +195,6 @@ class MusicPlaybackController private constructor(context: Context) {
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
         val previous = _state.value.currentTrack
         val previousPosition = sessionPlayer.currentPosition.coerceAtLeast(0L)
-        Log.d(MusicLogTag, "playQueue queueSize=${queue.size} startIndex=$safeIndex")
         if (previous != null && previous.id != queue[safeIndex].id) {
             emitEvent(VantafynMusicPlaybackEvent.Stopped(previous, previousPosition, VantafynMusicStopReason.QueueChange))
         }
@@ -241,7 +227,6 @@ class MusicPlaybackController private constructor(context: Context) {
                 (sessionPlayer.playbackState == Player.STATE_ENDED || sessionPlayer.playbackState == Player.STATE_IDLE)
             ) {
                 val index = sessionPlayer.currentMediaItemIndex.takeIf { it >= 0 } ?: _state.value.queueIndex
-                Log.d(MusicLogTag, "Recovering play command state=${sessionPlayer.playbackState} queueIndex=$index")
                 sessionPlayer.seekTo(index.coerceAtLeast(0), sessionPlayer.currentPosition.coerceAtLeast(0L))
                 sessionPlayer.prepare()
             }
@@ -420,8 +405,6 @@ class MusicPlaybackController private constructor(context: Context) {
             appContext.startService(intent)
         }.onSuccess {
             playbackServiceStarted = true
-        }.onFailure {
-            Log.d(MusicLogTag, "Unable to start music playback service: ${it.message.orEmpty().take(120)}")
         }
     }
 
@@ -449,7 +432,6 @@ class MusicPlaybackController private constructor(context: Context) {
             .build()
 
     companion object {
-        private const val MusicLogTag = "VantafynMusic"
         private const val MUSIC_TICKER_TASK_ID = "music.positionTicker"
         private const val ForegroundTickerIntervalMs = 1_000L
         private const val BackgroundTickerIntervalMs = 10_000L

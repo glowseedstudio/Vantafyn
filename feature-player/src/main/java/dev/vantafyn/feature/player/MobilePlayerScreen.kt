@@ -12,8 +12,10 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -22,11 +24,13 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowBack
@@ -42,8 +46,10 @@ import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.RestartAlt
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -58,7 +64,6 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -82,6 +87,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -113,9 +119,9 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassCard
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynGradients
-import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlin.math.abs
 
 @Composable
@@ -131,6 +137,7 @@ fun MobilePlayerScreen(
     onProgress: (Long, Boolean) -> Unit,
     onEnded: (Long) -> Unit,
     onPlayNext: (UpNextCandidate, Long) -> Unit,
+    onPlayPrevious: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
     onPrepareCastPlayback: (Long) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
@@ -161,13 +168,14 @@ fun MobilePlayerScreen(
                 onProgress = onProgress,
                 onEnded = onEnded,
                 onPlayNext = onPlayNext,
+                onPlayPrevious = onPlayPrevious,
                 onPlayerError = onPlayerError,
                 onPrepareCastPlayback = onPrepareCastPlayback,
                 onSelectAudioTrack = onSelectAudioTrack,
                 onSelectSubtitleTrack = onSelectSubtitleTrack,
                 suppressUpNext = suppressUpNext,
             )
-            isLoading -> VantafynLoadingIndicator(
+            isLoading -> PlayerLoadingIndicator(
                 text = "Preparing playback",
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -195,6 +203,7 @@ private fun PlayerSurface(
     onProgress: (Long, Boolean) -> Unit,
     onEnded: (Long) -> Unit,
     onPlayNext: (UpNextCandidate, Long) -> Unit,
+    onPlayPrevious: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
     onPrepareCastPlayback: (Long) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
@@ -204,7 +213,7 @@ private fun PlayerSurface(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val outputCoordinator = remember(context) { PlaybackOutputCoordinator.get(context) }
-    val outputState by outputCoordinator.state.collectAsState()
+    val outputState by outputCoordinator.state.collectAsStateWithLifecycle()
     var controlsVisible by remember(item.streamUrl) { mutableStateOf(true) }
     var isPlaying by remember(item.streamUrl) { mutableStateOf(false) }
     var isBuffering by remember(item.streamUrl) { mutableStateOf(true) }
@@ -220,7 +229,9 @@ private fun PlayerSurface(
     var upNextState by remember(item.itemId) { mutableStateOf<UpNextState>(UpNextState.Hidden) }
     var upNextCancelled by remember(item.itemId) { mutableStateOf(false) }
     var nextStarted by remember(item.itemId) { mutableStateOf(false) }
+    var previousStarted by remember(item.itemId) { mutableStateOf(false) }
     var lastCastProgressReportMs by remember(item.itemId) { mutableLongStateOf(-1L) }
+    val previousCandidate = item.previousCandidate
     val upNextCandidate = item.upNextCandidate
     val autoplaySettings = item.autoplaySettings
     val passoutProtectionLimitReached = autoplaySettings.passoutProtectionEnabled &&
@@ -356,7 +367,7 @@ private fun PlayerSurface(
 
     LaunchedEffect(player, isCastingThisItem, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
+            while (isActive) {
                 if (!isCastingThisItem) {
                     positionMs = player.currentPosition.coerceAtLeast(0L)
                     durationMs = player.duration.takeIf { it > 0 } ?: durationMs
@@ -377,7 +388,7 @@ private fun PlayerSurface(
 
     LaunchedEffect(player, started, isCastingThisItem, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
+            while (isActive) {
                 delay(7_000L)
                 if (started && !isCastingThisItem) onProgress(player.currentPosition, !player.isPlaying)
             }
@@ -460,6 +471,26 @@ private fun PlayerSurface(
                 activeSubtitleTrackId = castState.activeSubtitleTrackId,
                 onPlayPause = outputCoordinator::playPause,
                 onSeekTo = outputCoordinator::seekTo,
+                onSeekBy = { delta ->
+                    val target = (castState.positionMs + delta).coerceIn(0L, (castState.durationMs.takeIf { it > 0L } ?: durationMs).coerceAtLeast(0L))
+                    outputCoordinator.seekTo(target)
+                    onProgress(target, !castState.isPlaying)
+                },
+                onPlayPrevious = {
+                    val candidate = previousCandidate ?: return@CastControllerSurface
+                    if (!previousStarted) {
+                        previousStarted = true
+                        onPlayPrevious(candidate, castState.positionMs)
+                    }
+                },
+                onPlayNext = {
+                    val candidate = upNextCandidate ?: return@CastControllerSurface
+                    if (!nextStarted) {
+                        nextStarted = true
+                        upNextState = UpNextState.PlayingNext
+                        onPlayNext(candidate, castState.positionMs)
+                    }
+                },
                 onStopCasting = {
                     onProgress(castState.positionMs, true)
                     outputCoordinator.disconnect(stopPlayback = true)
@@ -496,7 +527,7 @@ private fun PlayerSurface(
             )
         }
         if (isBuffering && !isCastingThisItem) {
-            VantafynLoadingIndicator(
+            PlayerLoadingIndicator(
                 text = "Buffering",
                 modifier = Modifier.align(Alignment.Center),
             )
@@ -531,6 +562,13 @@ private fun PlayerSurface(
                 onAudio = { sheet = PlayerSheet.Audio },
                 onSubtitles = { sheet = PlayerSheet.Subtitles },
                 onMore = { sheet = PlayerSheet.More },
+                onPlayPrevious = {
+                    val candidate = previousCandidate ?: return@PlayerControls
+                    if (!previousStarted) {
+                        previousStarted = true
+                        onPlayPrevious(candidate, player.currentPosition)
+                    }
+                },
                 onPlayNext = {
                     val candidate = upNextCandidate ?: return@PlayerControls
                     if (!nextStarted) {
@@ -670,6 +708,7 @@ private fun PlayerControls(
     onAudio: () -> Unit,
     onSubtitles: () -> Unit,
     onMore: () -> Unit,
+    onPlayPrevious: () -> Unit,
     onPlayNext: () -> Unit,
 ) {
     Box(
@@ -766,11 +805,14 @@ private fun PlayerControls(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                PlayerIconButton(Icons.Rounded.Replay10, "Back 10 seconds", { onSeekBy(-10_000L) }, size = 52.dp)
+                if (item.previousCandidate != null && !item.isLiveStream) {
+                    PlayerIconButton(Icons.Rounded.SkipPrevious, "Previous episode", onPlayPrevious, size = 50.dp)
+                }
+                PlayerIconButton(Icons.Rounded.Replay10, "Back 10 seconds", { onSeekBy(-10_000L) }, size = 50.dp)
                 PlayerPrimaryButton(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (isPlaying) "Pause" else "Play", onPlayPause)
-                PlayerIconButton(Icons.Rounded.Forward10, "Forward 10 seconds", { onSeekBy(10_000L) }, size = 52.dp)
+                PlayerIconButton(Icons.Rounded.Forward10, "Forward 10 seconds", { onSeekBy(10_000L) }, size = 50.dp)
                 if (item.upNextCandidate != null && !item.isLiveStream) {
-                    PlayerIconButton(Icons.Rounded.SkipNext, "Next episode", onPlayNext, size = 52.dp)
+                    PlayerIconButton(Icons.Rounded.SkipNext, "Next episode", onPlayNext, size = 50.dp)
                 }
             }
         }
@@ -789,8 +831,11 @@ private fun CastControllerSurface(
     activeSubtitleTrackId: Long?,
     onPlayPause: () -> Unit,
     onSeekTo: (Long) -> Unit,
+    onSeekBy: (Long) -> Unit,
     onStopCasting: () -> Unit,
     onSubtitles: () -> Unit,
+    onPlayPrevious: () -> Unit,
+    onPlayNext: () -> Unit,
     onPlayHere: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -867,17 +912,29 @@ private fun CastControllerSurface(
                         Text(positionMs.formatMs(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
                         Text("-${(durationMs - positionMs).coerceAtLeast(0L).formatMs()}", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         if (subtitleTracks.isNotEmpty()) {
                             PlayerIconButton(
                                 icon = Icons.Rounded.ClosedCaption,
                                 contentDescription = "Cast subtitles",
                                 onClick = onSubtitles,
                                 active = activeSubtitleTrackId != null,
-                                size = 52.dp,
+                                size = 48.dp,
                             )
                         }
+                        if (item.previousCandidate != null && !item.isLiveStream) {
+                            PlayerIconButton(Icons.Rounded.SkipPrevious, "Previous episode", onPlayPrevious, size = 48.dp)
+                        }
+                        PlayerIconButton(Icons.Rounded.Replay10, "Back 10 seconds", { onSeekBy(-10_000L) }, size = 48.dp)
                         PlayerPrimaryButton(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (isPlaying) "Pause Cast" else "Play Cast", onPlayPause)
+                        PlayerIconButton(Icons.Rounded.Forward10, "Forward 10 seconds", { onSeekBy(10_000L) }, size = 48.dp)
+                        if (item.upNextCandidate != null && !item.isLiveStream) {
+                            PlayerIconButton(Icons.Rounded.SkipNext, "Next episode", onPlayNext, size = 48.dp)
+                        }
                     }
                     errorMessage?.let {
                         Text(it, color = Color(0xFFFFC2C2), textAlign = TextAlign.Center)
@@ -1072,6 +1129,30 @@ private fun UpNextOverlay(
 }
 
 @Composable
+private fun PlayerLoadingIndicator(
+    text: String,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CircularProgressIndicator(
+            color = Color(0xFF58D7FF),
+            trackColor = Color(0xFF9B5CFF).copy(alpha = 0.22f),
+            modifier = Modifier.size(30.dp),
+        )
+        Text(
+            text = text,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
 private fun PlaybackErrorOverlay(
     message: String,
     canTryTranscode: Boolean,
@@ -1133,96 +1214,108 @@ private fun PlayerOptionsSheet(
         containerColor = Color.Transparent,
         dragHandle = null,
     ) {
-        VantafynGlassPanel(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 10.dp, vertical = 8.dp),
-            cornerRadius = 30.dp,
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            VantafynGlassPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxHeight * 0.86f),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(sheet.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text(sheet.subtitle, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
-                }
-                PlayerIconButton(Icons.Rounded.Close, "Close", onDismiss, size = 38.dp)
-            }
-            when (sheet) {
-                PlayerSheet.Audio -> {
-                    if (item.audioTracks.isEmpty()) {
-                        EmptyOption("No alternate audio tracks")
-                    } else {
-                        item.audioTracks.forEach { track ->
-                            TrackRow(
-                                title = track.label,
-                                detail = track.audioDetail(),
-                                selected = track.index == selectedAudioIndex,
-                                badges = buildList {
-                                    if (track.isDefault) add("Default")
-                                    track.channels?.channelLabel()?.let { add(it) }
-                                },
-                            ) { onAudio(track) }
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(sheet.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text(sheet.subtitle, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        PlayerIconButton(Icons.Rounded.Close, "Close", onDismiss, size = 38.dp)
+                    }
+                    when (sheet) {
+                        PlayerSheet.Audio -> {
+                            if (item.audioTracks.isEmpty()) {
+                                EmptyOption("No alternate audio tracks")
+                            } else {
+                                item.audioTracks.forEach { track ->
+                                    TrackRow(
+                                        title = track.label,
+                                        detail = track.audioDetail(),
+                                        selected = track.index == selectedAudioIndex,
+                                        badges = buildList {
+                                            if (track.isDefault) add("Default")
+                                            track.channels?.channelLabel()?.let { add(it) }
+                                        },
+                                    ) { onAudio(track) }
+                                }
+                            }
+                        }
+                        PlayerSheet.Subtitles -> {
+                            TrackRow("Off", "Disable subtitles", selected = selectedSubtitleIndex == null) { onSubtitle(null) }
+                            if (item.subtitleTracks.isEmpty()) {
+                                EmptyOption("No subtitle tracks available")
+                            } else {
+                                item.subtitleTracks.forEach { track ->
+                                    TrackRow(
+                                        title = track.label,
+                                        detail = track.subtitleDetail(),
+                                        selected = track.index == selectedSubtitleIndex,
+                                        badges = buildList {
+                                            if (track.isDefault) add("Default")
+                                            if (track.isExternal) add("External")
+                                            if (track.deliveryUrl == null && track.isExternal) add("Unavailable")
+                                        },
+                                        enabled = !track.isExternal || track.deliveryUrl != null,
+                                    ) { onSubtitle(track) }
+                                }
+                            }
+                        }
+                        PlayerSheet.More -> {
+                            OptionRow(Icons.Rounded.ClosedCaption, "Subtitles", item.selectedSubtitleLabel(selectedSubtitleIndex)) { onOpen(PlayerSheet.Subtitles) }
+                            if (item.audioTracks.size > 1) {
+                                OptionRow(Icons.Rounded.Audiotrack, "Audio", item.selectedAudioLabel(selectedAudioIndex)) { onOpen(PlayerSheet.Audio) }
+                            }
+                            OptionRow(Icons.Rounded.Speed, "Playback speed", "${playbackSpeed.cleanSpeed()}x") { onOpen(PlayerSheet.Speed) }
+                            OptionRow(Icons.Rounded.Settings, "Screen fit", resizeMode.label) { onOpen(PlayerSheet.Resize) }
+                            if (item.fallbackStreamUrl != null || canTryTranscode) {
+                                OptionRow(Icons.Rounded.RestartAlt, "Try transcoding", "Preserves your current position where possible", onTryTranscode)
+                            }
+                            OptionRow(Icons.Rounded.Replay10, "Watch from beginning", "Start this title over", onWatchFromBeginning)
+                            OptionRow(Icons.Rounded.Stop, "Stop playback", "Return to Vantafyn", onStop)
+                            OptionRow(Icons.Rounded.Settings, "Retry playback", "Reload this playback source", onRetry)
+                        }
+                        PlayerSheet.Speed -> {
+                            listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
+                                TrackRow(
+                                    title = "${speed.cleanSpeed()}x",
+                                    detail = if (speed == 1f) "Normal speed" else "Playback speed",
+                                    selected = speed == playbackSpeed,
+                                ) { onSpeed(speed) }
+                            }
+                        }
+                        PlayerSheet.Resize -> {
+                            PlayerResizeMode.entries.forEach { mode ->
+                                TrackRow(
+                                    title = mode.label,
+                                    detail = mode.description,
+                                    selected = mode == resizeMode,
+                                ) { onResize(mode) }
+                            }
                         }
                     }
-                }
-                PlayerSheet.Subtitles -> {
-                    TrackRow("Off", "Disable subtitles", selected = selectedSubtitleIndex == null) { onSubtitle(null) }
-                    if (item.subtitleTracks.isEmpty()) {
-                        EmptyOption("No subtitle tracks available")
-                    } else {
-                        item.subtitleTracks.forEach { track ->
-                            TrackRow(
-                                title = track.label,
-                                detail = track.subtitleDetail(),
-                                selected = track.index == selectedSubtitleIndex,
-                                badges = buildList {
-                                    if (track.isDefault) add("Default")
-                                    if (track.isExternal) add("External")
-                                    if (track.deliveryUrl == null && track.isExternal) add("Unavailable")
-                                },
-                                enabled = !track.isExternal || track.deliveryUrl != null,
-                            ) { onSubtitle(track) }
-                        }
-                    }
-                }
-                PlayerSheet.More -> {
-                    OptionRow(Icons.Rounded.ClosedCaption, "Subtitles", item.selectedSubtitleLabel(selectedSubtitleIndex)) { onOpen(PlayerSheet.Subtitles) }
-                    if (item.audioTracks.size > 1) {
-                        OptionRow(Icons.Rounded.Audiotrack, "Audio", item.selectedAudioLabel(selectedAudioIndex)) { onOpen(PlayerSheet.Audio) }
-                    }
-                    OptionRow(Icons.Rounded.Speed, "Playback speed", "${playbackSpeed.cleanSpeed()}x") { onOpen(PlayerSheet.Speed) }
-                    OptionRow(Icons.Rounded.Settings, "Screen fit", resizeMode.label) { onOpen(PlayerSheet.Resize) }
-                    if (item.fallbackStreamUrl != null || canTryTranscode) {
-                        OptionRow(Icons.Rounded.RestartAlt, "Try transcoding", "Preserves your current position where possible", onTryTranscode)
-                    }
-                    OptionRow(Icons.Rounded.Replay10, "Watch from beginning", "Start this title over", onWatchFromBeginning)
-                    OptionRow(Icons.Rounded.Stop, "Stop playback", "Return to Vantafyn", onStop)
-                    OptionRow(Icons.Rounded.Settings, "Retry playback", "Reload this playback source", onRetry)
-                }
-                PlayerSheet.Speed -> {
-                    listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { speed ->
-                        TrackRow(
-                            title = "${speed.cleanSpeed()}x",
-                            detail = if (speed == 1f) "Normal speed" else "Playback speed",
-                            selected = speed == playbackSpeed,
-                        ) { onSpeed(speed) }
-                    }
-                }
-                PlayerSheet.Resize -> {
-                    PlayerResizeMode.entries.forEach { mode ->
-                        TrackRow(
-                            title = mode.label,
-                            detail = mode.description,
-                            selected = mode == resizeMode,
-                        ) { onResize(mode) }
-                    }
+                    Spacer(Modifier.height(16.dp))
                 }
             }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -1241,41 +1334,53 @@ private fun CastSubtitleOptionsSheet(
         containerColor = Color.Transparent,
         dragHandle = null,
     ) {
-        VantafynGlassPanel(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 10.dp, vertical = 8.dp),
-            cornerRadius = 30.dp,
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            VantafynGlassPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = maxHeight * 0.86f),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Cast subtitles", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text("Subtitles available on your Cast device.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text("Cast subtitles", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text("Subtitles available on your Cast device.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        PlayerIconButton(Icons.Rounded.Close, "Close", onDismiss, size = 38.dp)
+                    }
+                    TrackRow("Off", "Disable subtitles on Cast", selected = activeSubtitleTrackId == null) { onSubtitle(null) }
+                    if (subtitleTracks.isEmpty()) {
+                        EmptyOption("No Cast subtitles available")
+                    } else {
+                        subtitleTracks.forEach { track ->
+                            TrackRow(
+                                title = track.label,
+                                detail = track.castSubtitleDetail(),
+                                selected = track.castTrackId == activeSubtitleTrackId,
+                                badges = buildList {
+                                    if (track.isDefault) add("Default")
+                                    if (track.isExternal) add("External")
+                                },
+                            ) { onSubtitle(track) }
+                        }
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
-                PlayerIconButton(Icons.Rounded.Close, "Close", onDismiss, size = 38.dp)
             }
-            TrackRow("Off", "Disable subtitles on Cast", selected = activeSubtitleTrackId == null) { onSubtitle(null) }
-            if (subtitleTracks.isEmpty()) {
-                EmptyOption("No Cast subtitles available")
-            } else {
-                subtitleTracks.forEach { track ->
-                    TrackRow(
-                        title = track.label,
-                        detail = track.castSubtitleDetail(),
-                        selected = track.castTrackId == activeSubtitleTrackId,
-                        badges = buildList {
-                            if (track.isDefault) add("Default")
-                            if (track.isExternal) add("External")
-                        },
-                    ) { onSubtitle(track) }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -1309,11 +1414,11 @@ private fun TrackRow(
                 title,
                 color = if (enabled) VantafynColors.Ink else VantafynColors.Muted,
                 fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             if (detail.isNotBlank()) {
-                Text(detail, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(detail, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             if (badges.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1344,8 +1449,8 @@ private fun OptionRow(icon: ImageVector, title: String, detail: String, onClick:
     ) {
         Icon(icon, contentDescription = null, tint = VantafynColors.Ink.copy(alpha = 0.92f), modifier = Modifier.size(24.dp))
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-            Text(detail, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(detail, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

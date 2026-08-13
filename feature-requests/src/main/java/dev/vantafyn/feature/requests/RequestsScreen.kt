@@ -36,7 +36,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +57,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
@@ -94,6 +94,7 @@ import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @Composable
 fun RequestsScreen(
@@ -102,7 +103,7 @@ fun RequestsScreen(
     modifier: Modifier = Modifier,
     viewModel: RequestsViewModel = viewModel(),
 ) {
-    val state by viewModel.state.collectAsState()
+    val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(session?.profileId) {
         viewModel.bindSession(session)
     }
@@ -296,7 +297,7 @@ private fun RequestsHero(state: RequestsUiState, viewModel: RequestsViewModel, o
     LaunchedEffect(heroItems.map { it.externalId }, lifecycleOwner) {
         if (heroItems.size > 1) {
             lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                while (true) {
+                while (isActive) {
                     delay(5_800)
                     val next = (listState.firstVisibleItemIndex + 1) % heroItems.size
                     listState.animateScrollToItem(next)

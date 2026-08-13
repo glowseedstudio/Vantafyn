@@ -779,7 +779,13 @@ data class JellyfinAdminPlugin(
     val status: String?,
     val hasImage: Boolean,
     val canUninstall: Boolean,
-)
+) {
+    val isEnabled: Boolean
+        get() = !status.equals("Disabled", ignoreCase = true) &&
+            !status.equals("DELETED", ignoreCase = true) &&
+            !status.equals("Malfunctioned", ignoreCase = true) &&
+            !status.equals("NotSupported", ignoreCase = true)
+}
 
 data class JellyfinAdminTask(
     val id: String,

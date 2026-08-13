@@ -140,6 +140,7 @@ import dev.vantafyn.core.ui.VantafynTextField
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
@@ -1864,11 +1865,14 @@ private fun PlainLyricsView(text: String, modifier: Modifier = Modifier) {
     LaunchedEffect(lines, lifecycleOwner) {
         if (lines.isEmpty()) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
+            while (isActive) {
                 delay(1_400L)
                 if (System.currentTimeMillis() < suppressAutoScrollUntil) continue
                 val next = (listState.firstVisibleItemIndex + 1).coerceAtMost(lines.lastIndex)
-                if (next == listState.firstVisibleItemIndex) continue
+                if (next == listState.firstVisibleItemIndex) {
+                    delay(4_200L)
+                    continue
+                }
                 autoScrolling = true
                 listState.animateScrollToItem(next)
                 autoScrolling = false

@@ -5,12 +5,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassPill
 
@@ -18,7 +18,7 @@ import dev.vantafyn.core.ui.VantafynGlassPill
 fun GoogleCastStatusLabel(modifier: Modifier = Modifier) {
     if (!VantafynCastFeatureFlags.googleCastEnabled) return
     val context = LocalContext.current
-    val outputState by PlaybackOutputCoordinator.get(context).state.collectAsState()
+    val outputState by PlaybackOutputCoordinator.get(context).state.collectAsStateWithLifecycle()
     val receiverName = outputState.castState.receiverName?.takeIf(String::isNotBlank) ?: return
     if (outputState.castState.connectionState != RemoteConnectionState.Connected) return
 

@@ -87,7 +87,10 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         createMusicPlaybackChannel()
-        when (intent?.action) {
+        if (intent == null || intent.action == null) {
+            return super.onStartCommand(intent, flags, startId)
+        }
+        when (intent.action) {
             ACTION_TOGGLE_PLAYBACK -> playbackController.togglePlayPause()
             ACTION_PREVIOUS -> playbackController.previous()
             ACTION_NEXT -> playbackController.next()

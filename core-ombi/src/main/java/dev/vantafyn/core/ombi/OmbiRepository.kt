@@ -1,7 +1,6 @@
 package dev.vantafyn.core.ombi
 
 import android.content.Context
-import android.util.Log
 import dev.vantafyn.core.integrations.EncryptedIntegrationAuthStorage
 import dev.vantafyn.core.integrations.IntegrationCapability
 import dev.vantafyn.core.integrations.IntegrationConnectionState
@@ -1255,7 +1254,6 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType, sourceEndpo
         ?: optJSONObject("childRequests")?.optNullableString("title")
         ?: "Untitled"
     val state = requestState()
-    debugStatusResolution(sourceEndpoint, this, requestType, title, state)
     return RequestMediaSummary(
         externalId = externalId,
         movieDbId = movieDbId,
@@ -1471,24 +1469,6 @@ private fun String?.isRequestStatus(fragment: String): Boolean =
 private fun String?.isKnownRequestStatus(): Boolean =
     listOf("pending", "approv", "den", "process", "request", "fail")
         .any { isRequestStatus(it) }
-
-private fun debugStatusResolution(
-    sourceEndpoint: String?,
-    json: JSONObject,
-    mediaType: RequestMediaType,
-    title: String,
-    state: RequestState,
-) {
-    if (!Log.isLoggable(OMBI_STATUS_TAG, Log.DEBUG)) return
-    Log.d(
-        OMBI_STATUS_TAG,
-        "source=${sourceEndpoint ?: "detail"} type=$mediaType title=$title " +
-            "ids={tmdb=${json.optAnyString("theMovieDbId") ?: json.optAnyString("tmdbId")},tvdb=${json.optAnyString("theTvDbId") ?: json.optAnyString("tvDbId") ?: json.optAnyString("seriesId")},request=${json.requestRecordId()}} " +
-            "flags={requested=${json.opt("requested")},approved=${json.opt("approved")},denied=${json.opt("denied")},processing=${json.opt("processing")},available=${json.opt("available")},fully=${json.opt("fullyAvailable")},partial=${json.opt("partlyAvailable")},status=${json.opt("requestStatus")}} final=$state",
-    )
-}
-
-private const val OMBI_STATUS_TAG = "VantafynOmbiStatus"
 
 private fun JSONObject.optIntOrNull(name: String): Int? {
     val value = opt(name) ?: return null
