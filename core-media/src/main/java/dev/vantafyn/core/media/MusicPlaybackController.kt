@@ -372,6 +372,7 @@ class MusicPlaybackController private constructor(context: Context) {
 
     fun release() {
         tickerJob?.cancel()
+        LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "controller released")
         sessionPlayer.release()
         scope.cancel()
     }
@@ -380,9 +381,16 @@ class MusicPlaybackController private constructor(context: Context) {
         if (!sessionPlayer.isPlaying) {
             tickerJob?.cancel()
             tickerJob = null
+            LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "music paused")
             return
         }
         if (tickerJob != null) return
+        LongRunningTaskRegistry.start(
+            id = MUSIC_TICKER_TASK_ID,
+            type = LongRunningTaskType.MusicService,
+            owner = "MusicPlaybackController",
+            state = "playing",
+        )
         tickerJob = scope.launch {
             while (isActive) {
                 _state.update { state ->
@@ -393,6 +401,7 @@ class MusicPlaybackController private constructor(context: Context) {
                         isPlaying = sessionPlayer.isPlaying,
                     )
                 }
+                LongRunningTaskRegistry.tick(MUSIC_TICKER_TASK_ID, if (sessionPlayer.isPlaying) "playing" else "paused")
                 delay(1_000L)
             }
         }
@@ -419,6 +428,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private fun stopPlaybackService() {
         val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
         runCatching { appContext.stopService(intent) }
+        LongRunningTaskRegistry.stop("music.playbackService", "controller stopped service")
         playbackServiceStarted = false
     }
 
@@ -440,6 +450,7 @@ class MusicPlaybackController private constructor(context: Context) {
 
     companion object {
         private const val MusicLogTag = "VantafynMusic"
+        private const val MUSIC_TICKER_TASK_ID = "music.positionTicker"
 
         @Volatile
         private var instance: MusicPlaybackController? = null

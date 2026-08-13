@@ -62,6 +62,7 @@ data class VantafynPlaybackItem(
     val subtitleTracks: List<VantafynSubtitleTrack> = emptyList(),
     val itemType: String? = null,
     val isLiveStream: Boolean = false,
+    val isCastResolved: Boolean = false,
     val upNextCandidate: UpNextCandidate? = null,
     val autoplaySettings: AutoplaySettings = AutoplaySettings(),
     val continuousPlaybackStartedAtMs: Long = System.currentTimeMillis(),

@@ -58,6 +58,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
@@ -73,6 +74,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -80,6 +82,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -95,6 +98,10 @@ import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
+import dev.vantafyn.core.cast.GoogleCastRouteButton
+import dev.vantafyn.core.cast.PlaybackOutputCoordinator
+import dev.vantafyn.core.cast.PlaybackOutputType
+import dev.vantafyn.core.cast.CastSubtitleTrack
 import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.UpNextState
 import dev.vantafyn.core.media.VantafynAudioTrack
@@ -109,6 +116,7 @@ import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
 import kotlinx.coroutines.delay
+import kotlin.math.abs
 
 @Composable
 fun MobilePlayerScreen(
@@ -124,6 +132,7 @@ fun MobilePlayerScreen(
     onEnded: (Long) -> Unit,
     onPlayNext: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
+    onPrepareCastPlayback: (Long) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
     suppressUpNext: Boolean = false,
@@ -153,6 +162,7 @@ fun MobilePlayerScreen(
                 onEnded = onEnded,
                 onPlayNext = onPlayNext,
                 onPlayerError = onPlayerError,
+                onPrepareCastPlayback = onPrepareCastPlayback,
                 onSelectAudioTrack = onSelectAudioTrack,
                 onSelectSubtitleTrack = onSelectSubtitleTrack,
                 suppressUpNext = suppressUpNext,
@@ -186,12 +196,15 @@ private fun PlayerSurface(
     onEnded: (Long) -> Unit,
     onPlayNext: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
+    onPrepareCastPlayback: (Long) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
     suppressUpNext: Boolean,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val outputCoordinator = remember(context) { PlaybackOutputCoordinator.get(context) }
+    val outputState by outputCoordinator.state.collectAsState()
     var controlsVisible by remember(item.streamUrl) { mutableStateOf(true) }
     var isPlaying by remember(item.streamUrl) { mutableStateOf(false) }
     var isBuffering by remember(item.streamUrl) { mutableStateOf(true) }
@@ -199,6 +212,7 @@ private fun PlayerSurface(
     var positionMs by remember(item.streamUrl) { mutableLongStateOf(item.startPositionMs) }
     var started by remember(item.streamUrl) { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<PlayerSheet?>(null) }
+    var castSubtitleSheetVisible by remember { mutableStateOf(false) }
     var playbackSpeed by remember(item.streamUrl) { mutableFloatStateOf(1f) }
     var resizeMode by remember(item.streamUrl) { mutableStateOf(PlayerResizeMode.Fit) }
     var selectedAudioIndex by remember(item.streamUrl) { mutableStateOf(item.selectedAudioStreamIndex) }
@@ -206,6 +220,7 @@ private fun PlayerSurface(
     var upNextState by remember(item.itemId) { mutableStateOf<UpNextState>(UpNextState.Hidden) }
     var upNextCancelled by remember(item.itemId) { mutableStateOf(false) }
     var nextStarted by remember(item.itemId) { mutableStateOf(false) }
+    var lastCastProgressReportMs by remember(item.itemId) { mutableLongStateOf(-1L) }
     val upNextCandidate = item.upNextCandidate
     val autoplaySettings = item.autoplaySettings
     val passoutProtectionLimitReached = autoplaySettings.passoutProtectionEnabled &&
@@ -218,6 +233,9 @@ private fun PlayerSurface(
         autoplaySettings.onlyForEpisodes &&
         item.itemType.equals("Episode", ignoreCase = true) &&
         !item.isLiveStream
+    val isCastingThisItem = outputState.activeOutput == PlaybackOutputType.GoogleCast &&
+        outputState.castState.currentItemId == item.itemId
+    val castState = outputState.castState
     val trackSelector = remember(item.streamUrl) { DefaultTrackSelector(context) }
     val player = remember(item.streamUrl) {
         val renderersFactory = DefaultRenderersFactory(context)
@@ -238,9 +256,10 @@ private fun PlayerSurface(
                 setMediaItem(item.toMediaItem())
                 prepare()
                 if (item.startPositionMs > 0L) seekTo(item.startPositionMs)
-                playWhenReady = true
+                playWhenReady = !item.isCastResolved
             }
     }
+    KeepScreenAwake(enabled = !isCastingThisItem && (isPlaying || (isBuffering && player.playWhenReady)))
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -309,19 +328,67 @@ private fun PlayerSurface(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(player) {
-        while (true) {
-            positionMs = player.currentPosition.coerceAtLeast(0L)
-            durationMs = player.duration.takeIf { it > 0 } ?: durationMs
-            onPosition(positionMs)
-            delay(500L)
+    LaunchedEffect(outputState.castState.connectionState, outputState.activeOutput, item.streamUrl) {
+        if (
+            outputState.castState.connectionState == dev.vantafyn.core.cast.RemoteConnectionState.Connected &&
+            outputState.activeOutput != PlaybackOutputType.GoogleCast &&
+            item.itemType?.lowercase() in setOf("movie", "episode") &&
+            !item.isLiveStream
+        ) {
+            val handoffPosition = player.currentPosition.coerceAtLeast(positionMs)
+            player.pause()
+            onProgress(handoffPosition, true)
+            if (item.isCastResolved) {
+                outputCoordinator.loadVideo(item, handoffPosition)
+            } else {
+                onPrepareCastPlayback(handoffPosition)
+            }
         }
     }
 
-    LaunchedEffect(player, started) {
-        while (true) {
-            delay(7_000L)
-            if (started) onProgress(player.currentPosition, !player.isPlaying)
+    LaunchedEffect(isCastingThisItem) {
+        if (isCastingThisItem) {
+            player.pause()
+            started = true
+            onStarted(castState.positionMs)
+        }
+    }
+
+    LaunchedEffect(player, isCastingThisItem, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                if (!isCastingThisItem) {
+                    positionMs = player.currentPosition.coerceAtLeast(0L)
+                    durationMs = player.duration.takeIf { it > 0 } ?: durationMs
+                    onPosition(positionMs)
+                }
+                delay(500L)
+            }
+        }
+    }
+
+    LaunchedEffect(isCastingThisItem, castState.positionMs, castState.durationMs) {
+        if (isCastingThisItem) {
+            positionMs = castState.positionMs
+            durationMs = castState.durationMs.takeIf { it > 0L } ?: durationMs
+            onPosition(positionMs)
+        }
+    }
+
+    LaunchedEffect(player, started, isCastingThisItem, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                delay(7_000L)
+                if (started && !isCastingThisItem) onProgress(player.currentPosition, !player.isPlaying)
+            }
+        }
+    }
+
+    LaunchedEffect(isCastingThisItem, castState.positionMs, castState.isPlaying) {
+        if (!isCastingThisItem) return@LaunchedEffect
+        if (lastCastProgressReportMs < 0L || abs(castState.positionMs - lastCastProgressReportMs) >= 10_000L) {
+            lastCastProgressReportMs = castState.positionMs
+            onProgress(castState.positionMs, !castState.isPlaying)
         }
     }
 
@@ -381,33 +448,61 @@ private fun PlayerSurface(
                 indication = null,
             ) { controlsVisible = !controlsVisible },
     ) {
-        AndroidView(
-            factory = {
-                val initialResizeMode = resizeMode.media3Mode
-                PlayerView(it).apply {
-                    useController = false
-                    this.resizeMode = initialResizeMode
-                    this.player = player
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                    )
-                }
-            },
-            update = {
-                it.player = player
-                it.resizeMode = resizeMode.media3Mode
-            },
-            modifier = Modifier.fillMaxSize(),
-        )
-        if (isBuffering) {
+        if (isCastingThisItem) {
+            CastControllerSurface(
+                item = item,
+                receiverName = castState.receiverName,
+                positionMs = castState.positionMs,
+                durationMs = castState.durationMs.takeIf { it > 0L } ?: durationMs,
+                isPlaying = castState.isPlaying,
+                errorMessage = outputState.lastErrorMessage,
+                subtitleTracks = castState.subtitleTracks,
+                activeSubtitleTrackId = castState.activeSubtitleTrackId,
+                onPlayPause = outputCoordinator::playPause,
+                onSeekTo = outputCoordinator::seekTo,
+                onStopCasting = {
+                    onProgress(castState.positionMs, true)
+                    outputCoordinator.disconnect(stopPlayback = true)
+                    onBack()
+                },
+                onSubtitles = { castSubtitleSheetVisible = true },
+                onPlayHere = {
+                    val resumePosition = castState.positionMs
+                    outputCoordinator.playVideoOnThisDevice(stopCastPlayback = true)
+                    player.seekTo(resumePosition)
+                    player.play()
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            AndroidView(
+                factory = {
+                    val initialResizeMode = resizeMode.media3Mode
+                    PlayerView(it).apply {
+                        useController = false
+                        this.resizeMode = initialResizeMode
+                        this.player = player
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
+                    }
+                },
+                update = {
+                    it.player = player
+                    it.resizeMode = resizeMode.media3Mode
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (isBuffering && !isCastingThisItem) {
             VantafynLoadingIndicator(
                 text = "Buffering",
                 modifier = Modifier.align(Alignment.Center),
             )
         }
         AnimatedVisibility(
-            visible = controlsVisible,
+            visible = controlsVisible && !isCastingThisItem,
             modifier = Modifier.fillMaxSize(),
             enter = fadeIn(tween(220)),
             exit = fadeOut(tween(320)),
@@ -476,7 +571,22 @@ private fun PlayerSurface(
         }
     }
 
+    if (castSubtitleSheetVisible && isCastingThisItem) {
+        CastSubtitleOptionsSheet(
+            subtitleTracks = castState.subtitleTracks,
+            activeSubtitleTrackId = castState.activeSubtitleTrackId,
+            onDismiss = { castSubtitleSheetVisible = false },
+            onSubtitle = {
+                outputCoordinator.selectCastSubtitle(it?.castTrackId)
+                selectedSubtitleIndex = it?.streamIndex
+                onSelectSubtitleTrack(it?.streamIndex, castState.positionMs)
+                castSubtitleSheetVisible = false
+            },
+        )
+    }
+
     sheet?.let { current ->
+        if (isCastingThisItem) return@let
         PlayerOptionsSheet(
             sheet = current,
             item = item,
@@ -533,6 +643,18 @@ private fun PlayerSurface(
 }
 
 @Composable
+private fun KeepScreenAwake(enabled: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(view, enabled) {
+        val previous = view.keepScreenOn
+        view.keepScreenOn = enabled
+        onDispose {
+            view.keepScreenOn = previous
+        }
+    }
+}
+
+@Composable
 private fun PlayerControls(
     item: VantafynPlaybackItem,
     isPlaying: Boolean,
@@ -574,6 +696,7 @@ private fun PlayerControls(
         ) {
             PlayerIconButton(Icons.Rounded.ArrowBack, "Close player", onBack)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GoogleCastRouteButton(modifier = Modifier.size(44.dp))
                 if (item.subtitleTracks.isNotEmpty()) {
                     PlayerIconButton(
                         icon = Icons.Rounded.ClosedCaption,
@@ -650,6 +773,133 @@ private fun PlayerControls(
                     PlayerIconButton(Icons.Rounded.SkipNext, "Next episode", onPlayNext, size = 52.dp)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun CastControllerSurface(
+    item: VantafynPlaybackItem,
+    receiverName: String?,
+    positionMs: Long,
+    durationMs: Long,
+    isPlaying: Boolean,
+    errorMessage: String?,
+    subtitleTracks: List<CastSubtitleTrack>,
+    activeSubtitleTrackId: Long?,
+    onPlayPause: () -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onStopCasting: () -> Unit,
+    onSubtitles: () -> Unit,
+    onPlayHere: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF05070D),
+                        Color(0xFF101421),
+                        Color.Black,
+                    ),
+                ),
+            )
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(18.dp),
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(22.dp),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(118.dp)
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(VantafynGradients.accentHorizontal()),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        GoogleCastRouteButton(modifier = Modifier.size(58.dp))
+                    }
+                    Text(
+                        receiverName?.let { "Playing on $it" } ?: "Playing on Cast",
+                        color = Color(0xFF6FE7FF),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            item.title,
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            textAlign = TextAlign.Center,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        item.subtitle?.let {
+                            Text(it, color = VantafynColors.Muted, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                    Slider(
+                        value = positionMs.coerceAtLeast(0L).toFloat(),
+                        onValueChange = { onSeekTo(it.toLong()) },
+                        valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = Color.White,
+                            activeTrackColor = Color(0xFF6FE7FF),
+                            inactiveTrackColor = Color.White.copy(alpha = 0.18f),
+                        ),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(positionMs.formatMs(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                        Text("-${(durationMs - positionMs).coerceAtLeast(0L).formatMs()}", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        if (subtitleTracks.isNotEmpty()) {
+                            PlayerIconButton(
+                                icon = Icons.Rounded.ClosedCaption,
+                                contentDescription = "Cast subtitles",
+                                onClick = onSubtitles,
+                                active = activeSubtitleTrackId != null,
+                                size = 52.dp,
+                            )
+                        }
+                        PlayerPrimaryButton(if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (isPlaying) "Pause Cast" else "Play Cast", onPlayPause)
+                    }
+                    errorMessage?.let {
+                        Text(it, color = Color(0xFFFFC2C2), textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            TextButton(
+                onClick = onStopCasting,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(52.dp),
+            ) {
+                Text("Stop casting", color = VantafynColors.Ink)
+            }
+            VantafynButton("Play on this device", onClick = onPlayHere, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -977,6 +1227,59 @@ private fun PlayerOptionsSheet(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CastSubtitleOptionsSheet(
+    subtitleTracks: List<CastSubtitleTrack>,
+    activeSubtitleTrackId: Long?,
+    onDismiss: () -> Unit,
+    onSubtitle: (CastSubtitleTrack?) -> Unit,
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = Color.Transparent,
+        dragHandle = null,
+    ) {
+        VantafynGlassPanel(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            cornerRadius = 30.dp,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Cast subtitles", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text("Subtitles available on your Cast device.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                }
+                PlayerIconButton(Icons.Rounded.Close, "Close", onDismiss, size = 38.dp)
+            }
+            TrackRow("Off", "Disable subtitles on Cast", selected = activeSubtitleTrackId == null) { onSubtitle(null) }
+            if (subtitleTracks.isEmpty()) {
+                EmptyOption("No Cast subtitles available")
+            } else {
+                subtitleTracks.forEach { track ->
+                    TrackRow(
+                        title = track.label,
+                        detail = track.castSubtitleDetail(),
+                        selected = track.castTrackId == activeSubtitleTrackId,
+                        badges = buildList {
+                            if (track.isDefault) add("Default")
+                            if (track.isExternal) add("External")
+                        },
+                    ) { onSubtitle(track) }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
 @Composable
 private fun TrackRow(
     title: String,
@@ -1163,6 +1466,9 @@ private fun VantafynAudioTrack.audioDetail(): String =
 
 private fun VantafynSubtitleTrack.subtitleDetail(): String =
     listOfNotNull(language?.uppercase(), codec?.uppercase(), if (isExternal) "External" else "Embedded").joinToString(" · ")
+
+private fun CastSubtitleTrack.castSubtitleDetail(): String =
+    listOfNotNull(language?.uppercase(), codec?.uppercase(), contentType).joinToString(" · ")
 
 private fun Int.channelLabel(): String? =
     when (this) {

@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.ManagedActivityResultLauncher
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -18,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import dev.vantafyn.core.ui.VantafynPermissionStatus
@@ -156,7 +156,7 @@ class PermissionRequestCoordinator(
 
 @Composable
 fun rememberPermissionRequestCoordinator(): PermissionRequestCoordinator {
-    val activity = LocalContext.current as Activity
+    val activity = checkNotNull(LocalActivity.current) { "PermissionRequestCoordinator requires an Activity context." }
     var coordinatorRef by remember { mutableStateOf<PermissionRequestCoordinator?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         coordinatorRef?.onNotificationPermissionResult(granted)

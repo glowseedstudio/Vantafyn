@@ -52,6 +52,8 @@ Route-level safety is enforced in feature ViewModels. Hiding a button is not eno
 ## Current Providers
 
 Ombi is the first provider. It is optional and can be removed without changing Jellyfin playback, browsing, profile, or session behavior.
+
+Jellyfin profile picture editing is not an integration. It lives in `core-jellyfin` and uses Jellyfin user image APIs directly; see `docs/JELLYFIN_PROFILE_IMAGES.md`.
 ## Ombi Setup Ownership
 
 Ombi setup is admin-owned. App UI calls feature view models; app screens do not call Ombi HTTP APIs directly.

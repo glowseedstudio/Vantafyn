@@ -5,6 +5,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.vantafyn.core.cast.PlaybackOutputCoordinator
 import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
 import dev.vantafyn.core.jellyfin.JellyfinAdminOverview
 import dev.vantafyn.core.jellyfin.JellyfinAdminRepository
@@ -13,6 +14,7 @@ import dev.vantafyn.core.jellyfin.JellyfinHome
 import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
+import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.JellyfinMediaCard
@@ -21,6 +23,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMediaItem
 import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
+import dev.vantafyn.core.jellyfin.JellyfinProfileImageUpload
 import dev.vantafyn.core.jellyfin.JellyfinPublicUser
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectRepository
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectSession
@@ -60,6 +63,8 @@ import dev.vantafyn.core.jellyfin.WatchPartyVote
 import dev.vantafyn.core.jellyfin.WatchPartyVoteValue
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.AutoplaySettings
+import dev.vantafyn.core.media.LongRunningTaskRegistry
+import dev.vantafyn.core.media.LongRunningTaskType
 import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.VantafynPlaybackItem
@@ -75,6 +80,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class VantafynHomeViewModel(application: Application) : AndroidViewModel(application) {
@@ -98,6 +104,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var quickConnectJob: Job? = null
     private var watchPartyRealtimeJob: Job? = null
     private var watchPartyInviteExpiryJob: Job? = null
+    private var isAppForeground = false
 
     private val _state = MutableStateFlow(
         VantafynHomeUiState(
@@ -144,44 +151,122 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update { it.copy(step = VantafynSetupStep.ConnectServer, errorMessage = null) }
     }
 
+    fun navigateSetupBack() {
+        quickConnectJob?.cancel()
+        quickConnectJob = null
+        _state.update { state ->
+            when (state.step) {
+                VantafynSetupStep.Splash,
+                VantafynSetupStep.Home -> state
+                VantafynSetupStep.Welcome -> {
+                    if (state.savedProfiles.isEmpty()) {
+                        state
+                    } else {
+                        state.copy(
+                            step = VantafynSetupStep.ProfilePicker,
+                            errorMessage = null,
+                            isLoading = false,
+                            manageProfiles = false,
+                            pendingRemoval = null,
+                        )
+                    }
+                }
+                VantafynSetupStep.ConnectServer -> {
+                    if (state.savedProfiles.isEmpty()) {
+                        state.copy(step = VantafynSetupStep.Welcome, errorMessage = null, isLoading = false)
+                    } else {
+                        state.copy(
+                            step = VantafynSetupStep.ProfilePicker,
+                            errorMessage = null,
+                            isLoading = false,
+                            server = null,
+                            publicUsers = emptyList(),
+                            manageProfiles = false,
+                            pendingRemoval = null,
+                        )
+                    }
+                }
+                VantafynSetupStep.ServerConfirm -> state.copy(
+                    step = VantafynSetupStep.ConnectServer,
+                    errorMessage = null,
+                    isLoading = false,
+                )
+                VantafynSetupStep.Login -> {
+                    if (state.publicUsers.isNotEmpty()) {
+                        state.copy(
+                            step = VantafynSetupStep.ProfilePicker,
+                            username = "",
+                            password = "",
+                            errorMessage = null,
+                            isLoading = false,
+                        )
+                    } else {
+                        state.copy(
+                            step = if (state.server != null) VantafynSetupStep.ServerConfirm else VantafynSetupStep.ConnectServer,
+                            username = "",
+                            password = "",
+                            errorMessage = null,
+                            isLoading = false,
+                        )
+                    }
+                }
+                VantafynSetupStep.QuickConnect -> state.copy(
+                    step = VantafynSetupStep.Login,
+                    isLoading = false,
+                    quickConnectSession = null,
+                    quickConnectMessage = null,
+                    errorMessage = null,
+                )
+                VantafynSetupStep.ProfilePicker -> {
+                    if (state.server != null) {
+                        state.copy(step = VantafynSetupStep.ServerConfirm, errorMessage = null, isLoading = false)
+                    } else if (state.savedProfiles.isEmpty()) {
+                        state.copy(step = VantafynSetupStep.Welcome, errorMessage = null, isLoading = false)
+                    } else {
+                        state
+                    }
+                }
+                VantafynSetupStep.ConnectionRecovery -> state.copy(
+                    step = if (state.savedProfiles.isEmpty()) VantafynSetupStep.Welcome else VantafynSetupStep.ProfilePicker,
+                    restoreFailureProfile = null,
+                    restoreFailureReason = null,
+                    restoreFailureMessage = null,
+                    errorMessage = null,
+                    isLoading = false,
+                )
+            }
+        }
+    }
+
     fun addProfile() {
         val snapshot = _state.value
         val existingServer = snapshot.server ?: snapshot.savedProfiles.maxByOrNull { it.lastUsedAt }?.let {
             JellyfinServerConfig(url = it.serverUrl, name = it.serverName, localId = it.serverRef)
         }
         if (existingServer != null) {
-            viewModelScope.launch {
-                _state.update {
-                    it.copy(
-                        step = VantafynSetupStep.ProfilePicker,
-                        isLoading = true,
-                        server = existingServer,
-                        serverUrl = existingServer.url,
-                        username = "",
-                        password = "",
-                        publicUsers = emptyList(),
-                        manageProfiles = false,
-                        pendingRemoval = null,
-                        errorMessage = null,
-                    )
-                }
-                val publicUsers = when (val result = authRepository.publicUsers(existingServer)) {
-                    is JellyfinResult.Success -> result.value
-                    is JellyfinResult.Failure -> emptyList()
-                }
-                _state.update {
-                    it.copy(
-                        isLoading = false,
-                        publicUsers = publicUsers,
-                        step = if (publicUsers.isNotEmpty()) VantafynSetupStep.ProfilePicker else VantafynSetupStep.Login,
-                    )
-                }
+            _state.update {
+                it.copy(
+                    step = VantafynSetupStep.Login,
+                    isLoading = false,
+                    server = existingServer,
+                    serverUrl = existingServer.url,
+                    username = "",
+                    password = "",
+                    publicUsers = emptyList(),
+                    manageProfiles = false,
+                    pendingRemoval = null,
+                    selectedProfileId = null,
+                    restoreFailureProfile = null,
+                    restoreFailureReason = null,
+                    restoreFailureMessage = null,
+                    errorMessage = null,
+                )
             }
             return
         }
         _state.update {
             it.copy(
-                step = VantafynSetupStep.Welcome,
+                step = VantafynSetupStep.ConnectServer,
                 serverUrl = "",
                 username = "",
                 password = "",
@@ -278,6 +363,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
+                            videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                             autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
@@ -347,6 +433,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun logout() {
         stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
+            PlaybackOutputCoordinator.get(getApplication()).clearForLogoutOrServerSwitch()
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.Logout)
             authRepository.logout()
             _state.value = VantafynHomeUiState(step = VantafynSetupStep.Welcome)
@@ -365,6 +452,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val profileId = _state.value.session?.profileId ?: return
         stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
+            PlaybackOutputCoordinator.get(getApplication()).clearForLogoutOrServerSwitch()
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
             authRepository.removeProfile(profileId)
             val profiles = authRepository.savedProfiles()
@@ -401,6 +489,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
+                            videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                             autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
@@ -449,6 +538,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
+                            videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                             autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
@@ -628,6 +718,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination == MobileDestination.WatchParty) {
             loadWatchPartyRecipients()
             if (_state.value.watchPartyCandidates.isEmpty()) loadWatchParty()
+        } else if (_state.value.activeWatchParty == null) {
+            stopWatchPartyRealtime(clearInvites = false)
         }
     }
 
@@ -645,16 +737,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun openLibrary(library: JellyfinLibrary) {
-        openLibraryPage(library, startIndex = 0)
+        openLibraryPage(library, startIndex = 0, filter = JellyfinLibraryItemFilter.All)
     }
 
-    fun openLibraryPage(library: JellyfinLibrary, startIndex: Int) {
+    fun openLibraryPage(
+        library: JellyfinLibrary,
+        startIndex: Int,
+        filter: JellyfinLibraryItemFilter = _state.value.libraryItemsFilter,
+    ) {
         val session = _state.value.session ?: return
         _state.update {
             it.copy(
                 mobileDestination = MobileDestination.LibraryDetail,
                 previousMobileDestination = MobileDestination.Libraries,
                 selectedLibrary = library,
+                libraryItemsFilter = filter,
                 libraryItems = emptyList(),
                 libraryItemsPage = null,
                 isLibraryItemsLoading = true,
@@ -663,7 +760,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             )
         }
         viewModelScope.launch {
-            when (val result = libraryRepository.getLibraryItemsPage(session, library, startIndex, LibraryItemsPageSize)) {
+            when (val result = libraryRepository.getLibraryItemsPage(session, library, startIndex, LibraryItemsPageSize, filter)) {
                 is JellyfinResult.Success -> {
                     _state.update {
                         it.copy(
@@ -690,14 +787,19 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val state = _state.value
         val library = state.selectedLibrary ?: return
         val page = state.libraryItemsPage ?: return
-        if (page.hasNext) openLibraryPage(library, page.startIndex + page.pageSize)
+        if (page.hasNext) openLibraryPage(library, page.startIndex + page.pageSize, state.libraryItemsFilter)
     }
 
     fun previousLibraryItemsPage() {
         val state = _state.value
         val library = state.selectedLibrary ?: return
         val page = state.libraryItemsPage ?: return
-        if (page.hasPrevious) openLibraryPage(library, (page.startIndex - page.pageSize).coerceAtLeast(0))
+        if (page.hasPrevious) openLibraryPage(library, (page.startIndex - page.pageSize).coerceAtLeast(0), state.libraryItemsFilter)
+    }
+
+    fun setLibraryItemsFilter(filter: JellyfinLibraryItemFilter) {
+        val library = _state.value.selectedLibrary ?: return
+        openLibraryPage(library, startIndex = 0, filter = filter)
     }
 
     fun openMedia(itemId: UUID) {
@@ -1013,6 +1115,79 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun uploadCurrentUserProfileImage(bytes: ByteArray, mimeType: String) {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isProfileImageSaving = true, profileImageError = null, mobileMessage = null) }
+            val upload = runCatching { JellyfinProfileImageUpload(bytes, mimeType) }.getOrElse { throwable ->
+                _state.update {
+                    it.copy(
+                        isProfileImageSaving = false,
+                        profileImageError = throwable.message ?: "Couldn't read that image.",
+                    )
+                }
+                return@launch
+            }
+            when (val result = userPreferencesRepository.uploadCurrentUserProfileImage(session, upload)) {
+                is JellyfinResult.Success -> {
+                    val profiles = authRepository.savedProfiles()
+                    val publicUsers = refreshPublicUsers(result.value.server)
+                    _state.update {
+                        it.copy(
+                            session = result.value,
+                            server = result.value.server,
+                            savedProfiles = profiles,
+                            publicUsers = publicUsers,
+                            isProfileImageSaving = false,
+                            profileImageError = null,
+                            mobileMessage = "Profile picture updated",
+                        )
+                    }
+                    if (result.value.user.isAdministrator) refreshAdminOverview(showLoading = false)
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isProfileImageSaving = false,
+                        profileImageError = result.message,
+                        mobileMessage = result.message,
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteCurrentUserProfileImage() {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isProfileImageSaving = true, profileImageError = null, mobileMessage = null) }
+            when (val result = userPreferencesRepository.deleteCurrentUserProfileImage(session)) {
+                is JellyfinResult.Success -> {
+                    val profiles = authRepository.savedProfiles()
+                    val publicUsers = refreshPublicUsers(result.value.server)
+                    _state.update {
+                        it.copy(
+                            session = result.value,
+                            server = result.value.server,
+                            savedProfiles = profiles,
+                            publicUsers = publicUsers,
+                            isProfileImageSaving = false,
+                            profileImageError = null,
+                            mobileMessage = "Profile picture removed",
+                        )
+                    }
+                    if (result.value.user.isAdministrator) refreshAdminOverview(showLoading = false)
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isProfileImageSaving = false,
+                        profileImageError = result.message,
+                        mobileMessage = result.message,
+                    )
+                }
+            }
+        }
+    }
+
     fun openAdminUser(userId: UUID) {
         val session = _state.value.session ?: return
         if (!session.user.isAdministrator) return
@@ -1113,6 +1288,89 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             when (val result = adminRepository.resetUserPassword(session, detail.user.id, newPassword)) {
                 is JellyfinResult.Success -> _state.update { it.copy(isAdminUserSaving = false, mobileMessage = "Password reset") }
                 is JellyfinResult.Failure -> _state.update { it.copy(isAdminUserSaving = false, adminUserError = result.message) }
+            }
+        }
+    }
+
+    fun uploadSelectedAdminUserProfileImage(bytes: ByteArray, mimeType: String) {
+        val session = _state.value.session ?: return
+        val detail = _state.value.adminUserDetail ?: return
+        if (!session.user.isAdministrator) return
+        viewModelScope.launch {
+            _state.update { it.copy(isProfileImageSaving = true, adminUserError = null, mobileMessage = null) }
+            val upload = runCatching { JellyfinProfileImageUpload(bytes, mimeType) }.getOrElse { throwable ->
+                _state.update {
+                    it.copy(
+                        isProfileImageSaving = false,
+                        adminUserError = throwable.message ?: "Couldn't read that image.",
+                    )
+                }
+                return@launch
+            }
+            when (val result = adminRepository.uploadUserProfileImage(session, detail.user.id, upload)) {
+                is JellyfinResult.Success -> {
+                    val updatedSession = if (detail.user.id == session.user.id) {
+                        authRepository.restoreSession(session.profileId)
+                    } else {
+                        JellyfinResult.Success(session)
+                    }
+                    val sessionToStore = (updatedSession as? JellyfinResult.Success)?.value ?: _state.value.session
+                    _state.update {
+                        it.copy(
+                            session = sessionToStore,
+                            adminUserDetail = result.value,
+                            isProfileImageSaving = false,
+                            adminUserError = null,
+                            mobileMessage = "Profile picture updated",
+                        )
+                    }
+                    loadAdminOverview()
+                    refreshSavedProfileImages()
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isProfileImageSaving = false,
+                        adminUserError = result.message,
+                        mobileMessage = result.message,
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteSelectedAdminUserProfileImage() {
+        val session = _state.value.session ?: return
+        val detail = _state.value.adminUserDetail ?: return
+        if (!session.user.isAdministrator) return
+        viewModelScope.launch {
+            _state.update { it.copy(isProfileImageSaving = true, adminUserError = null, mobileMessage = null) }
+            when (val result = adminRepository.deleteUserProfileImage(session, detail.user.id)) {
+                is JellyfinResult.Success -> {
+                    val updatedCurrentSession = if (detail.user.id == session.user.id) {
+                        authRepository.restoreSession(session.profileId)
+                    } else {
+                        JellyfinResult.Success(session)
+                    }
+                    val sessionToStore = (updatedCurrentSession as? JellyfinResult.Success)?.value ?: _state.value.session
+                    _state.update {
+                        it.copy(
+                            session = sessionToStore,
+                            adminUserDetail = result.value,
+                            isProfileImageSaving = false,
+                            adminUserError = null,
+                            mobileMessage = "Profile picture removed",
+                        )
+                    }
+                    loadAdminOverview()
+                    refreshSavedProfileImages()
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isProfileImageSaving = false,
+                        adminUserError = result.message,
+                        mobileMessage = result.message,
+                    )
+                }
             }
         }
     }
@@ -1600,10 +1858,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun onAppForegrounded() {
-        _state.value.session?.let { startWatchPartyRealtime(it) }
+        isAppForeground = true
+        _state.value.session
+            ?.takeIf { shouldUseWatchPartyRealtime(_state.value) }
+            ?.let { startWatchPartyRealtime(it) }
     }
 
     fun onAppBackgrounded() {
+        isAppForeground = false
         if (_state.value.activeWatchParty == null) {
             stopWatchPartyRealtime(clearInvites = false)
         }
@@ -1701,10 +1963,28 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun startWatchPartyRealtime(session: JellyfinSession) {
+        val snapshot = _state.value
+        if (!isAppForeground && snapshot.activeWatchParty == null) return
+        if (!shouldUseWatchPartyRealtime(snapshot)) {
+            _state.update {
+                it.copy(
+                    watchPartyRealtimeConnectionState = SyncPlayConnectionState.Disconnected,
+                    watchPartySyncStateLabel = "Sync idle",
+                    watchPartyRealtimeError = null,
+                )
+            }
+            return
+        }
         if (watchPartyRealtimeJob?.isActive == true) return
+        LongRunningTaskRegistry.start(
+            id = WATCH_PARTY_REALTIME_TASK_ID,
+            type = LongRunningTaskType.WebSocket,
+            owner = "WatchPartyRealtime",
+            state = "connecting",
+        )
         watchPartyRealtimeJob = viewModelScope.launch {
             var reconnectDelayMs = 1_000L
-            while (true) {
+            while (isActive && shouldUseWatchPartyRealtime(_state.value)) {
                 realtimeClient.events(session)
                     .catch { throwable ->
                         _state.update {
@@ -1719,8 +1999,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         if (event is JellyfinWebSocketEvent.ConnectionChanged && event.state == SyncPlayConnectionState.Connected) {
                             reconnectDelayMs = 1_000L
                         }
+                        LongRunningTaskRegistry.tick(WATCH_PARTY_REALTIME_TASK_ID, event::class.simpleName ?: "event")
                         reduceWatchPartyRealtimeEvent(event)
                     }
+                if (!shouldUseWatchPartyRealtime(_state.value)) break
                 _state.update {
                     it.copy(
                         watchPartyRealtimeConnectionState = SyncPlayConnectionState.Reconnecting,
@@ -1730,18 +2012,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 delay(reconnectDelayMs)
                 reconnectDelayMs = (reconnectDelayMs * 2).coerceAtMost(30_000L)
             }
+            LongRunningTaskRegistry.stop(WATCH_PARTY_REALTIME_TASK_ID, "not needed")
         }
     }
 
     private fun stopWatchPartyRealtime(clearInvites: Boolean = false) {
         watchPartyRealtimeJob?.cancel()
         watchPartyRealtimeJob = null
+        LongRunningTaskRegistry.stop(WATCH_PARTY_REALTIME_TASK_ID, "stopped")
         if (clearInvites) {
             watchPartyInviteExpiryJob?.cancel()
             watchPartyInviteExpiryJob = null
             _state.update { it.copy(incomingWatchPartyInvites = emptyList(), incomingWatchPartyMessage = null) }
         }
     }
+
+    private fun shouldUseWatchPartyRealtime(state: VantafynHomeUiState): Boolean =
+        state.activeWatchParty != null ||
+            state.mobileDestination == MobileDestination.WatchParty ||
+            state.isWatchPartyRecipientsLoading ||
+            state.isWatchPartyLoading
 
     private fun reduceWatchPartyRealtimeEvent(event: JellyfinWebSocketEvent) {
         when (event) {
@@ -2041,6 +2331,56 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun prepareCastPlayback(positionMs: Long) {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        val target = snapshot.activePlaybackTarget ?: return
+        if (snapshot.isPlaybackLoading || snapshot.playbackItem?.isCastResolved == true) return
+        viewModelScope.launch {
+            _state.update { it.copy(isPlaybackLoading = true, playbackError = null) }
+            val positionTicks = positionMs.toTicks()
+            snapshot.playbackInfo?.let { localInfo ->
+                playbackRepository.reportStopped(session, localInfo, positionTicks)
+            }
+            when (
+                val result = playbackRepository.getCastPlaybackInfo(
+                    session = session,
+                    itemId = target.id,
+                    title = target.title,
+                    subtitle = target.subtitle,
+                    startPositionTicks = positionTicks,
+                    forceTranscode = false,
+                    audioStreamIndex = snapshot.playbackInfo?.audioStreamIndex,
+                    subtitleStreamIndex = snapshot.playbackInfo?.subtitleStreamIndex,
+                    isLiveTv = target.isLiveTv,
+                )
+            ) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(
+                        isPlaybackLoading = false,
+                        playbackInfo = result.value,
+                        playbackItem = result.value.toPlaybackItem(
+                            target = target.copy(startTicks = positionTicks),
+                            upNextCandidate = snapshot.playbackItem?.upNextCandidate,
+                            autoplaySettings = snapshot.playbackItem?.autoplaySettings ?: it.autoplaySettings(),
+                            continuousPlaybackStartedAtMs = snapshot.playbackItem?.continuousPlaybackStartedAtMs ?: System.currentTimeMillis(),
+                            isCastResolved = true,
+                        ),
+                        hasReportedPlaybackStart = false,
+                        canTryPlaybackTranscode = result.value.fallbackStreamUrl != null,
+                    )
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isPlaybackLoading = false,
+                        playbackError = result.message,
+                        mobileMessage = "Couldn't start casting.",
+                    )
+                }
+            }
+        }
+    }
+
     fun exitPlayback(positionMs: Long) {
         val snapshot = _state.value
         val session = snapshot.session
@@ -2212,6 +2552,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private suspend fun refreshPublicUsers(server: JellyfinServerConfig?): List<JellyfinPublicUser> {
+        if (server == null) return _state.value.publicUsers
+        return when (val result = authRepository.publicUsers(server)) {
+            is JellyfinResult.Success -> result.value
+            is JellyfinResult.Failure -> _state.value.publicUsers
+        }
+    }
+
+    private fun refreshSavedProfileImages() {
+        viewModelScope.launch {
+            val session = _state.value.session
+            _state.update {
+                it.copy(
+                    savedProfiles = authRepository.savedProfiles(),
+                    publicUsers = refreshPublicUsers(session?.server),
+                )
+            }
+        }
+    }
+
     fun toggleThemeMusic() {
         _state.update { state ->
             val enabled = !state.themeMusicEnabled
@@ -2243,11 +2603,55 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun selectVideoPlayerPreference(preference: VantafynVideoPlayerPreference) {
+        _state.update { state ->
+            val editor = appPreferences.edit().putString(KEY_VIDEO_PLAYER_PREFERENCE, preference.name)
+            state.session?.profileId?.let { profileId ->
+                editor.putString("${KEY_VIDEO_PLAYER_PREFERENCE}_$profileId", preference.name)
+            }
+            editor.apply()
+            state.copy(videoPlayerPreference = preference, mobileMessage = null)
+        }
+    }
+
+    fun externalVideoPlayerLaunchFailed() {
+        _state.update {
+            it.copy(
+                mobileDestination = it.previousMobileDestination,
+                playbackItem = null,
+                playbackInfo = null,
+                playbackError = null,
+                isPlaybackLoading = false,
+                mobileMessage = "No external video player is available on this device.",
+            )
+        }
+    }
+
+    fun externalVideoPlayerLaunched() {
+        _state.update {
+            it.copy(
+                mobileDestination = it.previousMobileDestination,
+                playbackItem = null,
+                playbackInfo = null,
+                playbackError = null,
+                isPlaybackLoading = false,
+                mobileMessage = "Opened in external player",
+            )
+        }
+    }
+
     private fun readSelectedBackground(profileId: String?): VantafynAppBackground {
         val key = profileId?.let { homeLayoutStorage.getString("background_$it", null) }
             ?: homeLayoutStorage.getString("background_app", null)
         return key?.let { runCatching { VantafynAppBackground.valueOf(it) }.getOrNull() }
             ?: VantafynAppBackground.Nebula
+    }
+
+    private fun readVideoPlayerPreference(profileId: String?): VantafynVideoPlayerPreference {
+        val key = profileId?.let { appPreferences.getString("${KEY_VIDEO_PLAYER_PREFERENCE}_$it", null) }
+            ?: appPreferences.getString(KEY_VIDEO_PLAYER_PREFERENCE, null)
+        return key?.let { runCatching { VantafynVideoPlayerPreference.valueOf(it) }.getOrNull() }
+            ?: VantafynVideoPlayerPreference.Vantafyn
     }
 
     private fun readAutoplayCountdownSeconds(profileId: String?): Int {
@@ -2345,6 +2749,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             savedProfiles = profiles,
                             autoLoginLastProfile = true,
                             selectedBackground = readSelectedBackground(null),
+                            videoPlayerPreference = readVideoPlayerPreference(null),
                         )
                     }
                     selectProfile(lastProfile, showPickerWhileRestoring = false)
@@ -2358,6 +2763,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     savedProfiles = profiles,
                     autoLoginLastProfile = autoLogin,
                     selectedBackground = readSelectedBackground(null),
+                    videoPlayerPreference = readVideoPlayerPreference(null),
                 )
             }
         }
@@ -2439,6 +2845,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     themeMusicEnabled = readThemeMusicEnabled(jellyfinSession.profileId),
                                     themeMusicVolume = readThemeMusicVolume(jellyfinSession.profileId),
                                     selectedBackground = readSelectedBackground(jellyfinSession.profileId),
+                                    videoPlayerPreference = readVideoPlayerPreference(jellyfinSession.profileId),
                                     configuredSmartRows = readSmartRows(jellyfinSession.profileId),
                                     autoplayCountdownSeconds = readAutoplayCountdownSeconds(jellyfinSession.profileId),
                                     passoutProtectionEnabled = readPassoutProtectionEnabled(jellyfinSession.profileId),
@@ -2490,6 +2897,7 @@ data class VantafynHomeUiState(
     val mobileDestination: MobileDestination = MobileDestination.Home,
     val selectedLibrary: JellyfinLibrary? = null,
     val libraryItems: List<JellyfinMediaItem> = emptyList(),
+    val libraryItemsFilter: JellyfinLibraryItemFilter = JellyfinLibraryItemFilter.All,
     val libraryItemsPage: JellyfinLibraryPage? = null,
     val isLibraryItemsLoading: Boolean = false,
     val libraryItemsError: String? = null,
@@ -2525,12 +2933,15 @@ data class VantafynHomeUiState(
     val isAdminUserLoading: Boolean = false,
     val isAdminUserSaving: Boolean = false,
     val adminUserError: String? = null,
+    val isProfileImageSaving: Boolean = false,
+    val profileImageError: String? = null,
     val mobileMessage: String? = null,
     val confirmLogout: Boolean = false,
     val homeLayout: List<HomeSectionPreference> = defaultHomeLayout(),
     val themeMusicEnabled: Boolean = true,
     val themeMusicVolume: ThemeMusicVolume = ThemeMusicVolume.Soft,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
+    val videoPlayerPreference: VantafynVideoPlayerPreference = VantafynVideoPlayerPreference.Vantafyn,
     val configuredSmartRows: List<String> = emptyList(),
     val previousMobileDestination: MobileDestination = MobileDestination.Home,
     val activePlaybackTarget: PlaybackTarget? = null,
@@ -2850,6 +3261,7 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(
     upNextCandidate: UpNextCandidate?,
     autoplaySettings: AutoplaySettings,
     continuousPlaybackStartedAtMs: Long,
+    isCastResolved: Boolean = false,
 ): VantafynPlaybackItem =
     VantafynPlaybackItem(
         itemId = itemId.toString(),
@@ -2885,6 +3297,7 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(
         },
         itemType = target.itemType,
         isLiveStream = isLiveStream || target.isLiveTv,
+        isCastResolved = isCastResolved,
         upNextCandidate = upNextCandidate,
         autoplaySettings = autoplaySettings,
         continuousPlaybackStartedAtMs = continuousPlaybackStartedAtMs,
@@ -2951,6 +3364,7 @@ private fun WatchPartyInvite.toSelectedMedia(): WatchPartySelectedMedia? =
 
 private const val KEY_PASSOUT_PROTECTION_ENABLED = "passout_protection_enabled"
 private const val KEY_PASSOUT_PROTECTION_LIMIT_MINUTES = "passout_protection_limit_minutes"
+private const val KEY_VIDEO_PLAYER_PREFERENCE = "video_player_preference"
 
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L
@@ -2961,6 +3375,20 @@ enum class VantafynAppBackground(val label: String) {
     Background2("Twilight"),
     Background3("Aurora"),
     Background4("Deep space"),
+}
+
+enum class VantafynVideoPlayerPreference(
+    val label: String,
+    val summary: String,
+) {
+    Vantafyn(
+        label = "Vantafyn player",
+        summary = "Recommended. Uses the built-in Media3 player with Cast, track selection, progress, and Up Next.",
+    ),
+    External(
+        label = "External app",
+        summary = "Hands the Jellyfin stream to another video app. Progress reporting and track controls depend on that app.",
+    ),
 }
 
 val supportedSmartRows = listOf(
@@ -3053,6 +3481,7 @@ private const val KEY_WATCH_PARTY_ENABLED = "watch_party_enabled"
 private const val KEY_WATCH_PARTY_INVITES_ENABLED = "watch_party_invites_enabled"
 private const val KEY_WATCH_PARTY_INVITE_ANIMATION_ENABLED = "watch_party_invite_animation_enabled"
 private const val KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS = "watch_party_invite_expiry_seconds"
+private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 60
 

@@ -18,6 +18,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core-media"))
+    implementation(project(":core-cast"))
     implementation(project(":core-ui"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

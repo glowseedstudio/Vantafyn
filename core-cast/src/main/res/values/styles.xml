@@ -1,0 +1,60 @@
+<resources>
+    <color name="vantafyn_cast_dialog_background">#FF101622</color>
+    <color name="vantafyn_cast_dialog_panel">#FF151C2A</color>
+    <color name="vantafyn_cast_dialog_accent">#FF8E5CFF</color>
+
+    <style name="VantafynCastButtonTheme" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowBackground">@color/vantafyn_cast_dialog_background</item>
+        <item name="android:colorBackground">@color/vantafyn_cast_dialog_background</item>
+        <item name="android:colorBackgroundFloating">@color/vantafyn_cast_dialog_background</item>
+        <item name="colorBackgroundFloating">@color/vantafyn_cast_dialog_background</item>
+        <item name="android:colorForeground">#FFFFFFFF</item>
+        <item name="android:textColorPrimary">#FFFFFFFF</item>
+        <item name="android:colorAccent">#FF8E5CFF</item>
+        <item name="colorPrimary">#FF151C2A</item>
+        <item name="colorPrimaryDark">#FF0A0F18</item>
+        <item name="colorAccent">#FF8E5CFF</item>
+        <item name="mediaRouteTheme">@style/VantafynMediaRouterTheme</item>
+        <item name="mediaRouteButtonStyle">@style/Widget.MediaRouter.MediaRouteButton</item>
+        <item name="dialogTheme">@style/VantafynCastDialogTheme</item>
+        <item name="alertDialogTheme">@style/VantafynCastDialogTheme</item>
+    </style>
+
+    <style name="VantafynMediaRouterTheme" parent="@style/Theme.MediaRouter">
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowBackground">@drawable/vantafyn_cast_dialog_background</item>
+        <item name="android:colorBackground">@color/vantafyn_cast_dialog_background</item>
+        <item name="android:colorBackgroundFloating">@color/vantafyn_cast_dialog_panel</item>
+        <item name="colorBackgroundFloating">@color/vantafyn_cast_dialog_panel</item>
+        <item name="android:fontFamily">sans</item>
+        <item name="android:textColorPrimary">#FFFFFFFF</item>
+        <item name="android:textColorSecondary">#BFC7D8</item>
+        <item name="colorPrimary">@color/vantafyn_cast_dialog_panel</item>
+        <item name="colorPrimaryDark">#FF0A0F18</item>
+        <item name="colorAccent">@color/vantafyn_cast_dialog_accent</item>
+        <item name="android:colorAccent">@color/vantafyn_cast_dialog_accent</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+
+    <style name="VantafynCastDialogTheme" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowBackground">@drawable/vantafyn_cast_dialog_background</item>
+        <item name="android:colorBackground">@color/vantafyn_cast_dialog_background</item>
+        <item name="android:colorBackgroundFloating">@color/vantafyn_cast_dialog_panel</item>
+        <item name="colorBackgroundFloating">@color/vantafyn_cast_dialog_panel</item>
+        <item name="android:textColorPrimary">#FFFFFFFF</item>
+        <item name="android:textColorSecondary">#BFC7D8</item>
+        <item name="colorPrimary">@color/vantafyn_cast_dialog_panel</item>
+        <item name="colorPrimaryDark">#FF0A0F18</item>
+        <item name="colorAccent">@color/vantafyn_cast_dialog_accent</item>
+        <item name="android:colorAccent">@color/vantafyn_cast_dialog_accent</item>
+        <item name="mediaRouteTheme">@style/VantafynMediaRouterTheme</item>
+        <item name="android:backgroundDimEnabled">true</item>
+    </style>
+</resources>

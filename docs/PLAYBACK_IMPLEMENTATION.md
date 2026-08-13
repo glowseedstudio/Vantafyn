@@ -13,6 +13,9 @@
 - Watch Party invite receive is now app-wide on mobile while Vantafyn is open/connected. Accepting an invite stops music through the existing video policy before joining the SyncPlay lobby.
 - Live TV channel/program taps now enter the same mobile player path.
 - Live TV now has an explicit `openLiveStream(...)` fallback after playback-info auto-open failures.
+- Google Cast video handoff is implemented for mobile movies and episodes through the Default Media Receiver.
+- Cast playback uses separate Jellyfin playback negotiation with a Google Cast device profile before loading the receiver.
+- While casting, the fullscreen mobile player switches to a Cast controller instead of showing a blank local video surface.
 - TV playback is not implemented yet, but `app-tv` still builds.
 
 ## Jellyfin APIs Used
@@ -27,6 +30,7 @@
 - `SessionApi.getSessions(...)` and `sendMessageCommand(...)` for active-session Watch Party invite delivery.
 - `MediaInfoApi.closeLiveStream(liveStreamId)` when Jellyfin marks the stream as live and returns a live stream id.
 - `MediaInfoApi.openLiveStream(...)` as the explicit Live TV fallback when playback-info auto-open does not provide a playable stream.
+- `MediaInfoApi.getPostedPlaybackInfo(itemId, PlaybackInfoDto)` with a Cast-specific device profile for Google Cast.
 
 ## Direct Play Strategy
 
@@ -58,6 +62,8 @@ Progress also updates Vantafyn's local `playbackItem`, active playback target, a
 
 When playback closes, the detail item and home libraries are refreshed so Continue Watching/resume state can update from Jellyfin.
 
+For Cast handoff, Vantafyn reports local playback stopped at the handoff position, resolves a Cast-specific Jellyfin playback session, then reports start/progress using remote Cast position from `RemoteMediaClient`. Cast progress reporting uses a safe roughly 10-second movement threshold rather than a tight network loop.
+
 For Up Next, the next episode transition calls back into the same ViewModel playback startup path. The current episode is reported stopped with the current player position before playback info is requested for the next episode. The next episode then reports playback start from the normal `STATE_READY` callback. A local guard prevents countdown completion and player completion from starting the next item twice.
 
 If next episode startup fails, the existing playback error overlay is used with retry/transcode options where available.
@@ -69,6 +75,34 @@ Playback info exposes audio and subtitle streams as Vantafyn-owned models. The m
 External subtitle delivery URLs from Jellyfin are preserved into `VantafynSubtitleTrack` and attached to the Media3 `MediaItem` as subtitle configurations. Supported external formats are mapped to Media3 MIME types where possible.
 
 Selecting audio/subtitles now applies an in-place Media3 track override with `TrackSelectionOverride`. Subtitle Off clears text overrides and disables text tracks. The ViewModel updates the selected Jellyfin stream indexes without restarting playback so playback reporting stays aligned with the current selection.
+
+Cast subtitle switching is implemented for the Google Cast Default Media Receiver when Jellyfin provides a Cast-reachable WebVTT, TTML/DFXP, or CEA-style text delivery URL. The Cast controller uses a separate Cast subtitles sheet and calls `RemoteMediaClient.setActiveMediaTracks(...)`; it does not route through local ExoPlayer track selection.
+
+Cast audio switching remains hidden with the Default Media Receiver. Google documents text tracks as the supported sender media-track path for Default/Styled receivers; reliable audio switching needs a custom receiver or a tested reload/transcode strategy.
+
+## Google Cast
+
+Cast sender support lives in `core-cast`. Vantafyn uses the Google Cast Default Media Receiver, not a custom receiver.
+
+The video flow is:
+
+- user opens a movie or episode in the mobile player;
+- user connects a Cast target;
+- player captures local position and pauses ExoPlayer;
+- ViewModel requests Cast playback info from Jellyfin;
+- local reporting is stopped at the handoff position;
+- Cast-resolved stream is loaded through `PlaybackOutputCoordinator`;
+- fullscreen player becomes a premium Cast controller;
+- play/pause and seek commands route to Cast;
+- progress reports use Cast remote position.
+
+See also:
+
+- `docs/CAST_IMPLEMENTATION_AUDIT.md`
+- `docs/CAST_PLAYBACK_NEGOTIATION.md`
+- `docs/CAST_PROGRESS_REPORTING.md`
+- `docs/CAST_TRACK_SUPPORT_AUDIT.md`
+- `docs/CAST_SUBTITLES_AUDIO.md`
 
 ## Screen Fit
 
@@ -107,6 +141,7 @@ Logs include playback method, whether media/play/live stream ids are present, se
 - TV playback UI remains TODO.
 - Music playback is service-owned through Media3 and now exposes Android notification, lock-screen, and Android Auto browse/control paths. Video playback still uses the existing mobile fullscreen player path.
 - TV Up Next UI remains TODO, though the shared model and Jellyfin lookup are reusable.
+- Cast-to-local resume works from the Cast controller using the last remote position and current resolved item, but full local re-resolution after a receiver disconnect remains future hardening.
 - Up Next lookup currently uses ordered same-series episodes instead of a dedicated server-side adjacent-episode endpoint.
 - If autoplay is disabled, Vantafyn finishes normally instead of showing a non-countdown next episode prompt.
 - External subtitle sidecar attachment handling is limited to URLs Jellyfin exposes in playback info.

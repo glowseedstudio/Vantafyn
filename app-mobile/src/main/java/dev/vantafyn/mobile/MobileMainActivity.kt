@@ -1,17 +1,20 @@
 package dev.vantafyn.mobile
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import dev.vantafyn.core.cast.PlaybackOutputCoordinator
 import androidx.compose.foundation.layout.Box
 import dev.vantafyn.core.ui.VantafynSurface
 import dev.vantafyn.core.ui.VantafynTheme
 import dev.vantafyn.core.ui.VantafynPermissionSheet
 import dev.vantafyn.feature.home.VantafynAppContent
+import androidx.fragment.app.FragmentActivity
 
-class MobileMainActivity : ComponentActivity() {
+class MobileMainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(
@@ -21,6 +24,12 @@ class MobileMainActivity : ComponentActivity() {
         setContent {
             VantafynTheme {
                 VantafynSurface {
+                    val context = LocalContext.current
+                    DisposableEffect(context) {
+                        val coordinator = PlaybackOutputCoordinator.get(context)
+                        coordinator.start()
+                        onDispose { coordinator.stop() }
+                    }
                     val permissionCoordinator = rememberPermissionRequestCoordinator()
                     Box {
                         VantafynAppContent(

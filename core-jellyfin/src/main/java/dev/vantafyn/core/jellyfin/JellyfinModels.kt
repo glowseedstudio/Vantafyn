@@ -181,6 +181,14 @@ data class JellyfinLibraryPage(
         get() = startIndex + items.size < totalItems
 }
 
+enum class JellyfinLibraryItemFilter {
+    All,
+    RecentlyAdded,
+    AZ,
+    Favorites,
+    Unwatched,
+}
+
 data class JellyfinLiveTvChannel(
     val id: UUID,
     val name: String,
@@ -709,7 +717,58 @@ data class JellyfinAdminOverview(
     val recentActivity: List<JellyfinAdminActivity> = emptyList(),
     val devices: List<JellyfinAdminDevice> = emptyList(),
     val serverLogs: List<JellyfinAdminLogFile> = emptyList(),
+    val statistics: JellyfinStatisticsOverview? = null,
     val unavailableStats: List<String>,
+)
+
+enum class JellyfinStatisticsCapability {
+    PlaybackReporting,
+    CoreActivityOnly,
+    Unavailable,
+}
+
+data class JellyfinStatisticsOverview(
+    val capability: JellyfinStatisticsCapability,
+    val rangeDays: Int,
+    val rangeLabel: String,
+    val totalWatchTimeSeconds: Long,
+    val totalPlayCount: Int,
+    val mostActiveUser: JellyfinUserWatchStats?,
+    val mostWatchedTitle: JellyfinMediaWatchStats?,
+    val users: List<JellyfinUserWatchStats>,
+    val media: List<JellyfinMediaWatchStats>,
+    val trend: List<JellyfinWatchTimeBucket>,
+    val recentActivity: List<JellyfinAdminActivity>,
+    val message: String? = null,
+)
+
+data class JellyfinUserWatchStats(
+    val userId: UUID?,
+    val displayName: String,
+    val avatarUrl: String?,
+    val totalWatchTimeSeconds: Long,
+    val playCount: Int,
+    val lastWatchedAt: String?,
+    val lastWatchedTitle: String?,
+    val lastClient: String?,
+    val rank: Int,
+)
+
+data class JellyfinMediaWatchStats(
+    val itemId: UUID?,
+    val title: String,
+    val type: String?,
+    val posterUrl: String?,
+    val playCount: Int,
+    val totalWatchTimeSeconds: Long,
+    val uniqueUsers: Int?,
+    val lastWatchedAt: String?,
+)
+
+data class JellyfinWatchTimeBucket(
+    val label: String,
+    val watchTimeSeconds: Long,
+    val playCount: Int,
 )
 
 data class JellyfinAdminPlugin(
@@ -810,6 +869,16 @@ data class JellyfinAdminUserDetail(
     val enabledFolderIds: List<UUID>,
 )
 
+data class JellyfinProfileImageUpload(
+    val bytes: ByteArray,
+    val mimeType: String,
+) {
+    init {
+        require(bytes.isNotEmpty()) { "Profile image is empty" }
+        require(mimeType.startsWith("image/")) { "Unsupported profile image type" }
+    }
+}
+
 sealed interface JellyfinResult<out T> {
     data class Success<T>(val value: T) : JellyfinResult<T>
     data class Failure(val message: String, val cause: Throwable? = null) : JellyfinResult<Nothing>
@@ -901,6 +970,7 @@ interface JellyfinLibraryRepository {
         library: JellyfinLibrary,
         startIndex: Int,
         limit: Int = 60,
+        filter: JellyfinLibraryItemFilter = JellyfinLibraryItemFilter.All,
     ): JellyfinResult<JellyfinLibraryPage>
     suspend fun buildAvailabilityIndex(session: JellyfinSession): JellyfinResult<JellyfinAvailabilityIndex>
 }
@@ -924,6 +994,18 @@ interface JellyfinMediaRepository {
 
 interface JellyfinPlaybackRepository {
     suspend fun getPlaybackInfo(
+        session: JellyfinSession,
+        itemId: UUID,
+        title: String,
+        subtitle: String?,
+        startPositionTicks: Long = 0L,
+        forceTranscode: Boolean = false,
+        audioStreamIndex: Int? = null,
+        subtitleStreamIndex: Int? = null,
+        isLiveTv: Boolean = false,
+    ): JellyfinResult<JellyfinPlaybackInfo>
+
+    suspend fun getCastPlaybackInfo(
         session: JellyfinSession,
         itemId: UUID,
         title: String,
@@ -974,6 +1056,8 @@ interface JellyfinAdminRepository {
         enabledFolderIds: List<UUID>? = null,
     ): JellyfinResult<JellyfinAdminUserDetail>
     suspend fun resetUserPassword(session: JellyfinSession, userId: UUID, newPassword: String): JellyfinResult<Unit>
+    suspend fun uploadUserProfileImage(session: JellyfinSession, userId: UUID, upload: JellyfinProfileImageUpload): JellyfinResult<JellyfinAdminUserDetail>
+    suspend fun deleteUserProfileImage(session: JellyfinSession, userId: UUID): JellyfinResult<JellyfinAdminUserDetail>
     suspend fun scanLibrary(session: JellyfinSession): JellyfinResult<Unit>
     suspend fun setPluginEnabled(session: JellyfinSession, pluginId: UUID, version: String, enabled: Boolean): JellyfinResult<Unit>
     suspend fun setScheduledTaskRunning(session: JellyfinSession, taskId: String, running: Boolean): JellyfinResult<Unit>
@@ -986,6 +1070,8 @@ interface JellyfinUserPreferencesRepository {
         preferences: JellyfinUserPlaybackPreferences,
     ): JellyfinResult<JellyfinUserPlaybackPreferences>
     suspend fun changePassword(session: JellyfinSession, currentPassword: String, newPassword: String): JellyfinResult<Unit>
+    suspend fun uploadCurrentUserProfileImage(session: JellyfinSession, upload: JellyfinProfileImageUpload): JellyfinResult<JellyfinSession>
+    suspend fun deleteCurrentUserProfileImage(session: JellyfinSession): JellyfinResult<JellyfinSession>
 }
 
 interface JellyfinQuickConnectRepository {

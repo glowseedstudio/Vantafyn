@@ -7,10 +7,13 @@ targetSdk = "36"
 activityCompose = "1.13.0"
 composeBom = "2026.06.01"
 coreKtx = "1.18.0"
+fragment = "1.7.1"
 jellyfinSdk = "1.7.1"
 lifecycle = "2.10.0"
 media3 = "1.10.1"
+mediarouter = "1.8.1"
 navigationCompose = "2.9.0"
+playServicesCast = "22.3.1"
 tvFoundation = "1.0.0"
 tvMaterial = "1.1.0-alpha01"
 coroutines = "1.10.2"
@@ -27,6 +30,7 @@ androidx-compose-ui = { module = "androidx.compose.ui:ui" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
+androidx-fragment = { module = "androidx.fragment:fragment", version.ref = "fragment" }
 androidx-lifecycle-runtime-ktx = { module = "androidx.lifecycle:lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel-ktx = { module = "androidx.lifecycle:lifecycle-viewmodel-ktx", version.ref = "lifecycle" }
@@ -34,6 +38,7 @@ androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", versi
 androidx-media3-exoplayer-hls = { module = "androidx.media3:media3-exoplayer-hls", version.ref = "media3" }
 androidx-media3-session = { module = "androidx.media3:media3-session", version.ref = "media3" }
 androidx-media3-ui = { module = "androidx.media3:media3-ui", version.ref = "media3" }
+androidx-mediarouter = { module = "androidx.mediarouter:mediarouter", version.ref = "mediarouter" }
 androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version.ref = "navigationCompose" }
 androidx-tv-foundation = { module = "androidx.tv:tv-foundation", version.ref = "tvFoundation" }
 androidx-tv-material = { module = "androidx.tv:tv-material", version.ref = "tvMaterial" }
@@ -44,6 +49,7 @@ jellyfin-api-okhttp = { module = "org.jellyfin.sdk:jellyfin-api-okhttp", version
 jellyfin-core = { module = "org.jellyfin.sdk:jellyfin-core", version.ref = "jellyfinSdk" }
 jellyfin-model = { module = "org.jellyfin.sdk:jellyfin-model", version.ref = "jellyfinSdk" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
+play-services-cast-framework = { module = "com.google.android.gms:play-services-cast-framework", version.ref = "playServicesCast" }
 junit = { module = "junit:junit", version.ref = "junit" }
 
 [plugins]

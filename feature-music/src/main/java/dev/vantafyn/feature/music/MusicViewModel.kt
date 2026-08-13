@@ -292,6 +292,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         closeNowPlaying()
     }
 
+    fun openTrackAlbum(track: JellyfinMusicTrack) {
+        val albumId = track.albumId ?: return
+        val album = _state.value.home?.albums?.firstOrNull { it.id == albumId }
+            ?: JellyfinMusicAlbum(
+                id = albumId,
+                title = track.album ?: "Album",
+                artist = track.artist,
+                year = null,
+                artworkUrl = track.artworkUrl,
+            )
+        openAlbum(album)
+    }
+
     fun toggleCurrentFavorite() {
         val activeSession = session ?: return
         val current = playbackController.state.value.currentTrack ?: return

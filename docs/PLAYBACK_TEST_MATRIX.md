@@ -65,6 +65,28 @@ Logs include playback method, whether media/play/live stream IDs are present, se
 - Try transcoding appears only when a fallback/source retry is available.
 - Full bitrate/resolution selection is not exposed until Vantafyn has a real source ladder.
 
+## Google Cast
+
+- Cast button appears when a Cast device is available.
+- Cast session connects and disconnects cleanly.
+- Starting Cast from an open movie pauses local playback.
+- Starting Cast from an open episode pauses local playback.
+- Cast playback starts near the current local position.
+- Chromecast receives movie/episode metadata rather than music metadata.
+- Cast controller shows `Playing on <device>` when the receiver name is available.
+- Cast play/pause controls the receiver.
+- Cast scrubber seek controls the receiver.
+- Cast subtitle button appears only when supported Cast subtitle tracks exist.
+- Cast subtitle sheet shows Off and supported text tracks.
+- Cast subtitle selection changes the receiver track through Cast, not local ExoPlayer.
+- Cast audio sheet is hidden with the Default Media Receiver.
+- Stop casting stops the receiver and returns to Vantafyn.
+- Play on this device resumes local playback near the Cast position.
+- Jellyfin dashboard/activity shows Cast playback after handoff.
+- Cast progress updates Jellyfin from the remote position.
+- Subtitle/audio options are not shown as Cast controls until actually supported.
+- Local movie and episode playback still work after disconnecting Cast.
+
 ## Episodes And Watch Party
 
 - Up Next appears for eligible episodes.

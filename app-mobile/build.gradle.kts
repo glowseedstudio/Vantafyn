@@ -22,6 +22,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core-jellyfin"))
+    implementation(project(":core-cast"))
     implementation(project(":core-media"))
     implementation(project(":core-ui"))
     implementation(project(":feature-home"))
@@ -35,6 +36,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.fragment)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
     debugImplementation(libs.androidx.compose.ui.tooling)

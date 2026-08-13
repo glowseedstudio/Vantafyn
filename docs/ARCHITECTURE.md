@@ -27,7 +27,8 @@ Playback is intentionally not implemented in this milestone. The next step is to
 
 - `JellyfinAuthRepository`: server test, public login-user discovery, username/password login, saved-session restore, and logout.
 - `JellyfinLibraryRepository`: authenticated library/view fetch.
-- `JellyfinAdminRepository`: administrator-only read model for real server, session, user, and library-count data.
+- `JellyfinAdminRepository`: administrator-only read model for real server, session, user, library-count, server-tool, and statistics data.
+- `JellyfinUserPreferencesRepository`: current-user playback settings, password changes, and current-user profile image changes.
 - `JellyfinSessionStorage`: storage boundary for saved profiles, server metadata, user identity, and access tokens.
 - `JellyfinResult`: success/failure wrapper so UI code does not catch SDK exceptions directly.
 
@@ -45,11 +46,16 @@ SDK APIs currently used:
 - `systemApi.getSystemInfo()`
 - `sessionApi.getSessions()`
 - `userApi.getUsers(...)`
+- `imageApi.getUserImageUrl(...)`
+- `imageApi.postUserImage(...)`
+- `imageApi.deleteUserImage(...)`
 - `itemsApi.getItems(GetItemsRequest)`
 
 Session storage currently lives in app-private `SharedPreferences` via `SharedPreferencesJellyfinSessionStorage`. It supports multiple saved profiles and migrates the earlier single-session keys if present. The interface exists so encrypted storage or DataStore can replace it without changing UI or repository call sites. Passwords are not stored.
 
-Admin surfaces must only display metrics that Jellyfin actually returns. Current admin counts come from real item-count queries and live session/user APIs. Watch-time totals and historical playback analytics are left as "requires plugin later" because Jellyfin core does not expose those totals through this flow.
+Admin surfaces must only display metrics that Jellyfin actually returns. Current admin counts come from real item-count queries and live session/user APIs. Historical watch-time analytics use the Jellyfin Playback Reporting plugin when its `user_usage_stats` endpoints are available; otherwise Vantafyn falls back to limited Jellyfin core data and clearly labels detailed statistics as unavailable.
+
+Jellyfin user profile image editing is implemented in `core-jellyfin`; see `docs/JELLYFIN_PROFILE_IMAGES.md`. Mobile owns Android Photo Picker and local crop/resize UI, while the repository owns authenticated upload/delete calls and session/profile refresh. TV displays Jellyfin profile images but does not expose image picking yet.
 
 The first-run and returning launch flow lives in `feature-home`:
 
