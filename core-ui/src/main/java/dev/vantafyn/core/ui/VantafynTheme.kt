@@ -44,6 +44,7 @@ object VantafynColors {
     val Muted = Color(0xFFB8C0D8)
     val Primary = Color(0xFF8EA2FF)
     val Secondary = Color(0xFF62D6FF)
+    val Gold = Color(0xFFFFC94A)
     val Destructive = Color(0xFFA96A72)
     val Border = Color.White.copy(alpha = 0.12f)
 }

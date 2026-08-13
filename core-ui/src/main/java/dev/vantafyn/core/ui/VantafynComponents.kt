@@ -208,6 +208,19 @@ private fun VantafynGlassVariant.surfaceBrush(selected: Boolean, focused: Boolea
     if (this == VantafynGlassVariant.Dock) {
         return VantafynNavDockBrush(enabled)
     }
+    if (this == VantafynGlassVariant.Modal) {
+        return Brush.linearGradient(
+            colorStops = arrayOf(
+                0.00f to VantafynGlassPalette.EdgeWhite.copy(alpha = 0.075f * enabledAlpha),
+                0.10f to VantafynColors.Graphite.copy(alpha = 0.96f * enabledAlpha),
+                0.46f to Color(0xFF080B14).copy(alpha = 0.97f * enabledAlpha),
+                0.74f to Color(0xFF0B0D17).copy(alpha = 0.96f * enabledAlpha),
+                1.00f to VantafynColors.Graphite.copy(alpha = 0.98f * enabledAlpha),
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(620f, 860f),
+        )
+    }
     val activeLift = when {
         focused -> 1f
         selected -> 0.76f
@@ -414,6 +427,26 @@ fun VantafynGlassPanel(
 )
 
 @Composable
+fun VantafynGlassModalPanel(
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    focused: Boolean = false,
+    enabled: Boolean = true,
+    cornerRadius: androidx.compose.ui.unit.Dp = 28.dp,
+    contentPadding: PaddingValues = PaddingValues(VantafynSpacing.lg),
+    content: @Composable BoxScope.() -> Unit,
+) = VantafynGlassSurface(
+    modifier = modifier,
+    variant = VantafynGlassVariant.Modal,
+    selected = selected,
+    focused = focused,
+    enabled = enabled,
+    cornerRadius = cornerRadius,
+    contentPadding = contentPadding,
+    content = content,
+)
+
+@Composable
 fun VantafynGlassCard(
     modifier: Modifier = Modifier,
     selected: Boolean = false,
@@ -463,7 +496,13 @@ fun VantafynGlassChip(
     content: @Composable BoxScope.() -> Unit,
 ) {
     VantafynInteractiveGlass(
-        modifier = modifier,
+        modifier = modifier.then(
+            if (selected && enabled) {
+                Modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
+            } else {
+                Modifier
+            },
+        ),
         variant = VantafynGlassVariant.Chip,
         selected = selected,
         enabled = enabled,
@@ -568,6 +607,7 @@ fun Modifier.vantafynAnimatedModalBorder(
     cornerRadius: Dp = 28.dp,
     strokeWidth: Dp = 2.dp,
     durationMillis: Int = 5200,
+    alpha: Float = 1f,
 ): Modifier {
     val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
     val shift by transition.animateFloat(
@@ -587,7 +627,9 @@ fun Modifier.vantafynAnimatedModalBorder(
         val end = Offset(size.width * (1f - shift), size.height * (1f - shift))
         drawRoundRect(
             brush = Brush.linearGradient(
-                colors = VantafynGradients.AccentColors + VantafynGradients.AccentColors.first(),
+                colors = (VantafynGradients.AccentColors + VantafynGradients.AccentColors.first()).map {
+                    it.copy(alpha = it.alpha * alpha.coerceIn(0f, 1f))
+                },
                 start = start,
                 end = end,
                 tileMode = TileMode.Repeated,
@@ -1222,7 +1264,7 @@ fun VantafynPermissionSheet(
             .padding(VantafynSpacing.lg),
         contentAlignment = Alignment.Center,
     ) {
-        VantafynGlassPanel(
+        VantafynGlassModalPanel(
             modifier = Modifier
                 .widthIn(max = 460.dp)
                 .vantafynAnimatedModalBorder(),

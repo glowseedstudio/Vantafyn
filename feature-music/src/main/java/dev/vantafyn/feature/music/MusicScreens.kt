@@ -2,6 +2,8 @@ package dev.vantafyn.feature.music
 
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -10,6 +12,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -41,6 +48,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -73,6 +81,7 @@ import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -105,6 +114,7 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
 import dev.vantafyn.core.cast.GoogleCastRouteButton
+import dev.vantafyn.core.jellyfin.JellyfinLyrics
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
 import dev.vantafyn.core.jellyfin.JellyfinMusicArtist
 import dev.vantafyn.core.jellyfin.JellyfinLyricLine
@@ -118,6 +128,7 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynErrorCard
 import dev.vantafyn.core.ui.VantafynGlassCard
 import dev.vantafyn.core.ui.VantafynGlassDock
+import dev.vantafyn.core.ui.VantafynGlassModalPanel
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassVariant
@@ -132,6 +143,11 @@ import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+
+private val VantafynModalContainerColor: Color
+    get() = VantafynColors.Graphite.copy(alpha = 0.96f)
+
+private val MusicBottomSheetRailClearance = 112.dp
 
 @Composable
 fun MusicScreen(
@@ -150,8 +166,30 @@ fun MusicScreen(
         state.home == null &&
         state.searchResults.isEmpty() &&
         state.screen == MusicScreenState.Home
+    var homeRevealActive by remember(session?.profileId) { mutableStateOf(true) }
+    LaunchedEffect(session?.profileId) {
+        homeRevealActive = true
+        delay(1_100L)
+        homeRevealActive = false
+    }
     LaunchedEffect(session?.profileId) {
         viewModel.bindSession(session)
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        viewModel.setMusicScreenActive(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.setMusicScreenActive(true)
+                Lifecycle.Event.ON_STOP -> viewModel.setMusicScreenActive(false)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.setMusicScreenActive(false)
+        }
     }
     BackHandler(enabled = state.showNowPlaying || state.screen != MusicScreenState.Home) {
         if (state.showLyricsScreen) {
@@ -171,60 +209,92 @@ fun MusicScreen(
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
             item {
-                MusicHomeHeader()
+                if (state.screen == MusicScreenState.Home) {
+                    MusicContentReveal(index = 0, animate = homeRevealActive) {
+                        MusicHomeHeader()
+                    }
+                } else {
+                    MusicTopBackHeader(title = "Music", onBack = viewModel::showHome)
+                }
             }
             state.errorMessage?.let { message ->
-                item { VantafynErrorCard(message) { VantafynButton("Retry", onClick = viewModel::loadHome) } }
+                item {
+                    MusicContentReveal(index = 1, animate = state.screen == MusicScreenState.Home && homeRevealActive) {
+                        VantafynErrorCard(message) { VantafynButton("Retry", onClick = viewModel::loadHome) }
+                    }
+                }
             }
-            item {
-                VantafynTextField(
-                    value = state.searchQuery,
-                    onValueChange = viewModel::search,
-                    label = "Search music",
-                    placeholder = "Songs, albums, artists",
-                )
+            if (state.screen == MusicScreenState.Home) {
+                item {
+                    MusicContentReveal(index = 1, animate = homeRevealActive) {
+                        VantafynTextField(
+                            value = state.searchQuery,
+                            onValueChange = viewModel::search,
+                            label = "Search music",
+                            placeholder = "Songs, albums, artists",
+                        )
+                    }
+                }
             }
             if (showInitialLoading) {
-                item(key = "music-loading-skeleton") { MusicLoadingSkeleton() }
+                item(key = "music-loading-skeleton") {
+                    MusicContentReveal(index = 2, animate = homeRevealActive) {
+                        MusicLoadingSkeleton()
+                    }
+                }
             }
             when (val screen = state.screen) {
                 MusicScreenState.Home -> {
                     if (state.searchResults.isNotEmpty()) {
                         item {
-                            MusicTrackList(
-                                title = "Search Results",
-                                tracks = state.searchResults,
-                                playlists = state.home?.playlists.orEmpty(),
-                                onTrack = { track -> startMusic { viewModel.playTrack(track, state.searchResults) } },
-                                onChoosePlaylist = { playlistPickerTrack = it },
-                                onLongPress = { actionTrack = it },
-                            )
+                            MusicContentReveal(index = 2, animate = homeRevealActive) {
+                                MusicTrackList(
+                                    title = "Search Results",
+                                    tracks = state.searchResults,
+                                    playlists = state.home?.playlists.orEmpty(),
+                                    pendingTrackId = state.pendingPlayTrackId,
+                                    onTrack = { track -> startMusic { viewModel.playTrack(track, state.searchResults) } },
+                                    onChoosePlaylist = { playlistPickerTrack = it },
+                                    onLongPress = { actionTrack = it },
+                                )
+                            }
                         }
                     }
                     state.home?.let { home ->
                         if (home.recentlyAdded.isNotEmpty()) item {
-                            MusicTrackRow("Recently Added", home.recentlyAdded) { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } }
+                            MusicContentReveal(index = 2, animate = homeRevealActive) {
+                                MusicTrackRow("Recently Added", home.recentlyAdded, pendingTrackId = state.pendingPlayTrackId) { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } }
+                            }
                         }
                         if (home.albums.isNotEmpty()) item {
-                            MusicAlbumRow(home.albums, onAlbum = viewModel::openAlbum)
+                            MusicContentReveal(index = 3, animate = homeRevealActive) {
+                                MusicAlbumRow(home.albums, onAlbum = viewModel::openAlbum)
+                            }
                         }
                         if (home.artists.isNotEmpty()) item {
-                            MusicArtistRow(home.artists, onArtist = viewModel::openArtist)
+                            MusicContentReveal(index = 4, animate = homeRevealActive) {
+                                MusicArtistRow(home.artists, onArtist = viewModel::openArtist)
+                            }
                         }
                         if (home.playlists.isNotEmpty()) item {
-                            MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
+                            MusicContentReveal(index = 5, animate = homeRevealActive) {
+                                MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
+                            }
                         }
                         if (home.songs.isNotEmpty()) item {
-                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                MusicSectionHeader("Songs", "View all", viewModel::showSongs)
-                                MusicTrackList(
-                                    title = "",
-                                    tracks = home.songs.take(20),
-                                    playlists = home.playlists,
-                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
-                                    onChoosePlaylist = { playlistPickerTrack = it },
-                                    onLongPress = { actionTrack = it },
-                                )
+                            MusicContentReveal(index = 6, animate = homeRevealActive) {
+                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                    MusicSectionHeader("Songs", "View all", viewModel::showSongs)
+                                    MusicTrackList(
+                                        title = "",
+                                        tracks = home.songs.take(20),
+                                        playlists = home.playlists,
+                                        pendingTrackId = state.pendingPlayTrackId,
+                                        onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
+                                        onChoosePlaylist = { playlistPickerTrack = it },
+                                        onLongPress = { actionTrack = it },
+                                    )
+                                }
                             }
                         }
                     }
@@ -240,6 +310,7 @@ fun MusicScreen(
                             title = "Tracks",
                             tracks = screen.tracks,
                             playlists = state.home?.playlists.orEmpty(),
+                            pendingTrackId = state.pendingPlayTrackId,
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                             onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
@@ -269,6 +340,7 @@ fun MusicScreen(
                             title = "Playlist",
                             tracks = screen.tracks,
                             playlists = state.home?.playlists.orEmpty(),
+                            pendingTrackId = state.pendingPlayTrackId,
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                             onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
@@ -277,13 +349,11 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Songs -> {
                     item {
-                        MusicSimpleHeader("Songs", onBack = viewModel::showHome)
-                    }
-                    item {
                         MusicTrackList(
                             title = "All Songs",
                             tracks = screen.tracks,
                             playlists = state.home?.playlists.orEmpty(),
+                            pendingTrackId = state.pendingPlayTrackId,
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                             onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
@@ -292,7 +362,19 @@ fun MusicScreen(
                 }
             }
         }
-        state.playback.currentTrack?.let {
+        AnimatedVisibility(
+            visible = state.playback.currentTrack != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = slideInVertically(
+                initialOffsetY = { fullHeight -> fullHeight + 96 },
+                animationSpec = tween(durationMillis = 520, easing = FastOutSlowInEasing),
+            ) + fadeIn(animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)),
+            exit = slideOutVertically(
+                targetOffsetY = { fullHeight -> fullHeight + 96 },
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+            ) + fadeOut(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)),
+        ) {
+            state.playback.currentTrack?.let {
             MusicMiniPlayer(
                 track = it,
                 isPlaying = state.playback.isPlaying,
@@ -308,10 +390,10 @@ fun MusicScreen(
                 onPrevious = viewModel::previous,
                 onNext = viewModel::next,
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                     .padding(start = 8.dp, end = 8.dp, bottom = 96.dp),
             )
+            }
         }
         if (state.showNowPlaying) {
             if (state.showLyricsScreen) {
@@ -542,7 +624,7 @@ private fun musicSkeletonBrush(): Brush {
 }
 
 @Composable
-private fun MusicTrackRow(title: String, tracks: List<JellyfinMusicTrack>, onTrack: (JellyfinMusicTrack) -> Unit) {
+private fun MusicTrackRow(title: String, tracks: List<JellyfinMusicTrack>, pendingTrackId: java.util.UUID?, onTrack: (JellyfinMusicTrack) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
         Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -551,6 +633,7 @@ private fun MusicTrackRow(title: String, tracks: List<JellyfinMusicTrack>, onTra
                     imageUrl = track.artworkUrl,
                     title = track.title,
                     subtitle = track.artist,
+                    isLoading = pendingTrackId == track.id,
                     onClick = { onTrack(track) },
                 )
             }
@@ -599,6 +682,7 @@ private fun MusicTrackList(
     title: String,
     tracks: List<JellyfinMusicTrack>,
     playlists: List<JellyfinMusicPlaylist> = emptyList(),
+    pendingTrackId: java.util.UUID? = null,
     onTrack: (JellyfinMusicTrack) -> Unit,
     onChoosePlaylist: (JellyfinMusicTrack) -> Unit = {},
     onLongPress: (JellyfinMusicTrack) -> Unit = {},
@@ -623,6 +707,14 @@ private fun MusicTrackList(
                         Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
+                    if (pendingTrackId == track.id) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(22.dp),
+                            strokeWidth = 2.dp,
+                            color = VantafynColors.Secondary,
+                            trackColor = Color.White.copy(alpha = 0.12f),
+                        )
+                    }
                     if (playlists.isNotEmpty()) {
                         MiniControl("+") { onChoosePlaylist(track) }
                     }
@@ -653,29 +745,41 @@ private fun MusicSimpleHeader(title: String, onBack: () -> Unit) {
 }
 
 @Composable
+private fun MusicTopBackHeader(title: String, onBack: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FlatMusicIconButton(Icons.Rounded.ArrowBack, "Back", onBack, size = 42)
+        Text(
+            title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
 private fun MusicDetailHeader(title: String, subtitle: String, imageUrl: String?, onBack: () -> Unit, onPlay: (() -> Unit)?) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            FlatMusicIconButton(Icons.Rounded.ArrowBack, "Back", onBack, size = 42)
-            Text(
-                title,
-                color = VantafynColors.Ink,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-        }
         MusicCollectionArtwork(imageUrl, Modifier.size(188.dp))
+        Text(
+            title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(7.dp),
@@ -735,14 +839,32 @@ private fun MusicCollectionArtwork(imageUrl: String?, modifier: Modifier = Modif
 }
 
 @Composable
-private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String, onClick: () -> Unit) {
+private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String, isLoading: Boolean = false, onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .width(128.dp)
             .clickable(onClick = onClick),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        MusicArt(imageUrl, Modifier.size(128.dp))
+        Box(contentAlignment = Alignment.Center) {
+            MusicArt(imageUrl, Modifier.size(128.dp))
+            if (isLoading) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Color.Black.copy(alpha = 0.32f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(28.dp),
+                        strokeWidth = 2.dp,
+                        color = VantafynColors.Secondary,
+                        trackColor = Color.White.copy(alpha = 0.14f),
+                    )
+                }
+            }
+        }
         Text(title, color = VantafynColors.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(subtitle, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -759,10 +881,21 @@ private fun MusicMiniPlayer(
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val borderAlpha by animateFloatAsState(
+        targetValue = if (isPlaying) 1f else 0f,
+        animationSpec = tween(durationMillis = if (isPlaying) 900 else 650, easing = FastOutSlowInEasing),
+        label = "musicMiniBorderAlpha",
+    )
     VantafynGlassDock(
         modifier = modifier
             .fillMaxWidth()
-            .vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.5.dp)
+            .then(
+                if (borderAlpha > 0.01f) {
+                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.5.dp, alpha = borderAlpha)
+                } else {
+                    Modifier
+                },
+            )
             .clickable(onClick = onOpen),
         cornerRadius = 22.dp,
         contentPadding = PaddingValues(10.dp),
@@ -842,7 +975,7 @@ private fun NowPlayingDialog(
                     Spacer(Modifier.size(44.dp))
                     Text("Now Playing", color = VantafynColors.Ink.copy(alpha = 0.90f), fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        FlatMusicIconButton(Icons.Rounded.MoreHoriz, "More", { showMoreSheet = true }, size = 44)
+                        GoogleCastRouteButton(modifier = Modifier.size(44.dp))
                         FlatMusicIconButton(Icons.Rounded.Close, "Close", viewModel::closeNowPlaying, size = 44)
                     }
                 }
@@ -923,7 +1056,6 @@ private fun NowPlayingDialog(
                     IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true }
                     IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
                     IconPill(Icons.Rounded.MoreHoriz, "More") { showMoreSheet = true }
-                    GoogleCastRouteButton(modifier = Modifier.size(44.dp))
                 }
             }
             item {
@@ -983,7 +1115,9 @@ private fun NowPlayingDialog(
         AlertDialog(
             modifier = Modifier.vantafynAnimatedModalBorder(),
             onDismissRequest = { showPlaylistName = false },
-            title = { Text("Create playlist") },
+            containerColor = VantafynModalContainerColor,
+            shape = RoundedCornerShape(28.dp),
+            title = { Text("Create playlist", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold) },
             text = { VantafynTextField(value = name, onValueChange = { name = it }, label = "Playlist name") },
             confirmButton = {
                 TextButton(onClick = {
@@ -1262,10 +1396,10 @@ private fun MusicTrackDetailsSheet(
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        VantafynGlassPanel(
+        VantafynGlassModalPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 104.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
                 .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
                 .clickable(enabled = false) {},
             cornerRadius = 30.dp,
@@ -1361,10 +1495,10 @@ private fun CurrentTrackMoreSheet(
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        VantafynGlassPanel(
+        VantafynGlassModalPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 104.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
                 .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
                 .clickable(enabled = false) {},
             cornerRadius = 30.dp,
@@ -1410,10 +1544,10 @@ private fun MusicQueueSheet(
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        VantafynGlassPanel(
+        VantafynGlassModalPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(14.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
                 .clickable(enabled = false) {},
             cornerRadius = 30.dp,
             contentPadding = PaddingValues(16.dp),
@@ -1462,6 +1596,14 @@ private fun LyricsPanel(state: MusicUiState) {
 @Composable
 private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
     val track = state.playback.currentTrack ?: return
+    val lyricsState = remember(track.id, state.lyricsTrackId, state.isLyricsLoading, state.lyrics) {
+        LyricsRenderState(
+            trackId = track.id,
+            lyricsTrackId = state.lyricsTrackId,
+            lyrics = state.lyrics,
+            isLoading = state.isLyricsLoading,
+        )
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -1494,26 +1636,63 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
                 }
                 FlatMusicIconButton(Icons.Rounded.Close, "Close lyrics", viewModel::closeLyrics)
             }
-            when {
-                state.isLyricsLoading -> VantafynLoadingIndicator("Loading lyrics")
-                state.lyrics == null -> {
-                    LyricsEmptyState("No lyrics available", "Jellyfin did not expose lyrics for this track.")
-                }
-                state.lyrics.isSynced -> {
-                    SyncedLyricsView(
-                        lines = state.lyrics.syncedLines,
-                        playbackMs = state.playback.positionMs,
-                        onSeek = viewModel::seekTo,
-                        modifier = Modifier.weight(1f),
+            AnimatedContent(
+                targetState = lyricsState,
+                transitionSpec = {
+                    fadeIn(
+                        animationSpec = tween(durationMillis = 260, delayMillis = 70, easing = FastOutSlowInEasing),
+                    ) togetherWith fadeOut(
+                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
                     )
-                }
-                else -> {
-                    PlainLyricsView(
-                        text = state.lyrics.plainText,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
+                },
+                modifier = Modifier.weight(1f),
+                label = "lyricsTrackCrossfade",
+            ) { renderState ->
+                LyricsBody(
+                    renderState = renderState,
+                    playbackMs = state.playback.positionMs,
+                    onSeek = viewModel::seekTo,
+                )
             }
+        }
+    }
+}
+
+private data class LyricsRenderState(
+    val trackId: java.util.UUID,
+    val lyricsTrackId: java.util.UUID?,
+    val lyrics: JellyfinLyrics?,
+    val isLoading: Boolean,
+)
+
+@Composable
+private fun LyricsBody(
+    renderState: LyricsRenderState,
+    playbackMs: Long,
+    onSeek: (Long) -> Unit,
+) {
+    when {
+        renderState.isLoading -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                VantafynLoadingIndicator("Loading lyrics from Jellyfin")
+            }
+        }
+        renderState.lyrics == null -> {
+            LyricsEmptyState("No lyrics available", "Jellyfin did not expose lyrics for this track.")
+        }
+        renderState.lyrics.isSynced -> {
+            SyncedLyricsView(
+                lines = renderState.lyrics.syncedLines,
+                playbackMs = playbackMs,
+                onSeek = onSeek,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        else -> {
+            PlainLyricsView(
+                text = renderState.lyrics.plainText,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
@@ -1756,10 +1935,10 @@ private fun MusicPlaylistPickerSheet(
             .clickable(onClick = onDismiss),
         contentAlignment = Alignment.BottomCenter,
     ) {
-        VantafynGlassPanel(
+        VantafynGlassModalPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = 104.dp)
+                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
                 .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
                 .clickable(enabled = false) {},
             cornerRadius = 30.dp,
@@ -1815,7 +1994,7 @@ private fun MusicTrackContextMenu(
         modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {},
-        containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+        containerColor = VantafynModalContainerColor,
         shape = RoundedCornerShape(28.dp),
         title = {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -2022,6 +2201,33 @@ private fun MusicScrubber(positionMs: Long, durationMs: Long, onSeek: (Long) -> 
 
 private fun progressFraction(positionMs: Long, durationMs: Long): Float =
     if (durationMs <= 0L) 0f else (positionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
+
+@Composable
+private fun MusicContentReveal(
+    index: Int,
+    animate: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (!animate) {
+        content()
+        return
+    }
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(index) {
+        delay((index.coerceAtMost(8) * 78L).coerceAtMost(620L))
+        visible = true
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 430, easing = FastOutSlowInEasing)) +
+            slideInVertically(
+                animationSpec = tween(durationMillis = 470, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 7 },
+            ),
+    ) {
+        content()
+    }
+}
 
 private fun JellyfinMusicTrack.toDetails(): MusicTrackDetails =
     MusicTrackDetails(

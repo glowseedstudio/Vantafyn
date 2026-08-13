@@ -1,5 +1,10 @@
 package dev.vantafyn.feature.requests
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
@@ -27,14 +32,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -42,10 +48,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -73,7 +82,9 @@ import dev.vantafyn.core.ombi.RequestMediaType
 import dev.vantafyn.core.ombi.RequestState
 import dev.vantafyn.core.ui.VantafynButton
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynGlassCard
+import dev.vantafyn.core.ui.VantafynGlassChip
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
@@ -109,6 +120,12 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         RequestDetailScreen(item = it, state = state, viewModel = viewModel, onOpenMedia = onOpenMedia, modifier = modifier)
         return
     }
+    var revealActive by remember(state.currentUserId) { mutableStateOf(true) }
+    LaunchedEffect(state.currentUserId) {
+        revealActive = true
+        delay(1_100L)
+        revealActive = false
+    }
     LazyColumn(
         modifier = modifier
             .fillMaxSize(),
@@ -117,28 +134,32 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
     ) {
         if (!state.isConfigured) {
             item {
-                RequestInset { EmptySetupState(state.isJellyfinAdmin, onSetup = viewModel::startSetup) }
+                RequestContentReveal(index = 0, animate = revealActive) {
+                    RequestInset { EmptySetupState(state.isJellyfinAdmin, onSetup = viewModel::startSetup) }
+                }
             }
             return@LazyColumn
         }
         if (!state.config.isEnabledForAdmins || !state.canUseRequests) {
             item {
-                RequestInset {
-                    if (state.isJellyfinAdmin) {
-                        UnavailableState(
-                            title = "Requests are disabled",
-                            body = "Ombi is configured, but request access is currently disabled.",
-                            admin = true,
-                            onRetry = viewModel::testConnection,
-                            onManage = viewModel::manageOmbi,
-                        )
-                    } else {
-                        UserUnavailableState(
-                            title = "Requests aren't ready yet",
-                            body = "Your server admin has not enabled Requests for this profile.",
-                            action = "Check again",
-                            onAction = viewModel::showRequests,
-                        )
+                RequestContentReveal(index = 0, animate = revealActive) {
+                    RequestInset {
+                        if (state.isJellyfinAdmin) {
+                            UnavailableState(
+                                title = "Requests are disabled",
+                                body = "Ombi is configured, but request access is currently disabled.",
+                                admin = true,
+                                onRetry = viewModel::testConnection,
+                                onManage = viewModel::manageOmbi,
+                            )
+                        } else {
+                            UserUnavailableState(
+                                title = "Requests aren't ready yet",
+                                body = "Your server admin has not enabled Requests for this profile.",
+                                action = "Check again",
+                                onAction = viewModel::showRequests,
+                            )
+                        }
                     }
                 }
             }
@@ -146,77 +167,112 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         }
         if (state.connectionStatus == "Connection failed") {
             item {
-                RequestInset {
-                    if (state.isJellyfinAdmin) {
-                        UnavailableState(
-                            title = "Requests are temporarily unavailable",
-                            body = state.message ?: state.config.lastFailureMessage ?: "Vantafyn could not reach Ombi.",
-                            admin = true,
-                            onRetry = viewModel::testConnection,
-                            onManage = viewModel::manageOmbi,
-                        )
-                    } else {
-                        UserUnavailableState(
-                            title = "Requests are temporarily unavailable",
-                            body = "Couldn't reach Requests. Try again in a moment.",
-                            action = "Check again",
-                            onAction = viewModel::showRequests,
-                        )
+                RequestContentReveal(index = 0, animate = revealActive) {
+                    RequestInset {
+                        if (state.isJellyfinAdmin) {
+                            UnavailableState(
+                                title = "Requests are temporarily unavailable",
+                                body = state.message ?: state.config.lastFailureMessage ?: "Vantafyn could not reach Ombi.",
+                                admin = true,
+                                onRetry = viewModel::testConnection,
+                                onManage = viewModel::manageOmbi,
+                            )
+                        } else {
+                            UserUnavailableState(
+                                title = "Requests are temporarily unavailable",
+                                body = "Couldn't reach Requests. Try again in a moment.",
+                                action = "Check again",
+                                onAction = viewModel::showRequests,
+                            )
+                        }
                     }
                 }
             }
         }
         if (state.config.identityMode == OmbiIdentityMode.PerUserAccount && !state.canSearchAndRequest) {
-            item { RequestInset { OmbiAccessNeededState(state, viewModel) } }
+            item { RequestContentReveal(index = 0, animate = revealActive) { RequestInset { OmbiAccessNeededState(state, viewModel) } } }
             return@LazyColumn
         }
-        item { RequestsHero(state, viewModel, onOpenMedia) }
-        item { RequestInset { RequestsToolbar(state, viewModel) } }
-        state.message?.let { item { RequestInset { MessageCard(it) } } }
+        item { RequestContentReveal(index = 0, animate = revealActive) { RequestsHero(state, viewModel, onOpenMedia) } }
+        item { RequestContentReveal(index = 1, animate = revealActive) { RequestInset { RequestsToolbar(state, viewModel) } } }
+        state.message?.let { item { RequestContentReveal(index = 2, animate = revealActive) { RequestInset { MessageCard(it) } } } }
         when (state.activeRequestsView) {
             RequestsView.Discover -> {
-                if (state.isLoadingDiscovery) item { RequestInset { DiscoverySkeleton() } }
+                if (state.isLoadingDiscovery) item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { DiscoverySkeleton() } } }
                 state.discoveryError?.let {
-                    item { RequestInset { InlineRetryCard(it, "Retry discovery", viewModel::loadDiscovery) } }
+                    item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { InlineRetryCard(it, "Retry discovery", viewModel::loadDiscovery) } } }
                 }
                 if (!state.isLoadingDiscovery && state.discoveryRails.isEmpty() && state.discoveryError == null) {
-                    item { RequestInset { MessageCard("Search for a movie or series to start building your Requests queue.") } }
+                    item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { MessageCard("Search for a movie or series to start building your Requests queue.") } } }
                 }
-                items(state.discoveryRails, key = { it.kind.name }) { rail ->
-                    RequestInset {
-                        DiscoveryRail(rail = rail, state = state, onOpen = viewModel::openRequestItem, onOpenAvailable = { viewModel.openAvailableItem(it, onOpenMedia) })
+                itemsIndexed(state.discoveryRails, key = { _, rail -> rail.kind.name }) { index, rail ->
+                    RequestContentReveal(index = index + 3, animate = revealActive) {
+                        RequestInset {
+                            DiscoveryRail(rail = rail, state = state, onOpen = viewModel::openRequestItem, onOpenAvailable = { viewModel.openAvailableItem(it, onOpenMedia) })
+                        }
                     }
                 }
             }
             RequestsView.Search -> {
-                if (state.isSearching) item { RequestInset { VantafynLoadingIndicator("Searching Ombi") } }
+                if (state.isSearching) item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { VantafynLoadingIndicator("Searching Ombi") } } }
                 if (!state.isSearching && state.searchResults.isEmpty() && state.query.length > 1) {
-                    item { RequestInset { MessageCard("No matching request results yet.") } }
+                    item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { MessageCard("No matching request results yet.") } } }
                 }
                 itemsIndexed(
                     state.searchResults,
                     key = { index, item -> "search-${item.mediaType}-${item.externalId}-${item.movieDbId.orEmpty()}-${item.tvDbId.orEmpty()}-$index" },
-                ) { _, item ->
-                    RequestInset {
-                        RequestPosterListCard(
-                            item = item,
-                            loading = state.activeRequestId == item.externalId,
-                            availableMatch = state.availabilityMatches[item.availabilityKey()],
-                            onOpen = { viewModel.openRequestItem(item) },
-                            onOpenAvailable = { viewModel.openAvailableItem(item, onOpenMedia) },
-                            onRequest = { viewModel.request(item) },
-                        )
+                ) { index, item ->
+                    RequestContentReveal(index = index + 3, animate = revealActive) {
+                        RequestInset {
+                            RequestPosterListCard(
+                                item = item,
+                                loading = state.activeRequestId == item.externalId,
+                                availableMatch = state.availabilityMatches[item.availabilityKey()],
+                                onOpen = { viewModel.openRequestItem(item) },
+                                onOpenAvailable = { viewModel.openAvailableItem(item, onOpenMedia) },
+                                onRequest = { viewModel.request(item) },
+                            )
+                        }
                     }
                 }
             }
             RequestsView.MyRequests -> {
                 item {
-                    RequestInset {
-                        RequestHistory(state.requests, state.isJellyfinAdmin, state.isLoadingRequests, onRefresh = viewModel::loadRequests)
+                    RequestContentReveal(index = 3, animate = revealActive) {
+                        RequestInset {
+                            RequestHistory(state.requests, state.isJellyfinAdmin, state.isLoadingRequests, onRefresh = viewModel::loadRequests)
+                        }
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun RequestContentReveal(
+    index: Int,
+    animate: Boolean,
+    content: @Composable () -> Unit,
+) {
+    if (!animate) {
+        content()
+        return
+    }
+    var visible by remember { mutableStateOf(false) }
+    LaunchedEffect(index) {
+        delay((index.coerceAtMost(8) * 78L).coerceAtMost(620L))
+        visible = true
+    }
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 430, easing = FastOutSlowInEasing)) +
+            slideInVertically(
+                animationSpec = tween(durationMillis = 470, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 7 },
+            ),
+    ) {
+        content()
     }
 }
 
@@ -252,7 +308,6 @@ private fun RequestsHero(state: RequestsUiState, viewModel: RequestsViewModel, o
         modifier = Modifier
             .fillMaxWidth()
             .height(264.dp)
-            .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
             .background(VantafynColors.SurfaceHigh.copy(alpha = 0.52f)),
     ) {
         if (heroItems.isEmpty()) {
@@ -291,6 +346,36 @@ private fun RequestsHero(state: RequestsUiState, viewModel: RequestsViewModel, o
                             .background(Color.White.copy(alpha = if (selected) 0.74f else 0.32f)),
                     )
                 }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(74.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.Transparent,
+                            VantafynColors.Graphite.copy(alpha = 0.72f),
+                            VantafynColors.Graphite,
+                        ),
+                    ),
+                ),
+        )
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(
+                    start = 16.dp,
+                    top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
+                ),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TypeChip("Requests", selected = true, onClick = {})
+            if (state.isJellyfinAdmin && state.isConfigured) {
+                TypeChip("Manage Ombi", selected = false, onClick = viewModel::manageOmbi)
             }
         }
     }
@@ -335,14 +420,8 @@ private fun RequestsHeroSlide(
                 .align(Alignment.BottomStart)
                 .fillMaxWidth()
                 .padding(start = 16.dp, end = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(9.dp),
+            verticalArrangement = Arrangement.spacedBy(11.dp),
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                TypeChip("Requests", selected = true, onClick = {})
-                if (state.isJellyfinAdmin && state.isConfigured) {
-                    TypeChip("Manage Ombi", selected = false, onClick = viewModel::manageOmbi)
-                }
-            }
             Text(
                 hero?.title ?: "Request movies and series",
                 color = VantafynColors.Ink,
@@ -355,23 +434,9 @@ private fun RequestsHeroSlide(
                 hero?.overview ?: "Search Ombi, track your requests, and open available titles back in Vantafyn.",
                 color = VantafynColors.Muted,
                 style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
+                maxLines = 3,
                 overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                VantafynButton(
-                    if (heroAvailable != null) "Watch now" else hero?.primaryActionLabel() ?: "Search",
-                    onClick = {
-                        when {
-                            hero != null && heroAvailable != null -> viewModel.openAvailableItem(hero, onOpenMedia)
-                            hero != null -> viewModel.openRequestItem(hero)
-                            else -> viewModel.selectRequestsView(RequestsView.Search)
-                        }
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-                VantafynButton("Refresh", onClick = viewModel::loadDiscovery, modifier = Modifier.weight(1f))
-            }
         }
     }
 }
@@ -574,12 +639,46 @@ private fun OmbiManageStatusSection(state: RequestsUiState, viewModel: RequestsV
                 Text(state.config.baseUrl.ifBlank { "No Ombi server configured" }, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(state.config.version?.let { "Ombi $it" } ?: state.connectionStatus, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Switch(checked = state.config.accessMode != OmbiAccessMode.Disabled, onCheckedChange = viewModel::setEnabled)
+            VantafynToggleSwitch(
+                checked = state.config.accessMode != OmbiAccessMode.Disabled,
+                onCheckedChange = viewModel::setEnabled,
+            )
         }
         state.config.lastSuccessfulConnectionAt?.let {
             ManageInfoRow("Last checked", DateFormat.getDateTimeInstance().format(Date(it)))
         }
         ManageInfoRow("Request mode", state.config.identityMode.label)
+    }
+}
+
+@Composable
+private fun VantafynToggleSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .width(52.dp)
+            .height(30.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .then(
+                if (checked) {
+                    Modifier.background(VantafynGradients.accentHorizontal())
+                } else {
+                    Modifier.background(Color.White.copy(alpha = 0.12f))
+                },
+            )
+            .clickable { onCheckedChange(!checked) }
+            .padding(4.dp),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.94f)),
+        )
     }
 }
 
@@ -1087,18 +1186,15 @@ private fun RequestDetailScreen(item: RequestMediaSummary, state: RequestsUiStat
                 ) {
                     TypeChip(display.resolvedLabel(availableMatch != null), selected = true, onClick = {})
                     Text(display.title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        listOfNotNull(
+                    RequestRatingMetadata(
+                        values = listOfNotNull(
                             display.mediaType.label,
                             display.year?.toString(),
                             detail?.runtimeMinutes?.let { "${it}m" },
                             detail?.certification,
                             detail?.network,
                             display.rating?.let { "★ %.1f".format(it) },
-                        ).joinToString(" · "),
-                        color = VantafynColors.Muted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
+                        ),
                     )
                     if (display.mediaType == RequestMediaType.Series && display.state == RequestState.NotRequested && availableMatch == null) {
                         TvRequestOptions(state.tvRequestSelection, viewModel::onTvRequestSelectionChanged)
@@ -1574,12 +1670,10 @@ private fun ManageSelectableRow(title: String, subtitle: String, selected: Boole
 
 @Composable
 private fun TypeChip(label: String, selected: Boolean, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(if (selected) VantafynColors.Primary.copy(alpha = 0.34f) else VantafynColors.SurfaceHigh.copy(alpha = 0.42f))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
+    VantafynGlassChip(
+        selected = selected,
+        onClick = onClick,
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 7.dp),
     ) {
         Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodyLarge)
     }
@@ -1746,6 +1840,28 @@ private fun RequestMediaSummary.primaryActionLabel(): String =
 
 private fun RequestMediaSummary.accessibilityLabel(): String =
     "${title}, ${mediaType.label}, ${state.label}"
+
+@Composable
+private fun RequestRatingMetadata(values: List<String>) {
+    if (values.isEmpty()) return
+    Text(
+        text = buildAnnotatedString {
+            values.forEachIndexed { index, value ->
+                if (index > 0) append(" · ")
+                if (value.trimStart().startsWith("★")) {
+                    withStyle(SpanStyle(color = VantafynColors.Gold, fontWeight = FontWeight.SemiBold)) {
+                        append(value)
+                    }
+                } else {
+                    append(value)
+                }
+            }
+        },
+        color = VantafynColors.Muted,
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis,
+    )
+}
 
 private val MediaRequestType.label: String get() = if (this == MediaRequestType.Movie) "Movie" else "TV"
 private val MediaRequestStatus.label: String get() = if (this == MediaRequestStatus.Pending) "Requested" else name.replaceFirstChar(Char::titlecase)

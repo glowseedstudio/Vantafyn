@@ -46,6 +46,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var lastProgressReportMs: Long = 0L
     private var lastProgressTrackId: UUID? = null
     private var lastPausedState: Boolean? = null
+    private var playRequestJob: Job? = null
+    private var pendingPlayTrackId: UUID? = null
+    private var musicScreenActive = false
+    private var lyricsPrefetchJob: Job? = null
+    private val lyricsCache = LinkedHashMap<LyricsCacheKey, JellyfinLyrics?>()
 
     private val _state = MutableStateFlow(MusicUiState(playback = playbackController.state.value))
     val state: StateFlow<MusicUiState> = _state.asStateFlow()
@@ -55,8 +60,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             playbackController.state.collect { playback ->
                 _state.update { it.copy(playback = playback) }
                 val track = playback.currentTrack
-                if (track != null && track.id != _state.value.lyricsTrackId) {
+                if (track != null && _state.value.showLyricsScreen && track.id != _state.value.lyricsTrackId) {
                     loadLyrics(track.id)
+                } else if (track != null && shouldPrefetchLyrics()) {
+                    prefetchLyrics(track.id)
                 }
                 maybeReportTimedProgress(playback)
             }
@@ -70,7 +77,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun bindSession(session: JellyfinSession?) {
         if (session == null) return
-        if (this.session?.profileId == session.profileId && _state.value.home != null) return
+        if (this.session?.profileId == session.profileId && this.session?.server?.localId == session.server.localId && _state.value.home != null) return
+        if (this.session?.profileId != session.profileId || this.session?.server?.localId != session.server.localId) {
+            lyricsCache.clear()
+            lyricsJob?.cancel()
+            lyricsPrefetchJob?.cancel()
+        }
         this.session = session
         loadHome()
     }
@@ -92,27 +104,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun playTrack(track: JellyfinMusicTrack, queue: List<JellyfinMusicTrack>) {
         val activeSession = session ?: return
-        viewModelScope.launch {
+        if (pendingPlayTrackId == track.id && playRequestJob?.isActive == true) return
+        playRequestJob?.cancel()
+        pendingPlayTrackId = track.id
+        _state.update { it.copy(pendingPlayTrackId = track.id, errorMessage = null) }
+        playRequestJob = viewModelScope.launch {
             val safeQueue = queue.ifEmpty { listOf(track) }
             val queueIds = safeQueue.map { it.id }.toSet()
             playbackInfoByTrack.keys.removeAll { it !in queueIds }
-            val preparedQueue = safeQueue.map { queuedTrack ->
-                val playbackInfo = preparePlaybackInfo(activeSession, queuedTrack)
-                if (playbackInfo != null) {
-                    playbackInfoByTrack[queuedTrack.id] = playbackInfo
-                    queuedTrack.toPlaybackTrack(streamUrl = playbackInfo.streamUrl)
-                } else {
-                    queuedTrack.toPlaybackTrack()
+            try {
+                val preparedQueue = safeQueue.map { queuedTrack ->
+                    val playbackInfo = preparePlaybackInfo(activeSession, queuedTrack)
+                    if (playbackInfo != null) {
+                        playbackInfoByTrack[queuedTrack.id] = playbackInfo
+                        queuedTrack.toPlaybackTrack(streamUrl = playbackInfo.streamUrl)
+                    } else {
+                        queuedTrack.toPlaybackTrack()
+                    }
+                }
+                Log.d(
+                    "VantafynMusic",
+                    "Starting track '${track.title.take(80)}' queueSize=${safeQueue.size} prepared=${preparedQueue.count { it.id in playbackInfoByTrack }}",
+                )
+                playbackController.playQueue(
+                    queue = preparedQueue,
+                    startIndex = safeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0),
+                )
+            } finally {
+                if (pendingPlayTrackId == track.id) {
+                    pendingPlayTrackId = null
+                    _state.update { it.copy(pendingPlayTrackId = null) }
                 }
             }
-            Log.d(
-                "VantafynMusic",
-                "Starting track '${track.title.take(80)}' queueSize=${safeQueue.size} prepared=${preparedQueue.count { it.id in playbackInfoByTrack }}",
-            )
-            playbackController.playQueue(
-                queue = preparedQueue,
-                startIndex = safeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0),
-            )
         }
     }
 
@@ -220,14 +243,26 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openNowPlaying() {
         _state.update { it.copy(showNowPlaying = true) }
+        playbackController.state.value.currentTrack?.id?.let(::prefetchLyrics)
     }
 
     fun closeNowPlaying() {
         _state.update { it.copy(showNowPlaying = false, showLyricsScreen = false) }
     }
 
+    fun setMusicScreenActive(active: Boolean) {
+        musicScreenActive = active
+        if (active) {
+            playbackController.state.value.currentTrack?.id?.takeIf { shouldPrefetchLyrics() }?.let(::prefetchLyrics)
+        }
+    }
+
     fun openLyrics() {
+        val track = playbackController.state.value.currentTrack
         _state.update { it.copy(showLyricsScreen = true, showNowPlaying = true) }
+        if (track != null && track.id != _state.value.lyricsTrackId) {
+            loadLyrics(track.id)
+        }
     }
 
     fun closeLyrics() {
@@ -406,12 +441,19 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun loadLyrics(trackId: UUID) {
         val activeSession = session ?: return
+        val cacheKey = activeSession.lyricsCacheKey(trackId)
+        if (lyricsCache.containsKey(cacheKey)) {
+            _state.update { it.copy(lyricsTrackId = trackId, lyrics = lyricsCache[cacheKey], isLyricsLoading = false) }
+            return
+        }
         lyricsJob?.cancel()
+        lyricsPrefetchJob?.cancel()
         lyricsJob = viewModelScope.launch {
             _state.update { it.copy(lyricsTrackId = trackId, lyrics = null, isLyricsLoading = true) }
             when (val result = musicRepository.getLyrics(activeSession, trackId)) {
                 is JellyfinResult.Success -> _state.update {
                     Log.d("VantafynMusic", "Lyrics ${if (result.value == null) "missing" else "loaded"} for track=$trackId")
+                    cacheLyrics(cacheKey, result.value)
                     it.copy(isLyricsLoading = false, lyrics = result.value)
                 }
                 is JellyfinResult.Failure -> _state.update {
@@ -421,6 +463,35 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    private fun prefetchLyrics(trackId: UUID) {
+        val activeSession = session ?: return
+        val cacheKey = activeSession.lyricsCacheKey(trackId)
+        if (lyricsCache.containsKey(cacheKey)) return
+        if (lyricsJob?.isActive == true && _state.value.lyricsTrackId == trackId) return
+        if (lyricsPrefetchJob?.isActive == true) return
+        lyricsPrefetchJob = viewModelScope.launch {
+            when (val result = musicRepository.getLyrics(activeSession, trackId)) {
+                is JellyfinResult.Success -> {
+                    Log.d("VantafynMusic", "Lyrics prefetched for track=$trackId")
+                    cacheLyrics(cacheKey, result.value)
+                    if (_state.value.showLyricsScreen && playbackController.state.value.currentTrack?.id == trackId) {
+                        _state.update { it.copy(lyricsTrackId = trackId, lyrics = result.value, isLyricsLoading = false) }
+                    }
+                }
+                is JellyfinResult.Failure -> Log.d("VantafynMusic", "Lyrics prefetch failed: ${result.message.take(120)}")
+            }
+        }
+    }
+
+    private fun cacheLyrics(key: LyricsCacheKey, lyrics: JellyfinLyrics?) {
+        lyricsCache[key] = lyrics
+        while (lyricsCache.size > 12) {
+            lyricsCache.remove(lyricsCache.keys.first())
+        }
+    }
+
+    private fun shouldPrefetchLyrics(): Boolean = musicScreenActive && (_state.value.showNowPlaying || _state.value.showLyricsScreen)
 
     private suspend fun preparePlaybackInfo(activeSession: JellyfinSession, track: JellyfinMusicTrack): JellyfinPlaybackInfo? =
         when (
@@ -445,8 +516,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             is VantafynMusicPlaybackEvent.TrackStarted -> reportStarted(event.track, event.positionMs)
             is VantafynMusicPlaybackEvent.TrackChanged -> {
                 event.previousTrack?.let { reportStopped(it, event.previousPositionMs, event.reason) }
-                _state.update { it.copy(lyricsTrackId = null, lyrics = null, isLyricsLoading = false) }
-                event.currentTrack?.let { reportStarted(it, 0L) }
+                val currentTrack = event.currentTrack
+                if (_state.value.showLyricsScreen && currentTrack != null) {
+                    loadLyrics(currentTrack.id)
+                } else {
+                    _state.update { it.copy(lyricsTrackId = null, lyrics = null, isLyricsLoading = false) }
+                }
+                currentTrack?.let { reportStarted(it, 0L) }
             }
             is VantafynMusicPlaybackEvent.PauseChanged -> reportProgress(event.track, event.positionMs, event.isPaused, force = true)
             is VantafynMusicPlaybackEvent.Seeked -> reportProgress(event.track, event.positionMs, isPaused = !_state.value.playback.isPlaying, force = true)
@@ -466,6 +542,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun reportStarted(track: VantafynMusicTrack, positionMs: Long) {
+        val safePosition = positionMs.coerceAtLeast(0L)
         if (reportedTrackId == track.id) return
         val activeSession = session ?: return
         val info = playbackInfoByTrack[track.id] ?: track.toFallbackPlaybackInfo()
@@ -473,7 +550,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         lastPausedState = false
         Log.d("VantafynMusic", "Reporting start '${track.title.take(80)}' playSession=${info.playSessionId != null}")
         viewModelScope.launch {
-            reportResult("start", playbackRepository.reportStarted(activeSession, info, positionMs.toTicks()))
+            reportResult("start", playbackRepository.reportStarted(activeSession, info, safePosition.toTicks()))
         }
     }
 
@@ -547,6 +624,7 @@ data class MusicUiState(
     val message: String? = null,
     val home: JellyfinMusicHome? = null,
     val playback: VantafynMusicPlaybackState,
+    val pendingPlayTrackId: UUID? = null,
     val showNowPlaying: Boolean = false,
     val showLyricsScreen: Boolean = false,
     val lyricsTrackId: UUID? = null,
@@ -556,6 +634,19 @@ data class MusicUiState(
     val searchResults: List<JellyfinMusicTrack> = emptyList(),
     val screen: MusicScreenState = MusicScreenState.Home,
 )
+
+private data class LyricsCacheKey(
+    val serverId: String,
+    val profileId: String,
+    val trackId: UUID,
+)
+
+private fun JellyfinSession.lyricsCacheKey(trackId: UUID): LyricsCacheKey =
+    LyricsCacheKey(
+        serverId = server.localId,
+        profileId = profileId,
+        trackId = trackId,
+    )
 
 sealed interface MusicScreenState {
     data object Home : MusicScreenState

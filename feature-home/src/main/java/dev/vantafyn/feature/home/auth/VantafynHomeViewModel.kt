@@ -510,7 +510,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun retryFailedRestore() {
         val profile = _state.value.restoreFailureProfile ?: return
-        selectProfile(profile)
+        selectProfile(profile, showPickerWhileRestoring = false)
     }
 
     fun saveRecoveryServerAddress() {
@@ -802,12 +802,32 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         openLibraryPage(library, startIndex = 0, filter = filter)
     }
 
+    fun reorderLibraries(orderedIds: List<UUID>) {
+        _state.update { state ->
+            val rank = orderedIds.mapIndexed { index, id -> id to index }.toMap()
+            val currentIndex = state.libraries.mapIndexed { index, library -> library.id to index }.toMap()
+            val updated = state.libraries.sortedWith(
+                compareBy<JellyfinLibrary>(
+                    { rank[it.id] ?: Int.MAX_VALUE },
+                    { currentIndex[it.id] ?: Int.MAX_VALUE },
+                ),
+            )
+            if (updated.map { it.id } == state.libraries.map { it.id }) return@update state
+            persistLibraryOrder(state.session?.profileId, updated.map { it.id })
+            state.copy(libraries = updated)
+        }
+    }
+
     fun openMedia(itemId: UUID) {
         val session = _state.value.session ?: return
         _state.update {
             it.copy(
                 mobileDestination = MobileDestination.MediaDetail,
-                previousMobileDestination = it.mobileDestination.rootDestination(),
+                previousMobileDestination = when (it.mobileDestination) {
+                    MobileDestination.MediaDetail,
+                    MobileDestination.Player -> it.previousMobileDestination
+                    else -> it.mobileDestination
+                },
                 selectedMediaId = itemId,
                 mediaDetail = null,
                 selectedSeasonId = null,
@@ -876,12 +896,19 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val snapshot = _state.value
         when (snapshot.mobileDestination) {
             MobileDestination.Player -> exitPlayback(0L)
-            MobileDestination.MediaDetail -> navigateMobile(snapshot.previousMobileDestination.rootDestination())
+            MobileDestination.MediaDetail -> navigateMobile(snapshot.previousMobileDestination)
             MobileDestination.LibraryDetail -> navigateMobile(MobileDestination.Libraries)
             MobileDestination.WatchParty -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
             MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
             MobileDestination.AdminUserSettings -> closeAdminUser()
+            MobileDestination.Libraries,
+            MobileDestination.Search,
+            MobileDestination.Music,
+            MobileDestination.Favorites,
+            MobileDestination.Requests,
+            MobileDestination.Admin,
+            MobileDestination.Profile -> navigateMobile(MobileDestination.Home)
             else -> Unit
         }
     }
@@ -986,9 +1013,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun onSearchQueryChanged(query: String) {
-        _state.update { it.copy(searchQuery = query, searchError = null) }
+        val trimmed = query.trim()
+        _state.update {
+            it.copy(
+                searchQuery = query,
+                searchError = null,
+                isSearchLoading = trimmed.length >= 2,
+            )
+        }
         searchJob?.cancel()
-        if (query.trim().length < 2) {
+        if (trimmed.length < 2) {
             _state.update { it.copy(isSearchLoading = false, searchResults = emptyList()) }
             return
         }
@@ -2691,6 +2725,32 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         homeLayoutStorage.edit().putString(key, rows.joinToString("|")).apply()
     }
 
+    private fun applyLibraryOrder(profileId: String?, libraries: List<JellyfinLibrary>): List<JellyfinLibrary> {
+        val savedOrder = readLibraryOrder(profileId)
+        if (savedOrder.isEmpty()) return libraries
+        val originalIndex = libraries.mapIndexed { index, library -> library.id to index }.toMap()
+        val rank = savedOrder.mapIndexed { index, id -> id to index }.toMap()
+        return libraries.sortedWith(
+            compareBy<JellyfinLibrary>(
+                { rank[it.id] ?: Int.MAX_VALUE },
+                { originalIndex[it.id] ?: Int.MAX_VALUE },
+            ),
+        )
+    }
+
+    private fun readLibraryOrder(profileId: String?): List<UUID> {
+        val key = profileId?.let { "library_order_$it" } ?: return emptyList()
+        return homeLayoutStorage.getString(key, null)
+            ?.split('|')
+            ?.mapNotNull { token -> runCatching { UUID.fromString(token) }.getOrNull() }
+            .orEmpty()
+    }
+
+    private fun persistLibraryOrder(profileId: String?, ids: List<UUID>) {
+        val key = profileId?.let { "library_order_$it" } ?: return
+        homeLayoutStorage.edit().putString(key, ids.joinToString("|")).apply()
+    }
+
     private fun readHomeLayout(profileId: String?): List<HomeSectionPreference> {
         val key = profileId?.let { "layout_$it" } ?: return defaultHomeLayout()
         val encoded = homeLayoutStorage.getString(key, null) ?: return defaultHomeLayout()
@@ -2787,13 +2847,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             _state.update { it.copy(isLibrariesLoading = true, errorMessage = null) }
             when (val result = libraryRepository.getLibraries(session)) {
                 is JellyfinResult.Success -> {
+                    val libraries = applyLibraryOrder(session.profileId, result.value)
                     _state.update {
                         it.copy(
                             isLibrariesLoading = false,
-                            libraries = result.value,
+                            libraries = libraries,
                         )
                     }
-                    loadHome(session, result.value)
+                    loadHome(session, libraries)
                 }
                 is JellyfinResult.Failure -> {
                     _state.update {

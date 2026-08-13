@@ -402,7 +402,7 @@ class MusicPlaybackController private constructor(context: Context) {
                     )
                 }
                 LongRunningTaskRegistry.tick(MUSIC_TICKER_TASK_ID, if (sessionPlayer.isPlaying) "playing" else "paused")
-                delay(1_000L)
+                delay(if (AppForegroundStateRepository.isForeground.value) ForegroundTickerIntervalMs else BackgroundTickerIntervalMs)
             }
         }
     }
@@ -451,6 +451,8 @@ class MusicPlaybackController private constructor(context: Context) {
     companion object {
         private const val MusicLogTag = "VantafynMusic"
         private const val MUSIC_TICKER_TASK_ID = "music.positionTicker"
+        private const val ForegroundTickerIntervalMs = 1_000L
+        private const val BackgroundTickerIntervalMs = 10_000L
 
         @Volatile
         private var instance: MusicPlaybackController? = null
