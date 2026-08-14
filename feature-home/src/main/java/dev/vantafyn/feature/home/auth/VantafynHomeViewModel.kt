@@ -2,9 +2,17 @@ package dev.vantafyn.feature.home.auth
 
 import android.app.Application
 import android.content.Context
+import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.vantafyn.core.cast.PlaybackOutputCoordinator
+import dev.vantafyn.core.downloads.DownloadRecord
+import dev.vantafyn.core.downloads.DownloadSyncState
+import dev.vantafyn.core.downloads.DownloadState
+import dev.vantafyn.core.downloads.OfflineDownloadManager
+import dev.vantafyn.core.downloads.OfflineSyncScheduler
+import dev.vantafyn.core.downloads.PendingUserDataMutation
+import dev.vantafyn.core.downloads.SqliteDownloadRepository
 import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
 import dev.vantafyn.core.jellyfin.JellyfinAdminOverview
 import dev.vantafyn.core.jellyfin.JellyfinAdminRepository
@@ -94,6 +102,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val adminRepository: JellyfinAdminRepository = repositories.adminRepository
     private val userPreferencesRepository: JellyfinUserPreferencesRepository = repositories.userPreferencesRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
+    private val offlineDownloadManager = OfflineDownloadManager(application)
+    private val downloadRepository = SqliteDownloadRepository(application)
+    private val offlineSyncScheduler = OfflineSyncScheduler(application)
     private val watchPartyRepository: JellyfinWatchPartyRepository = repositories.watchPartyRepository
     private val realtimeClient = repositories.realtimeClient
     private val ombiRepository = OmbiRepository(application)
@@ -389,6 +400,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                     refreshSavedProfiles()
                     startWatchPartyRealtime(result.value)
+                    offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                 }
@@ -526,6 +538,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                     refreshSavedProfiles()
                     startWatchPartyRealtime(result.value)
+                    offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                 }
@@ -577,6 +590,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                     refreshSavedProfiles()
                     startWatchPartyRealtime(result.value)
+                    offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                 }
@@ -653,22 +667,54 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             routeProfileToLogin(profile, profile.serverUrl, result.message)
             return
         }
-        _state.update {
-            it.copy(
-                step = VantafynSetupStep.ConnectionRecovery,
-                selectedProfileId = profile.id,
-                isLoading = false,
-                isStartupResolved = true,
-                server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
-                serverUrl = profile.serverUrl,
-                username = profile.displayName,
-                password = "",
-                restoreFailureProfile = profile,
-                restoreFailureReason = reason,
-                restoreFailureMessage = result.message,
-                failedProfileIds = it.failedProfileIds + profile.id,
-                errorMessage = null,
-            )
+        viewModelScope.launch {
+            val records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            if (reason in setOf(JellyfinRestoreFailureReason.ServerUnreachable, JellyfinRestoreFailureReason.NetworkUnavailable) && records.isNotEmpty()) {
+                _state.update {
+                    it.copy(
+                        step = VantafynSetupStep.Home,
+                        selectedProfileId = profile.id,
+                        isLoading = false,
+                        isStartupResolved = true,
+                        session = null,
+                        offlineProfile = profile,
+                        server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                        serverUrl = profile.serverUrl,
+                        username = profile.displayName,
+                        password = "",
+                        restoreFailureProfile = null,
+                        restoreFailureReason = null,
+                        restoreFailureMessage = null,
+                        failedProfileIds = it.failedProfileIds + profile.id,
+                        errorMessage = null,
+                        mobileDestination = MobileDestination.Downloads,
+                        previousMobileDestination = MobileDestination.Profile,
+                        offlineDownloads = records,
+                        isDownloadsLoading = false,
+                        downloadsError = null,
+                        mobileMessage = "Working offline",
+                    )
+                }
+                return@launch
+            }
+            _state.update {
+                it.copy(
+                    step = VantafynSetupStep.ConnectionRecovery,
+                    selectedProfileId = profile.id,
+                    isLoading = false,
+                    isStartupResolved = true,
+                    server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                    serverUrl = profile.serverUrl,
+                    username = profile.displayName,
+                    password = "",
+                    restoreFailureProfile = profile,
+                    restoreFailureReason = reason,
+                    restoreFailureMessage = result.message,
+                    failedProfileIds = it.failedProfileIds + profile.id,
+                    offlineDownloads = records,
+                    errorMessage = null,
+                )
+            }
         }
     }
 
@@ -941,6 +987,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.MediaDetail -> navigateMobile(snapshot.previousMobileDestination)
             MobileDestination.LibraryDetail -> navigateMobile(MobileDestination.Libraries)
             MobileDestination.WatchParty -> navigateMobile(MobileDestination.Profile)
+            MobileDestination.Downloads -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
             MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
             MobileDestination.AdminUserSettings -> closeAdminUser()
@@ -1538,6 +1585,193 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update { it.copy(mobileMessage = "Playback coming next") }
     }
 
+    fun queueCurrentMediaDownload() {
+        val session = _state.value.session ?: return
+        val detail = _state.value.mediaDetail ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(mobileMessage = null) }
+            if (detail.itemType.equals("series", ignoreCase = true)) {
+                val episodes = _state.value.selectedSeasonEpisodes.ifEmpty { detail.episodes }
+                    .distinctBy { it.id }
+                    .sortedWith(
+                        compareBy<JellyfinEpisode> { it.seasonIndexNumber ?: Int.MAX_VALUE }
+                            .thenBy { it.indexNumber ?: Int.MAX_VALUE }
+                            .thenBy { it.title },
+                    )
+                if (episodes.isEmpty()) {
+                    _state.update { it.copy(mobileMessage = "Choose a season before saving offline.") }
+                    return@launch
+                }
+                var queued = 0
+                var firstFailure: String? = null
+                episodes.forEach { episode ->
+                    when (val result = offlineDownloadManager.queueEpisode(session, detail, episode)) {
+                        is JellyfinResult.Success -> queued += 1
+                        is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result.message
+                    }
+                }
+                _state.update {
+                    it.copy(
+                        mobileMessage = when {
+                            queued > 0 && firstFailure == null -> "$queued episodes queued"
+                            queued > 0 -> "$queued episodes queued. Some could not be saved."
+                            else -> firstFailure ?: "This season could not be saved offline."
+                        },
+                    )
+                }
+                loadDownloads()
+                return@launch
+            }
+            when (val result = offlineDownloadManager.queueMedia(session, detail)) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(mobileMessage = "Download queued") }
+                    loadDownloads()
+                }
+                is JellyfinResult.Failure -> _state.update { it.copy(mobileMessage = result.message) }
+            }
+        }
+    }
+
+    fun openDownloads() {
+        navigateMobile(MobileDestination.Downloads)
+        loadDownloads()
+    }
+
+    fun loadDownloads() {
+        val scope = _state.value.downloadScope() ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isDownloadsLoading = true, downloadsError = null) }
+            runCatching {
+                downloadRepository.listForUser(scope.serverId, scope.userId)
+            }.onSuccess { records ->
+                _state.update {
+                    it.copy(
+                        offlineDownloads = records,
+                        isDownloadsLoading = false,
+                        downloadsError = null,
+                    )
+                }
+            }.onFailure { throwable ->
+                _state.update {
+                    it.copy(
+                        isDownloadsLoading = false,
+                        downloadsError = throwable.message ?: "Downloads could not be loaded.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun workOfflineFromRecovery() {
+        val profile = _state.value.restoreFailureProfile ?: return
+        openOfflineDownloads(profile, message = "Working offline")
+    }
+
+    private fun openOfflineDownloads(profile: SavedProfile, message: String?) {
+        viewModelScope.launch {
+            val records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            _state.update {
+                it.copy(
+                    step = VantafynSetupStep.Home,
+                    selectedProfileId = profile.id,
+                    isLoading = false,
+                    isStartupResolved = true,
+                    session = null,
+                    offlineProfile = profile,
+                    server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                    serverUrl = profile.serverUrl,
+                    username = profile.displayName,
+                    password = "",
+                    restoreFailureProfile = null,
+                    restoreFailureReason = null,
+                    restoreFailureMessage = null,
+                    mobileDestination = MobileDestination.Downloads,
+                    previousMobileDestination = MobileDestination.Profile,
+                    offlineDownloads = records,
+                    isDownloadsLoading = false,
+                    downloadsError = null,
+                    mobileMessage = message,
+                    homeLayout = readHomeLayout(profile.id),
+                    themeMusicEnabled = readThemeMusicEnabled(profile.id),
+                    themeMusicVolume = readThemeMusicVolume(profile.id),
+                    selectedBackground = readSelectedBackground(profile.id),
+                    videoPlayerPreference = readVideoPlayerPreference(profile.id),
+                    configuredSmartRows = readSmartRows(profile.id),
+                    autoplayCountdownSeconds = readAutoplayCountdownSeconds(profile.id),
+                    passoutProtectionEnabled = readPassoutProtectionEnabled(profile.id),
+                    passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(profile.id),
+                )
+            }
+        }
+    }
+
+    fun playOfflineDownload(record: DownloadRecord) {
+        val path = record.localMediaPath
+        if (record.state != DownloadState.Completed || path.isNullOrBlank()) {
+            _state.update { it.copy(mobileMessage = "This download is not ready yet") }
+            return
+        }
+        val target = PlaybackTarget(
+            id = runCatching { UUID.fromString(record.identity.itemId) }.getOrNull() ?: UUID.randomUUID(),
+            title = record.title,
+            subtitle = record.seriesName ?: record.albumName,
+            startTicks = record.localPlaybackPositionTicks,
+            itemType = record.mediaType.name,
+            seriesName = record.seriesName,
+            seasonNumber = record.seasonNumber,
+            episodeNumber = record.episodeNumber,
+        )
+        _state.update {
+            it.copy(
+                previousMobileDestination = MobileDestination.Downloads,
+                mobileDestination = MobileDestination.Player,
+                playbackInfo = null,
+                playbackItem = VantafynPlaybackItem(
+                    itemId = record.identity.itemId,
+                    title = record.title,
+                    subtitle = record.seriesName ?: record.albumName,
+                    streamUrl = java.io.File(path).toUri().toString(),
+                    startPositionMs = record.localPlaybackPositionTicks / 10_000L,
+                    durationMs = record.runtimeTicks?.let { ticks -> ticks / 10_000L },
+                    sourceLabel = "Offline",
+                    itemType = record.mediaType.name,
+                    autoplaySettings = it.autoplaySettings(),
+                ),
+                activePlaybackTarget = target,
+                activeOfflineDownloadId = record.id,
+                isPlaybackLoading = false,
+                playbackError = null,
+                canTryPlaybackTranscode = false,
+                hasPlaybackRetriedTranscode = true,
+                hasReportedPlaybackStart = true,
+            )
+        }
+    }
+
+    fun cancelDownload(record: DownloadRecord) {
+        viewModelScope.launch {
+            offlineDownloadManager.cancel(record.id)
+            _state.update { it.copy(mobileMessage = "Download cancelled") }
+            loadDownloads()
+        }
+    }
+
+    fun retryDownload(record: DownloadRecord) {
+        viewModelScope.launch {
+            offlineDownloadManager.retry(record)
+            _state.update { it.copy(mobileMessage = "Download queued") }
+            loadDownloads()
+        }
+    }
+
+    fun removeDownload(record: DownloadRecord) {
+        viewModelScope.launch {
+            offlineDownloadManager.remove(record)
+            _state.update { it.copy(mobileMessage = "Download removed") }
+            loadDownloads()
+        }
+    }
+
     fun startPlayback(
         forceTranscode: Boolean = false,
         audioStreamIndex: Int? = null,
@@ -1618,6 +1852,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     playbackInfo = null,
                     playbackItem = null,
                     activePlaybackTarget = target,
+                    activeOfflineDownloadId = null,
                     isPlaybackLoading = true,
                     playbackError = null,
                     canTryPlaybackTranscode = false,
@@ -1963,6 +2198,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppForegrounded() {
         isAppForeground = true
+        if (_state.value.session != null) {
+            offlineSyncScheduler.schedule()
+        }
         _state.value.session
             ?.takeIf { shouldUseWatchPartyRealtime(_state.value) }
             ?.let { startWatchPartyRealtime(it) }
@@ -2504,10 +2742,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 playbackInfo = null,
                 playbackItem = null,
                 activePlaybackTarget = null,
+                activeOfflineDownloadId = null,
                 playbackError = null,
                 isPlaybackLoading = false,
                 hasReportedPlaybackStart = false,
             )
+        }
+        if (snapshot.activeOfflineDownloadId != null) {
+            persistOfflinePlaybackProgress(snapshot.activeOfflineDownloadId, positionMs.toTicks(), played = false)
         }
         if (session != null && info != null) {
             viewModelScope.launch {
@@ -2515,6 +2757,33 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 snapshot.selectedMediaId?.let { openMedia(it) }
                 loadLibraries(session)
             }
+        }
+    }
+
+    private fun persistOfflinePlaybackProgress(downloadId: String, positionTicks: Long, played: Boolean) {
+        val now = System.currentTimeMillis()
+        viewModelScope.launch {
+            val record = downloadRepository.get(downloadId) ?: return@launch
+            downloadRepository.updateLocalPlaybackState(
+                id = record.id,
+                playbackPositionTicks = positionTicks,
+                played = played,
+                syncState = DownloadSyncState.Pending,
+                updatedAtMillis = now,
+            )
+            downloadRepository.upsertPendingUserDataMutation(
+                PendingUserDataMutation(
+                    profileId = record.profileId,
+                    serverId = record.identity.serverId,
+                    userId = record.identity.userId,
+                    itemId = record.identity.itemId,
+                    playbackPositionTicks = positionTicks,
+                    played = played,
+                    updatedAtMillis = now,
+                ),
+            )
+            offlineSyncScheduler.schedule()
+            loadDownloads()
         }
     }
 
@@ -3016,6 +3285,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             }
                             refreshSavedProfiles()
                             startWatchPartyRealtime(jellyfinSession)
+                            offlineSyncScheduler.schedule()
                             loadLibraries(jellyfinSession)
                             loadFavorites(jellyfinSession)
                             return@launch
@@ -3044,6 +3314,7 @@ data class VantafynHomeUiState(
     val password: String = "",
     val server: JellyfinServerConfig? = null,
     val session: JellyfinSession? = null,
+    val offlineProfile: SavedProfile? = null,
     val savedProfiles: List<SavedProfile> = emptyList(),
     val autoLoginLastProfile: Boolean = false,
     val publicUsers: List<JellyfinPublicUser> = emptyList(),
@@ -3079,6 +3350,9 @@ data class VantafynHomeUiState(
     val favorites: List<JellyfinMediaItem> = emptyList(),
     val isFavoritesLoading: Boolean = false,
     val favoritesError: String? = null,
+    val offlineDownloads: List<DownloadRecord> = emptyList(),
+    val isDownloadsLoading: Boolean = false,
+    val downloadsError: String? = null,
     val adminOverview: JellyfinAdminOverview? = null,
     val isAdminLoading: Boolean = false,
     val isAdminActionRunning: Boolean = false,
@@ -3114,6 +3388,7 @@ data class VantafynHomeUiState(
     val activePlaybackTarget: PlaybackTarget? = null,
     val playbackInfo: JellyfinPlaybackInfo? = null,
     val playbackItem: VantafynPlaybackItem? = null,
+    val activeOfflineDownloadId: String? = null,
     val isPlaybackLoading: Boolean = false,
     val playbackError: String? = null,
     val canTryPlaybackTranscode: Boolean = false,
@@ -3292,6 +3567,7 @@ enum class MobileDestination {
     Favorites,
     Requests,
     WatchParty,
+    Downloads,
     Admin,
     AdminUserSettings,
     Profile,
@@ -3314,6 +3590,7 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.Admin,
         MobileDestination.Profile -> true
         MobileDestination.AdminUserSettings,
+        MobileDestination.Downloads,
         MobileDestination.HomeLayout,
         MobileDestination.PlaybackPreferences,
         MobileDestination.LibraryDetail,
@@ -3323,6 +3600,15 @@ private fun MobileDestination.isRootDestination(): Boolean =
 
 private fun MobileDestination.rootDestination(): MobileDestination =
     if (isRootDestination()) this else MobileDestination.Home
+
+private data class DownloadScope(
+    val serverId: String,
+    val userId: String,
+)
+
+private fun VantafynHomeUiState.downloadScope(): DownloadScope? =
+    session?.let { DownloadScope(it.server.localId, it.user.id.toString()) }
+        ?: offlineProfile?.let { DownloadScope(it.serverRef, it.jellyfinUserId.toString()) }
 
 data class PlaybackTarget(
     val id: UUID,

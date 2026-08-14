@@ -98,6 +98,10 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CollectionsBookmark
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
@@ -114,6 +118,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SwitchAccount
@@ -186,6 +191,8 @@ import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import dev.vantafyn.core.cast.GoogleCastRouteButton
+import dev.vantafyn.core.downloads.DownloadRecord
+import dev.vantafyn.core.downloads.DownloadState
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
@@ -283,6 +290,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.io.ByteArrayOutputStream
+import java.io.File
 import java.util.Date
 import java.util.UUID
 import kotlin.math.abs
@@ -439,6 +447,7 @@ fun VantafynAppContent(
                 onUseAnotherServer = viewModel::useAnotherServerFromRecovery,
                 onSignInAgain = viewModel::signInAgainFromRecovery,
                 onChooseProfile = viewModel::showProfilePicker,
+                onWorkOffline = viewModel::workOfflineFromRecovery,
                 onBack = viewModel::navigateSetupBack,
             )
                 VantafynSetupStep.Home -> AnimatedVisibility(
@@ -495,6 +504,13 @@ fun VantafynAppContent(
             onToggleMediaPlayed = viewModel::toggleMediaPlayed,
             onSetMediaFavorite = viewModel::setMediaFavorite,
             onSetMediaPlayed = viewModel::setMediaPlayed,
+            onQueueMediaDownload = viewModel::queueCurrentMediaDownload,
+            onOpenDownloads = viewModel::openDownloads,
+            onRefreshDownloads = viewModel::loadDownloads,
+            onPlayOfflineDownload = viewModel::playOfflineDownload,
+            onCancelDownload = viewModel::cancelDownload,
+            onRetryDownload = viewModel::retryDownload,
+            onRemoveDownload = viewModel::removeDownload,
             onStartPlayback = { viewModel.startPlayback() },
             onStartPlaybackFromBeginning = viewModel::startPlaybackFromBeginning,
             onStartEpisodePlayback = viewModel::startEpisodePlayback,
@@ -1048,6 +1064,7 @@ private fun ConnectionRecoveryScreen(
     onUseAnotherServer: () -> Unit,
     onSignInAgain: () -> Unit,
     onChooseProfile: () -> Unit,
+    onWorkOffline: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1149,6 +1166,45 @@ private fun ConnectionRecoveryScreen(
                                 )
                             }
                             StatusBlock(state)
+
+                            if (state.offlineDownloads.any { it.state == DownloadState.Completed }) {
+                                VantafynGlassSurface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    variant = VantafynGlassVariant.Card,
+                                    cornerRadius = 20.dp,
+                                    contentPadding = PaddingValues(14.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        SettingsRowIcon(Icons.Rounded.DownloadDone)
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                                        ) {
+                                            Text(
+                                                "Offline library ready",
+                                                color = VantafynColors.Ink,
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                            Text(
+                                                "Play saved titles while this server reconnects.",
+                                                color = VantafynColors.Muted,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                            )
+                                        }
+                                    }
+                                }
+                                VantafynButton(
+                                    "Work offline",
+                                    onClick = onWorkOffline,
+                                    enabled = !state.isLoading,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -1781,6 +1837,13 @@ private fun HomeScreen(
     onToggleMediaPlayed: () -> Unit,
     onSetMediaFavorite: (java.util.UUID, Boolean) -> Unit,
     onSetMediaPlayed: (java.util.UUID, Boolean) -> Unit,
+    onQueueMediaDownload: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onRefreshDownloads: () -> Unit,
+    onPlayOfflineDownload: (DownloadRecord) -> Unit,
+    onCancelDownload: (DownloadRecord) -> Unit,
+    onRetryDownload: (DownloadRecord) -> Unit,
+    onRemoveDownload: (DownloadRecord) -> Unit,
     onStartPlayback: () -> Unit,
     onStartPlaybackFromBeginning: () -> Unit,
     onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
@@ -1886,6 +1949,13 @@ private fun HomeScreen(
             onToggleMediaPlayed = onToggleMediaPlayed,
             onSetMediaFavorite = onSetMediaFavorite,
             onSetMediaPlayed = onSetMediaPlayed,
+            onQueueMediaDownload = onQueueMediaDownload,
+            onOpenDownloads = onOpenDownloads,
+            onRefreshDownloads = onRefreshDownloads,
+            onPlayOfflineDownload = onPlayOfflineDownload,
+            onCancelDownload = onCancelDownload,
+            onRetryDownload = onRetryDownload,
+            onRemoveDownload = onRemoveDownload,
             onStartPlayback = onStartPlayback,
             onStartPlaybackFromBeginning = onStartPlaybackFromBeginning,
             onStartEpisodePlayback = onStartEpisodePlayback,
@@ -2033,6 +2103,13 @@ private fun MobileShellScreen(
     onToggleMediaPlayed: () -> Unit,
     onSetMediaFavorite: (java.util.UUID, Boolean) -> Unit,
     onSetMediaPlayed: (java.util.UUID, Boolean) -> Unit,
+    onQueueMediaDownload: () -> Unit,
+    onOpenDownloads: () -> Unit,
+    onRefreshDownloads: () -> Unit,
+    onPlayOfflineDownload: (DownloadRecord) -> Unit,
+    onCancelDownload: (DownloadRecord) -> Unit,
+    onRetryDownload: (DownloadRecord) -> Unit,
+    onRemoveDownload: (DownloadRecord) -> Unit,
     onStartPlayback: () -> Unit,
     onStartPlaybackFromBeginning: () -> Unit,
     onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
@@ -2133,6 +2210,15 @@ private fun MobileShellScreen(
                     onPlaybackComingSoon = onPlaybackComingSoon,
                 )
                 MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
+                MobileDestination.Downloads -> DownloadsScreen(
+                    state = state,
+                    onBack = onNavigateBack,
+                    onRefresh = onRefreshDownloads,
+                    onPlay = onPlayOfflineDownload,
+                    onCancel = onCancelDownload,
+                    onRetry = onRetryDownload,
+                    onRemove = onRemoveDownload,
+                )
                 MobileDestination.MediaDetail -> MediaDetailScreen(
                     state = state,
                     onBack = onNavigateBack,
@@ -2147,6 +2233,7 @@ private fun MobileShellScreen(
                     themeMusicVolume = state.themeMusicVolume,
                     onToggleFavorite = onToggleMediaFavorite,
                     onTogglePlayed = onToggleMediaPlayed,
+                    onQueueDownload = onQueueMediaDownload,
                     onStartWatchParty = onStartWatchPartyFromDetail,
                 )
                 MobileDestination.Player -> Box(Modifier.fillMaxSize()) {
@@ -2254,6 +2341,7 @@ private fun MobileShellScreen(
                             state = state,
                             onAdmin = { onNavigate(MobileDestination.Admin) },
                             onRequests = { onNavigate(MobileDestination.Requests) },
+                            onDownloads = onOpenDownloads,
                             onWatchParty = { onNavigate(MobileDestination.WatchParty) },
                             onHomeLayout = { onNavigate(MobileDestination.HomeLayout) },
                             onPlaybackPreferences = { onNavigate(MobileDestination.PlaybackPreferences) },
@@ -7294,6 +7382,7 @@ private fun ProfileSettingsScreen(
     state: VantafynHomeUiState,
     onAdmin: () -> Unit,
     onRequests: () -> Unit,
+    onDownloads: () -> Unit,
     onWatchParty: () -> Unit,
     onHomeLayout: () -> Unit,
     onPlaybackPreferences: () -> Unit,
@@ -7408,6 +7497,7 @@ private fun ProfileSettingsScreen(
                     if (state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers) {
                         SettingsRow("Integrations & Requests", "", onRequests, compact = true, icon = Icons.Rounded.Apps)
                     }
+                    SettingsRow("Downloads", "", onDownloads, compact = true, icon = Icons.Rounded.Download)
                     SettingsRow("Home Sections", "", onHomeLayout, compact = true, icon = Icons.Rounded.ViewAgenda)
                     SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
                     SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
@@ -8042,6 +8132,227 @@ private fun VideoPlayerPreferenceRow(
 }
 
 @Composable
+private fun DownloadsScreen(
+    state: VantafynHomeUiState,
+    onBack: () -> Unit,
+    onRefresh: () -> Unit,
+    onPlay: (DownloadRecord) -> Unit,
+    onCancel: (DownloadRecord) -> Unit,
+    onRetry: (DownloadRecord) -> Unit,
+    onRemove: (DownloadRecord) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 118.dp),
+        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.ArrowBack,
+                    contentDescription = "Back",
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onBack)
+                        .padding(3.dp),
+                )
+                Text(
+                    "Downloads",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "Refresh downloads",
+                    tint = VantafynColors.Ink.copy(alpha = 0.9f),
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onRefresh)
+                        .padding(4.dp),
+                )
+            }
+        }
+        if (state.isDownloadsLoading) {
+            item { VantafynLoadingIndicator("Loading downloads") }
+        }
+        state.downloadsError?.let { error ->
+            item { VantafynErrorCard(error) { VantafynButton("Retry", onClick = onRefresh) } }
+        }
+        if (!state.isDownloadsLoading && state.offlineDownloads.isEmpty() && state.downloadsError == null) {
+            item {
+                GlassPanel {
+                    Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                        SettingsRowIcon(Icons.Rounded.Download)
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Nothing saved yet", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            Text("Save movies and episodes from their detail pages. Completed downloads will play without a server connection.", color = VantafynColors.Muted)
+                        }
+                    }
+                }
+            }
+        }
+        items(state.offlineDownloads, key = { it.id }) { record ->
+            DownloadRecordCard(
+                record = record,
+                onPlay = { onPlay(record) },
+                onCancel = { onCancel(record) },
+                onRetry = { onRetry(record) },
+                onRemove = { onRemove(record) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DownloadRecordCard(
+    record: DownloadRecord,
+    onPlay: () -> Unit,
+    onCancel: () -> Unit,
+    onRetry: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val isReady = record.state == DownloadState.Completed
+    val isActive = record.state in setOf(
+        DownloadState.Queued,
+        DownloadState.Preparing,
+        DownloadState.WaitingForNetwork,
+        DownloadState.WaitingForWifi,
+        DownloadState.Downloading,
+        DownloadState.Finalizing,
+    )
+    val canRetry = record.state == DownloadState.Failed || record.state == DownloadState.Cancelled
+    GlassPanel(
+        modifier = Modifier.clickable(enabled = isReady, onClick = onPlay),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(VantafynColors.SurfaceHigh.copy(alpha = 0.7f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                val poster = record.localPosterPath?.let(::File)?.takeIf { it.exists() }
+                if (poster != null) {
+                    AsyncImage(
+                        model = poster,
+                        contentDescription = record.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (isReady) Icons.Rounded.PlayArrow else Icons.Rounded.Download,
+                        contentDescription = null,
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(record.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(record.downloadStatusLabel(), color = record.downloadStatusColor(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                record.progressFraction()?.let { progress ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.10f)),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(progress)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(VantafynGradients.accentHorizontal()),
+                        )
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (isReady) {
+                    DownloadActionIcon(Icons.Rounded.PlayArrow, "Play", onPlay)
+                }
+                if (isActive) {
+                    DownloadActionIcon(Icons.Rounded.Close, "Cancel", onCancel)
+                }
+                if (canRetry) {
+                    DownloadActionIcon(Icons.Rounded.Replay, "Retry", onRetry)
+                }
+                if (!isActive) {
+                    DownloadActionIcon(Icons.Rounded.Delete, "Remove", onRemove, tint = Color(0xFFFFC2C2))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DownloadActionIcon(
+    icon: ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    tint: Color = VantafynColors.Ink,
+) {
+    Icon(
+        imageVector = icon,
+        contentDescription = label,
+        tint = tint.copy(alpha = 0.92f),
+        modifier = Modifier
+            .size(34.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(6.dp),
+    )
+}
+
+private fun DownloadRecord.progressFraction(): Float? {
+    val total = totalBytes ?: return null
+    if (total <= 0L) return null
+    return (bytesDownloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+}
+
+private fun DownloadRecord.downloadStatusLabel(): String =
+    when (state) {
+        DownloadState.Queued -> "Queued"
+        DownloadState.Preparing -> "Preparing"
+        DownloadState.WaitingForNetwork -> "Waiting for network"
+        DownloadState.WaitingForWifi -> "Waiting for Wi-Fi"
+        DownloadState.Downloading -> progressFraction()?.let { "${(it * 100).toInt()}%" } ?: "Downloading"
+        DownloadState.Finalizing -> "Finishing"
+        DownloadState.Completed -> "Ready offline"
+        DownloadState.Failed -> failureReason ?: "Could not download"
+        DownloadState.Cancelled -> "Cancelled"
+    }
+
+private fun DownloadRecord.downloadStatusColor(): Color =
+    when (state) {
+        DownloadState.Completed -> Color(0xFF78E6B2)
+        DownloadState.Failed,
+        DownloadState.Cancelled -> Color(0xFFFFA9A9)
+        else -> VantafynColors.Ink.copy(alpha = 0.78f)
+    }
+
+@Composable
 private fun PasswordChangeDialog(
     title: String,
     requiresCurrent: Boolean,
@@ -8600,6 +8911,7 @@ private fun MediaDetailScreen(
     themeMusicVolume: ThemeMusicVolume,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
+    onQueueDownload: () -> Unit,
     onStartWatchParty: (WatchPartyMode) -> Unit,
 ) {
     val detail = state.mediaDetail
@@ -8644,6 +8956,7 @@ private fun MediaDetailScreen(
                         onMore = { showActions = true },
                         onToggleFavorite = onToggleFavorite,
                         onTogglePlayed = onTogglePlayed,
+                        onQueueDownload = onQueueDownload,
                     )
                 }
             }
@@ -8711,6 +9024,10 @@ private fun MediaDetailScreen(
             onTogglePlayed = {
                 showActions = false
                 onTogglePlayed()
+            },
+            onQueueDownload = {
+                showActions = false
+                onQueueDownload()
             },
             onMediaInfo = {
                 showActions = false
@@ -8836,6 +9153,7 @@ private fun DetailActionPanel(
     onMore: () -> Unit,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
+    onQueueDownload: () -> Unit,
 ) {
     val supportsMyList = detail.itemType.supportsMyListAction()
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
@@ -9003,6 +9321,7 @@ private fun DetailActionSheet(
     onWatchFromBeginning: () -> Unit,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
+    onQueueDownload: () -> Unit,
     onMediaInfo: () -> Unit,
     onStartWatchParty: () -> Unit,
 ) {
@@ -9026,6 +9345,7 @@ private fun DetailActionSheet(
                 if (supportsMyList) {
                     DetailSheetAction(if (detail.isFavorite) "♡" else "＋", if (detail.isFavorite) "Remove from My List" else "Add to My List", onToggleFavorite)
                 }
+                DetailSheetAction("↓", "Save offline", onQueueDownload)
                 DetailSheetAction(if (detail.isPlayed) "↺" else "✓", if (detail.isPlayed) "Mark unwatched" else "Mark watched", onTogglePlayed)
                 if (!detail.itemType.equals("Audio", ignoreCase = true) && !detail.itemType.equals("LiveTvChannel", ignoreCase = true)) {
                     DetailSheetAction("◌", "Start Watch Party", onStartWatchParty)
@@ -9719,12 +10039,15 @@ private fun MobileBottomNav(
     }
     Box(
         modifier = modifier
-            .windowInsetsPadding(WindowInsets.safeDrawing)
             .fillMaxWidth()
-            .background(VantafynBottomScrim())
-            .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
+            .background(VantafynBottomScrim()),
     ) {
-        VantafynGlassDock(modifier = Modifier.fillMaxWidth()) {
+        VantafynGlassDock(
+            modifier = Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                .fillMaxWidth()
+                .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -9790,7 +10113,8 @@ private fun MusicQuickPlayerSheet(
 ) {
     val musicState by musicViewModel.state.collectAsStateWithLifecycle()
     var showLyrics by rememberSaveable { mutableStateOf(false) }
-    val currentPlayback = if (showLyrics) musicState.playback else playback
+    var popupLyricsPlayback by remember { mutableStateOf(playback) }
+    val currentPlayback = if (showLyrics) popupLyricsPlayback else playback
     val track = currentPlayback.currentTrack
     val activeTrackId = track?.id
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -9808,7 +10132,7 @@ private fun MusicQuickPlayerSheet(
     }
     LaunchedEffect(showLyrics) {
         musicViewModel.setPopupLyricsActive(showLyrics)
-        if (showLyrics) controller.refreshPositionFromPlayer()
+        if (showLyrics) popupLyricsPlayback = controller.forcePlaybackSnapshot()
     }
     DisposableEffect(Unit) {
         onDispose {
@@ -9819,8 +10143,8 @@ private fun MusicQuickPlayerSheet(
         if (!showLyrics) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
-                controller.refreshPositionFromPlayer()
-                delay(750L)
+                popupLyricsPlayback = controller.forcePlaybackSnapshot()
+                delay(500L)
             }
         }
     }

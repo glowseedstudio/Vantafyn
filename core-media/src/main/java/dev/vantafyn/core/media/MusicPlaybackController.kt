@@ -164,6 +164,10 @@ class MusicPlaybackController private constructor(context: Context) {
                         )
                         _state.update { it.copy(isPlaying = false) }
                     }
+                    if (playbackState == Player.STATE_READY) {
+                        forcePlaybackSnapshot()
+                        syncTicker()
+                    }
                 }
 
                 override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
@@ -268,10 +272,14 @@ class MusicPlaybackController private constructor(context: Context) {
             lastTransitionReason = VantafynMusicStopReason.Skip
             sessionPlayer.seekToNextMediaItem()
             sessionPlayer.play()
+            forcePlaybackSnapshot()
+            syncTicker()
         } else if (_state.value.repeatMode == VantafynMusicRepeatMode.All && _state.value.queue.isNotEmpty()) {
             lastTransitionReason = VantafynMusicStopReason.Skip
             sessionPlayer.seekTo(0, 0L)
             sessionPlayer.play()
+            forcePlaybackSnapshot()
+            syncTicker()
         }
     }
 
@@ -313,6 +321,8 @@ class MusicPlaybackController private constructor(context: Context) {
             sessionPlayer.seekToPreviousMediaItem()
         }
         sessionPlayer.play()
+        forcePlaybackSnapshot()
+        syncTicker()
     }
 
     fun seekTo(positionMs: Long) {
@@ -322,6 +332,11 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     fun refreshPositionFromPlayer() {
+        forcePlaybackSnapshot()
+    }
+
+    fun forcePlaybackSnapshot(): VantafynMusicPlaybackState {
+        var snapshot = _state.value
         _state.update { state ->
             val currentIndex = sessionPlayer.currentMediaItemIndex.takeIf { it >= 0 } ?: state.queueIndex
             val currentTrack = state.queue.getOrNull(currentIndex) ?: state.currentTrack
@@ -330,8 +345,9 @@ class MusicPlaybackController private constructor(context: Context) {
                 positionMs = sessionPlayer.currentPosition.coerceAtLeast(0L),
                 durationMs = sessionPlayer.duration.takeIf { it > 0 } ?: currentTrack?.durationMs ?: state.durationMs,
                 isPlaying = sessionPlayer.isPlaying,
-            )
+            ).also { snapshot = it }
         }
+        return snapshot
     }
 
     fun toggleShuffle() {

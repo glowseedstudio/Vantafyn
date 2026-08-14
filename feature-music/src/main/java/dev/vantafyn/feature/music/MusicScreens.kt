@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -100,6 +101,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -408,6 +411,7 @@ fun MusicScreen(
                 },
                 onPrevious = viewModel::previous,
                 onNext = viewModel::next,
+                onStop = viewModel::stopMusic,
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                     .padding(start = 8.dp, end = 8.dp, bottom = 96.dp),
@@ -930,8 +934,18 @@ private fun MusicMiniPlayer(
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
+    onStop: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val density = LocalDensity.current
+    val dismissThresholdPx = with(density) { 112.dp.toPx() }
+    var dragOffset by remember(track.id) { mutableStateOf(0f) }
+    var isDragging by remember(track.id) { mutableStateOf(false) }
+    val visualOffset by animateFloatAsState(
+        targetValue = if (isDragging) dragOffset else 0f,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "musicMiniSwipeOffset",
+    )
     val borderAlpha by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
         animationSpec = tween(durationMillis = if (isPlaying) 900 else 650, easing = FastOutSlowInEasing),
@@ -947,6 +961,36 @@ private fun MusicMiniPlayer(
                     Modifier
                 },
             )
+            .graphicsLayer {
+                translationX = visualOffset
+                alpha = 1f - (abs(visualOffset) / (dismissThresholdPx * 2.4f)).coerceIn(0f, 0.28f)
+            }
+            .pointerInput(track.id) {
+                detectHorizontalDragGestures(
+                    onDragStart = {
+                        isDragging = true
+                    },
+                    onHorizontalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffset = (dragOffset + dragAmount).coerceIn(
+                            -dismissThresholdPx * 1.35f,
+                            dismissThresholdPx * 1.35f,
+                        )
+                    },
+                    onDragEnd = {
+                        val shouldStop = abs(dragOffset) >= dismissThresholdPx
+                        isDragging = false
+                        dragOffset = 0f
+                        if (shouldStop) {
+                            onStop()
+                        }
+                    },
+                    onDragCancel = {
+                        isDragging = false
+                        dragOffset = 0f
+                    },
+                )
+            }
             .clickable(onClick = onOpen),
         cornerRadius = 22.dp,
         contentPadding = PaddingValues(10.dp),

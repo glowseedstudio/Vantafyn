@@ -431,6 +431,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playbackController.stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
     }
 
+    fun stopMusic() {
+        playbackController.stop(clearQueue = true, reason = VantafynMusicStopReason.User)
+    }
+
     fun pauseForBackground() {
         if (playbackController.state.value.isPlaying) {
             playbackController.pause()

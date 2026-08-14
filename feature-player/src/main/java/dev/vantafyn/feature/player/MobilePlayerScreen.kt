@@ -776,15 +776,10 @@ private fun PlayerControls(
                     Text(it, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
             }
-            Slider(
-                value = positionMs.toFloat(),
-                onValueChange = { onSeekTo(it.toLong()) },
-                valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color(0xFF6FE7FF),
-                    inactiveTrackColor = Color.White.copy(alpha = 0.18f),
-                ),
+            VantafynPlayerProgressSlider(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                onSeekTo = onSeekTo,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -817,6 +812,53 @@ private fun PlayerControls(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VantafynPlayerProgressSlider(
+    positionMs: Long,
+    durationMs: Long,
+    onSeekTo: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val safeDuration = durationMs.coerceAtLeast(1L)
+    val safePosition = positionMs.coerceIn(0L, safeDuration)
+    val progress = (safePosition.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(5.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.17f)),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(VantafynGradients.accentHorizontal()),
+            )
+        }
+        Slider(
+            value = safePosition.toFloat(),
+            onValueChange = { onSeekTo(it.toLong()) },
+            valueRange = 0f..safeDuration.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = Color.White,
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = Color.Transparent,
+            ),
+        )
     }
 }
 
@@ -896,15 +938,10 @@ private fun CastControllerSurface(
                             Text(it, color = VantafynColors.Muted, textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
-                    Slider(
-                        value = positionMs.coerceAtLeast(0L).toFloat(),
-                        onValueChange = { onSeekTo(it.toLong()) },
-                        valueRange = 0f..durationMs.coerceAtLeast(1L).toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color(0xFF6FE7FF),
-                            inactiveTrackColor = Color.White.copy(alpha = 0.18f),
-                        ),
+                    VantafynPlayerProgressSlider(
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        onSeekTo = onSeekTo,
                     )
                     Row(
                         modifier = Modifier.fillMaxWidth(),
