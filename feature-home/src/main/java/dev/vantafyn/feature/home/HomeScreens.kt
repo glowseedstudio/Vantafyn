@@ -13,6 +13,7 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import java.util.Locale
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
@@ -90,6 +91,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Apps
@@ -127,12 +129,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -186,13 +190,18 @@ import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
 import dev.vantafyn.core.jellyfin.JellyfinHomeSection
+import dev.vantafyn.core.jellyfin.JellyfinLyrics
+import dev.vantafyn.core.jellyfin.JellyfinLyricLine
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinMediaCard
 import dev.vantafyn.core.jellyfin.JellyfinMediaCardShape
 import dev.vantafyn.core.jellyfin.JellyfinMediaItem
 import dev.vantafyn.core.jellyfin.JellyfinPublicUser
+import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
+import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSearchResult
+import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinHeroMediaItem
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.jellyfin.SyncPlayConnectionState
@@ -262,6 +271,7 @@ import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
 import dev.vantafyn.feature.home.auth.supportedSmartRows
 import dev.vantafyn.feature.music.MusicScreen
+import dev.vantafyn.feature.music.MusicViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -279,7 +289,7 @@ import kotlin.math.abs
 
 private val VantafynModalContainerColor: Color
     get() = VantafynColors.Graphite.copy(alpha = 0.96f)
-private val VantafynSetupCinematicEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
+private val VantafynSetupCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1f)
 
 @Composable
 fun VantafynAppContent(
@@ -340,28 +350,28 @@ fun VantafynAppContent(
                         .using(SizeTransform(clip = false))
                 } else {
                     val enteringHome = targetState == VantafynSetupStep.Home
-                    val enterDuration = if (enteringHome) 880 else 720
-                    val exitDuration = if (enteringHome) 460 else 380
+                    val enterDuration = if (enteringHome) 1_180 else 980
+                    val exitDuration = if (enteringHome) 620 else 520
                     (
                         fadeIn(
                             animationSpec = tween(
                                 durationMillis = enterDuration,
-                                delayMillis = if (enteringHome) 110 else 120,
+                                delayMillis = if (enteringHome) 160 else 150,
                                 easing = VantafynSetupCinematicEasing,
                             ),
                         ) + slideInVertically(
                             animationSpec = tween(
                                 durationMillis = enterDuration,
-                                delayMillis = if (enteringHome) 110 else 120,
+                                delayMillis = if (enteringHome) 160 else 150,
                                 easing = VantafynSetupCinematicEasing,
                             ),
-                            initialOffsetY = { if (enteringHome) 18 else 12 },
+                            initialOffsetY = { if (enteringHome) 12 else 8 },
                         )
                     ).togetherWith(
                         fadeOut(animationSpec = tween(durationMillis = exitDuration, easing = VantafynSetupCinematicEasing)) +
                             slideOutVertically(
                                 animationSpec = tween(durationMillis = exitDuration, easing = VantafynSetupCinematicEasing),
-                                targetOffsetY = { if (enteringHome) -10 else -8 },
+                                targetOffsetY = { if (enteringHome) -6 else -5 },
                             ),
                     ).using(SizeTransform(clip = false))
                 }
@@ -437,10 +447,10 @@ fun VantafynAppContent(
                     exit = if (reducedMotion) {
                         fadeOut(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing))
                     } else {
-                        fadeOut(animationSpec = tween(durationMillis = 380, easing = VantafynSetupCinematicEasing)) +
+                        fadeOut(animationSpec = tween(durationMillis = 560, easing = VantafynSetupCinematicEasing)) +
                             slideOutVertically(
-                                animationSpec = tween(durationMillis = 380, easing = VantafynSetupCinematicEasing),
-                                targetOffsetY = { -8 },
+                                animationSpec = tween(durationMillis = 560, easing = VantafynSetupCinematicEasing),
+                                targetOffsetY = { -5 },
                             )
                     },
                 ) {
@@ -686,20 +696,20 @@ private fun SetupMaterialize(
         } else {
             fadeIn(
                 animationSpec = tween(
-                    durationMillis = 820,
+                    durationMillis = 1_120,
                     delayMillis = delayMillis,
                     easing = VantafynSetupCinematicEasing,
                 ),
             ) + slideInVertically(
                 animationSpec = tween(
-                    durationMillis = 820,
+                    durationMillis = 1_120,
                     delayMillis = delayMillis,
                     easing = VantafynSetupCinematicEasing,
                 ),
-                initialOffsetY = { 14 },
+                initialOffsetY = { 7 },
             )
         },
-        exit = fadeOut(animationSpec = tween(durationMillis = 260, easing = VantafynSetupCinematicEasing)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 380, easing = VantafynSetupCinematicEasing)),
     ) {
         content()
     }
@@ -2225,6 +2235,7 @@ private fun MobileShellScreen(
                         MobileDestination.Admin -> AdminScreen(
                             state = state,
                             onOpenUser = onOpenAdminUser,
+                            onOpenSettings = { onNavigate(MobileDestination.Profile) },
                             onCreateUser = onCreateAdminUser,
                             onRefresh = onRefreshAdmin,
                             onScanLibrary = onScanAdminLibrary,
@@ -2336,6 +2347,7 @@ private fun MobileShellScreen(
                 MusicQuickPlayerSheet(
                     playback = musicPlayback,
                     controller = musicController,
+                    session = state.session,
                     onDismiss = { showMusicQuickPlayer = false },
                     onOpenMusic = {
                         showMusicQuickPlayer = false
@@ -2487,27 +2499,17 @@ private fun MobileHomeContent(
         state.favorites.isEmpty() &&
         !hasHomeSections &&
         state.homeErrorMessage == null
-    val homeRevealKey = remember(
-        state.isHomeLoading,
-        hero.size,
-        state.libraries.size,
-        state.favorites.size,
-        state.home?.sections.orEmpty().sumOf { it.items.size },
-    ) {
-        listOf(
-            state.isHomeLoading,
-            hero.size,
-            state.libraries.size,
-            state.favorites.size,
-            state.home?.sections.orEmpty().sumOf { it.items.size },
-        ).joinToString("-")
+    val homeRevealKey = state.session?.profileId.orEmpty()
+    var hasPlayedHomeReveal by rememberSaveable(homeRevealKey) { mutableStateOf(false) }
+    var homeInitialRevealActive by remember(homeRevealKey, state.isHomeLoading) {
+        mutableStateOf(!state.isHomeLoading && !hasPlayedHomeReveal)
     }
-    var homeInitialRevealActive by remember(homeRevealKey) { mutableStateOf(!state.isHomeLoading) }
-    LaunchedEffect(homeRevealKey) {
-        if (!state.isHomeLoading) {
+    LaunchedEffect(homeRevealKey, state.isHomeLoading) {
+        if (!state.isHomeLoading && !hasPlayedHomeReveal) {
             homeInitialRevealActive = true
-            delay(900L)
+            delay(1_450L)
             homeInitialRevealActive = false
+            hasPlayedHomeReveal = true
         } else {
             homeInitialRevealActive = false
         }
@@ -2954,8 +2956,8 @@ private fun CinematicHero(
                     item.year?.toString(),
                     item.runtimeMinutes?.let { "${it}m" },
                     item.officialRating,
-                    item.communityRating?.let { "★ ${"%.1f".format(it)}" },
                 ),
+                rating = item.communityRating?.let { "★ ${"%.1f".format(it)}" },
             )
             if (item.genres.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -3070,26 +3072,34 @@ private fun HomeHeroSkeleton() {
 }
 
 @Composable
-private fun HeroRatingMetadata(values: List<String>) {
-    if (values.isEmpty()) return
-    Text(
-        text = buildAnnotatedString {
-            values.forEachIndexed { index, value ->
-                if (index > 0) append(" · ")
-                if (value.isStarRating()) {
-                    withStyle(SpanStyle(color = VantafynColors.Gold, fontWeight = FontWeight.SemiBold)) {
-                        append(value)
-                    }
-                } else {
-                    append(value)
-                }
-            }
-        },
-        color = VantafynColors.Muted,
-        style = MaterialTheme.typography.bodyLarge,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-    )
+private fun HeroRatingMetadata(values: List<String>, rating: String?) {
+    if (values.isEmpty() && rating == null) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (values.isNotEmpty()) {
+            Text(
+                text = values.joinToString(" · "),
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+        rating?.let {
+            Text(
+                text = it,
+                color = VantafynColors.Gold,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+    }
 }
 
 @Composable
@@ -3153,15 +3163,15 @@ private fun HomeContentReveal(
     }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(index) {
-        delay((index.coerceAtMost(8) * 78L).coerceAtMost(620L))
+        delay((index.coerceAtMost(8) * 112L).coerceAtMost(780L))
         visible = true
     }
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(animationSpec = tween(durationMillis = 430, easing = FastOutSlowInEasing)) +
+        enter = fadeIn(animationSpec = tween(durationMillis = 620, easing = FastOutSlowInEasing)) +
             slideInVertically(
-                animationSpec = tween(durationMillis = 470, easing = FastOutSlowInEasing),
-                initialOffsetY = { it / 7 },
+                animationSpec = tween(durationMillis = 680, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 8 },
             ),
     ) {
         content()
@@ -3654,6 +3664,20 @@ private fun LibraryDetailScreen(
     val library = state.selectedLibrary
     val liveTv = library?.collectionType.isLiveTvCollection()
     val visibleItems = state.libraryItems
+    val screenRevealKey = library?.id?.toString().orEmpty()
+    var screenRevealActive by remember(screenRevealKey) { mutableStateOf(true) }
+    LaunchedEffect(screenRevealKey) {
+        screenRevealActive = true
+        delay(1_100L)
+        screenRevealActive = false
+    }
+    val contentRevealKey = "${library?.id}-${state.libraryItemsPage?.startIndex ?: 0}-${state.libraryItemsFilter.name}"
+    var contentRevealActive by remember(contentRevealKey) { mutableStateOf(true) }
+    LaunchedEffect(contentRevealKey) {
+        contentRevealActive = true
+        delay(1_100L)
+        contentRevealActive = false
+    }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -3662,89 +3686,101 @@ private fun LibraryDetailScreen(
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
-                CompactBackButton(onClick = onBack)
-                ScreenTitle(library?.name ?: "Library", null)
+            HomeContentReveal(index = 0, animate = screenRevealActive) {
+                Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                    CompactBackButton(onClick = onBack)
+                    ScreenTitle(library?.name ?: "Library", null)
+                }
             }
         }
         if (!liveTv) {
             item {
-                LibraryFilterChips(
-                    selected = state.libraryItemsFilter,
-                    onSelected = onSetFilter,
-                )
+                HomeContentReveal(index = 1, animate = screenRevealActive) {
+                    LibraryFilterChips(
+                        selected = state.libraryItemsFilter,
+                        onSelected = onSetFilter,
+                    )
+                }
             }
         }
         state.libraryItemsPage?.let { page ->
             item {
-                LibraryPageControls(
-                    page = page,
-                    loading = state.isLibraryItemsLoading,
-                    onPrevious = onPreviousPage,
-                    onNext = onNextPage,
-                )
+                HomeContentReveal(index = 2, animate = screenRevealActive) {
+                    LibraryPageControls(
+                        page = page,
+                        loading = state.isLibraryItemsLoading,
+                        onPrevious = onPreviousPage,
+                        onNext = onNextPage,
+                    )
+                }
             }
         }
-        if (state.isLibraryItemsLoading) item { HomeLoadingShelf() }
+        if (state.isLibraryItemsLoading) item { HomeContentReveal(index = 3, animate = contentRevealActive) { HomeLoadingShelf() } }
         state.libraryItemsError?.let { message ->
-            item { VantafynErrorCard(message) { VantafynButton("Retry", onClick = onRetry) } }
+            item { HomeContentReveal(index = 3, animate = contentRevealActive) { VantafynErrorCard(message) { VantafynButton("Retry", onClick = onRetry) } } }
         }
         if (liveTv) {
             item {
-                LiveTvGuideSection(
-                    channels = state.home?.liveTvChannels.orEmpty(),
-                    programs = state.home?.liveTvPrograms.orEmpty(),
-                    onChannel = { channel -> onStartLiveTvPlayback(channel.id, channel.name, channel.currentProgramName) },
-                    onProgram = { program ->
-                        program.channelId?.let { onStartLiveTvPlayback(it, program.title, program.subtitle) }
-                            ?: onPlaybackComingSoon()
-                    },
-                )
+                HomeContentReveal(index = 4, animate = contentRevealActive) {
+                    LiveTvGuideSection(
+                        channels = state.home?.liveTvChannels.orEmpty(),
+                        programs = state.home?.liveTvPrograms.orEmpty(),
+                        onChannel = { channel -> onStartLiveTvPlayback(channel.id, channel.name, channel.currentProgramName) },
+                        onProgram = { program ->
+                            program.channelId?.let { onStartLiveTvPlayback(it, program.title, program.subtitle) }
+                                ?: onPlaybackComingSoon()
+                        },
+                    )
+                }
             }
         }
         if (!state.isLibraryItemsLoading && state.libraryItems.isEmpty() && state.libraryItemsError == null) {
             item {
-                if (liveTv) {
-                    EmptyState("No Live TV channels found", "Jellyfin did not return channels for this profile/server.")
-                } else {
-                    EmptyState("Nothing here yet", "This library returned no browsable items.")
+                HomeContentReveal(index = 4, animate = contentRevealActive) {
+                    if (liveTv) {
+                        EmptyState("No Live TV channels found", "Jellyfin did not return channels for this profile/server.")
+                    } else {
+                        EmptyState("Nothing here yet", "This library returned no browsable items.")
+                    }
                 }
             }
         }
         if (!state.isLibraryItemsLoading && state.libraryItems.isNotEmpty() && visibleItems.isEmpty()) {
-            item { EmptyState("No matching items", "Try All or a different filter.") }
+            item { HomeContentReveal(index = 4, animate = contentRevealActive) { EmptyState("No matching items", "Try All or a different filter.") } }
         }
         if (visibleItems.isNotEmpty()) {
             val rows = visibleItems.chunked(2)
-            itemsIndexed(rows, key = { index, row -> "${row.firstOrNull()?.id}-$index" }) { _, row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                ) {
-                    row.forEach { item ->
-                        Box(
-                            modifier = Modifier.weight(1f),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            MediaItemCard(
-                                item = item,
-                                onClick = {
-                                    if (liveTv || item.itemType?.startsWith("LiveTv") == true) {
-                                        onStartLiveTvPlayback(item.id, item.title, item.subtitle)
-                                    } else {
-                                        onOpenMedia(item.id)
-                                    }
-                                },
-                                onLongPress = {
-                                    if (!liveTv && item.itemType?.startsWith("LiveTv") != true) {
-                                        onMediaLongPress(item.toMediaActionTarget())
-                                    }
-                                },
-                            )
+            itemsIndexed(rows, key = { index, row -> "${row.firstOrNull()?.id}-$index" }) { index, row ->
+                HomeContentReveal(index = index + 5, animate = contentRevealActive) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                    ) {
+                        row.forEach { item ->
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                MediaItemCard(
+                                    item = item,
+                                    onClick = {
+                                        if (liveTv || item.itemType?.startsWith("LiveTv") == true) {
+                                            onStartLiveTvPlayback(item.id, item.title, item.subtitle)
+                                        } else {
+                                            onOpenMedia(item.id)
+                                        }
+                                    },
+                                    onLongPress = {
+                                        if (!liveTv && item.itemType?.startsWith("LiveTv") != true) {
+                                            onMediaLongPress(item.toMediaActionTarget())
+                                        }
+                                    },
+                                )
+                            }
                         }
-                    }
-                    if (row.size == 1) {
-                        Spacer(modifier = Modifier.weight(1f))
+                        if (row.size == 1) {
+                            Spacer(modifier = Modifier.weight(1f))
+                        }
                     }
                 }
             }
@@ -3752,12 +3788,14 @@ private fun LibraryDetailScreen(
         state.libraryItemsPage?.let { page ->
             if (page.totalPages > 1) {
                 item {
-                    LibraryPageControls(
-                        page = page,
-                        loading = state.isLibraryItemsLoading,
-                        onPrevious = onPreviousPage,
-                        onNext = onNextPage,
-                    )
+                    HomeContentReveal(index = 8, animate = screenRevealActive) {
+                        LibraryPageControls(
+                            page = page,
+                            loading = state.isLibraryItemsLoading,
+                            onPrevious = onPreviousPage,
+                            onNext = onNextPage,
+                        )
+                    }
                 }
             }
         }
@@ -4112,33 +4150,44 @@ private fun SearchQuickChip(
         animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
         label = "searchChipGlow",
     )
-    VantafynGlassChip(
+    Box(
         modifier = Modifier
+            .height(38.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(
                 Brush.linearGradient(
                     listOf(
-                        Color(0xFF31D7FF).copy(alpha = 0.05f + glow * 0.10f),
-                        Color(0xFF8B5CFF).copy(alpha = 0.04f + glow * 0.12f),
+                        Color.White.copy(alpha = 0.10f + glow * 0.05f),
+                        Color(0xFF31D7FF).copy(alpha = 0.05f + glow * 0.08f),
+                        Color(0xFF8B5CFF).copy(alpha = 0.04f + glow * 0.10f),
                     ),
                 ),
-            ),
-        selected = selected,
-        onClick = onClick,
-        contentPadding = PaddingValues(horizontal = 13.dp, vertical = 9.dp),
+            )
+            .then(
+                if (selected) {
+                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.15.dp, durationMillis = 4200)
+                } else {
+                    Modifier.border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
+                },
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 11.dp),
+        contentAlignment = Alignment.Center,
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 tint = if (selected) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.82f),
-                modifier = Modifier.size(17.dp),
+                modifier = Modifier.size(15.dp),
             )
             Text(
                 label,
                 color = if (selected) VantafynColors.Ink else VantafynColors.Muted,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }
@@ -4576,6 +4625,7 @@ private fun MyListEmptyHint(label: String, value: String, modifier: Modifier = M
 private fun AdminScreen(
     state: VantafynHomeUiState,
     onOpenUser: (java.util.UUID) -> Unit,
+    onOpenSettings: () -> Unit,
     onCreateUser: (String, String) -> Unit,
     onRefresh: () -> Unit,
     onScanLibrary: () -> Unit,
@@ -4630,7 +4680,7 @@ private fun AdminScreen(
         if (state.isAdminLoading) item { HomeContentReveal(index = 1, animate = revealActive) { VantafynLoadingIndicator("Loading admin dashboard") } }
         state.adminError?.let { item { HomeContentReveal(index = 1, animate = revealActive) { VantafynErrorCard(it) } } }
         if (overview != null) {
-            item { HomeContentReveal(index = 1, animate = revealActive) { AdminHeroCard(state = state, overview = overview, adminImageUrl = adminUser?.imageUrl) } }
+            item { HomeContentReveal(index = 1, animate = revealActive) { AdminHeroCard(state = state, overview = overview, adminImageUrl = adminUser?.imageUrl, onAvatarClick = onOpenSettings) } }
             item {
                 HomeContentReveal(index = 2, animate = revealActive) {
                     AdminLibraryScanCard(
@@ -4699,6 +4749,7 @@ private fun AdminHeroCard(
     state: VantafynHomeUiState,
     overview: dev.vantafyn.core.jellyfin.JellyfinAdminOverview,
     adminImageUrl: String?,
+    onAvatarClick: () -> Unit,
 ) {
     VantafynGlassCard(
         modifier = Modifier
@@ -4726,6 +4777,8 @@ private fun AdminHeroCard(
                 imageUrl = adminImageUrl,
                 modifier = Modifier
                     .size(58.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(onClick = onAvatarClick)
                     .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(999.dp)),
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -5294,76 +5347,202 @@ private fun AdminTinyUserMetric(label: String, value: String, modifier: Modifier
 
 @Composable
 private fun AdminMostWatchedMedia(media: List<dev.vantafyn.core.jellyfin.JellyfinMediaWatchStats>) {
+    val maxWatchTime = media.maxOfOrNull { it.totalWatchTimeSeconds }?.coerceAtLeast(1L) ?: 1L
     VantafynGlassCard(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 24.dp,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(14.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(13.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Movie, contentDescription = null, tint = Color(0xFF58D7FF), modifier = Modifier.size(24.dp))
-                Text("Most watched", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Icon(Icons.Rounded.Movie, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(23.dp))
+                Text(
+                    "Most watched",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "${media.size} titles",
+                    color = VantafynColors.Muted.copy(alpha = 0.78f),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
             }
-	            media.forEachIndexed { index, item ->
-	                VantafynGlassSurface(
-	                    modifier = Modifier.fillMaxWidth(),
-	                    variant = VantafynGlassVariant.Card,
-	                    cornerRadius = 18.dp,
-	                    contentPadding = PaddingValues(10.dp),
-	                ) {
-	                    Row(
-	                        modifier = Modifier.fillMaxWidth(),
-	                        horizontalArrangement = Arrangement.spacedBy(11.dp),
-	                        verticalAlignment = Alignment.Top,
-	                    ) {
-	                        Box(
-	                            modifier = Modifier
-	                                .width(46.dp)
-	                                .height(68.dp)
-	                                .clip(RoundedCornerShape(13.dp))
-	                                .background(Color.White.copy(alpha = 0.08f)),
-	                            contentAlignment = Alignment.Center,
-	                        ) {
-	                            if (item.posterUrl != null) {
-	                                AsyncImage(
-	                                    model = item.posterUrl,
-	                                    contentDescription = item.title,
-	                                    modifier = Modifier.fillMaxSize(),
-	                                    contentScale = ContentScale.Crop,
-	                                )
-	                            } else {
-	                                Text((index + 1).toString(), color = VantafynColors.Ink.copy(alpha = 0.84f), fontWeight = FontWeight.Bold)
-	                            }
-	                        }
-	                        Column(
-	                            modifier = Modifier.weight(1f),
-	                            verticalArrangement = Arrangement.spacedBy(5.dp),
-	                        ) {
-	                            Text(
-	                                item.title,
-	                                color = VantafynColors.Ink,
-	                                fontWeight = FontWeight.SemiBold,
-	                                maxLines = 3,
-	                                overflow = TextOverflow.Ellipsis,
-	                                lineHeight = MaterialTheme.typography.bodyLarge.lineHeight,
-	                            )
-	                            Text(
-	                                listOfNotNull(item.type, item.uniqueUsers?.let { "$it users" }).joinToString(" · "),
-	                                color = VantafynColors.Muted,
-	                                maxLines = 1,
-	                                overflow = TextOverflow.Ellipsis,
-	                            )
-	                        }
-	                        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(2.dp)) {
-	                            Text(item.totalWatchTimeSeconds.watchTimeLabel(), color = Color(0xFFB9C6FF), fontWeight = FontWeight.SemiBold, maxLines = 1)
-	                            Text("${item.playCount.groupedCountLabel()} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelLarge, maxLines = 1)
-	                        }
+            media.forEachIndexed { index, item ->
+                AdminMostWatchedMediaCard(
+                    rank = index + 1,
+                    item = item,
+                    progress = (item.totalWatchTimeSeconds.toFloat() / maxWatchTime.toFloat()).coerceIn(0.05f, 1f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminMostWatchedMediaCard(
+    rank: Int,
+    item: dev.vantafyn.core.jellyfin.JellyfinMediaWatchStats,
+    progress: Float,
+) {
+    VantafynGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        variant = VantafynGlassVariant.Card,
+        cornerRadius = 22.dp,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(116.dp)
+                    .clip(RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)),
+            ) {
+                if (item.posterUrl != null) {
+                    AsyncImage(
+                        model = item.posterUrl,
+                        contentDescription = item.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    AdminMostWatchedFallbackArt(rank = rank, title = item.title)
+                }
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.08f),
+                                    Color.Black.copy(alpha = 0.28f),
+                                    VantafynColors.Graphite.copy(alpha = 0.88f),
+                                ),
+                            ),
+                        ),
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(10.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.Black.copy(alpha = 0.48f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("#$rank", color = VantafynColors.Ink, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                }
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            item.title,
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            listOfNotNull(item.type?.prettyMediaType(), item.uniqueUsers?.let { "$it viewers" }).joinToString(" · "),
+                            color = VantafynColors.Muted.copy(alpha = 0.88f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
+                    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(item.totalWatchTimeSeconds.watchTimeLabel(), color = Color(0xFFB9C6FF), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text("${item.playCount.groupedCountLabel()} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(5.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.08f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(5.dp)
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(0xFF37D8FF).copy(alpha = 0.86f),
+                                        Color(0xFF786AFF).copy(alpha = 0.82f),
+                                        Color(0xFFB15CFF).copy(alpha = 0.78f),
+                                    ),
+                                ),
+                            ),
+                    )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun AdminMostWatchedFallbackArt(rank: Int, title: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF182438),
+                        Color(0xFF17152D),
+                        Color(0xFF2C183F),
+                    ),
+                ),
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(86.dp)
+                .align(Alignment.CenterEnd)
+                .offset(x = 22.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0xFF5FD8FF).copy(alpha = 0.13f)),
+        )
+        Text(
+            title.firstOrNull()?.uppercaseChar()?.toString().orEmpty(),
+            color = VantafynColors.Ink.copy(alpha = 0.46f),
+            style = MaterialTheme.typography.displaySmall,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        Text(
+            "#$rank",
+            color = Color.White.copy(alpha = 0.18f),
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = 6.dp),
+        )
+    }
+}
+
+private fun String.prettyMediaType(): String =
+    when (lowercase(Locale.US)) {
+        "movie" -> "Movie"
+        "series" -> "Series"
+        "episode" -> "Episode"
+        "audio" -> "Song"
+        "musicalbum", "music album" -> "Album"
+        else -> replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.US) else it.toString() }
+    }
 
 @Composable
 private fun AdminLatestWatchActivity(users: List<dev.vantafyn.core.jellyfin.JellyfinUserWatchStats>) {
@@ -6178,42 +6357,44 @@ private fun WatchPartyScreen(
         }
         item {
             VantafynGlassPanel(cornerRadius = 26.dp, contentPadding = PaddingValues(16.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                    Box(
-                        modifier = Modifier
-                            .size(48.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(VantafynGradients.accentHorizontal()),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Rounded.Groups, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(26.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(VantafynGradients.accentHorizontal()),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Rounded.Groups, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(26.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(state.activeWatchParty?.name ?: "Start a room", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(state.activeWatchParty?.serverName ?: state.server?.name ?: "Current Jellyfin server", color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        SoftBadge(if (state.activeWatchParty == null) "Solo" else "Host")
                     }
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(state.activeWatchParty?.name ?: "Start a room", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(state.activeWatchParty?.serverName ?: state.server?.name ?: "Current Jellyfin server", color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    SoftBadge(if (state.activeWatchParty == null) "Solo" else "Host")
-                }
-                VantafynTextField(
-                    value = state.watchPartyName,
-                    onValueChange = onName,
-                    label = "Room name",
-                    placeholder = "${state.session?.user?.name ?: "My"} Watch Party",
-                )
-                WatchPartyModeSelector(selected = state.watchPartyMode, onSelected = onMode)
-                state.watchPartySelectedMedia?.let { media ->
-                    WatchPartySelectedMediaCard(media)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    VantafynButton(
-                        text = if (state.activeWatchParty == null) "Create room" else "Refresh room",
-                        onClick = if (state.activeWatchParty == null) onCreate else onRefresh,
-                        enabled = state.watchPartyEnabled && !state.isWatchPartyLoading,
-                        modifier = Modifier.weight(1f),
+                    VantafynTextField(
+                        value = state.watchPartyName,
+                        onValueChange = onName,
+                        label = "Room name",
+                        placeholder = "${state.session?.user?.name ?: "My"} Watch Party",
                     )
-                    if (state.activeWatchParty != null) {
-                        OutlinedButton(onClick = onLeave, modifier = Modifier.height(58.dp)) {
-                            Text("Leave", color = VantafynColors.Ink)
+                    WatchPartyModeSelector(selected = state.watchPartyMode, onSelected = onMode)
+                    state.watchPartySelectedMedia?.let { media ->
+                        WatchPartySelectedMediaCard(media)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        VantafynButton(
+                            text = if (state.activeWatchParty == null) "Create room" else "Refresh room",
+                            onClick = if (state.activeWatchParty == null) onCreate else onRefresh,
+                            enabled = state.watchPartyEnabled && !state.isWatchPartyLoading,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (state.activeWatchParty != null) {
+                            OutlinedButton(onClick = onLeave, modifier = Modifier.height(58.dp)) {
+                                Text("Leave", color = VantafynColors.Ink)
+                            }
                         }
                     }
                 }
@@ -6253,45 +6434,49 @@ private fun WatchPartyScreen(
         if (state.watchPartyMode == WatchPartyMode.FixedTitle && state.watchPartySelectedMedia != null) {
             item {
                 VantafynGlassPanel(cornerRadius = 28.dp) {
-                    Text("Lobby", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    VantafynButton(
-                        text = "Start Watching",
-                        onClick = onStartFixed,
-                        enabled = state.activeWatchParty != null,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Lobby", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        VantafynButton(
+                            text = "Start Watching",
+                            onClick = onStartFixed,
+                            enabled = state.activeWatchParty != null,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
         item {
             VantafynGlassPanel(cornerRadius = 28.dp) {
-                Text("Match style", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                WatchPartyRuleSection(
-                    title = "What to match",
-                    options = WatchPartyMediaScope.entries,
-                    selected = state.watchPartyRules.mediaScope,
-                    label = { it.watchPartyLabel() },
-                    onSelected = { onRules(state.watchPartyRules.copy(mediaScope = it)) },
-                )
-                WatchPartyRuleSection(
-                    title = "Choose when",
-                    options = WatchPartyMatchRule.entries,
-                    selected = state.watchPartyRules.matchRule,
-                    label = { it.watchPartyLabel() },
-                    onSelected = { onRules(state.watchPartyRules.copy(matchRule = it)) },
-                )
-                WatchPartyRuleSection(
-                    title = "Length",
-                    options = dev.vantafyn.core.jellyfin.WatchPartyRuntimeLimit.entries,
-                    selected = state.watchPartyRules.runtimeLimit,
-                    label = { it.watchPartyLabel() },
-                    onSelected = { onRules(state.watchPartyRules.copy(runtimeLimit = it)) },
-                )
-                PremiumToggleRow("Unwatched only", "Hide titles this profile has already watched.", state.watchPartyRules.unwatchedOnly) {
-                    onRules(state.watchPartyRules.copy(unwatchedOnly = !state.watchPartyRules.unwatchedOnly))
-                }
-                PremiumToggleRow("Family friendly", "Limit results to titles Jellyfin rates PG or below.", state.watchPartyRules.kidFriendlyOnly) {
-                    onRules(state.watchPartyRules.copy(kidFriendlyOnly = !state.watchPartyRules.kidFriendlyOnly))
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Text("Match style", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    WatchPartyRuleSection(
+                        title = "What to match",
+                        options = WatchPartyMediaScope.entries,
+                        selected = state.watchPartyRules.mediaScope,
+                        label = { it.watchPartyLabel() },
+                        onSelected = { onRules(state.watchPartyRules.copy(mediaScope = it)) },
+                    )
+                    WatchPartyRuleSection(
+                        title = "Choose when",
+                        options = WatchPartyMatchRule.entries,
+                        selected = state.watchPartyRules.matchRule,
+                        label = { it.watchPartyLabel() },
+                        onSelected = { onRules(state.watchPartyRules.copy(matchRule = it)) },
+                    )
+                    WatchPartyRuleSection(
+                        title = "Length",
+                        options = dev.vantafyn.core.jellyfin.WatchPartyRuntimeLimit.entries,
+                        selected = state.watchPartyRules.runtimeLimit,
+                        label = { it.watchPartyLabel() },
+                        onSelected = { onRules(state.watchPartyRules.copy(runtimeLimit = it)) },
+                    )
+                    PremiumToggleRow("Unwatched only", "Hide titles this profile has already watched.", state.watchPartyRules.unwatchedOnly) {
+                        onRules(state.watchPartyRules.copy(unwatchedOnly = !state.watchPartyRules.unwatchedOnly))
+                    }
+                    PremiumToggleRow("Family friendly", "Limit results to titles Jellyfin rates PG or below.", state.watchPartyRules.kidFriendlyOnly) {
+                        onRules(state.watchPartyRules.copy(kidFriendlyOnly = !state.watchPartyRules.kidFriendlyOnly))
+                    }
                 }
             }
         }
@@ -6326,32 +6511,34 @@ private fun WatchPartyMatchLaunchCard(
     onOpen: () -> Unit,
 ) {
     VantafynGlassPanel(cornerRadius = 28.dp, contentPadding = PaddingValues(18.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            Box(
-                modifier = Modifier
-                    .size(58.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(VantafynGradients.accentHorizontal()),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(30.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Box(
+                    modifier = Modifier
+                        .size(58.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(30.dp))
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (hasMatch) "Match found" else "Swipe to match", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (hasMatch) "Open the deck to start watching." else candidate?.title ?: "Find something everyone wants to watch.",
+                        color = VantafynColors.Muted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                SoftBadge(if (hasMatch) "Ready" else "$remaining")
             }
-            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(if (hasMatch) "Match found" else "Swipe to match", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(
-                    if (hasMatch) "Open the deck to start watching." else candidate?.title ?: "Find something everyone wants to watch.",
-                    color = VantafynColors.Muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            SoftBadge(if (hasMatch) "Ready" else "$remaining")
+            VantafynButton(
+                text = if (hasMatch) "View match" else "Open deck",
+                onClick = onOpen,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        VantafynButton(
-            text = if (hasMatch) "View match" else "Open deck",
-            onClick = onOpen,
-            modifier = Modifier.fillMaxWidth(),
-        )
     }
 }
 
@@ -6371,13 +6558,13 @@ private fun WatchPartyMatchDeckModal(
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.72f))
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 10.dp, vertical = 12.dp),
+            .padding(start = 10.dp, end = 10.dp, top = 16.dp, bottom = 106.dp),
         contentAlignment = Alignment.Center,
     ) {
         VantafynGlassModalPanel(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 680.dp, max = 820.dp)
+                .heightIn(min = 560.dp, max = 680.dp)
                 .vantafynAnimatedModalBorder(cornerRadius = 34.dp, strokeWidth = 1.4.dp),
             cornerRadius = 34.dp,
             contentPadding = PaddingValues(14.dp),
@@ -6437,38 +6624,40 @@ private fun WatchPartySettingsPanel(
     onRetryRealtime: () -> Unit,
 ) {
     VantafynGlassPanel(cornerRadius = 26.dp, contentPadding = PaddingValues(16.dp)) {
-        Text("Party options", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        PremiumToggleRow("Watch Party", "Create rooms and join invites.", state.watchPartyEnabled, onClick = onToggleWatchPartyEnabled)
-        PremiumToggleRow("Invites", "Show invite cards in Vantafyn.", state.watchPartyInvitesEnabled, onClick = onToggleWatchPartyInvitesEnabled)
-        PremiumToggleRow("Invite animation", "Use the cinematic invite card.", state.watchPartyInviteAnimationEnabled, onClick = onToggleWatchPartyInviteAnimationEnabled)
-        Text("Invite stays open", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-            listOf(30 to "30 sec", 60 to "1 min", 300 to "5 min").forEach { (seconds, label) ->
-                VantafynGlassChip(
-                    selected = state.watchPartyInviteExpirySeconds == seconds,
-                    onClick = { onSetWatchPartyInviteExpirySeconds(seconds) },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Party options", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            PremiumToggleRow("Watch Party", "", state.watchPartyEnabled, onClick = onToggleWatchPartyEnabled)
+            PremiumToggleRow("Invites", "", state.watchPartyInvitesEnabled, onClick = onToggleWatchPartyInvitesEnabled)
+            PremiumToggleRow("Invite animation", "", state.watchPartyInviteAnimationEnabled, onClick = onToggleWatchPartyInviteAnimationEnabled)
+            Text("Invite stays open", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                listOf(30 to "30 sec", 60 to "1 min", 300 to "5 min").forEach { (seconds, label) ->
+                    VantafynGlassChip(
+                        selected = state.watchPartyInviteExpirySeconds == seconds,
+                        onClick = { onSetWatchPartyInviteExpirySeconds(seconds) },
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                    }
                 }
             }
-        }
-        if (state.watchPartyRealtimeConnectionState == SyncPlayConnectionState.Failed) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    "Realtime connection unavailable",
-                    color = VantafynColors.Muted,
-                    modifier = Modifier.weight(1f),
-                )
-                VantafynButton(
-                    text = "Retry",
-                    onClick = onRetryRealtime,
-                    modifier = Modifier.width(112.dp),
-                )
+            if (state.watchPartyRealtimeConnectionState == SyncPlayConnectionState.Failed) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Realtime connection unavailable",
+                        color = VantafynColors.Muted,
+                        modifier = Modifier.weight(1f),
+                    )
+                    VantafynButton(
+                        text = "Retry",
+                        onClick = onRetryRealtime,
+                        modifier = Modifier.width(112.dp),
+                    )
+                }
             }
         }
     }
@@ -6523,6 +6712,7 @@ private fun WatchPartySelectedMediaCard(media: WatchPartySelectedMedia) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun WatchPartyInvitePanel(
     state: VantafynHomeUiState,
@@ -6531,73 +6721,129 @@ private fun WatchPartyInvitePanel(
     onSendInvites: () -> Unit,
 ) {
     VantafynGlassPanel(cornerRadius = 28.dp) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Invite viewers", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .clickable(onClick = onRefreshRecipients),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Refresh, contentDescription = "Refresh recipients", tint = VantafynColors.Ink)
+                }
             }
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .clickable(onClick = onRefreshRecipients),
-                contentAlignment = Alignment.Center,
+            if (state.isWatchPartyRecipientsLoading) {
+                VantafynLoadingIndicator("Finding active users")
+            } else if (state.watchPartyInviteRecipients.isEmpty()) {
+                VantafynGlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 22.dp,
+                    contentPadding = PaddingValues(16.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Nobody is available right now", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                        Text("Open Vantafyn on another device, then refresh.", color = VantafynColors.Muted)
+                    }
+                }
+            } else {
+                VantafynGlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 24.dp,
+                    contentPadding = PaddingValues(12.dp),
+                ) {
+                    FlowRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        state.watchPartyInviteRecipients.forEach { recipient ->
+                            val selected = recipient.sessionId in state.selectedWatchPartyRecipientSessionIds
+                            WatchPartyRecipientTile(
+                                name = recipient.displayName,
+                                imageUrl = recipient.imageUrl,
+                                online = recipient.active,
+                                selected = selected,
+                                onClick = { onToggleRecipient(recipient.sessionId) },
+                            )
+                        }
+                    }
+                }
+            }
+            VantafynButton(
+                text = when (state.watchPartyMode) {
+                    WatchPartyMode.FixedTitle -> "Send invite"
+                    WatchPartyMode.SwipeToMatch -> "Invite to match"
+                },
+                onClick = onSendInvites,
+                enabled = state.selectedWatchPartyRecipientSessionIds.isNotEmpty() && !state.isWatchPartyLoading,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            AnimatedVisibility(
+                visible = state.showWatchPartyInviteSentAnimation,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(220)),
+                exit = slideOutVertically(targetOffsetY = { -it * 2 }) + fadeOut(tween(650)),
             ) {
-                Icon(Icons.Rounded.Refresh, contentDescription = "Refresh recipients", tint = VantafynColors.Ink)
-            }
-        }
-        if (state.isWatchPartyRecipientsLoading) {
-            VantafynLoadingIndicator("Finding active users")
-        } else if (state.watchPartyInviteRecipients.isEmpty()) {
-            VantafynGlassCard(cornerRadius = 20.dp, contentPadding = PaddingValues(16.dp)) {
-                Text("Nobody is available right now", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-                Text("Open Vantafyn on another device, then refresh.", color = VantafynColors.Muted)
-            }
-        } else {
-            state.watchPartyInviteRecipients.forEach { recipient ->
-                val selected = recipient.sessionId in state.selectedWatchPartyRecipientSessionIds
                 VantafynGlassCard(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { onToggleRecipient(recipient.sessionId) },
-                    cornerRadius = 18.dp,
-                    contentPadding = PaddingValues(12.dp),
+                        .vantafynAnimatedModalBorder(),
+                    cornerRadius = 24.dp,
+                    contentPadding = PaddingValues(16.dp),
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ProfileAvatar(recipient.displayName, recipient.imageUrl, Modifier.size(46.dp))
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(recipient.displayName, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(listOfNotNull(recipient.client, recipient.deviceName).joinToString(" · ").ifBlank { "Available" }, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        }
-                        if (selected) SoftBadge("Selected") else SoftBadge("Online")
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Invite sent", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text("They'll see it while Vantafyn is open and connected.", color = VantafynColors.Muted)
                     }
                 }
             }
         }
-        VantafynButton(
-            text = when (state.watchPartyMode) {
-                WatchPartyMode.FixedTitle -> "Send invite"
-                WatchPartyMode.SwipeToMatch -> "Invite to match"
-            },
-            onClick = onSendInvites,
-            enabled = state.selectedWatchPartyRecipientSessionIds.isNotEmpty() && !state.isWatchPartyLoading,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        AnimatedVisibility(
-            visible = state.showWatchPartyInviteSentAnimation,
-            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(tween(220)),
-            exit = slideOutVertically(targetOffsetY = { -it * 2 }) + fadeOut(tween(650)),
-        ) {
-            VantafynGlassCard(
+    }
+}
+
+@Composable
+private fun WatchPartyRecipientTile(
+    name: String,
+    imageUrl: String?,
+    online: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .width(88.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(if (selected) Color.White.copy(alpha = 0.11f) else Color.White.copy(alpha = 0.045f))
+            .border(
+                width = 1.dp,
+                brush = if (selected) VantafynGradients.accentHorizontal() else Brush.horizontalGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.06f))),
+                shape = RoundedCornerShape(24.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Box(contentAlignment = Alignment.BottomEnd) {
+            ProfileAvatar(name, imageUrl, Modifier.size(54.dp))
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .vantafynAnimatedModalBorder(),
-                cornerRadius = 24.dp,
-                contentPadding = PaddingValues(16.dp),
-            ) {
-                Text("Invite sent", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("They'll see it while Vantafyn is open and connected.", color = VantafynColors.Muted)
-            }
+                    .size(13.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(if (online) Color(0xFF66E6A8) else Color.White.copy(alpha = 0.35f))
+                    .border(2.dp, VantafynColors.Graphite.copy(alpha = 0.95f), RoundedCornerShape(999.dp)),
+            )
         }
+        Text(
+            name,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -6606,45 +6852,47 @@ private fun WatchPartyRealtimePanel(state: VantafynHomeUiState, onToggleReady: (
     val currentUserId = state.session?.user?.id
     val currentReady = currentUserId?.let { state.localWatchPartyReadyStates[it] } ?: WatchPartyMemberReadyStatus.NotReady
     VantafynGlassPanel(cornerRadius = 28.dp) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("Room status", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(state.watchPartySyncStateLabel, color = VantafynColors.Muted)
-            }
-            SoftBadge(state.watchPartyRealtimeConnectionState.watchPartyLabel())
-        }
-        if (state.watchPartyRealtimeError != null) {
-            Text(state.watchPartyRealtimeError, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
-        }
-        VantafynGlassCard(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onToggleReady),
-            cornerRadius = 18.dp,
-            contentPadding = PaddingValues(14.dp),
-        ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    Text("Ready to watch", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.weight(1f)) {
+                    Text("Room status", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(state.watchPartySyncStateLabel, color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
-                SoftBadge(if (currentReady == WatchPartyMemberReadyStatus.Ready) "Ready" else "Not ready")
+                SoftBadge(state.watchPartyRealtimeConnectionState.watchPartyLabel())
             }
-        }
-        if (state.watchPartyRealtimeMembers.isEmpty()) {
-            VantafynGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(14.dp)) {
-                Text("Waiting for everyone", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-                Text("People will appear here when they join.", color = VantafynColors.Muted)
+            if (state.watchPartyRealtimeError != null) {
+                Text(state.watchPartyRealtimeError, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
             }
-        } else {
-            state.watchPartyRealtimeMembers.take(8).forEach { member ->
-                VantafynGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(12.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        ProfileAvatar(member.displayName, imageUrl = null, modifier = Modifier.size(42.dp))
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Text(member.displayName, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(listOf(member.deviceName, member.playback.watchPartyLabel()).filterNotNull().joinToString(" · ").ifBlank { "Status unknown" }, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            VantafynGlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onToggleReady),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Text("Ready to watch", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                    SoftBadge(if (currentReady == WatchPartyMemberReadyStatus.Ready) "Ready" else "Not ready")
+                }
+            }
+            if (state.watchPartyRealtimeMembers.isEmpty()) {
+                VantafynGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(14.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Waiting for everyone", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                        Text("People will appear here when they join.", color = VantafynColors.Muted)
+                    }
+                }
+            } else {
+                state.watchPartyRealtimeMembers.take(8).forEach { member ->
+                    VantafynGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(12.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            ProfileAvatar(member.displayName, imageUrl = null, modifier = Modifier.size(42.dp))
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text(member.displayName, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(listOf(member.deviceName, member.playback.watchPartyLabel()).filterNotNull().joinToString(" · ").ifBlank { "Status unknown" }, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            SoftBadge(member.presence.watchPartyLabel())
                         }
-                        SoftBadge(member.presence.watchPartyLabel())
                     }
                 }
             }
@@ -6719,7 +6967,7 @@ private fun WatchPartyDeck(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 600.dp)
+            .heightIn(min = 500.dp, max = 570.dp)
             .padding(top = 2.dp),
     ) {
         if (candidate == null) {
@@ -6764,9 +7012,7 @@ private fun WatchPartyDeck(
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .fillMaxWidth()
                 .fillMaxSize()
-                .heightIn(min = 560.dp, max = 720.dp)
                 .graphicsLayer {
                     translationX = dragX.value
                     translationY = dragY.value
@@ -6837,23 +7083,23 @@ private fun WatchPartyDeck(
             Column(
                 modifier = Modifier
                     .matchParentSize()
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.Bottom,
+                    .padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
             ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom, modifier = Modifier.fillMaxWidth()) {
                     AsyncImage(
                         model = candidate.imageUrl,
                         contentDescription = candidate.title,
                         modifier = Modifier
-                            .width(108.dp)
-                            .height(162.dp)
-                            .clip(RoundedCornerShape(22.dp))
+                            .width(88.dp)
+                            .height(132.dp)
+                            .clip(RoundedCornerShape(20.dp))
                             .background(Color.White.copy(alpha = 0.08f)),
                         contentScale = ContentScale.Crop,
                     )
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(candidate.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        Text(candidate.watchPartyMetaLine(), color = VantafynColors.Muted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text(candidate.watchPartyMetaLine(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                             listOfNotNull(candidate.itemType?.searchGroupLabel(), candidate.officialRating, candidate.runtimeMinutes?.let { "$it min" })
                                 .take(4)
@@ -6861,7 +7107,7 @@ private fun WatchPartyDeck(
                         }
                     }
                 }
-                Text(candidate.overview ?: "No overview from Jellyfin.", color = VantafynColors.Ink.copy(alpha = 0.84f), maxLines = 4, overflow = TextOverflow.Ellipsis)
+                Text(candidate.overview ?: "No overview from Jellyfin.", color = VantafynColors.Ink.copy(alpha = 0.84f), style = MaterialTheme.typography.bodyMedium, maxLines = 5, overflow = TextOverflow.Ellipsis)
                 Text("$remaining waiting", color = VantafynColors.Muted)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     WatchPartyVoteButton("Pass", Color(0xFFFF7EA8), modifier = Modifier.weight(1f)) { voteAndThrow(WatchPartyVoteValue.No) }
@@ -8087,26 +8333,48 @@ private fun HomeLayoutScreen(
     onCycleSize: (HomeSectionType) -> Unit,
     onCycleSpacing: (HomeSectionType) -> Unit,
 ) {
+    val editableSections = state.homeLayout.sortedBy { it.order }.filter { it.type != HomeSectionType.MediaBar }
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(bottom = 108.dp),
-        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
             Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
                 CompactBackButton(onClick = onBack)
-                Text("Home Sections", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Home Sections", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text("Choose what appears below the hero row.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+                }
             }
         }
-        items(
-            state.homeLayout.sortedBy { it.order }.filter { it.type != HomeSectionType.MediaBar },
-            key = { it.type.name },
-        ) { preference ->
+        item {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 22.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.ViewAgenda, contentDescription = null, tint = VantafynColors.Ink.copy(alpha = 0.88f), modifier = Modifier.size(22.dp))
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Hero row stays locked", color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("Move the rows underneath it into the order you want.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        }
+        itemsIndexed(
+            editableSections,
+            key = { _, item -> item.type.name },
+        ) { index, preference ->
             HomeSectionEditorCard(
                 state = state,
                 preference = preference,
+                orderLabel = "${index + 1}".padStart(2, '0'),
+                canMoveUp = index > 0,
+                canMoveDown = index < editableSections.lastIndex,
                 onToggle = onToggle,
                 onMove = onMove,
                 onCycleArtwork = onCycleArtwork,
@@ -8117,13 +8385,15 @@ private fun HomeLayoutScreen(
         }
         item {
             GlassPanel {
-                Text("Add Smart Row", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text("Only rows backed by real Jellyfin metadata queries are available.", color = VantafynColors.Muted)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = VantafynColors.Ink.copy(alpha = 0.88f), modifier = Modifier.size(22.dp))
+                    Text("Smart Rows", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                }
                 supportedSmartRows.forEach { row ->
                     val selected = row in state.configuredSmartRows
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Text(row, color = VantafynColors.Ink, modifier = Modifier.weight(1f))
-                        TinyAction(if (selected) "Remove" else "Add") {
+                        TinyAction(if (selected) "Remove" else "Add", gradientBorder = !selected) {
                             if (selected) onRemoveSmartRow(row) else onAddSmartRow(row)
                         }
                     }
@@ -8140,6 +8410,9 @@ private fun HomeLayoutScreen(
 private fun HomeSectionEditorCard(
     state: VantafynHomeUiState,
     preference: HomeSectionPreference,
+    orderLabel: String,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onToggle: (HomeSectionType) -> Unit,
     onMove: (HomeSectionType, Int) -> Unit,
     onCycleArtwork: (HomeSectionType) -> Unit,
@@ -8148,26 +8421,49 @@ private fun HomeSectionEditorCard(
     onCycleSpacing: (HomeSectionType) -> Unit,
 ) {
     GlassPanel {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(Color.White.copy(alpha = 0.075f))
+                    .border(1.dp, Color.White.copy(alpha = 0.11f), RoundedCornerShape(15.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(orderLabel, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Text(preference.type.label, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                Text(if (preference.visible) "Visible" else "Hidden", color = VantafynColors.Muted)
+                Text(if (preference.visible) "Visible" else "Hidden", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs)) {
-                TinyAction(if (preference.visible) "Hide" else "Show") { onToggle(preference.type) }
-                TinyAction("↑") { onMove(preference.type, -1) }
-                TinyAction("↓") { onMove(preference.type, 1) }
+            TinyAction(
+                if (preference.visible) "Hide" else "Show",
+                gradientBorder = !preference.visible,
+            ) { onToggle(preference.type) }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+                HomeSectionMoveButton(
+                    icon = Icons.Rounded.KeyboardArrowUp,
+                    contentDescription = "Move ${preference.type.label} up",
+                    enabled = canMoveUp,
+                    onClick = { onMove(preference.type, -1) },
+                )
+                HomeSectionMoveButton(
+                    icon = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Move ${preference.type.label} down",
+                    enabled = canMoveDown,
+                    onClick = { onMove(preference.type, 1) },
+                )
             }
         }
         HomeSectionPreview(state, preference.type)
         if (preference.type != HomeSectionType.MediaBar) {
             Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs), modifier = Modifier.fillMaxWidth()) {
-                TinyAction("Art ${preference.artworkType.shortLabel()}", Modifier.weight(1f)) { onCycleArtwork(preference.type) }
-                TinyAction("Shape ${preference.cardShape.shortLabel()}", Modifier.weight(1f)) { onCycleShape(preference.type) }
+                TinyAction("Art ${preference.artworkType.shortLabel()}", Modifier.weight(1f), compact = false) { onCycleArtwork(preference.type) }
+                TinyAction("Shape ${preference.cardShape.shortLabel()}", Modifier.weight(1f), compact = false) { onCycleShape(preference.type) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs), modifier = Modifier.fillMaxWidth()) {
-                TinyAction("Size ${preference.cardSize.shortLabel()}", Modifier.weight(1f)) { onCycleSize(preference.type) }
-                TinyAction("Space ${preference.spacing.shortLabel()}", Modifier.weight(1f)) { onCycleSpacing(preference.type) }
+                TinyAction("Size ${preference.cardSize.shortLabel()}", Modifier.weight(1f), compact = false) { onCycleSize(preference.type) }
+                TinyAction("Space ${preference.spacing.shortLabel()}", Modifier.weight(1f), compact = false) { onCycleSpacing(preference.type) }
             }
         }
     }
@@ -8206,20 +8502,56 @@ private fun HomeSectionPreview(state: VantafynHomeUiState, type: HomeSectionType
 }
 
 @Composable
-private fun TinyAction(text: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun TinyAction(
+    text: String,
+    modifier: Modifier = Modifier,
+    compact: Boolean = true,
+    gradientBorder: Boolean = false,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(999.dp)
+    val decoratedModifier = if (gradientBorder) {
+        modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.1.dp, durationMillis = 4200)
+    } else {
+        modifier.border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+    }
     Text(
         text,
         color = VantafynColors.Ink,
         style = MaterialTheme.typography.bodyLarge,
+        fontWeight = FontWeight.SemiBold,
         textAlign = TextAlign.Center,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color.White.copy(alpha = 0.075f))
+        modifier = decoratedModifier
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.065f))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 7.dp),
+            .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = if (compact) 7.dp else 9.dp),
     )
+}
+
+@Composable
+private fun HomeSectionMoveButton(
+    icon: ImageVector,
+    contentDescription: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = VantafynColors.Ink.copy(alpha = if (enabled) 0.92f else 0.24f),
+            modifier = Modifier.size(28.dp),
+        )
+    }
 }
 
 private fun VantafynArtworkType.shortLabel(): String =
@@ -8564,6 +8896,7 @@ private fun DetailChipRow(values: List<String>) {
     ) {
         values.forEach { value ->
             val tone = detailChipTone(value)
+            val showToneDot = tone != null && !value.isStarRating()
             VantafynGlassPill(
                 selected = tone != null,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
@@ -8572,11 +8905,11 @@ private fun DetailChipRow(values: List<String>) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    tone?.let {
+                    tone?.takeIf { showToneDot }?.let { dotTone ->
                         Box(
                             modifier = Modifier
                                 .size(5.dp)
-                                .background(it.copy(alpha = 0.90f), RoundedCornerShape(999.dp)),
+                                .background(dotTone.copy(alpha = 0.90f), RoundedCornerShape(999.dp)),
                         )
                     }
                     Text(
@@ -8757,8 +9090,10 @@ private fun WatchPartyModeChoice(title: String, subtitle: String, onClick: () ->
         cornerRadius = 22.dp,
         contentPadding = PaddingValues(16.dp),
     ) {
-        Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        Text(subtitle, color = VantafynColors.Muted)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = VantafynColors.Muted, maxLines = 4, overflow = TextOverflow.Ellipsis)
+        }
     }
 }
 
@@ -9016,11 +9351,14 @@ private fun String.isDateChip(): Boolean {
 @Composable
 private fun rememberFinishAtLabel(detail: JellyfinMediaDetail): String? {
     if ((detail.runtimeMinutes ?: 0) <= 0) return null
+    val lifecycleOwner = LocalLifecycleOwner.current
     var nowMs by remember(detail.id) { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(detail.id, detail.runtimeMinutes, detail.playbackPositionTicks, detail.isPlayed) {
-        while (true) {
-            nowMs = System.currentTimeMillis()
-            delay(15_000L)
+    LaunchedEffect(detail.id, detail.runtimeMinutes, detail.playbackPositionTicks, detail.isPlayed, lifecycleOwner) {
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                nowMs = System.currentTimeMillis()
+                delay(15_000L)
+            }
         }
     }
     return remember(detail.id, detail.runtimeMinutes, detail.playbackPositionTicks, detail.isPlayed, nowMs) {
@@ -9444,11 +9782,51 @@ private fun MobileBottomNav(
 private fun MusicQuickPlayerSheet(
     playback: VantafynMusicPlaybackState,
     controller: MusicPlaybackController,
+    session: JellyfinSession?,
     onDismiss: () -> Unit,
     onOpenMusic: () -> Unit,
     modifier: Modifier = Modifier,
+    musicViewModel: MusicViewModel = viewModel(),
 ) {
-    val track = playback.currentTrack
+    val musicState by musicViewModel.state.collectAsStateWithLifecycle()
+    var showLyrics by rememberSaveable { mutableStateOf(false) }
+    val currentPlayback = if (showLyrics) musicState.playback else playback
+    val track = currentPlayback.currentTrack
+    val activeTrackId = track?.id
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val lyricsRenderState = remember(activeTrackId, musicState.lyricsTrackId, musicState.isLyricsLoading, musicState.lyrics) {
+        PopupLyricsRenderState(
+            trackId = activeTrackId,
+            lyricsTrackId = musicState.lyricsTrackId,
+            lyrics = musicState.lyrics,
+            isLoading = musicState.isLyricsLoading,
+        )
+    }
+
+    LaunchedEffect(session) {
+        musicViewModel.bindSession(session)
+    }
+    LaunchedEffect(showLyrics) {
+        musicViewModel.setPopupLyricsActive(showLyrics)
+        if (showLyrics) controller.refreshPositionFromPlayer()
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            musicViewModel.setPopupLyricsActive(false)
+        }
+    }
+    LaunchedEffect(showLyrics, lifecycleOwner) {
+        if (!showLyrics) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                controller.refreshPositionFromPlayer()
+                delay(750L)
+            }
+        }
+    }
+    LaunchedEffect(track?.id) {
+        if (track == null) showLyrics = false
+    }
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -9490,54 +9868,95 @@ private fun MusicQuickPlayerSheet(
                             ),
                     )
                 }
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("Now Playing", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        if (showLyrics) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .clickable { showLyrics = false },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(Icons.Rounded.ArrowBack, contentDescription = "Back to player", tint = VantafynColors.Ink, modifier = Modifier.size(23.dp))
+                            }
+                        } else {
+                            Text("Now Playing", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             GoogleCastRouteButton(modifier = Modifier.size(38.dp))
-                            MiniPlayerTextButton("Open", onOpenMusic)
+                            if (!showLyrics) MiniPlayerTextButton("Open", onOpenMusic)
                             MiniPlayerTextButton("Close", onDismiss)
                         }
                     }
-                    if (track == null) {
-                        MusicQuickPlayerEmptyState(onOpenMusic)
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                            AsyncImage(
-                                model = track.artworkUrl,
-                                contentDescription = track.title,
+                    AnimatedContent(
+                        targetState = showLyrics,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(durationMillis = 260, delayMillis = 70, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing))
+                        },
+                        label = "quickPlayerLyricsMode",
+                    ) { lyricsMode ->
+                        if (track == null) {
+                            MusicQuickPlayerEmptyState(onOpenMusic)
+                        } else if (lyricsMode) {
+                            PopupLyricsBody(
+                                renderState = lyricsRenderState,
+                                playbackMs = currentPlayback.positionMs,
+                                onSeek = controller::seekTo,
                                 modifier = Modifier
-                                    .size(76.dp)
-                                    .clip(RoundedCornerShape(18.dp))
-                                    .background(Color.White.copy(alpha = 0.08f)),
-                                contentScale = ContentScale.Crop,
+                                    .fillMaxWidth()
+                                    .height(260.dp)
+                                    .padding(top = 10.dp),
                             )
-                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(track.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                Text(listOfNotNull(track.artist, track.album).joinToString(" - "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    AsyncImage(
+                                        model = track.artworkUrl,
+                                        contentDescription = track.title,
+                                        modifier = Modifier
+                                            .size(76.dp)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(Color.White.copy(alpha = 0.08f)),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Text(track.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                                        Text(listOfNotNull(track.artist, track.album).joinToString(" - "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                                MiniMusicProgress(currentPlayback)
+                                Box(
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.align(Alignment.Center),
+                                        horizontalArrangement = Arrangement.Center,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        MiniPlayerIconControl(Icons.Rounded.SkipPrevious, "Previous", onClick = controller::previous)
+                                        MiniPlayerIconControl(
+                                            if (currentPlayback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                            if (currentPlayback.isPlaying) "Pause" else "Play",
+                                            emphasized = true,
+                                            onClick = controller::togglePlayPause,
+                                        )
+                                        MiniPlayerIconControl(Icons.Rounded.SkipNext, "Next", onClick = controller::next)
+                                    }
+                                    MiniPlayerSmallIconButton(
+                                        icon = Icons.Rounded.Article,
+                                        contentDescription = "Show lyrics",
+                                        size = 32.dp,
+                                        onClick = { showLyrics = true },
+                                        modifier = Modifier.align(Alignment.BottomEnd),
+                                    )
+                                }
                             }
-                        }
-                        MiniMusicProgress(playback)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            MiniPlayerIconControl(Icons.Rounded.SkipPrevious, "Previous", onClick = controller::previous)
-                            MiniPlayerIconControl(
-                                if (playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                if (playback.isPlaying) "Pause" else "Play",
-                                emphasized = true,
-                                onClick = controller::togglePlayPause,
-                            )
-                            MiniPlayerIconControl(Icons.Rounded.SkipNext, "Next", onClick = controller::next)
                         }
                     }
                 }
@@ -9666,6 +10085,284 @@ private fun MiniPlayerTextButton(label: String, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     )
+}
+
+@Composable
+private fun MiniPlayerSmallIconButton(
+    icon: ImageVector,
+    contentDescription: String,
+    size: androidx.compose.ui.unit.Dp = 38.dp,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.08f))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = contentDescription, tint = VantafynColors.Ink, modifier = Modifier.size(size * 0.55f))
+    }
+}
+
+private data class PopupLyricsRenderState(
+    val trackId: UUID?,
+    val lyricsTrackId: UUID?,
+    val lyrics: JellyfinLyrics?,
+    val isLoading: Boolean,
+)
+
+@Composable
+private fun PopupLyricsBody(
+    renderState: PopupLyricsRenderState,
+    playbackMs: Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        renderState.isLoading || renderState.trackId != renderState.lyricsTrackId -> {
+            Box(modifier = modifier, contentAlignment = Alignment.Center) {
+                VantafynLoadingIndicator("Loading lyrics from Jellyfin")
+            }
+        }
+        renderState.lyrics == null -> {
+            PopupLyricsEmptyState(
+                title = "No lyrics available",
+                message = "Jellyfin did not expose lyrics for this track.",
+                modifier = modifier,
+            )
+        }
+        renderState.lyrics.isSynced -> {
+            key(renderState.trackId) {
+                PopupSyncedLyricsView(
+                    lines = renderState.lyrics.syncedLines,
+                    playbackMs = playbackMs,
+                    onSeek = onSeek,
+                    modifier = modifier,
+                )
+            }
+        }
+        else -> {
+            PopupPlainLyricsView(
+                text = renderState.lyrics.plainText,
+                modifier = modifier,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PopupSyncedLyricsView(
+    lines: List<JellyfinLyricLine>,
+    playbackMs: Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val listState = rememberLazyListState()
+    val activeLineLeadMs = 120L
+    val activeIndex = remember(lines, playbackMs) { lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0) }
+    var suppressAutoFollowUntil by remember(lines) { mutableStateOf(0L) }
+    var programmaticScroll by remember(lines) { mutableStateOf(false) }
+    var lastPlaybackMs by remember(lines) { mutableStateOf(-1L) }
+    var pendingRewindTicks by remember(lines) { mutableStateOf(0) }
+
+    LaunchedEffect(lines) {
+        if (lines.isEmpty()) return@LaunchedEffect
+        delay(80L)
+        val targetIndex = lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0)
+        programmaticScroll = true
+        listState.scrollToItem(targetIndex.coerceAtMost(lines.lastIndex))
+        programmaticScroll = false
+        lastPlaybackMs = playbackMs
+    }
+
+    LaunchedEffect(listState, lines) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (scrolling && !programmaticScroll) {
+                suppressAutoFollowUntil = System.currentTimeMillis() + 5_000L
+            }
+        }
+    }
+
+    LaunchedEffect(activeIndex, playbackMs, lines) {
+        if (lines.isEmpty()) return@LaunchedEffect
+        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - playbackMs else 0L
+        val rewindCandidate = lastPlaybackMs >= 0L && playbackMs + 350L < lastPlaybackMs
+        val rewound = when {
+            !rewindCandidate -> {
+                pendingRewindTicks = 0
+                false
+            }
+            rewindDrop >= 1_400L -> {
+                pendingRewindTicks = 0
+                true
+            }
+            else -> {
+                pendingRewindTicks += 1
+                if (pendingRewindTicks >= 2) {
+                    pendingRewindTicks = 0
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        lastPlaybackMs = playbackMs
+        val suppressAutoFollow = System.currentTimeMillis() < suppressAutoFollowUntil
+        if (rewound && !suppressAutoFollow) suppressAutoFollowUntil = 0L
+        if (!suppressAutoFollow) {
+            programmaticScroll = true
+            try {
+                listState.animateScrollToItem(activeIndex.coerceAtMost(lines.lastIndex))
+            } finally {
+                programmaticScroll = false
+            }
+        }
+    }
+
+    BoxWithConstraints(modifier = modifier) {
+        if (lines.isEmpty()) {
+            PopupLyricsEmptyState("No lyrics text", "Jellyfin returned an empty lyrics file.", Modifier.fillMaxSize())
+            return@BoxWithConstraints
+        }
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            state = listState,
+            contentPadding = PaddingValues(top = maxHeight * 0.42f, bottom = maxHeight * 0.48f),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            itemsIndexed(lines, key = { index, line -> "${line.startMs}-${line.text}-$index" }) { index, line ->
+                PopupSyncedLyricLine(
+                    line = line,
+                    active = index == activeIndex,
+                    onClick = {
+                        line.startMs?.let {
+                            suppressAutoFollowUntil = 0L
+                            lastPlaybackMs = it
+                            onSeek(it)
+                        }
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PopupSyncedLyricLine(line: JellyfinLyricLine, active: Boolean, onClick: () -> Unit) {
+    val scale by animateFloatAsState(
+        targetValue = if (active) 1f else 0.92f,
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+        label = "popupLyricLineScale",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (active) 1f else 0.42f,
+        animationSpec = tween(durationMillis = 280, easing = FastOutSlowInEasing),
+        label = "popupLyricLineAlpha",
+    )
+    Text(
+        text = line.text.trim().ifBlank { "♪" },
+        textAlign = TextAlign.Start,
+        color = Color.White.copy(alpha = alpha),
+        style = MaterialTheme.typography.titleLarge,
+        fontWeight = if (active) FontWeight.Bold else FontWeight.SemiBold,
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+            }
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(enabled = line.startMs != null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+    )
+}
+
+@Composable
+private fun PopupPlainLyricsView(text: String, modifier: Modifier = Modifier) {
+    val listState = rememberLazyListState()
+    val lines = remember(text) {
+        text.trim()
+            .lines()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+    var suppressAutoScrollUntil by remember(text) { mutableStateOf(0L) }
+    var autoScrolling by remember(text) { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    LaunchedEffect(listState, text) {
+        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
+            if (scrolling && !autoScrolling) {
+                suppressAutoScrollUntil = System.currentTimeMillis() + 2_000L
+            }
+        }
+    }
+    LaunchedEffect(lines, lifecycleOwner) {
+        if (lines.isEmpty()) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                delay(1_400L)
+                if (System.currentTimeMillis() < suppressAutoScrollUntil) continue
+                val next = (listState.firstVisibleItemIndex + 1).coerceAtMost(lines.lastIndex)
+                if (next == listState.firstVisibleItemIndex) {
+                    delay(4_200L)
+                    continue
+                }
+                autoScrolling = true
+                listState.animateScrollToItem(next)
+                autoScrolling = false
+            }
+        }
+    }
+
+    if (lines.isEmpty()) {
+        PopupLyricsEmptyState("No lyrics text", "Jellyfin returned an empty lyrics file.", modifier)
+        return
+    }
+    LazyColumn(
+        modifier = modifier.fillMaxWidth(),
+        state = listState,
+        contentPadding = PaddingValues(top = 42.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(lines) { line ->
+            Text(
+                text = line,
+                color = VantafynColors.Ink.copy(alpha = 0.86f),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun PopupLyricsEmptyState(title: String, message: String, modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(horizontal = 16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Rounded.Article, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(34.dp))
+        Spacer(Modifier.height(10.dp))
+        Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        Text(message, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.Center)
+    }
+}
+
+private fun List<JellyfinLyricLine>.activeIndex(positionMs: Long): Int {
+    if (isEmpty()) return -1
+    var active = 0
+    forEachIndexed { index, line ->
+        val start = line.startMs ?: return@forEachIndexed
+        if (start <= positionMs) active = index else return active
+    }
+    return active
 }
 
 private fun Long.toMusicTimeLabel(): String {

@@ -1,13 +1,19 @@
 package dev.vantafyn.feature.requests
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -46,12 +52,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -96,6 +104,8 @@ import java.util.UUID
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
+private val RequestsSetupCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1f)
+
 @Composable
 fun RequestsScreen(
     session: JellyfinSession?,
@@ -121,6 +131,14 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         RequestDetailScreen(item = it, state = state, viewModel = viewModel, onOpenMedia = onOpenMedia, modifier = modifier)
         return
     }
+    if (!state.isConfigured) {
+        UnconfiguredRequestsScreen(
+            admin = state.isJellyfinAdmin,
+            onSetup = viewModel::startSetup,
+            modifier = modifier,
+        )
+        return
+    }
     var revealActive by remember(state.currentUserId) { mutableStateOf(true) }
     LaunchedEffect(state.currentUserId) {
         revealActive = true
@@ -133,14 +151,6 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         contentPadding = PaddingValues(bottom = 164.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        if (!state.isConfigured) {
-            item {
-                RequestContentReveal(index = 0, animate = revealActive) {
-                    RequestInset { EmptySetupState(state.isJellyfinAdmin, onSetup = viewModel::startSetup) }
-                }
-            }
-            return@LazyColumn
-        }
         if (!state.config.isEnabledForAdmins || !state.canUseRequests) {
             item {
                 RequestContentReveal(index = 0, animate = revealActive) {
@@ -449,29 +459,100 @@ private fun OmbiSetupWizard(state: RequestsUiState, viewModel: RequestsViewModel
             .fillMaxSize()
             .padding(horizontal = 8.dp),
         contentPadding = PaddingValues(
-            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
+            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 42.dp,
             bottom = 108.dp,
         ),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            Header("Connect Ombi", "Vantafyn uses Ombi to request movies and shows from your server.")
+            RequestsSetupHeader(
+                title = "Connect Ombi",
+                onBack = viewModel::previousSetupStep,
+            )
         }
         item {
             VantafynGlassPanel(cornerRadius = 24.dp) {
                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     StepBadge(state.setupStep.stepTitle)
-                    when (state.setupStep) {
-                        OmbiSetupStep.Connect -> ConnectStep(state, viewModel)
-                        OmbiSetupStep.Authentication -> RequestModeStep(state, viewModel)
-                        OmbiSetupStep.Test -> UserAccessStep(state, viewModel)
-                        OmbiSetupStep.Access -> UserAccessStep(state, viewModel)
-                        OmbiSetupStep.Finish -> FinishStep(state, viewModel)
+                    AnimatedContent(
+                        targetState = state.setupStep,
+                        transitionSpec = {
+                            (
+                                fadeIn(animationSpec = tween(durationMillis = 760, delayMillis = 90, easing = RequestsSetupCinematicEasing)) +
+                                    slideInVertically(
+                                        animationSpec = tween(durationMillis = 820, delayMillis = 90, easing = RequestsSetupCinematicEasing),
+                                        initialOffsetY = { it / 16 },
+                                    )
+                                ).togetherWith(
+                                fadeOut(animationSpec = tween(durationMillis = 360, easing = RequestsSetupCinematicEasing)),
+                            ).using(SizeTransform(clip = false))
+                        },
+                        label = "ombiSetupStep",
+                    ) { step ->
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            when (step) {
+                                OmbiSetupStep.Connect -> ConnectStep(state, viewModel)
+                                OmbiSetupStep.Authentication -> RequestModeStep(state, viewModel)
+                                OmbiSetupStep.Test -> UserAccessStep(state, viewModel)
+                                OmbiSetupStep.Access -> UserAccessStep(state, viewModel)
+                                OmbiSetupStep.Finish -> FinishStep(state, viewModel)
+                            }
+                        }
                     }
                 }
             }
         }
         state.message?.let { item { MessageCard(it) } }
+    }
+}
+
+@Composable
+private fun RequestsSetupHeader(title: String, onBack: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(42.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(onClick = onBack),
+            contentAlignment = Alignment.Center,
+        ) {
+            Canvas(modifier = Modifier.size(19.dp)) {
+                val stroke = 2.35.dp.toPx()
+                drawLine(
+                    color = Color.White,
+                    start = Offset(11.5.dp.toPx(), 3.dp.toPx()),
+                    end = Offset(5.dp.toPx(), 9.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = Color.White,
+                    start = Offset(5.dp.toPx(), 9.dp.toPx()),
+                    end = Offset(11.5.dp.toPx(), 15.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = Color.White,
+                    start = Offset(5.5.dp.toPx(), 9.dp.toPx()),
+                    end = Offset(16.dp.toPx(), 9.dp.toPx()),
+                    strokeWidth = stroke,
+                    cap = StrokeCap.Round,
+                )
+            }
+        }
+        Text(
+            title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -918,17 +999,43 @@ private fun OmbiLoginState(state: RequestsUiState, viewModel: RequestsViewModel)
 }
 
 @Composable
-private fun EmptySetupState(admin: Boolean, onSetup: () -> Unit) {
+private fun UnconfiguredRequestsScreen(
+    admin: Boolean,
+    onSetup: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(284.dp)
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 8.dp)
+            .padding(bottom = 164.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        RequestContentReveal(index = 0, animate = true) {
+            EmptySetupState(
+                admin = admin,
+                onSetup = onSetup,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmptySetupState(
+    admin: Boolean,
+    onSetup: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .height(if (admin) 356.dp else 304.dp)
             .clip(RoundedCornerShape(28.dp))
             .background(
                 Brush.linearGradient(
                     listOf(
-                        Color(0xFF172235),
-                        Color(0xFF25234A),
+                        Color(0xFF111A2B),
+                        Color(0xFF1B1B38),
                         Color(0xFF0A0F1C),
                     ),
                 ),
@@ -941,10 +1048,11 @@ private fun EmptySetupState(admin: Boolean, onSetup: () -> Unit) {
                     Brush.radialGradient(
                         listOf(
                             VantafynColors.Primary.copy(alpha = 0.28f),
+                            Color(0xFFA956FF).copy(alpha = 0.16f),
                             Color.Transparent,
                         ),
-                        center = Offset(760f, 80f),
-                        radius = 620f,
+                        center = Offset(720f, 120f),
+                        radius = 700f,
                     ),
                 ),
         )
@@ -963,35 +1071,69 @@ private fun EmptySetupState(admin: Boolean, onSetup: () -> Unit) {
         )
         Column(
             modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(22.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .padding(horizontal = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            TypeChip("Requests", selected = true, onClick = {})
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
                 Text(
                     if (admin) "Requests are ready when you are" else "Requests aren't ready yet",
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     if (admin) "Connect Ombi to let this home request movies and series from Vantafyn."
                     else "Your server admin has not finished setting up Requests.",
                     color = VantafynColors.Muted,
                     style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 2,
+                    textAlign = TextAlign.Center,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(listOf("Movies", "Series", "Family queue")) { label ->
-                    TypeChip(label, selected = true, onClick = {})
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                SetupFeaturePill("Movies", Modifier.weight(1f))
+                SetupFeaturePill("Series", Modifier.weight(1f))
+                SetupFeaturePill("Family", Modifier.weight(1f))
             }
             if (admin) {
                 VantafynButton("Set up Ombi", onClick = onSetup, modifier = Modifier.fillMaxWidth())
             }
         }
+    }
+}
+
+@Composable
+private fun SetupFeaturePill(label: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .height(42.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.075f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = VantafynColors.Ink.copy(alpha = 0.92f),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

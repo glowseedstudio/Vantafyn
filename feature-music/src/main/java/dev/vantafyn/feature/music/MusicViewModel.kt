@@ -48,6 +48,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var playRequestJob: Job? = null
     private var pendingPlayTrackId: UUID? = null
     private var musicScreenActive = false
+    private var popupLyricsActive = false
     private var lyricsPrefetchJob: Job? = null
     private val lyricsCache = LinkedHashMap<LyricsCacheKey, JellyfinLyrics?>()
 
@@ -59,7 +60,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             playbackController.state.collect { playback ->
                 _state.update { it.copy(playback = playback) }
                 val track = playback.currentTrack
-                if (track != null && _state.value.showLyricsScreen && track.id != _state.value.lyricsTrackId) {
+                if (track != null && (_state.value.showLyricsScreen || popupLyricsActive) && track.id != _state.value.lyricsTrackId) {
                     loadLyrics(track.id)
                 } else if (track != null && shouldPrefetchLyrics()) {
                     prefetchLyrics(track.id)
@@ -253,6 +254,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(showLyricsScreen = true, showNowPlaying = true) }
         if (track != null && track.id != _state.value.lyricsTrackId) {
             loadLyrics(track.id)
+        }
+    }
+
+    fun setPopupLyricsActive(active: Boolean) {
+        popupLyricsActive = active
+        if (active) {
+            playbackController.state.value.currentTrack?.id?.let { trackId ->
+                if (trackId != _state.value.lyricsTrackId) loadLyrics(trackId)
+            }
         }
     }
 

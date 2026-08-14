@@ -220,16 +220,20 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         if (!_state.value.isJellyfinAdmin) return
         val snapshot = _state.value
         _state.update {
-            it.copy(
-                setupStep = when (snapshot.setupStep) {
-                    OmbiSetupStep.Connect -> OmbiSetupStep.Connect
-                    OmbiSetupStep.Authentication -> OmbiSetupStep.Connect
-                    OmbiSetupStep.Test -> OmbiSetupStep.Authentication
-                    OmbiSetupStep.Access -> OmbiSetupStep.Test
-                    OmbiSetupStep.Finish -> OmbiSetupStep.Test
-                },
-                message = null,
-            )
+            if (snapshot.setupStep == OmbiSetupStep.Connect) {
+                it.copy(mode = RequestsScreenMode.Requests, message = null)
+            } else {
+                it.copy(
+                    setupStep = when (snapshot.setupStep) {
+                        OmbiSetupStep.Connect -> OmbiSetupStep.Connect
+                        OmbiSetupStep.Authentication -> OmbiSetupStep.Connect
+                        OmbiSetupStep.Test -> OmbiSetupStep.Authentication
+                        OmbiSetupStep.Access -> OmbiSetupStep.Test
+                        OmbiSetupStep.Finish -> OmbiSetupStep.Test
+                    },
+                    message = null,
+                )
+            }
         }
     }
 

@@ -18,6 +18,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,7 +50,6 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +81,7 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -94,6 +95,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -725,12 +727,7 @@ private fun MusicTrackList(
                     }
                     Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
                     if (pendingTrackId == track.id) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            strokeWidth = 2.dp,
-                            color = VantafynColors.Secondary,
-                            trackColor = Color.White.copy(alpha = 0.12f),
-                        )
+                        VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     }
                     if (playlists.isNotEmpty()) {
                         MiniControl("+") { onChoosePlaylist(track) }
@@ -873,17 +870,54 @@ private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String,
                         .background(Color.Black.copy(alpha = 0.32f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(28.dp),
-                        strokeWidth = 2.dp,
-                        color = VantafynColors.Secondary,
-                        trackColor = Color.White.copy(alpha = 0.14f),
-                    )
+                    VantafynGradientLoadingRing(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
                 }
             }
         }
         Text(title, color = VantafynColors.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(subtitle, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun VantafynGradientLoadingRing(modifier: Modifier = Modifier, strokeWidth: androidx.compose.ui.unit.Dp = 2.dp) {
+    val transition = rememberInfiniteTransition(label = "musicGradientLoadingRing")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 960, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "musicGradientLoadingRotation",
+    )
+    val ringColors = remember {
+        listOf(
+            Color(0xFF31D7FF),
+            Color(0xFF45C0FF),
+            Color(0xFF5B8CFF),
+            Color(0xFF8368FF),
+            Color(0xFFC05CFF),
+            Color(0xFF9A62FF),
+            Color(0xFF5B8CFF),
+            Color(0xFF45C0FF),
+            Color(0xFF31D7FF),
+        )
+    }
+    Canvas(modifier = modifier.graphicsLayer { rotationZ = rotation }) {
+        val strokePx = strokeWidth.toPx()
+        drawCircle(
+            color = Color.White.copy(alpha = 0.13f),
+            radius = (size.minDimension - strokePx) / 2f,
+            style = Stroke(width = strokePx),
+        )
+        drawArc(
+            brush = Brush.sweepGradient(ringColors),
+            startAngle = -90f,
+            sweepAngle = 270f,
+            useCenter = false,
+            style = Stroke(width = strokePx, cap = StrokeCap.Round),
+        )
     }
 }
 
@@ -956,6 +990,12 @@ private fun NowPlayingDialog(
     var showPlaylistName by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
     val track = state.playback.currentTrack ?: return
+    var revealActive by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        revealActive = true
+        kotlinx.coroutines.delay(1_450L)
+        revealActive = false
+    }
     Box(
         Modifier.fillMaxSize(),
     ) {
@@ -982,111 +1022,127 @@ private fun NowPlayingDialog(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             item {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .windowInsetsPadding(WindowInsets.safeDrawing),
-                ) {
-                    Text(
-                        "Now Playing",
-                        color = VantafynColors.Ink.copy(alpha = 0.90f),
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
-                    Row(
-                        modifier = Modifier.align(Alignment.CenterEnd),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                MusicContentReveal(index = 0, animate = revealActive) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .windowInsetsPadding(WindowInsets.safeDrawing),
                     ) {
-                        GoogleCastRouteButton(modifier = Modifier.size(44.dp))
-                        FlatMusicIconButton(Icons.Rounded.Close, "Close", viewModel::closeNowPlaying, size = 44)
+                        Text(
+                            "Now Playing",
+                            color = VantafynColors.Ink.copy(alpha = 0.90f),
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.align(Alignment.Center),
+                        )
+                        Row(
+                            modifier = Modifier.align(Alignment.CenterEnd),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            GoogleCastRouteButton(modifier = Modifier.size(44.dp))
+                            FlatMusicIconButton(Icons.Rounded.Close, "Close", viewModel::closeNowPlaying, size = 44)
+                        }
                     }
                 }
             }
             item {
-                MusicArt(
-                    imageUrl = track.artworkUrl,
-                    modifier = Modifier
-                        .size(296.dp)
-                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(30.dp)),
-                    cornerRadius = 30,
-                )
-            }
-            item {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    VantafynMarqueeText(
-                        text = track.title,
-                        style = MaterialTheme.typography.headlineSmall.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold),
-                        textAlign = TextAlign.Center,
-                    )
-                    VantafynMarqueeText(
-                        text = listOfNotNull(track.artist, track.album).joinToString(" - "),
-                        style = MaterialTheme.typography.bodyLarge.copy(color = VantafynColors.Muted),
-                        textAlign = TextAlign.Center,
+                MusicContentReveal(index = 1, animate = revealActive) {
+                    MusicArt(
+                        imageUrl = track.artworkUrl,
+                        modifier = Modifier
+                            .size(296.dp)
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(30.dp)),
+                        cornerRadius = 30,
                     )
                 }
             }
             item {
-                MusicScrubber(
-                    positionMs = state.playback.positionMs,
-                    durationMs = state.playback.durationMs,
-                    onSeek = viewModel::seekTo,
-                )
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(state.playback.positionMs.formatTime(), color = VantafynColors.Muted)
-                    Text(state.playback.durationMs.formatTime(), color = VantafynColors.Muted)
+                MusicContentReveal(index = 2, animate = revealActive) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        VantafynMarqueeText(
+                            text = track.title,
+                            style = MaterialTheme.typography.headlineSmall.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold),
+                            textAlign = TextAlign.Center,
+                        )
+                        VantafynMarqueeText(
+                            text = listOfNotNull(track.artist, track.album).joinToString(" - "),
+                            style = MaterialTheme.typography.bodyLarge.copy(color = VantafynColors.Muted),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
                 }
             }
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    FlatMusicIconButton(Icons.Rounded.Shuffle, "Shuffle", viewModel::toggleShuffle, selected = state.playback.shuffleEnabled, size = 46)
-                    FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous", viewModel::previous, size = 54)
-                    GradientPlayButton(
-                        if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        if (state.playback.isPlaying) "Pause" else "Play",
-                        {
-                            if (state.playback.isPlaying) {
-                                viewModel.togglePlayPause()
-                            } else {
-                                onRequestMusicControlsPermission { viewModel.togglePlayPause() }
-                            }
-                        },
-                        size = 72,
+                MusicContentReveal(index = 3, animate = revealActive) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        MusicScrubber(
+                            positionMs = state.playback.positionMs,
+                            durationMs = state.playback.durationMs,
+                            onSeek = viewModel::seekTo,
+                        )
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(state.playback.positionMs.formatTime(), color = VantafynColors.Muted)
+                            Text(state.playback.durationMs.formatTime(), color = VantafynColors.Muted)
+                        }
+                    }
+                }
+            }
+            item {
+                MusicContentReveal(index = 4, animate = revealActive) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FlatMusicIconButton(Icons.Rounded.Shuffle, "Shuffle", viewModel::toggleShuffle, selected = state.playback.shuffleEnabled, size = 46)
+                        FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous", viewModel::previous, size = 54)
+                        GradientPlayButton(
+                            if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            if (state.playback.isPlaying) "Pause" else "Play",
+                            {
+                                if (state.playback.isPlaying) {
+                                    viewModel.togglePlayPause()
+                                } else {
+                                    onRequestMusicControlsPermission { viewModel.togglePlayPause() }
+                                }
+                            },
+                            size = 72,
+                        )
+                        FlatMusicIconButton(Icons.Rounded.SkipNext, "Next", viewModel::next, size = 54)
+                        FlatMusicIconButton(
+                            if (state.playback.repeatMode == VantafynMusicRepeatMode.One) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                            "Repeat",
+                            viewModel::cycleRepeat,
+                            selected = state.playback.repeatMode != VantafynMusicRepeatMode.Off,
+                        )
+                    }
+                }
+            }
+            item {
+                MusicContentReveal(index = 5, animate = revealActive) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true }
+                        IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
+                        IconPill(Icons.Rounded.MoreHoriz, "More") { showMoreSheet = true }
+                    }
+                }
+            }
+            item {
+                MusicContentReveal(index = 6, animate = revealActive) {
+                    QueuePanel(
+                        queue = state.playback.queue,
+                        index = state.playback.queueIndex,
+                        onTrack = viewModel::playQueueIndex,
                     )
-                    FlatMusicIconButton(Icons.Rounded.SkipNext, "Next", viewModel::next, size = 54)
-                    FlatMusicIconButton(
-                        if (state.playback.repeatMode == VantafynMusicRepeatMode.One) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                        "Repeat",
-                        viewModel::cycleRepeat,
-                        selected = state.playback.repeatMode != VantafynMusicRepeatMode.Off,
-                    )
                 }
-            }
-            item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true }
-                    IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
-                    IconPill(Icons.Rounded.MoreHoriz, "More") { showMoreSheet = true }
-                }
-            }
-            item {
-                QueuePanel(
-                    queue = state.playback.queue,
-                    index = state.playback.queueIndex,
-                    onTrack = viewModel::playQueueIndex,
-                )
             }
             item {
                 Spacer(Modifier.height(96.dp))
@@ -2242,15 +2298,15 @@ private fun MusicContentReveal(
     }
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(index) {
-        delay((index.coerceAtMost(8) * 78L).coerceAtMost(620L))
+        delay((index.coerceAtMost(8) * 112L).coerceAtMost(780L))
         visible = true
     }
     AnimatedVisibility(
         visible = visible,
-        enter = fadeIn(animationSpec = tween(durationMillis = 430, easing = FastOutSlowInEasing)) +
+        enter = fadeIn(animationSpec = tween(durationMillis = 680, easing = FastOutSlowInEasing)) +
             slideInVertically(
-                animationSpec = tween(durationMillis = 470, easing = FastOutSlowInEasing),
-                initialOffsetY = { it / 7 },
+                animationSpec = tween(durationMillis = 740, easing = FastOutSlowInEasing),
+                initialOffsetY = { it / 8 },
             ),
     ) {
         content()

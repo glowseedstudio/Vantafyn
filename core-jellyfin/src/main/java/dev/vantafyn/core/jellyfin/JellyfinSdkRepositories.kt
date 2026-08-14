@@ -2066,8 +2066,7 @@ class SdkJellyfinAdminRepository(
                 .mapNotNull { row ->
                     val title = row.firstString("label", "name", "item_name", "ItemName", "Name").takeIf { it.isNotBlank() }
                         ?: return@mapNotNull null
-                    val itemId = row.firstString("id", "item_id", "ItemId", "Id")
-                        .let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
+                    val itemId = row.playbackReportingItemId()
                     JellyfinMediaWatchStats(
                         itemId = itemId,
                         title = title,
@@ -2082,7 +2081,14 @@ class SdkJellyfinAdminRepository(
                 .sortedWith(compareByDescending<JellyfinMediaWatchStats> { it.totalWatchTimeSeconds }.thenByDescending { it.playCount })
                 .take(12)
             val artworkById = loadPlaybackReportingArtwork(api, session, stats.mapNotNull { it.itemId })
-            stats.map { item -> item.copy(posterUrl = item.itemId?.let { artworkById[it] }) }
+            val missingArtwork = stats.filter { item -> item.itemId?.let { artworkById[it] } == null }
+            val artworkByTitle = loadPlaybackReportingArtworkByTitle(api, session, missingArtwork)
+            stats.map { item ->
+                item.copy(
+                    posterUrl = item.itemId?.let { artworkById[it] }
+                        ?: artworkByTitle[item.title.normalizedPlaybackReportingTitle()],
+                )
+            }
         }.getOrDefault(emptyList())
 
     private suspend fun loadPlaybackReportingArtwork(
@@ -2109,6 +2115,47 @@ class SdkJellyfinAdminRepository(
                 item.id to (item.primaryImageUrl(api, 260) ?: item.thumbImageUrl(api, 360) ?: item.backdropImageUrl(api, 360))
             }
         }.getOrDefault(emptyMap())
+    }
+
+    private suspend fun loadPlaybackReportingArtworkByTitle(
+        api: ApiClient,
+        session: JellyfinSession,
+        items: List<JellyfinMediaWatchStats>,
+    ): Map<String, String?> {
+        if (items.isEmpty()) return emptyMap()
+        return items.take(12).mapNotNull { stats ->
+            runCatching {
+                val query = stats.title.playbackReportingSearchTitle()
+                if (query.isBlank()) return@runCatching null
+                val response by api.searchApi.getSearchHints(
+                    GetSearchHintsRequest(
+                        userId = session.user.id,
+                        searchTerm = query,
+                        includeItemTypes = listOf(
+                            BaseItemKind.MOVIE,
+                            BaseItemKind.SERIES,
+                            BaseItemKind.EPISODE,
+                            BaseItemKind.AUDIO,
+                            BaseItemKind.MUSIC_ALBUM,
+                        ),
+                        limit = 8,
+                        mediaTypes = emptyList(),
+                    ),
+                )
+                val normalizedTitle = stats.title.normalizedPlaybackReportingTitle()
+                val hint = response.searchHints
+                    .firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
+                    ?: response.searchHints.firstOrNull()
+                    ?: return@runCatching null
+                val itemId = hint.itemId ?: hint.id ?: return@runCatching null
+                val imageUrl = hint.primaryImageTag?.takeIf { it.isNotBlank() }?.let {
+                    itemImageUrl(api, itemId, ImageType.PRIMARY, it, maxWidth = 260)
+                } ?: hint.backdropImageTag?.takeIf { it.isNotBlank() }?.let {
+                    itemImageUrl(api, itemId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+                }
+                normalizedTitle to imageUrl
+            }.getOrNull()
+        }.toMap()
     }
 
     private fun playbackReportingJsonArray(session: JellyfinSession, pathAndQuery: String): JSONArray {
@@ -2974,6 +3021,22 @@ private fun publicUserImageUrl(api: ApiClient, userId: java.util.UUID, imageTag:
 private fun JSONObject.firstString(vararg names: String): String =
     names.firstNotNullOfOrNull { name -> optString(name).takeIf { it.isNotBlank() } }.orEmpty()
 
+private fun JSONObject.playbackReportingItemId(): java.util.UUID? =
+    firstString(
+        "item_id",
+        "ItemId",
+        "ItemID",
+        "Id",
+        "id",
+        "itemId",
+        "ItemGuid",
+        "item_guid",
+        "Guid",
+        "guid",
+    ).let { raw ->
+        runCatching { java.util.UUID.fromString(raw) }.getOrNull()
+    }
+
 private fun JSONObject.firstInt(vararg names: String): Int =
     firstIntOrNull(*names) ?: 0
 
@@ -2994,6 +3057,17 @@ private fun JSONObject.firstLong(vararg names: String): Long =
             optLong(name)
         }
     } ?: 0L
+
+private fun String.playbackReportingSearchTitle(): String =
+    replace(Regex("""\s+\([^)]*\)\s*$"""), "")
+        .substringBefore(" - ")
+        .trim()
+
+private fun String.normalizedPlaybackReportingTitle(): String =
+    playbackReportingSearchTitle()
+        .lowercase(Locale.US)
+        .replace(Regex("""[^a-z0-9]+"""), " ")
+        .trim()
 
 private fun String.withCacheTag(tag: String?): String {
     val safeTag = tag?.takeIf { it.isNotBlank() } ?: return this

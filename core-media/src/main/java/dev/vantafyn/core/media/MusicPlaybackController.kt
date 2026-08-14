@@ -321,6 +321,19 @@ class MusicPlaybackController private constructor(context: Context) {
         _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, sessionPlayer.currentPosition.coerceAtLeast(0L))) }
     }
 
+    fun refreshPositionFromPlayer() {
+        _state.update { state ->
+            val currentIndex = sessionPlayer.currentMediaItemIndex.takeIf { it >= 0 } ?: state.queueIndex
+            val currentTrack = state.queue.getOrNull(currentIndex) ?: state.currentTrack
+            state.copy(
+                queueIndex = currentIndex,
+                positionMs = sessionPlayer.currentPosition.coerceAtLeast(0L),
+                durationMs = sessionPlayer.duration.takeIf { it > 0 } ?: currentTrack?.durationMs ?: state.durationMs,
+                isPlaying = sessionPlayer.isPlaying,
+            )
+        }
+    }
+
     fun toggleShuffle() {
         val enabled = !_state.value.shuffleEnabled
         sessionPlayer.shuffleModeEnabled = enabled
@@ -383,10 +396,12 @@ class MusicPlaybackController private constructor(context: Context) {
         tickerJob = scope.launch {
             while (isActive) {
                 _state.update { state ->
+                    val currentIndex = sessionPlayer.currentMediaItemIndex.takeIf { it >= 0 } ?: state.queueIndex
+                    val currentTrack = state.queue.getOrNull(currentIndex) ?: state.currentTrack
                     state.copy(
-                        queueIndex = sessionPlayer.currentMediaItemIndex.takeIf { it >= 0 } ?: state.queueIndex,
+                        queueIndex = currentIndex,
                         positionMs = sessionPlayer.currentPosition.coerceAtLeast(0L),
-                        durationMs = sessionPlayer.duration.takeIf { it > 0 } ?: state.currentTrack?.durationMs ?: state.durationMs,
+                        durationMs = sessionPlayer.duration.takeIf { it > 0 } ?: currentTrack?.durationMs ?: state.durationMs,
                         isPlaying = sessionPlayer.isPlaying,
                     )
                 }

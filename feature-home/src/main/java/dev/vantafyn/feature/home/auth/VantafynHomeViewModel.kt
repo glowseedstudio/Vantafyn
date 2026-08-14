@@ -782,13 +782,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     ) {
         val session = _state.value.session ?: return
         _state.update {
+            val currentPage = it.libraryItemsPage
             it.copy(
                 mobileDestination = MobileDestination.LibraryDetail,
                 previousMobileDestination = MobileDestination.Libraries,
                 selectedLibrary = library,
                 libraryItemsFilter = filter,
                 libraryItems = emptyList(),
-                libraryItemsPage = null,
+                libraryItemsPage = currentPage?.copy(items = emptyList(), startIndex = startIndex)
+                    ?: JellyfinLibraryPage(
+                        items = emptyList(),
+                        startIndex = startIndex,
+                        pageSize = LibraryItemsPageSize,
+                        totalItems = 0,
+                    ),
                 isLibraryItemsLoading = true,
                 libraryItemsError = null,
                 mobileMessage = null,
