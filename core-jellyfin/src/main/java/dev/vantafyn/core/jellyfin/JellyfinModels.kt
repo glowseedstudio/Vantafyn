@@ -869,6 +869,32 @@ data class JellyfinUserPlaybackPreferences(
     val enableNextEpisodeAutoPlay: Boolean,
 )
 
+enum class JellyfinMediaSegmentType {
+    Unknown,
+    Commercial,
+    Preview,
+    Recap,
+    Outro,
+    Intro,
+}
+
+enum class JellyfinMediaSegmentBehavior {
+    Prompt,
+    AutoSkip,
+    DoNothing,
+}
+
+data class JellyfinMediaSegment(
+    val id: UUID,
+    val itemId: UUID,
+    val type: JellyfinMediaSegmentType,
+    val startTicks: Long,
+    val endTicks: Long,
+) {
+    val startMs: Long get() = startTicks / 10_000L
+    val endMs: Long get() = endTicks / 10_000L
+}
+
 data class JellyfinAdminUserDetail(
     val user: JellyfinAdminUser,
     val enableAllFolders: Boolean,
@@ -1067,6 +1093,10 @@ interface JellyfinAdminRepository {
     suspend fun scanLibrary(session: JellyfinSession): JellyfinResult<Unit>
     suspend fun setPluginEnabled(session: JellyfinSession, pluginId: UUID, version: String, enabled: Boolean): JellyfinResult<Unit>
     suspend fun setScheduledTaskRunning(session: JellyfinSession, taskId: String, running: Boolean): JellyfinResult<Unit>
+}
+
+interface JellyfinMediaSegmentRepository {
+    suspend fun getItemSegments(session: JellyfinSession, itemId: UUID): JellyfinResult<List<JellyfinMediaSegment>>
 }
 
 interface JellyfinUserPreferencesRepository {

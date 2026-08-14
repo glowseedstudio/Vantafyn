@@ -1,5 +1,7 @@
 package dev.vantafyn.feature.player
 
+import android.app.Activity
+import android.content.Context
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -10,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
@@ -29,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -49,7 +53,6 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -89,6 +92,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -108,7 +114,11 @@ import dev.vantafyn.core.cast.GoogleCastRouteButton
 import dev.vantafyn.core.cast.PlaybackOutputCoordinator
 import dev.vantafyn.core.cast.PlaybackOutputType
 import dev.vantafyn.core.cast.CastSubtitleTrack
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegment
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentBehavior
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
 import dev.vantafyn.core.media.UpNextCandidate
+import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.UpNextState
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.VantafynPlaybackItem
@@ -119,10 +129,14 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassCard
 import dev.vantafyn.core.ui.VantafynGlassModalPanel
 import dev.vantafyn.core.ui.VantafynGlassPanel
+import dev.vantafyn.core.ui.VantafynGradientSpinner
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynSpacing
+import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import java.text.DateFormat
+import java.util.Date
 import kotlin.math.abs
 
 @Composable
@@ -232,6 +246,7 @@ private fun PlayerSurface(
     var nextStarted by remember(item.itemId) { mutableStateOf(false) }
     var previousStarted by remember(item.itemId) { mutableStateOf(false) }
     var lastCastProgressReportMs by remember(item.itemId) { mutableLongStateOf(-1L) }
+    var autoSkippedSegmentIds by remember(item.itemId) { mutableStateOf(emptySet<String>()) }
     val previousCandidate = item.previousCandidate
     val upNextCandidate = item.upNextCandidate
     val autoplaySettings = item.autoplaySettings
@@ -248,6 +263,12 @@ private fun PlayerSurface(
     val isCastingThisItem = outputState.activeOutput == PlaybackOutputType.GoogleCast &&
         outputState.castState.currentItemId == item.itemId
     val castState = outputState.castState
+    val activeSegment = remember(positionMs, item.mediaSegments, durationMs) {
+        item.mediaSegments.activeAt(positionMs, durationMs)
+    }
+    val activeSegmentBehavior = activeSegment?.let { segment ->
+        item.mediaSegmentBehaviors[segment.type] ?: JellyfinMediaSegmentBehavior.DoNothing
+    } ?: JellyfinMediaSegmentBehavior.DoNothing
     val trackSelector = remember(item.streamUrl) { DefaultTrackSelector(context) }
     val player = remember(item.streamUrl) {
         val renderersFactory = DefaultRenderersFactory(context)
@@ -271,7 +292,29 @@ private fun PlayerSurface(
                 playWhenReady = !item.isCastResolved
             }
     }
+    val skipSegment: (JellyfinMediaSegment) -> Unit = { segment ->
+        val targetMs = (segment.endMs + 1L).coerceAtLeast(0L)
+        autoSkippedSegmentIds = autoSkippedSegmentIds + segment.id.toString()
+        if (isCastingThisItem) {
+            outputCoordinator.seekTo(targetMs)
+            positionMs = targetMs
+            onPosition(targetMs)
+            onProgress(targetMs, !castState.isPlaying)
+        } else {
+            val shouldContinuePlaying = player.playWhenReady || player.isPlaying
+            player.seekTo(targetMs)
+            if (shouldContinuePlaying) {
+                player.play()
+            } else {
+                player.pause()
+            }
+            positionMs = targetMs
+            onPosition(targetMs)
+            onProgress(targetMs, !shouldContinuePlaying)
+        }
+    }
     KeepScreenAwake(enabled = !isCastingThisItem && (isPlaying || (isBuffering && player.playWhenReady)))
+    PlayerImmersiveMode()
 
     DisposableEffect(player) {
         val listener = object : Player.Listener {
@@ -296,9 +339,19 @@ private fun PlayerSurface(
                             !upNextCancelled &&
                             !nextStarted
                         ) {
-                            nextStarted = true
-                            upNextState = UpNextState.PlayingNext
-                            onPlayNext(candidate, player.currentPosition)
+                            if (autoplaySettings.displayMode == UpNextDisplayMode.AfterCompletion) {
+                                controlsVisible = false
+                                upNextState = UpNextState.Available(
+                                    candidate = candidate,
+                                    countdownSeconds = autoplaySettings.countdownSeconds,
+                                    autoplayEnabled = true,
+                                    shownAfterCompletion = true,
+                                )
+                            } else {
+                                nextStarted = true
+                                upNextState = UpNextState.PlayingNext
+                                onPlayNext(candidate, player.currentPosition)
+                            }
                         } else {
                             onEnded(player.currentPosition)
                         }
@@ -404,6 +457,19 @@ private fun PlayerSurface(
         }
     }
 
+    LaunchedEffect(activeSegment?.id) {
+        if (activeSegment == null && autoSkippedSegmentIds.isNotEmpty()) {
+            autoSkippedSegmentIds = emptySet()
+        }
+    }
+
+    LaunchedEffect(activeSegment?.id, activeSegmentBehavior, isCastingThisItem) {
+        val segment = activeSegment ?: return@LaunchedEffect
+        if (activeSegmentBehavior != JellyfinMediaSegmentBehavior.AutoSkip) return@LaunchedEffect
+        if (segment.id.toString() in autoSkippedSegmentIds) return@LaunchedEffect
+        skipSegment(segment)
+    }
+
     LaunchedEffect(controlsVisible, isPlaying, sheet) {
         if (controlsVisible && isPlaying && sheet == null) {
             delay(4_200L)
@@ -413,6 +479,12 @@ private fun PlayerSurface(
 
     LaunchedEffect(positionMs, durationMs, canUseUpNext, upNextCancelled, nextStarted) {
         val candidate = upNextCandidate ?: return@LaunchedEffect
+        if (autoplaySettings.displayMode == UpNextDisplayMode.AfterCompletion) {
+            if ((upNextState as? UpNextState.Available)?.shownAfterCompletion != true) {
+                upNextState = UpNextState.Hidden
+            }
+            return@LaunchedEffect
+        }
         if (!canUseUpNext || durationMs <= 0L || nextStarted) {
             if (upNextState is UpNextState.Available) upNextState = UpNextState.Hidden
             return@LaunchedEffect
@@ -434,7 +506,7 @@ private fun PlayerSurface(
 
     LaunchedEffect(upNextState, isPlaying, item.itemId) {
         val available = upNextState as? UpNextState.Available ?: return@LaunchedEffect
-        if (!available.autoplayEnabled || !isPlaying || nextStarted) return@LaunchedEffect
+        if (!available.autoplayEnabled || (!isPlaying && !available.shownAfterCompletion) || nextStarted) return@LaunchedEffect
         delay(1_000L)
         val nextSeconds = available.countdownSeconds - 1
         if (nextSeconds <= 0) {
@@ -581,11 +653,33 @@ private fun PlayerSurface(
             )
         }
         AnimatedVisibility(
+            visible = activeSegment != null &&
+                activeSegmentBehavior == JellyfinMediaSegmentBehavior.Prompt &&
+                activeSegment.id.toString() !in autoSkippedSegmentIds,
+            enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+                slideInVertically(animationSpec = tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it / 5 }),
+            exit = fadeOut(tween(260, easing = FastOutSlowInEasing)) +
+                slideOutVertically(animationSpec = tween(300, easing = FastOutSlowInEasing), targetOffsetY = { it / 5 }),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(end = 54.dp, start = 18.dp, bottom = if (controlsVisible) 166.dp else 54.dp),
+        ) {
+            val segment = activeSegment
+            if (segment != null) {
+                SkipSegmentOverlay(
+                    label = segment.skipLabel(),
+                    onSkip = { skipSegment(segment) },
+                )
+            }
+        }
+        AnimatedVisibility(
             visible = upNextState is UpNextState.Available,
             enter = fadeIn(tween(260)) + slideInVertically(animationSpec = tween(360, easing = FastOutSlowInEasing), initialOffsetY = { it / 3 }),
             exit = fadeOut(tween(260)) + slideOutVertically(animationSpec = tween(360, easing = FastOutSlowInEasing), targetOffsetY = { it / 3 }),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .widthIn(max = 560.dp)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(horizontal = 14.dp, vertical = if (controlsVisible) 162.dp else 24.dp),
         ) {
@@ -689,6 +783,29 @@ private fun KeepScreenAwake(enabled: Boolean) {
         view.keepScreenOn = enabled
         onDispose {
             view.keepScreenOn = previous
+        }
+    }
+}
+
+@Composable
+private fun PlayerImmersiveMode() {
+    val context = LocalContext.current
+    val activity = remember(context) { context.findActivity() }
+    DisposableEffect(activity) {
+        val window = activity?.window
+        if (window == null) {
+            onDispose {}
+        } else {
+            val controller = WindowCompat.getInsetsController(window, window.decorView)
+            val previousBehavior = controller.systemBarsBehavior
+            WindowCompat.setDecorFitsSystemWindows(window, false)
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                controller.show(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior = previousBehavior
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+            }
         }
     }
 }
@@ -1048,6 +1165,45 @@ private fun PlayerPrimaryButton(icon: ImageVector, contentDescription: String, o
 }
 
 @Composable
+private fun SkipSegmentOverlay(
+    label: String,
+    onSkip: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .height(38.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        Color(0xFF070A12).copy(alpha = 0.88f),
+                        Color(0xFF111728).copy(alpha = 0.86f),
+                        Color(0xFF090812).copy(alpha = 0.90f),
+                    ),
+                ),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
+            .vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.15.dp, durationMillis = 4200)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onSkip,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.padding(horizontal = 14.dp),
+        )
+    }
+}
+
+@Composable
 private fun UpNextOverlay(
     state: UpNextState.Available,
     totalCountdownSeconds: Int,
@@ -1056,6 +1212,14 @@ private fun UpNextOverlay(
 ) {
     val candidate = state.candidate
     val progress = 1f - (state.countdownSeconds.toFloat() / totalCountdownSeconds.coerceAtLeast(1).toFloat()).coerceIn(0f, 1f)
+    val finishAtLabel = remember(candidate.itemId, candidate.runtimeMs, state.countdownSeconds) {
+        candidate.runtimeMs
+            ?.takeIf { it > 0L }
+            ?.let { runtimeMs ->
+                val finishMs = System.currentTimeMillis() + runtimeMs + state.countdownSeconds.coerceAtLeast(0) * 1_000L
+                "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(Date(finishMs))}"
+            }
+    }
     VantafynGlassPanel(
         modifier = Modifier
             .fillMaxWidth()
@@ -1126,6 +1290,25 @@ private fun UpNextOverlay(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
+                        finishAtLabel?.let { label ->
+                            Box(
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color.Black.copy(alpha = 0.36f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(999.dp))
+                                    .padding(horizontal = 10.dp, vertical = 5.dp),
+                            ) {
+                                Text(
+                                    label,
+                                    color = VantafynColors.Ink.copy(alpha = 0.92f),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
                     }
                     Text(
                         "Playing in ${state.countdownSeconds}",
@@ -1176,11 +1359,7 @@ private fun PlayerLoadingIndicator(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        CircularProgressIndicator(
-            color = Color(0xFF58D7FF),
-            trackColor = Color(0xFF9B5CFF).copy(alpha = 0.22f),
-            modifier = Modifier.size(30.dp),
-        )
+        VantafynGradientSpinner(modifier = Modifier.size(30.dp), strokeWidth = 3.5.dp)
         Text(
             text = text,
             color = VantafynColors.Ink,
@@ -1251,6 +1430,7 @@ private fun PlayerOptionsSheet(
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = Color.Transparent,
         dragHandle = null,
+        sheetGesturesEnabled = false,
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -1261,7 +1441,8 @@ private fun PlayerOptionsSheet(
             VantafynGlassModalPanel(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = maxHeight * 0.86f),
+                    .heightIn(max = maxHeight * 0.86f)
+                    .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp),
                 cornerRadius = 30.dp,
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 18.dp),
             ) {
@@ -1586,6 +1767,37 @@ private fun VantafynSubtitleTrack.subtitleMimeType(): String =
         else -> MimeTypes.TEXT_UNKNOWN
     }
 
+private fun List<JellyfinMediaSegment>.activeAt(positionMs: Long, durationMs: Long): JellyfinMediaSegment? =
+    firstOrNull { segment ->
+        segment.isUsableFor(durationMs) && positionMs >= segment.startMs && positionMs < segment.endMs
+    }
+
+private fun JellyfinMediaSegment.isUsableFor(durationMs: Long): Boolean {
+    val segmentDurationMs = endMs - startMs
+    if (segmentDurationMs <= 0L) return false
+    if (durationMs > 0L && startMs >= durationMs) return false
+    if (durationMs > 0L && type != JellyfinMediaSegmentType.Outro && endMs >= durationMs - 10_000L) return false
+    if (durationMs > 0L && type != JellyfinMediaSegmentType.Outro && segmentDurationMs > durationMs * 0.35f) return false
+    return when (type) {
+        JellyfinMediaSegmentType.Intro,
+        JellyfinMediaSegmentType.Recap,
+        JellyfinMediaSegmentType.Preview,
+        JellyfinMediaSegmentType.Commercial -> segmentDurationMs <= 15 * 60_000L
+        JellyfinMediaSegmentType.Outro -> true
+        JellyfinMediaSegmentType.Unknown -> false
+    }
+}
+
+private fun JellyfinMediaSegment.skipLabel(): String =
+    when (type) {
+        JellyfinMediaSegmentType.Intro -> "Skip Intro"
+        JellyfinMediaSegmentType.Recap -> "Skip Recap"
+        JellyfinMediaSegmentType.Outro -> "Skip Credits"
+        JellyfinMediaSegmentType.Commercial -> "Skip Commercial"
+        JellyfinMediaSegmentType.Preview -> "Skip Preview"
+        JellyfinMediaSegmentType.Unknown -> "Skip Segment"
+    }
+
 private fun Long.formatMs(): String {
     val totalSeconds = coerceAtLeast(0L) / 1000L
     val hours = totalSeconds / 3600L
@@ -1612,6 +1824,13 @@ private fun VantafynSubtitleTrack.subtitleDetail(): String =
 
 private fun CastSubtitleTrack.castSubtitleDetail(): String =
     listOfNotNull(language?.uppercase(), codec?.uppercase(), contentType).joinToString(" · ")
+
+private tailrec fun Context.findActivity(): Activity? =
+    when (this) {
+        is Activity -> this
+        is android.content.ContextWrapper -> baseContext.findActivity()
+        else -> null
+    }
 
 private fun Int.channelLabel(): String? =
     when (this) {

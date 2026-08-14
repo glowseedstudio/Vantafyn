@@ -28,6 +28,10 @@ import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.JellyfinMediaCard
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinMediaItem
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegment
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentBehavior
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentRepository
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
 import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
@@ -75,6 +79,7 @@ import dev.vantafyn.core.media.LongRunningTaskRegistry
 import dev.vantafyn.core.media.LongRunningTaskType
 import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.UpNextCandidate
+import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
@@ -102,6 +107,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val adminRepository: JellyfinAdminRepository = repositories.adminRepository
     private val userPreferencesRepository: JellyfinUserPreferencesRepository = repositories.userPreferencesRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
+    private val mediaSegmentRepository: JellyfinMediaSegmentRepository = repositories.mediaSegmentRepository
     private val offlineDownloadManager = OfflineDownloadManager(application)
     private val downloadRepository = SqliteDownloadRepository(application)
     private val offlineSyncScheduler = OfflineSyncScheduler(application)
@@ -123,6 +129,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             autoplayCountdownSeconds = appPreferences.getInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, 10)
                 .takeIf { value -> value in AUTOPLAY_COUNTDOWN_OPTIONS }
                 ?: 10,
+            upNextDisplayMode = readUpNextDisplayMode(null),
             passoutProtectionLimitMinutes = appPreferences.getInt(KEY_PASSOUT_PROTECTION_LIMIT_MINUTES, 180)
                 .takeIf { value -> value in PASSOUT_PROTECTION_LIMIT_OPTIONS }
                 ?: 180,
@@ -132,6 +139,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             watchPartyInviteExpirySeconds = appPreferences.getInt(KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS, 60)
                 .takeIf { value -> value in WATCH_PARTY_INVITE_EXPIRY_OPTIONS }
                 ?: 60,
+            mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
         ),
     )
     val state: StateFlow<VantafynHomeUiState> = _state.asStateFlow()
@@ -392,8 +400,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
+                            mediaSegmentBehaviors = readMediaSegmentBehaviors(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                             autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
+                            upNextDisplayMode = readUpNextDisplayMode(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
                             passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
                         )
@@ -530,8 +540,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
+                            mediaSegmentBehaviors = readMediaSegmentBehaviors(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                             autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
+                            upNextDisplayMode = readUpNextDisplayMode(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
                             passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
                         )
@@ -582,8 +594,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
+                            mediaSegmentBehaviors = readMediaSegmentBehaviors(result.value.profileId),
                             configuredSmartRows = readSmartRows(result.value.profileId),
                             autoplayCountdownSeconds = readAutoplayCountdownSeconds(result.value.profileId),
+                            upNextDisplayMode = readUpNextDisplayMode(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
                             passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
                         )
@@ -828,20 +842,23 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     ) {
         val session = _state.value.session ?: return
         _state.update {
-            val currentPage = it.libraryItemsPage
+            val keepCurrentPage = it.selectedLibrary?.id == library.id && it.libraryItemsPage != null
             it.copy(
                 mobileDestination = MobileDestination.LibraryDetail,
                 previousMobileDestination = MobileDestination.Libraries,
                 selectedLibrary = library,
                 libraryItemsFilter = filter,
-                libraryItems = emptyList(),
-                libraryItemsPage = currentPage?.copy(items = emptyList(), startIndex = startIndex)
-                    ?: JellyfinLibraryPage(
+                libraryItems = if (keepCurrentPage) it.libraryItems else emptyList(),
+                libraryItemsPage = if (keepCurrentPage) {
+                    it.libraryItemsPage
+                } else {
+                    JellyfinLibraryPage(
                         items = emptyList(),
                         startIndex = startIndex,
                         pageSize = LibraryItemsPageSize,
                         totalItems = 0,
-                    ),
+                    )
+                },
                 isLibraryItemsLoading = true,
                 libraryItemsError = null,
                 mobileMessage = null,
@@ -1696,8 +1713,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     themeMusicVolume = readThemeMusicVolume(profile.id),
                     selectedBackground = readSelectedBackground(profile.id),
                     videoPlayerPreference = readVideoPlayerPreference(profile.id),
+                    mediaSegmentBehaviors = readMediaSegmentBehaviors(profile.id),
                     configuredSmartRows = readSmartRows(profile.id),
                     autoplayCountdownSeconds = readAutoplayCountdownSeconds(profile.id),
+                    upNextDisplayMode = readUpNextDisplayMode(profile.id),
                     passoutProtectionEnabled = readPassoutProtectionEnabled(profile.id),
                     passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(profile.id),
                 )
@@ -1841,6 +1860,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             val upNextCandidate = loadUpNextCandidate(session, target)
             val previousCandidate = loadPreviousEpisodeCandidate(target)
+            val mediaSegments = loadMediaSegments(session, target)
             _state.update {
                 it.copy(
                     previousMobileDestination = if (it.mobileDestination == MobileDestination.Player) {
@@ -1884,6 +1904,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                 upNextCandidate = upNextCandidate,
                                 autoplaySettings = it.autoplaySettings(),
                                 continuousPlaybackStartedAtMs = autoplayWindowStartedAtMs,
+                                mediaSegments = mediaSegments,
+                                mediaSegmentBehaviors = it.mediaSegmentBehaviors,
                             ),
                             playbackError = null,
                             canTryPlaybackTranscode = result.value.fallbackStreamUrl != null,
@@ -2630,6 +2652,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun setUpNextDisplayMode(mode: UpNextDisplayMode) {
+        _state.update { state ->
+            val editor = appPreferences.edit().putString(KEY_UP_NEXT_DISPLAY_MODE, mode.name)
+            state.session?.profileId?.let { profileId ->
+                editor.putString("${KEY_UP_NEXT_DISPLAY_MODE}_$profileId", mode.name)
+            }
+            editor.apply()
+            state.copy(upNextDisplayMode = mode, mobileMessage = null)
+        }
+    }
+
     fun togglePassoutProtection() {
         _state.update { state ->
             val enabled = !state.passoutProtectionEnabled
@@ -2715,6 +2748,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             upNextCandidate = snapshot.playbackItem?.upNextCandidate,
                             autoplaySettings = snapshot.playbackItem?.autoplaySettings ?: it.autoplaySettings(),
                             continuousPlaybackStartedAtMs = snapshot.playbackItem?.continuousPlaybackStartedAtMs ?: System.currentTimeMillis(),
+                            mediaSegments = snapshot.playbackItem?.mediaSegments.orEmpty(),
+                            mediaSegmentBehaviors = it.mediaSegmentBehaviors,
                             isCastResolved = true,
                         ),
                         hasReportedPlaybackStart = false,
@@ -2846,6 +2881,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         return when (val result = mediaRepository.getNextEpisode(session, target.id)) {
             is JellyfinResult.Success -> result.value?.toUpNextCandidate()
             is JellyfinResult.Failure -> null
+        }
+    }
+
+    private suspend fun loadMediaSegments(session: JellyfinSession, target: PlaybackTarget): List<JellyfinMediaSegment> {
+        if (target.isLiveTv || target.itemType.equals("Audio", ignoreCase = true)) return emptyList()
+        return when (val result = mediaSegmentRepository.getItemSegments(session, target.id)) {
+            is JellyfinResult.Success -> result.value
+            is JellyfinResult.Failure -> emptyList()
         }
     }
 
@@ -3006,6 +3049,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun setMediaSegmentBehavior(type: JellyfinMediaSegmentType, behavior: JellyfinMediaSegmentBehavior) {
+        if (type == JellyfinMediaSegmentType.Unknown) return
+        _state.update { state ->
+            val updated = state.mediaSegmentBehaviors + (type to behavior)
+            val editor = appPreferences.edit()
+                .putString(segmentBehaviorKey(type, null), behavior.name)
+            state.session?.profileId?.let { profileId ->
+                editor.putString(segmentBehaviorKey(type, profileId), behavior.name)
+            }
+            editor.apply()
+            state.copy(mediaSegmentBehaviors = updated, mobileMessage = null)
+        }
+    }
+
     fun externalVideoPlayerLaunchFailed() {
         _state.update {
             it.copy(
@@ -3046,6 +3103,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             ?: VantafynVideoPlayerPreference.Vantafyn
     }
 
+    private fun readMediaSegmentBehaviors(profileId: String?): Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior> =
+        JellyfinMediaSegmentType.entries
+            .filterNot { it == JellyfinMediaSegmentType.Unknown }
+            .associateWith { type ->
+                val profileKey = profileId?.let { segmentBehaviorKey(type, it) }
+                val saved = profileKey?.let { appPreferences.getString(it, null) }
+                    ?: appPreferences.getString(segmentBehaviorKey(type, null), null)
+                saved?.let { runCatching { JellyfinMediaSegmentBehavior.valueOf(it) }.getOrNull() }
+                    ?: defaultMediaSegmentBehavior(type)
+            }
+
+    private fun segmentBehaviorKey(type: JellyfinMediaSegmentType, profileId: String?): String =
+        profileId?.let { "${KEY_MEDIA_SEGMENT_BEHAVIOR}_${type.name}_$it" }
+            ?: "${KEY_MEDIA_SEGMENT_BEHAVIOR}_${type.name}"
+
     private fun readAutoplayCountdownSeconds(profileId: String?): Int {
         val profileKey = profileId?.let { "${KEY_AUTOPLAY_COUNTDOWN_SECONDS}_$it" }
         return profileKey?.let { appPreferences.getInt(it, -1) }
@@ -3053,6 +3125,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             ?: appPreferences.getInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, 10)
                 .takeIf { it in AUTOPLAY_COUNTDOWN_OPTIONS }
             ?: 10
+    }
+
+    private fun readUpNextDisplayMode(profileId: String?): UpNextDisplayMode {
+        val key = profileId?.let { appPreferences.getString("${KEY_UP_NEXT_DISPLAY_MODE}_$it", null) }
+            ?: appPreferences.getString(KEY_UP_NEXT_DISPLAY_MODE, null)
+        return key?.let { runCatching { UpNextDisplayMode.valueOf(it) }.getOrNull() }
+            ?: UpNextDisplayMode.BeforeEnd
     }
 
     private fun readPassoutProtectionEnabled(profileId: String?): Boolean {
@@ -3174,6 +3253,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             autoLoginLastProfile = true,
                             selectedBackground = readSelectedBackground(null),
                             videoPlayerPreference = readVideoPlayerPreference(null),
+                            mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
+                            upNextDisplayMode = readUpNextDisplayMode(null),
                         )
                     }
                     selectProfile(lastProfile, showPickerWhileRestoring = false)
@@ -3188,6 +3269,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     autoLoginLastProfile = autoLogin,
                     selectedBackground = readSelectedBackground(null),
                     videoPlayerPreference = readVideoPlayerPreference(null),
+                    mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
+                    upNextDisplayMode = readUpNextDisplayMode(null),
                     isStartupResolved = true,
                 )
             }
@@ -3277,8 +3360,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     themeMusicVolume = readThemeMusicVolume(jellyfinSession.profileId),
                                     selectedBackground = readSelectedBackground(jellyfinSession.profileId),
                                     videoPlayerPreference = readVideoPlayerPreference(jellyfinSession.profileId),
+                                    mediaSegmentBehaviors = readMediaSegmentBehaviors(jellyfinSession.profileId),
                                     configuredSmartRows = readSmartRows(jellyfinSession.profileId),
                                     autoplayCountdownSeconds = readAutoplayCountdownSeconds(jellyfinSession.profileId),
+                                    upNextDisplayMode = readUpNextDisplayMode(jellyfinSession.profileId),
                                     passoutProtectionEnabled = readPassoutProtectionEnabled(jellyfinSession.profileId),
                                     passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(jellyfinSession.profileId),
                                 )
@@ -3363,6 +3448,7 @@ data class VantafynHomeUiState(
     val playbackPreferences: JellyfinUserPlaybackPreferences? = null,
     val editablePlaybackPreferences: JellyfinUserPlaybackPreferences? = null,
     val autoplayCountdownSeconds: Int = 10,
+    val upNextDisplayMode: UpNextDisplayMode = UpNextDisplayMode.BeforeEnd,
     val passoutProtectionEnabled: Boolean = false,
     val passoutProtectionLimitMinutes: Int = 180,
     val isPlaybackPreferencesLoading: Boolean = false,
@@ -3383,6 +3469,7 @@ data class VantafynHomeUiState(
     val themeMusicVolume: ThemeMusicVolume = ThemeMusicVolume.Soft,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
     val videoPlayerPreference: VantafynVideoPlayerPreference = VantafynVideoPlayerPreference.Vantafyn,
+    val mediaSegmentBehaviors: Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior> = defaultMediaSegmentBehaviors(),
     val configuredSmartRows: List<String> = emptyList(),
     val previousMobileDestination: MobileDestination = MobileDestination.Home,
     val activePlaybackTarget: PlaybackTarget? = null,
@@ -3704,6 +3791,8 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(
     upNextCandidate: UpNextCandidate?,
     autoplaySettings: AutoplaySettings,
     continuousPlaybackStartedAtMs: Long,
+    mediaSegments: List<JellyfinMediaSegment>,
+    mediaSegmentBehaviors: Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior>,
     isCastResolved: Boolean = false,
 ): VantafynPlaybackItem =
     VantafynPlaybackItem(
@@ -3745,6 +3834,8 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(
         upNextCandidate = upNextCandidate,
         autoplaySettings = autoplaySettings,
         continuousPlaybackStartedAtMs = continuousPlaybackStartedAtMs,
+        mediaSegments = mediaSegments,
+        mediaSegmentBehaviors = mediaSegmentBehaviors,
     )
 
 private fun JellyfinUpNextCandidate.toUpNextCandidate(): UpNextCandidate =
@@ -3787,11 +3878,28 @@ private fun VantafynHomeUiState.autoplaySettings(): AutoplaySettings =
         countdownSeconds = autoplayCountdownSeconds,
         passoutProtectionEnabled = passoutProtectionEnabled,
         passoutProtectionLimitMinutes = passoutProtectionLimitMinutes,
+        displayMode = upNextDisplayMode,
     )
+
+private fun defaultMediaSegmentBehaviors(): Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior> =
+    JellyfinMediaSegmentType.entries
+        .filterNot { it == JellyfinMediaSegmentType.Unknown }
+        .associateWith(::defaultMediaSegmentBehavior)
+
+private fun defaultMediaSegmentBehavior(type: JellyfinMediaSegmentType): JellyfinMediaSegmentBehavior =
+    when (type) {
+        JellyfinMediaSegmentType.Intro,
+        JellyfinMediaSegmentType.Recap,
+        JellyfinMediaSegmentType.Outro -> JellyfinMediaSegmentBehavior.Prompt
+        JellyfinMediaSegmentType.Commercial,
+        JellyfinMediaSegmentType.Preview,
+        JellyfinMediaSegmentType.Unknown -> JellyfinMediaSegmentBehavior.DoNothing
+    }
 
 private val AUTOPLAY_COUNTDOWN_OPTIONS = setOf(5, 10, 15, 30)
 private val PASSOUT_PROTECTION_LIMIT_OPTIONS = setOf(60, 120, 180, 240, 300)
 private const val KEY_AUTOPLAY_COUNTDOWN_SECONDS = "autoplay_countdown_seconds"
+private const val KEY_UP_NEXT_DISPLAY_MODE = "up_next_display_mode"
 private const val LOGOUT_TRANSITION_DELAY_MS = 380L
 
 private fun WatchPartyRules.isMatched(votes: List<WatchPartyVote>, candidateId: UUID, memberCount: Int): Boolean {
@@ -3827,6 +3935,7 @@ private fun WatchPartyInvite.toSelectedMedia(): WatchPartySelectedMedia? =
 private const val KEY_PASSOUT_PROTECTION_ENABLED = "passout_protection_enabled"
 private const val KEY_PASSOUT_PROTECTION_LIMIT_MINUTES = "passout_protection_limit_minutes"
 private const val KEY_VIDEO_PLAYER_PREFERENCE = "video_player_preference"
+private const val KEY_MEDIA_SEGMENT_BEHAVIOR = "media_segment_behavior"
 
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L

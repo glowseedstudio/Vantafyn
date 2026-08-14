@@ -1,5 +1,9 @@
 package dev.vantafyn.core.media
 
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegment
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentBehavior
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
+
 data class UpNextCandidate(
     val itemId: String,
     val seriesId: String?,
@@ -29,10 +33,16 @@ sealed interface UpNextState {
         val candidate: UpNextCandidate,
         val countdownSeconds: Int,
         val autoplayEnabled: Boolean,
+        val shownAfterCompletion: Boolean = false,
     ) : UpNextState
     data class Cancelled(val candidate: UpNextCandidate) : UpNextState
     data object PlayingNext : UpNextState
     data class Unavailable(val reason: String) : UpNextState
+}
+
+enum class UpNextDisplayMode {
+    BeforeEnd,
+    AfterCompletion,
 }
 
 data class AutoplaySettings(
@@ -40,6 +50,7 @@ data class AutoplaySettings(
     val countdownSeconds: Int = 10,
     val passoutProtectionEnabled: Boolean = false,
     val passoutProtectionLimitMinutes: Int = 180,
+    val displayMode: UpNextDisplayMode = UpNextDisplayMode.BeforeEnd,
     val showBeforeEndSeconds: Int = 45,
     val showBeforeEndPercent: Float = 0.94f,
     val onlyForEpisodes: Boolean = true,
@@ -66,6 +77,8 @@ data class VantafynPlaybackItem(
     val previousCandidate: UpNextCandidate? = null,
     val upNextCandidate: UpNextCandidate? = null,
     val autoplaySettings: AutoplaySettings = AutoplaySettings(),
+    val mediaSegments: List<JellyfinMediaSegment> = emptyList(),
+    val mediaSegmentBehaviors: Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior> = emptyMap(),
     val continuousPlaybackStartedAtMs: Long = System.currentTimeMillis(),
 )
 

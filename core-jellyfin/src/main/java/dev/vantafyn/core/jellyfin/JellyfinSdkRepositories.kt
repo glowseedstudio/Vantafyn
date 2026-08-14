@@ -29,6 +29,7 @@ import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.api.client.extensions.liveTvApi
 import org.jellyfin.sdk.api.client.extensions.lyricsApi
 import org.jellyfin.sdk.api.client.extensions.mediaInfoApi
+import org.jellyfin.sdk.api.client.extensions.mediaSegmentsApi
 import org.jellyfin.sdk.api.client.extensions.playStateApi
 import org.jellyfin.sdk.api.client.extensions.playlistsApi
 import org.jellyfin.sdk.api.client.extensions.pluginsApi
@@ -62,6 +63,8 @@ import org.jellyfin.sdk.model.api.ItemFields
 import org.jellyfin.sdk.model.api.ItemSortBy
 import org.jellyfin.sdk.model.api.JoinGroupRequestDto
 import org.jellyfin.sdk.model.api.MediaSourceInfo
+import org.jellyfin.sdk.model.api.MediaSegmentDto
+import org.jellyfin.sdk.model.api.MediaSegmentType
 import org.jellyfin.sdk.model.api.MediaProtocol
 import org.jellyfin.sdk.model.api.MediaStreamProtocol
 import org.jellyfin.sdk.model.api.MediaType
@@ -153,6 +156,9 @@ class JellyfinRepositoryProvider(
 
     val playbackRepository: JellyfinPlaybackRepository =
         SdkJellyfinPlaybackRepository(jellyfin, deviceId, ioDispatcher)
+
+    val mediaSegmentRepository: JellyfinMediaSegmentRepository =
+        SdkJellyfinMediaSegmentRepository(jellyfin, ioDispatcher)
 
     val musicRepository: JellyfinMusicRepository =
         SdkJellyfinMusicRepository(jellyfin, ioDispatcher)
@@ -1619,6 +1625,26 @@ class SdkJellyfinMusicRepository(
         }
         return null
     }
+}
+
+class SdkJellyfinMediaSegmentRepository(
+    private val jellyfin: Jellyfin,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+) : JellyfinMediaSegmentRepository {
+    override suspend fun getItemSegments(session: JellyfinSession, itemId: java.util.UUID): JellyfinResult<List<JellyfinMediaSegment>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.mediaSegmentsApi.getItemSegments(itemId)
+                JellyfinResult.Success(
+                    response.items
+                        .mapNotNull { it.toMediaSegment() }
+                        .sortedBy { it.startTicks },
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Success(emptyList())
+            }
+        }
 }
 
 class SdkJellyfinUserPreferencesRepository(
@@ -3829,6 +3855,27 @@ private fun org.jellyfin.sdk.model.api.UserConfiguration.toPlaybackPreferences()
         rememberSubtitleSelections = rememberSubtitleSelections,
         enableNextEpisodeAutoPlay = enableNextEpisodeAutoPlay,
     )
+
+private fun MediaSegmentDto.toMediaSegment(): JellyfinMediaSegment? {
+    if (endTicks <= startTicks) return null
+    return JellyfinMediaSegment(
+        id = id,
+        itemId = itemId,
+        type = type.toVantafynSegmentType(),
+        startTicks = startTicks,
+        endTicks = endTicks,
+    )
+}
+
+private fun MediaSegmentType.toVantafynSegmentType(): JellyfinMediaSegmentType =
+    when (this) {
+        MediaSegmentType.UNKNOWN -> JellyfinMediaSegmentType.Unknown
+        MediaSegmentType.COMMERCIAL -> JellyfinMediaSegmentType.Commercial
+        MediaSegmentType.PREVIEW -> JellyfinMediaSegmentType.Preview
+        MediaSegmentType.RECAP -> JellyfinMediaSegmentType.Recap
+        MediaSegmentType.OUTRO -> JellyfinMediaSegmentType.Outro
+        MediaSegmentType.INTRO -> JellyfinMediaSegmentType.Intro
+    }
 
 private fun String?.toSubtitlePlaybackMode(fallback: SubtitlePlaybackMode): SubtitlePlaybackMode =
     SubtitlePlaybackMode.entries.firstOrNull {

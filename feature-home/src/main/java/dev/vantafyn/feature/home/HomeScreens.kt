@@ -72,6 +72,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.LazyColumn
@@ -204,6 +205,8 @@ import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinMediaCard
 import dev.vantafyn.core.jellyfin.JellyfinMediaCardShape
 import dev.vantafyn.core.jellyfin.JellyfinMediaItem
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentBehavior
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
 import dev.vantafyn.core.jellyfin.JellyfinPublicUser
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
@@ -228,6 +231,7 @@ import dev.vantafyn.core.media.LongRunningTaskRegistry
 import dev.vantafyn.core.media.LongRunningTaskType
 import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.UpNextCandidate
+import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.ui.MobilePosterSpec
@@ -246,6 +250,7 @@ import dev.vantafyn.core.ui.VantafynGlassPill
 import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassTile
 import dev.vantafyn.core.ui.VantafynGlassVariant
+import dev.vantafyn.core.ui.VantafynGradientSpinner
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynLogoHeader
@@ -531,9 +536,11 @@ fun VantafynAppContent(
                 onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
                 onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
                 onSetAutoplayCountdownSeconds = viewModel::setAutoplayCountdownSeconds,
+                onSetUpNextDisplayMode = viewModel::setUpNextDisplayMode,
                 onTogglePassoutProtection = viewModel::togglePassoutProtection,
                 onSetPassoutProtectionLimitMinutes = viewModel::setPassoutProtectionLimitMinutes,
                 onSelectVideoPlayerPreference = viewModel::selectVideoPlayerPreference,
+                onSetMediaSegmentBehavior = viewModel::setMediaSegmentBehavior,
                 onExternalVideoPlayerLaunched = viewModel::externalVideoPlayerLaunched,
                 onExternalVideoPlayerLaunchFailed = viewModel::externalVideoPlayerLaunchFailed,
                 onChangePassword = viewModel::changeCurrentUserPassword,
@@ -1502,8 +1509,13 @@ private fun ManageProfilesButton(
             onClick = onToggleManage,
             modifier = modifier.widthIn(min = 96.dp),
         ) {
+            val label = if (state.manageProfiles) "Done" else "Manage"
             Text(
-                if (state.manageProfiles) "Done" else "Manage",
+                label,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    brush = VantafynGradients.accentHorizontal(),
+                    fontWeight = FontWeight.SemiBold,
+                ),
                 maxLines = 1,
                 textAlign = TextAlign.Center,
             )
@@ -1523,17 +1535,98 @@ private fun ProfilePickerFeedback(
     }
     state.pendingRemoval?.let { profile ->
         Spacer(Modifier.height(VantafynSpacing.lg))
-        VantafynErrorCard("Remove ${profile.displayName} from this device?") {
-            VantafynButton("Remove", onClick = onConfirmRemove)
-            Spacer(Modifier.width(VantafynSpacing.sm))
-            OutlinedButton(onClick = onCancelRemove) {
-                Text("Cancel")
+        VantafynAttentionPanel(
+            title = "Remove saved profile?",
+            message = "${profile.displayName} will be removed from this device. Nothing is deleted from Jellyfin.",
+            icon = Icons.Rounded.Delete,
+        ) {
+            val actionButtonHeight = 58.dp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+            ) {
+                OutlinedButton(
+                    onClick = onCancelRemove,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(actionButtonHeight),
+                ) {
+                    Text("Cancel")
+                }
+                VantafynButton(
+                    text = "Remove",
+                    onClick = onConfirmRemove,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(actionButtonHeight),
+                )
             }
         }
     }
-    state.errorMessage?.let {
+    state.errorMessage?.let { message ->
         Spacer(Modifier.height(VantafynSpacing.lg))
-        VantafynErrorCard(it)
+        VantafynAttentionPanel(
+            title = "Something needs attention",
+            message = message,
+            icon = Icons.Rounded.Info,
+        )
+    }
+}
+
+@Composable
+private fun VantafynAttentionPanel(
+    title: String,
+    message: String,
+    icon: ImageVector,
+    modifier: Modifier = Modifier,
+    actions: @Composable ColumnScope.() -> Unit = {},
+) {
+    VantafynGlassModalPanel(
+        modifier = modifier
+            .fillMaxWidth(0.92f)
+            .vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.25.dp),
+        cornerRadius = 24.dp,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(21.dp),
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        title,
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        message,
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+            actions()
+        }
     }
 }
 
@@ -1755,11 +1848,7 @@ private fun ProfileImageStatusCard(isSaving: Boolean, error: String?) {
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
             if (isSaving) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    color = VantafynColors.Primary,
-                    modifier = Modifier.size(22.dp),
-                    strokeWidth = 2.dp,
-                )
+                VantafynGradientSpinner(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
             }
             Text(
                 text = if (isSaving) "Preparing profile picture..." else error.orEmpty(),
@@ -1864,9 +1953,11 @@ private fun HomeScreen(
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
     onSetAutoplayCountdownSeconds: (Int) -> Unit,
+    onSetUpNextDisplayMode: (UpNextDisplayMode) -> Unit,
     onTogglePassoutProtection: () -> Unit,
     onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
+    onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
     onExternalVideoPlayerLaunched: () -> Unit,
     onExternalVideoPlayerLaunchFailed: () -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -1976,9 +2067,11 @@ private fun HomeScreen(
             onEditPlaybackPreferences = onEditPlaybackPreferences,
             onSavePlaybackPreferences = onSavePlaybackPreferences,
             onSetAutoplayCountdownSeconds = onSetAutoplayCountdownSeconds,
+            onSetUpNextDisplayMode = onSetUpNextDisplayMode,
             onTogglePassoutProtection = onTogglePassoutProtection,
             onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
             onSelectVideoPlayerPreference = onSelectVideoPlayerPreference,
+            onSetMediaSegmentBehavior = onSetMediaSegmentBehavior,
             onExternalVideoPlayerLaunched = onExternalVideoPlayerLaunched,
             onExternalVideoPlayerLaunchFailed = onExternalVideoPlayerLaunchFailed,
             onChangePassword = onChangePassword,
@@ -2130,9 +2223,11 @@ private fun MobileShellScreen(
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
     onSetAutoplayCountdownSeconds: (Int) -> Unit,
+    onSetUpNextDisplayMode: (UpNextDisplayMode) -> Unit,
     onTogglePassoutProtection: () -> Unit,
     onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
+    onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
     onExternalVideoPlayerLaunched: () -> Unit,
     onExternalVideoPlayerLaunchFailed: () -> Unit,
     onChangePassword: (String, String) -> Unit,
@@ -2365,9 +2460,11 @@ private fun MobileShellScreen(
                             onEdit = onEditPlaybackPreferences,
                             onSave = onSavePlaybackPreferences,
                             onSetAutoplayCountdownSeconds = onSetAutoplayCountdownSeconds,
+                            onSetUpNextDisplayMode = onSetUpNextDisplayMode,
                             onTogglePassoutProtection = onTogglePassoutProtection,
                             onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
                             onSelectVideoPlayerPreference = onSelectVideoPlayerPreference,
+                            onSetMediaSegmentBehavior = onSetMediaSegmentBehavior,
                         )
                         MobileDestination.HomeLayout -> HomeLayoutScreen(
                             state = state,
@@ -3751,7 +3848,7 @@ private fun LibraryDetailScreen(
 ) {
     val library = state.selectedLibrary
     val liveTv = library?.collectionType.isLiveTvCollection()
-    val visibleItems = state.libraryItems
+    val visibleItems = if (state.isLibraryItemsLoading) emptyList() else state.libraryItems
     val screenRevealKey = library?.id?.toString().orEmpty()
     var screenRevealActive by remember(screenRevealKey) { mutableStateOf(true) }
     LaunchedEffect(screenRevealKey) {
@@ -7502,7 +7599,7 @@ private fun ProfileSettingsScreen(
                     SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
                     SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
                     SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
-                    SettingsRow("App version 0.1.0", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
+                    SettingsRow("App version $VANTAFYN_APP_VERSION", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
                 }
             }
         }
@@ -7614,10 +7711,21 @@ private fun BackgroundSelector(selected: VantafynAppBackground, onSelect: (Vanta
                 modifier = Modifier
                     .size(54.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(if (isSelected) Color(0xFF7B8DFF).copy(alpha = 0.24f) else Color.White.copy(alpha = 0.08f))
+                    .background(if (isSelected) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.08f))
                     .border(
-                        width = if (isSelected) 2.dp else 1.dp,
-                        color = if (isSelected) Color(0xFF93A7FF) else Color.White.copy(alpha = 0.14f),
+                        border = BorderStroke(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            brush = if (isSelected) {
+                                VantafynGradients.accentHorizontal()
+                            } else {
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.White.copy(alpha = 0.14f),
+                                        Color.White.copy(alpha = 0.14f),
+                                    ),
+                                )
+                            },
+                        ),
                         shape = RoundedCornerShape(999.dp),
                     )
                     .padding(4.dp)
@@ -7918,28 +8026,60 @@ private fun AppVersionDialog(onDismiss: () -> Unit) {
         },
         containerColor = VantafynModalContainerColor,
         shape = RoundedCornerShape(28.dp),
-        title = {
-            Text("Vantafyn", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-        },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(86.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(24.dp))
+                        .padding(12.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Image(
+                        painter = painterResource(id = CoreUiR.drawable.vantafyn_logo),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
+                Text(
+                    "Vantafyn",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(18.dp))
                         .background(VantafynGradients.accentHorizontal())
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 ) {
-                    Text("Version 0.1.0", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Version $VANTAFYN_APP_VERSION", color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
                 Text(
-                    "Built with love for homes that want Jellyfin to feel calm, premium, and effortless.",
+                    "Built with love for homes that want Jellyfin to feel calm, beautiful, and easy to use.",
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
                 )
                 Text(
-                    "Thank you for helping shape Vantafyn. Every polish pass makes it feel more like the streaming app it was meant to be.",
+                    "Thank you for using Vantafyn. Every detail is shaped with care by Glowseed Studio.",
                     color = VantafynColors.Muted,
                     style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    "♥",
+                    color = Color(0xFFFF5D73),
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         },
@@ -7970,9 +8110,11 @@ private fun PlaybackPreferencesScreen(
     onEdit: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSave: () -> Unit,
     onSetAutoplayCountdownSeconds: (Int) -> Unit,
+    onSetUpNextDisplayMode: (UpNextDisplayMode) -> Unit,
     onTogglePassoutProtection: () -> Unit,
     onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
+    onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
 ) {
     val preferences = state.editablePlaybackPreferences
     LazyColumn(
@@ -8047,6 +8189,14 @@ private fun PlaybackPreferencesScreen(
                     PremiumToggleRow("Autoplay next episode", "Show Up Next near the end of an episode and continue automatically.", preferences.enableNextEpisodeAutoPlay) {
                         onEdit { it.copy(enableNextEpisodeAutoPlay = !it.enableNextEpisodeAutoPlay) }
                     }
+                    Text("Show Up Next", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                        items(UpNextDisplayMode.entries.toList()) { mode ->
+                            SelectableChip(mode.upNextDisplayLabel(), state.upNextDisplayMode == mode) {
+                                onSetUpNextDisplayMode(mode)
+                            }
+                        }
+                    }
                     Text("Up Next countdown", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
                         items(listOf(5, 10, 15, 30)) { seconds ->
@@ -8073,6 +8223,29 @@ private fun PlaybackPreferencesScreen(
                 }
             }
             item {
+                GlassPanel {
+                    Text("Skip Segments", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Uses Jellyfin Media Segments when your server provides them.",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    listOf(
+                        JellyfinMediaSegmentType.Intro,
+                        JellyfinMediaSegmentType.Recap,
+                        JellyfinMediaSegmentType.Outro,
+                        JellyfinMediaSegmentType.Commercial,
+                        JellyfinMediaSegmentType.Preview,
+                    ).forEach { type ->
+                        MediaSegmentPreferenceRow(
+                            type = type,
+                            selected = state.mediaSegmentBehaviors[type] ?: JellyfinMediaSegmentBehavior.DoNothing,
+                            onSelect = { behavior -> onSetMediaSegmentBehavior(type, behavior) },
+                        )
+                    }
+                }
+            }
+            item {
                 VantafynButton(
                     if (state.isPlaybackPreferencesSaving) "Saving" else "Save Preferences",
                     onClick = onSave,
@@ -8083,6 +8256,52 @@ private fun PlaybackPreferencesScreen(
         }
     }
 }
+
+@Composable
+private fun MediaSegmentPreferenceRow(
+    type: JellyfinMediaSegmentType,
+    selected: JellyfinMediaSegmentBehavior,
+    onSelect: (JellyfinMediaSegmentBehavior) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            type.segmentPreferenceLabel(),
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+            items(JellyfinMediaSegmentBehavior.entries.toList()) { behavior ->
+                SelectableChip(behavior.segmentBehaviorLabel(), selected == behavior) {
+                    onSelect(behavior)
+                }
+            }
+        }
+    }
+}
+
+private fun JellyfinMediaSegmentType.segmentPreferenceLabel(): String =
+    when (this) {
+        JellyfinMediaSegmentType.Intro -> "Intro"
+        JellyfinMediaSegmentType.Recap -> "Recap"
+        JellyfinMediaSegmentType.Outro -> "Credits"
+        JellyfinMediaSegmentType.Commercial -> "Commercials"
+        JellyfinMediaSegmentType.Preview -> "Previews"
+        JellyfinMediaSegmentType.Unknown -> "Unknown"
+    }
+
+private fun JellyfinMediaSegmentBehavior.segmentBehaviorLabel(): String =
+    when (this) {
+        JellyfinMediaSegmentBehavior.Prompt -> "Prompt"
+        JellyfinMediaSegmentBehavior.AutoSkip -> "Auto Skip"
+        JellyfinMediaSegmentBehavior.DoNothing -> "Do Nothing"
+    }
+
+private fun UpNextDisplayMode.upNextDisplayLabel(): String =
+    when (this) {
+        UpNextDisplayMode.BeforeEnd -> "Before the end"
+        UpNextDisplayMode.AfterCompletion -> "After episode finishes"
+    }
 
 @Composable
 private fun VideoPlayerPreferenceRow(
@@ -10973,7 +11192,7 @@ private fun ProfileSettingsDialog(
                 Text(state.server?.name ?: "Jellyfin Server")
                 Text(state.server?.url ?: "", color = VantafynColors.Muted)
                 Text("Add Profile from the profile picker.")
-                Text("App version 0.1.0")
+                Text("App version $VANTAFYN_APP_VERSION")
             }
         },
     )
@@ -11017,11 +11236,67 @@ private fun StatusBlock(state: VantafynHomeUiState) {
         Spacer(Modifier.height(VantafynSpacing.md))
         VantafynLoadingIndicator("Please wait")
     }
-    state.errorMessage?.let {
+    state.errorMessage?.let { message ->
         Spacer(Modifier.height(VantafynSpacing.md))
-        VantafynErrorCard(it)
+        VantafynGlassModalPanel(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.25.dp),
+            cornerRadius = 24.dp,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Link,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(21.dp),
+                    )
+                }
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        "Check this address",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        message.setupFriendlyError(),
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
     }
 }
+
+private fun String.setupFriendlyError(): String =
+    when {
+        contains("timed out", ignoreCase = true) || contains("timeout", ignoreCase = true) ->
+            "The server did not answer in time. Check the address and try again."
+        contains("resolve", ignoreCase = true) ->
+            "That address could not be resolved. For local servers, enter the IP address directly."
+        contains("reach", ignoreCase = true) ->
+            "This device cannot reach that server on your network. Check Wi-Fi, VPN, or the server's local IP."
+        contains("cleartext", ignoreCase = true) ->
+            "This server is using HTTP. Enter the full local address and try again."
+        else -> this
+    }
 
 private fun initials(name: String): String =
     name
@@ -11255,3 +11530,5 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     val finishTime = Date(nowMs + remainingMs)
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
+
+private const val VANTAFYN_APP_VERSION = "0.7.0"

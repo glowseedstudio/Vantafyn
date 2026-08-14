@@ -954,6 +954,10 @@ private fun MusicMiniPlayer(
     VantafynGlassDock(
         modifier = modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                translationX = visualOffset
+                alpha = 1f - (abs(visualOffset) / (dismissThresholdPx * 2.4f)).coerceIn(0f, 0.28f)
+            }
             .then(
                 if (borderAlpha > 0.01f) {
                     Modifier.vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.5.dp, alpha = borderAlpha)
@@ -961,10 +965,6 @@ private fun MusicMiniPlayer(
                     Modifier
                 },
             )
-            .graphicsLayer {
-                translationX = visualOffset
-                alpha = 1f - (abs(visualOffset) / (dismissThresholdPx * 2.4f)).coerceIn(0f, 0.28f)
-            }
             .pointerInput(track.id) {
                 detectHorizontalDragGestures(
                     onDragStart = {

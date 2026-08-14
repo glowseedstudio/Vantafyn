@@ -13,6 +13,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,7 +37,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.OutlinedTextField
@@ -61,7 +61,9 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
@@ -986,8 +988,53 @@ fun VantafynLoadingIndicator(text: String, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircularProgressIndicator(color = VantafynColors.Primary, modifier = Modifier.size(24.dp))
+        VantafynGradientSpinner(modifier = Modifier.size(24.dp))
         Text(text, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+    }
+}
+
+@Composable
+fun VantafynGradientSpinner(
+    modifier: Modifier = Modifier,
+    strokeWidth: Dp = 3.dp,
+) {
+    val transition = rememberInfiniteTransition(label = "vantafynSpinner")
+    val rotation by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_250, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "vantafynSpinnerRotation",
+    )
+    Canvas(modifier = modifier) {
+        val strokePx = strokeWidth.toPx()
+        val arcSize = Size(size.width - strokePx, size.height - strokePx)
+        val topLeft = Offset(strokePx / 2f, strokePx / 2f)
+        drawArc(
+            color = Color.White.copy(alpha = 0.11f),
+            startAngle = 0f,
+            sweepAngle = 360f,
+            useCenter = false,
+            topLeft = topLeft,
+            size = arcSize,
+            style = Stroke(width = strokePx, cap = StrokeCap.Round),
+        )
+        rotate(rotation) {
+            drawArc(
+                brush = VantafynGradients.accentLinear(
+                    start = Offset.Zero,
+                    end = Offset(size.width, size.height),
+                ),
+                startAngle = -90f,
+                sweepAngle = 280f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+            )
+        }
     }
 }
 
