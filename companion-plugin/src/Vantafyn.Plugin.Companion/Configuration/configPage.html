@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Vantafyn Companion</title>
+</head>
+<body>
+  <div id="VantafynCompanionConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+    <div data-role="content">
+      <div class="content-primary">
+        <h1>Vantafyn Companion</h1>
+        <p>Optional server-side features for Vantafyn clients.</p>
+
+        <div class="paperList" style="padding:1.25em;margin-bottom:1em">
+          <h2>Profile & Settings Sync</h2>
+          <label><input is="emby-checkbox" id="userSettingsEnabled" type="checkbox" /> Enabled</label>
+        </div>
+
+        <div class="paperList" style="padding:1.25em;margin-bottom:1em">
+          <h2>Requests / Ombi</h2>
+          <label><input is="emby-checkbox" id="requestsEnabled" type="checkbox" /> Enabled</label>
+          <div class="inputContainer">
+            <input is="emby-input" id="ombiBaseUrl" label="Ombi URL" placeholder="https://ombi.example.com" />
+          </div>
+          <div class="inputContainer">
+            <input is="emby-input" id="ombiApiKey" label="Ombi API Key" type="password" autocomplete="off" placeholder="Leave blank to keep existing key" />
+          </div>
+          <div class="inputContainer">
+            <input is="emby-input" id="ombiTimeoutSeconds" label="Timeout seconds" type="number" min="2" max="30" />
+          </div>
+          <label><input is="emby-checkbox" id="ombiRequireUserLogin" type="checkbox" /> Require each Vantafyn profile to sign in with its own Ombi account</label>
+          <button is="emby-button" type="button" class="raised button-submit block" id="testOmbi">Test Connection</button>
+          <p id="ombiStatus" style="opacity:.85"></p>
+        </div>
+
+        <div class="paperList" style="padding:1.25em;margin-bottom:1em">
+          <h2>Watch Parties</h2>
+          <label><input is="emby-checkbox" id="watchPartiesEnabled" type="checkbox" /> Enabled</label>
+        </div>
+
+        <div class="paperList" style="padding:1.25em;margin-bottom:1em">
+          <h2>Personal Playlists</h2>
+          <label><input is="emby-checkbox" id="personalPlaylistsEnabled" type="checkbox" /> Enabled</label>
+        </div>
+
+        <div class="paperList" style="padding:1.25em;margin-bottom:1em">
+          <h2>Diagnostics</h2>
+          <pre id="diagnostics" style="white-space:pre-wrap;opacity:.85"></pre>
+          <button is="emby-button" type="button" class="raised block" id="copyDiagnostics">Copy diagnostics</button>
+        </div>
+
+        <button is="emby-button" type="button" class="raised button-submit block" id="saveConfig">Save</button>
+      </div>
+    </div>
+    <script type="text/javascript">
+      (function () {
+        const page = document.querySelector('#VantafynCompanionConfigPage');
+        async function api(path, options) {
+          const response = await ApiClient.ajax(Object.assign({ url: ApiClient.getUrl(path), type: 'GET' }, options || {}));
+          return typeof response === 'string' && response.length ? JSON.parse(response) : response;
+        }
+        async function load() {
+          const config = await api('Vantafyn/Admin/Configuration');
+          page.querySelector('#userSettingsEnabled').checked = !!config.userSettingsEnabled;
+          page.querySelector('#requestsEnabled').checked = !!config.requestsEnabled;
+          page.querySelector('#watchPartiesEnabled').checked = !!config.watchPartiesEnabled;
+          page.querySelector('#personalPlaylistsEnabled').checked = !!config.personalPlaylistsEnabled;
+          page.querySelector('#ombiBaseUrl').value = config.ombi.baseUrl || '';
+          page.querySelector('#ombiTimeoutSeconds').value = config.ombi.timeoutSeconds || 5;
+          page.querySelector('#ombiRequireUserLogin').checked = !!config.ombi.requireUserLogin;
+          const diagnostics = await api('Vantafyn/Admin/Diagnostics');
+          page.querySelector('#diagnostics').textContent = JSON.stringify(diagnostics, null, 2);
+        }
+        page.addEventListener('pageshow', load);
+        page.querySelector('#saveConfig').addEventListener('click', async () => {
+          await api('Vantafyn/Admin/Configuration', {
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+              userSettingsEnabled: page.querySelector('#userSettingsEnabled').checked,
+              requestsEnabled: page.querySelector('#requestsEnabled').checked,
+              watchPartiesEnabled: page.querySelector('#watchPartiesEnabled').checked,
+              personalPlaylistsEnabled: page.querySelector('#personalPlaylistsEnabled').checked,
+              notificationsEnabled: true,
+              ombiBaseUrl: page.querySelector('#ombiBaseUrl').value,
+              ombiApiKey: page.querySelector('#ombiApiKey').value,
+              ombiTimeoutSeconds: parseInt(page.querySelector('#ombiTimeoutSeconds').value || '5'),
+              ombiRequireUserLogin: page.querySelector('#ombiRequireUserLogin').checked
+            })
+          });
+          Dashboard.alert('Vantafyn Companion settings saved.');
+          await load();
+        });
+        page.querySelector('#testOmbi').addEventListener('click', async () => {
+          const result = await api('Vantafyn/Admin/Requests/TestConnection', { type: 'POST' });
+          page.querySelector('#ombiStatus').textContent = result.message + (result.version ? ' Version: ' + result.version : '');
+        });
+        page.querySelector('#copyDiagnostics').addEventListener('click', async () => {
+          await navigator.clipboard.writeText(page.querySelector('#diagnostics').textContent || '');
+          Dashboard.alert('Diagnostics copied.');
+        });
+      })();
+    </script>
+  </div>
+</body>
+</html>

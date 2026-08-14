@@ -26,11 +26,18 @@ internal class DownloadsDatabase(
             db.addColumnIfMissing("download_records", "remote_logo_url", "TEXT")
             db.addColumnIfMissing("pending_user_data_mutations", "profile_id", "TEXT NOT NULL DEFAULT ''")
         }
+        if (oldVersion < 3) {
+            db.addColumnIfMissing("download_records", "local_metadata_path", "TEXT")
+            db.addColumnIfMissing("download_records", "local_lyrics_path", "TEXT")
+            db.addColumnIfMissing("download_records", "local_chapters_path", "TEXT")
+            db.addColumnIfMissing("download_records", "local_trickplay_path", "TEXT")
+            db.addColumnIfMissing("download_records", "offline_feature_flags", "TEXT")
+        }
     }
 
     companion object {
         const val DATABASE_NAME = "vantafyn_downloads.db"
-        const val DATABASE_VERSION = 2
+        const val DATABASE_VERSION = 3
 
         private const val CREATE_DOWNLOAD_RECORDS = """
             CREATE TABLE download_records (
@@ -62,6 +69,11 @@ internal class DownloadsDatabase(
                 local_backdrop_path TEXT,
                 local_logo_path TEXT,
                 local_subtitle_path TEXT,
+                local_metadata_path TEXT,
+                local_lyrics_path TEXT,
+                local_chapters_path TEXT,
+                local_trickplay_path TEXT,
+                offline_feature_flags TEXT,
                 remote_poster_url TEXT,
                 remote_backdrop_url TEXT,
                 remote_logo_url TEXT,

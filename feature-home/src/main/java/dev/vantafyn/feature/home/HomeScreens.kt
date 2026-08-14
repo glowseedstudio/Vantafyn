@@ -125,6 +125,8 @@ import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SwitchAccount
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.ViewAgenda
@@ -190,9 +192,10 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
-import androidx.media3.exoplayer.ExoPlayer
 import dev.vantafyn.core.cast.GoogleCastRouteButton
 import dev.vantafyn.core.downloads.DownloadRecord
+import dev.vantafyn.core.downloads.DownloadMediaType
+import dev.vantafyn.core.downloads.DownloadStorageSummary
 import dev.vantafyn.core.downloads.DownloadState
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
@@ -232,6 +235,8 @@ import dev.vantafyn.core.media.LongRunningTaskType
 import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.UpNextDisplayMode
+import dev.vantafyn.core.media.VantafynExoPlayerFactory
+import dev.vantafyn.core.media.VantafynMedia3ExtensionSupport
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.ui.MobilePosterSpec
@@ -516,6 +521,8 @@ fun VantafynAppContent(
             onCancelDownload = viewModel::cancelDownload,
             onRetryDownload = viewModel::retryDownload,
             onRemoveDownload = viewModel::removeDownload,
+            onRemoveAllDownloads = viewModel::removeAllDownloads,
+            onSetDownloadWifiOnlyDefault = viewModel::setDownloadWifiOnlyDefault,
             onStartPlayback = { viewModel.startPlayback() },
             onStartPlaybackFromBeginning = viewModel::startPlaybackFromBeginning,
             onStartEpisodePlayback = viewModel::startEpisodePlayback,
@@ -1933,6 +1940,8 @@ private fun HomeScreen(
     onCancelDownload: (DownloadRecord) -> Unit,
     onRetryDownload: (DownloadRecord) -> Unit,
     onRemoveDownload: (DownloadRecord) -> Unit,
+    onRemoveAllDownloads: () -> Unit,
+    onSetDownloadWifiOnlyDefault: (Boolean) -> Unit,
     onStartPlayback: () -> Unit,
     onStartPlaybackFromBeginning: () -> Unit,
     onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
@@ -2047,6 +2056,8 @@ private fun HomeScreen(
             onCancelDownload = onCancelDownload,
             onRetryDownload = onRetryDownload,
             onRemoveDownload = onRemoveDownload,
+            onRemoveAllDownloads = onRemoveAllDownloads,
+            onSetDownloadWifiOnlyDefault = onSetDownloadWifiOnlyDefault,
             onStartPlayback = onStartPlayback,
             onStartPlaybackFromBeginning = onStartPlaybackFromBeginning,
             onStartEpisodePlayback = onStartEpisodePlayback,
@@ -2203,6 +2214,8 @@ private fun MobileShellScreen(
     onCancelDownload: (DownloadRecord) -> Unit,
     onRetryDownload: (DownloadRecord) -> Unit,
     onRemoveDownload: (DownloadRecord) -> Unit,
+    onRemoveAllDownloads: () -> Unit,
+    onSetDownloadWifiOnlyDefault: (Boolean) -> Unit,
     onStartPlayback: () -> Unit,
     onStartPlaybackFromBeginning: () -> Unit,
     onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
@@ -2313,6 +2326,8 @@ private fun MobileShellScreen(
                     onCancel = onCancelDownload,
                     onRetry = onRetryDownload,
                     onRemove = onRemoveDownload,
+                    onRemoveAll = onRemoveAllDownloads,
+                    onSetWifiOnlyDefault = onSetDownloadWifiOnlyDefault,
                 )
                 MobileDestination.MediaDetail -> MediaDetailScreen(
                     state = state,
@@ -5893,16 +5908,64 @@ private fun AdminSectionHeader(title: String, icon: ImageVector, modifier: Modif
 
 @Composable
 private fun AdminSessionsSection(sessions: List<dev.vantafyn.core.jellyfin.JellyfinAdminSession>) {
+    val measuredBitrates = sessions.mapNotNull { it.bitrate?.takeIf { bitrate -> bitrate > 0 } }
+    val totalBitrate = measuredBitrates.sum().takeIf { it > 0 }
     GlassPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             AdminSectionHeader(title = "Active Sessions", icon = Icons.Rounded.Tv, modifier = Modifier.weight(1f))
             SoftBadge("${sessions.size} live")
         }
+        AdminActiveBitrateSummary(
+            totalBitrate = totalBitrate,
+        )
         if (sessions.isEmpty()) {
             AdminEmptySessionsCard()
         }
         sessions.take(12).forEach { session ->
             AdminSessionCard(session)
+        }
+    }
+}
+
+@Composable
+private fun AdminActiveBitrateSummary(
+    totalBitrate: Int?,
+) {
+    VantafynGlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color.White.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Speed, contentDescription = null, tint = Color.White, modifier = Modifier.size(23.dp))
+            }
+            Text(
+                "Total active bitrate",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                totalBitrate?.streamBitrateLabel() ?: "—",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
     }
 }
@@ -6422,6 +6485,7 @@ private fun AdminSessionCard(session: dev.vantafyn.core.jellyfin.JellyfinAdminSe
                 verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
             ) {
                 AdminSessionProgress(session)
+                AdminSessionTechnicalLine(session)
                 Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
                     ProfileAvatar(name = session.userName ?: "User", imageUrl = session.userImageUrl, modifier = Modifier.size(38.dp))
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -6476,15 +6540,27 @@ private fun AdminSessionProgress(session: dev.vantafyn.core.jellyfin.JellyfinAdm
 
 @Composable
 private fun AdminSessionTechnicalLine(session: dev.vantafyn.core.jellyfin.JellyfinAdminSession) {
-    val bitrate = session.bitrate?.takeIf { it > 0 }?.let { "${it / 1_000_000.0}".take(3).trimEnd('.') + " Mbps" }
     val details = listOfNotNull(
         session.container?.uppercase(),
         session.videoCodec?.uppercase(),
         session.audioCodec?.uppercase(),
-        bitrate,
+        session.bitrate?.takeIf { it > 0 }?.streamBitrateLabel(),
     )
     if (details.isNotEmpty()) {
-        Text(details.joinToString(" · "), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(details.joinToString(" · "), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    } else {
+        Text("Bitrate unavailable", color = VantafynColors.Muted.copy(alpha = 0.74f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+private fun Int.streamBitrateLabel(): String {
+    if (this <= 0) return "0 Mbps"
+    return if (this >= 1_000_000) {
+        val mbps = this / 1_000_000.0
+        val text = if (mbps >= 10) "%.0f".format(Locale.US, mbps) else "%.1f".format(Locale.US, mbps)
+        "${text.trimEnd('0').trimEnd('.')} Mbps"
+    } else {
+        "${this / 1_000} Kbps"
     }
 }
 
@@ -8146,6 +8222,9 @@ private fun PlaybackPreferencesScreen(
                 }
             }
             item {
+                Media3ExtensionDecoderPanel()
+            }
+            item {
                 GlassPanel {
                     Text("Languages", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     VantafynTextField(
@@ -8258,6 +8337,55 @@ private fun PlaybackPreferencesScreen(
 }
 
 @Composable
+private fun Media3ExtensionDecoderPanel() {
+    val decoders = remember { VantafynMedia3ExtensionSupport.decoders }
+    val availableCount = decoders.count { it.isAvailable }
+    GlassPanel {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SettingsRowIcon(Icons.Rounded.Tune)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    "Enhanced playback",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Media3 extension renderers are enabled for the built-in player and music service.",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            SoftBadge(if (availableCount > 0) "$availableCount active" else "Ready")
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+            items(decoders) { decoder ->
+                VantafynGlassChip(
+                    selected = decoder.isAvailable,
+                    onClick = {},
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Text(
+                        if (decoder.isAvailable) "${decoder.label} active" else "${decoder.label} ready",
+                        color = if (decoder.isAvailable) VantafynColors.Ink else VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (decoder.isAvailable) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        }
+        Text(
+            "Vantafyn keeps device decoding first for battery life, then uses bundled extensions for formats Android cannot handle cleanly.",
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
+}
+
+@Composable
 private fun MediaSegmentPreferenceRow(
     type: JellyfinMediaSegmentType,
     selected: JellyfinMediaSegmentBehavior,
@@ -8359,77 +8487,233 @@ private fun DownloadsScreen(
     onCancel: (DownloadRecord) -> Unit,
     onRetry: (DownloadRecord) -> Unit,
     onRemove: (DownloadRecord) -> Unit,
+    onRemoveAll: () -> Unit,
+    onSetWifiOnlyDefault: (Boolean) -> Unit,
 ) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 118.dp),
-        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
-    ) {
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.ArrowBack,
-                    contentDescription = "Back",
-                    tint = VantafynColors.Ink,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(onClick = onBack)
-                        .padding(3.dp),
+    var query by rememberSaveable { mutableStateOf("") }
+    var selectedType by rememberSaveable { mutableStateOf(DownloadFilter.All) }
+    var confirmClear by rememberSaveable { mutableStateOf(false) }
+    val visibleDownloads = remember(state.offlineDownloads, query, selectedType) {
+        state.offlineDownloads
+            .asSequence()
+            .filter { selectedType.matches(it) }
+            .filter { it.matchesOfflineDownloadQuery(query) }
+            .toList()
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 118.dp),
+            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+        ) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ArrowBack,
+                        contentDescription = "Back",
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(onClick = onBack)
+                            .padding(3.dp),
+                    )
+                    Text(
+                        "Downloads",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "Refresh downloads",
+                        tint = VantafynColors.Ink.copy(alpha = 0.9f),
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(onClick = onRefresh)
+                            .padding(4.dp),
+                    )
+                }
+            }
+            item {
+                DownloadStorageCard(
+                    summary = state.offlineDownloadStorageSummary,
+                    records = state.offlineDownloads,
                 )
-                Text(
-                    "Downloads",
-                    color = VantafynColors.Ink,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(
-                    imageVector = Icons.Rounded.Refresh,
-                    contentDescription = "Refresh downloads",
-                    tint = VantafynColors.Ink.copy(alpha = 0.9f),
-                    modifier = Modifier
-                        .size(32.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .clickable(onClick = onRefresh)
-                        .padding(4.dp),
+            }
+            item {
+                GlassPanel {
+                    PremiumToggleRow(
+                        title = "Wi-Fi only downloads",
+                        subtitle = "",
+                        checked = state.downloadWifiOnlyDefault,
+                        icon = Icons.Rounded.Cloud,
+                    ) {
+                        onSetWifiOnlyDefault(!state.downloadWifiOnlyDefault)
+                    }
+                    if (state.offlineDownloads.isNotEmpty()) {
+                        VantafynGlassCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { confirmClear = true },
+                            cornerRadius = 18.dp,
+                        ) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                                SettingsRowIcon(Icons.Rounded.Delete)
+                                Text("Remove all downloads", color = Color(0xFFFFC2C2), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                GlassPanel {
+                    VantafynTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        label = "Search downloads",
+                        placeholder = "Movies, episodes, songs...",
+                    )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                        items(DownloadFilter.entries.toList()) { filter ->
+                            SelectableChip(filter.label, selectedType == filter) {
+                                selectedType = filter
+                            }
+                        }
+                    }
+                }
+            }
+            if (state.isDownloadsLoading) {
+                item { VantafynLoadingIndicator("Loading downloads") }
+            }
+            state.downloadsError?.let { error ->
+                item { VantafynErrorCard(error) { VantafynButton("Retry", onClick = onRefresh) } }
+            }
+            if (!state.isDownloadsLoading && state.offlineDownloads.isEmpty() && state.downloadsError == null) {
+                item {
+                    GlassPanel {
+                        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                            SettingsRowIcon(Icons.Rounded.Download)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Nothing saved yet", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                                Text("Save movies, episodes, seasons, music, and audiobooks. Completed downloads will play without a server connection.", color = VantafynColors.Muted)
+                            }
+                        }
+                    }
+                }
+            }
+            if (!state.isDownloadsLoading && state.offlineDownloads.isNotEmpty() && visibleDownloads.isEmpty()) {
+                item {
+                    GlassPanel {
+                        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                            SettingsRowIcon(Icons.Rounded.Search)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("Nothing matched", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                                Text("Try a different title, artist, series, or media type.", color = VantafynColors.Muted)
+                            }
+                        }
+                    }
+                }
+            }
+            items(visibleDownloads, key = { it.id }) { record ->
+                DownloadRecordCard(
+                    record = record,
+                    onPlay = { onPlay(record) },
+                    onCancel = { onCancel(record) },
+                    onRetry = { onRetry(record) },
+                    onRemove = { onRemove(record) },
                 )
             }
         }
-        if (state.isDownloadsLoading) {
-            item { VantafynLoadingIndicator("Loading downloads") }
-        }
-        state.downloadsError?.let { error ->
-            item { VantafynErrorCard(error) { VantafynButton("Retry", onClick = onRefresh) } }
-        }
-        if (!state.isDownloadsLoading && state.offlineDownloads.isEmpty() && state.downloadsError == null) {
-            item {
-                GlassPanel {
-                    Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
-                        SettingsRowIcon(Icons.Rounded.Download)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Nothing saved yet", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                            Text("Save movies and episodes from their detail pages. Completed downloads will play without a server connection.", color = VantafynColors.Muted)
+        if (confirmClear) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.58f))
+                    .clickable { confirmClear = false }
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                VantafynGlassModalPanel(
+                    selected = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = false) {},
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                            SettingsRowIcon(Icons.Rounded.Delete)
+                            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Clear offline library?", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                                Text("Downloaded files for this profile will be removed from this device.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+                            OutlinedButton(
+                                onClick = { confirmClear = false },
+                                modifier = Modifier.weight(1f),
+                            ) { Text("Cancel") }
+                            VantafynButton(
+                                text = "Remove",
+                                onClick = {
+                                    confirmClear = false
+                                    onRemoveAll()
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
                 }
             }
         }
-        items(state.offlineDownloads, key = { it.id }) { record ->
-            DownloadRecordCard(
-                record = record,
-                onPlay = { onPlay(record) },
-                onCancel = { onCancel(record) },
-                onRetry = { onRetry(record) },
-                onRemove = { onRemove(record) },
+    }
+}
+
+@Composable
+private fun DownloadStorageCard(summary: DownloadStorageSummary?, records: List<DownloadRecord>) {
+    GlassPanel {
+        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+            SettingsRowIcon(Icons.Rounded.Storage)
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Offline Library", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${summary?.completedCount ?: records.count { it.state == DownloadState.Completed }} ready · ${summary?.activeCount ?: 0} active",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Text(
+                (summary?.totalBytes ?: records.sumOf { it.totalBytes ?: it.bytesDownloaded }).downloadSizeLabel(),
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
             )
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+            DownloadStatPill("Video", records.count { it.mediaType == DownloadMediaType.Movie || it.mediaType == DownloadMediaType.Episode || it.mediaType == DownloadMediaType.Season })
+            DownloadStatPill("Music", records.count { it.mediaType == DownloadMediaType.MusicTrack || it.mediaType == DownloadMediaType.MusicAlbum })
+            DownloadStatPill("Books", records.count { it.mediaType == DownloadMediaType.Audiobook })
+        }
+    }
+}
+
+@Composable
+private fun DownloadStatPill(label: String, count: Int) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.07f))
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+    ) {
+        Text("$count $label", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -8476,7 +8760,7 @@ private fun DownloadRecordCard(
                     )
                 } else {
                     Icon(
-                        imageVector = if (isReady) Icons.Rounded.PlayArrow else Icons.Rounded.Download,
+                        imageVector = record.downloadIcon(isReady),
                         contentDescription = null,
                         tint = VantafynColors.Ink,
                         modifier = Modifier.size(30.dp),
@@ -8488,6 +8772,9 @@ private fun DownloadRecordCard(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Text(record.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                record.downloadSubtitle()?.let { subtitle ->
+                    Text(subtitle, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
                 Text(record.downloadStatusLabel(), color = record.downloadStatusColor(), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
                 record.progressFraction()?.let { progress ->
                     Box(
@@ -8569,6 +8856,84 @@ private fun DownloadRecord.downloadStatusColor(): Color =
         DownloadState.Failed,
         DownloadState.Cancelled -> Color(0xFFFFA9A9)
         else -> VantafynColors.Ink.copy(alpha = 0.78f)
+    }
+
+private fun DownloadRecord.downloadSubtitle(): String? =
+    when (mediaType) {
+        DownloadMediaType.Movie -> year?.toString()
+        DownloadMediaType.Episode -> listOfNotNull(seriesName, seasonNumber?.let { "Season $it" }, episodeNumber?.let { "Episode $it" })
+            .joinToString(" · ")
+            .takeIf { it.isNotBlank() }
+        DownloadMediaType.Season -> listOfNotNull(seriesName, seasonName).joinToString(" · ").takeIf { it.isNotBlank() }
+        DownloadMediaType.MusicTrack -> listOfNotNull(artistName, albumName).joinToString(" · ").takeIf { it.isNotBlank() }
+        DownloadMediaType.MusicAlbum -> listOfNotNull(albumName, artistName).joinToString(" · ").takeIf { it.isNotBlank() }
+        DownloadMediaType.Audiobook -> listOfNotNull(artistName, albumName).joinToString(" · ").takeIf { it.isNotBlank() } ?: "Audiobook"
+    }
+
+private fun DownloadRecord.downloadIcon(isReady: Boolean): ImageVector =
+    if (!isReady) {
+        Icons.Rounded.Download
+    } else {
+        when (mediaType) {
+            DownloadMediaType.MusicTrack,
+            DownloadMediaType.MusicAlbum,
+            DownloadMediaType.Audiobook -> Icons.Rounded.MusicNote
+            DownloadMediaType.Season,
+            DownloadMediaType.Episode -> Icons.Rounded.Tv
+            DownloadMediaType.Movie -> Icons.Rounded.Movie
+        }
+    }
+
+private enum class DownloadFilter(val label: String) {
+    All("All"),
+    Video("Video"),
+    Music("Music"),
+    Books("Books"),
+    Active("Active"),
+    Ready("Ready");
+
+    fun matches(record: DownloadRecord): Boolean =
+        when (this) {
+            All -> true
+            Video -> record.mediaType == DownloadMediaType.Movie ||
+                record.mediaType == DownloadMediaType.Episode ||
+                record.mediaType == DownloadMediaType.Season
+            Music -> record.mediaType == DownloadMediaType.MusicTrack ||
+                record.mediaType == DownloadMediaType.MusicAlbum
+            Books -> record.mediaType == DownloadMediaType.Audiobook
+            Active -> record.state in setOf(
+                DownloadState.Queued,
+                DownloadState.Preparing,
+                DownloadState.WaitingForNetwork,
+                DownloadState.WaitingForWifi,
+                DownloadState.Downloading,
+                DownloadState.Finalizing,
+            )
+            Ready -> record.state == DownloadState.Completed
+        }
+}
+
+private fun DownloadRecord.matchesOfflineDownloadQuery(query: String): Boolean {
+    val trimmed = query.trim()
+    if (trimmed.isBlank()) return true
+    val haystack = listOfNotNull(
+        title,
+        sortTitle,
+        seriesName,
+        seasonName,
+        albumName,
+        artistName,
+        year?.toString(),
+        overview,
+    ).joinToString(" ").lowercase()
+    return trimmed.lowercase().split(Regex("\\s+")).all { it in haystack }
+}
+
+private fun Long.downloadSizeLabel(): String =
+    when {
+        this <= 0L -> "0 MB"
+        this >= 1024L * 1024L * 1024L -> "%.1f GB".format(Locale.US, this / (1024.0 * 1024.0 * 1024.0))
+        else -> "${this / (1024L * 1024L)} MB"
     }
 
 @Composable
@@ -9290,7 +9655,7 @@ private fun DetailThemeAudio(url: String?, enabled: Boolean, volume: ThemeMusicV
             val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
             var fadeJob: Job? = null
             var released = false
-            val player = ExoPlayer.Builder(context).build().apply {
+            val player = VantafynExoPlayerFactory.builder(context).build().apply {
                 this.volume = 0f
                 setAudioAttributes(
                     AudioAttributes.Builder()

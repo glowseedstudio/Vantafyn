@@ -17,7 +17,7 @@
 - External subtitle URLs are carried into `VantafynPlaybackItem` and attached to Media3 when online.
 - Cast support lives in `core-cast` and maps Vantafyn track models to Google Cast tracks.
 - Android Auto music browsing is implemented in `core-media/VantafynMusicMediaLibraryProvider`.
-- There is no download-related production code, durable local media metadata, local artwork resolver, offline repository, or pending offline user-data mutation store.
+- `core-downloads` now owns durable download records, app-private media/artwork/sidecar storage, WorkManager transfer orchestration, offline playback-state mutation storage, and active-profile storage summaries.
 - Requests/Ombi, admin, statistics, search, and home assume a reachable network-backed repository today, though failed server restore paths have UI fallbacks.
 
 ## High-Risk Integration Points
@@ -26,7 +26,7 @@
 - Local video playback should feed local URIs into the existing `VantafynPlaybackItem`, not create a second player.
 - Local music playback must feed tracks into `MusicPlaybackController`, not create a second audio stack.
 - Download records must be keyed by `serverId + userId + itemId + mediaSourceId`.
-- External subtitles and artwork need local paths so offline screens do not repeatedly hit remote URLs.
+- External subtitles and artwork now persist local paths when Jellyfin exposes downloadable assets; chapter/trickplay sidecars remain unavailable until the active Jellyfin SDK path exposes a stable source.
 - User progress made offline needs a durable pending mutation table and a deterministic conflict policy before sync is enabled.
 
 ## Phase 1 Files Expected To Change
@@ -40,6 +40,8 @@ Phase 1 intentionally established the durable model first, then the mobile imple
 
 ## Phase 1 Result
 
-`core-downloads` now exists and builds independently. It contains the offline identity model, download state machine, app-private SQLite repository, migration handling, pending user-data mutation storage, local artwork/media file target helpers, foreground video download worker, and constrained user-data sync worker.
+`core-downloads` now exists and builds independently. It contains the offline identity model, download state machine, app-private SQLite repository, migration handling, pending user-data mutation storage, local artwork/media file target helpers, foreground download worker, and constrained user-data sync worker.
 
-Mobile now exposes a Downloads screen, a detail-page download action for direct-play movies and episodes, local poster display for completed downloads, local playback through the existing video player, and an offline recovery path when a saved Jellyfin profile cannot reach its server but completed downloads exist. Player ownership and music MediaSession ownership remain unchanged.
+Mobile now exposes a Downloads screen, detail-page download actions for direct-play video/audiobook items, music track/album/playlist download actions, local poster display for completed downloads, local video playback through the existing video player, local audio playback through the existing music service, and an offline recovery path when a saved Jellyfin profile cannot reach its server but completed downloads exist. Player ownership and music MediaSession ownership remain unchanged.
+
+The Downloads screen now provides the rich offline browsing surface for saved media: local search, video/music/book filters, storage totals, Wi-Fi-only download policy, retry/cancel/remove, and delete-all for the active profile. Completed downloads also write offline JSON sidecars for subtitle metadata, Jellyfin media segments, and lyrics when those APIs return data.

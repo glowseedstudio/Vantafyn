@@ -1,8 +1,10 @@
 package dev.vantafyn.feature.music
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import dev.vantafyn.core.downloads.OfflineDownloadManager
 import dev.vantafyn.core.jellyfin.JellyfinLyricLine
 import dev.vantafyn.core.jellyfin.JellyfinLyrics
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
@@ -37,6 +39,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val musicRepository: JellyfinMusicRepository = repositories.musicRepository
     private val mediaRepository: JellyfinMediaRepository = repositories.mediaRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
+    private val offlineDownloadManager = OfflineDownloadManager(application)
+    private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
     private val playbackController = MusicPlaybackController.get(application)
     private var session: JellyfinSession? = null
     private var lyricsJob: Job? = null
@@ -286,6 +290,61 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         playbackController.addToQueue(track.toPlaybackTrack())
         _state.update { it.copy(message = "Added to queue") }
     }
+
+    fun queueTrackDownload(track: JellyfinMusicTrack) {
+        val activeSession = session ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(errorMessage = null, message = null) }
+            when (val result = offlineDownloadManager.queueMusicTrack(activeSession, track, requireWifi = readDownloadWifiOnlyDefault())) {
+                is JellyfinResult.Success -> _state.update { it.copy(message = "Download queued") }
+                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+            }
+        }
+    }
+
+    fun queueAlbumDownload(album: JellyfinMusicAlbum, tracks: List<JellyfinMusicTrack>) {
+        val activeSession = session ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(errorMessage = null, message = null) }
+            when (val result = offlineDownloadManager.queueMusicAlbum(activeSession, album, tracks, requireWifi = readDownloadWifiOnlyDefault())) {
+                is JellyfinResult.Success -> _state.update { it.copy(message = "${result.value} tracks queued") }
+                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+            }
+        }
+    }
+
+    fun queuePlaylistDownload(playlist: JellyfinMusicPlaylist, tracks: List<JellyfinMusicTrack>) {
+        val activeSession = session ?: return
+        if (tracks.isEmpty()) {
+            _state.update { it.copy(errorMessage = "This playlist does not have any tracks to save.") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(errorMessage = null, message = null) }
+            var queued = 0
+            var firstFailure: String? = null
+            val requireWifi = readDownloadWifiOnlyDefault()
+            tracks.forEach { track ->
+                when (val result = offlineDownloadManager.queueMusicTrack(activeSession, track, requireWifi = requireWifi)) {
+                    is JellyfinResult.Success -> queued += 1
+                    is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result.message
+                }
+            }
+            _state.update {
+                it.copy(
+                    message = when {
+                        queued > 0 && firstFailure == null -> "${queued} tracks queued"
+                        queued > 0 -> "${queued} tracks queued. Some could not be saved."
+                        else -> firstFailure ?: "${playlist.name} could not be saved offline."
+                    },
+                    errorMessage = null,
+                )
+            }
+        }
+    }
+
+    private fun readDownloadWifiOnlyDefault(): Boolean =
+        appPreferences.getBoolean(KEY_DOWNLOAD_WIFI_ONLY_DEFAULT, true)
 
     fun playCurrentNext() {
         val current = playbackController.state.value.currentTrack ?: return
@@ -711,3 +770,4 @@ private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L
 
 private const val MusicProgressReportIntervalMs = 10_000L
+private const val KEY_DOWNLOAD_WIFI_ONLY_DEFAULT = "download_wifi_only_default"

@@ -30,6 +30,8 @@ import dev.vantafyn.core.ombi.OmbiUserSession
 import dev.vantafyn.core.ombi.OmbiUserMapping
 import dev.vantafyn.core.ombi.RequestMediaDetail
 import dev.vantafyn.core.ombi.RequestMediaSummary
+import dev.vantafyn.core.ombi.RequestSearchFilterValue
+import dev.vantafyn.core.ombi.VantafynCompanionCapabilities
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -51,6 +53,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         activeSession = session
         ombiRepository.cleanupAccessRequests()
         val config = ombiRepository.config()
+        val previousCompanion = _state.value.companionCapabilities?.takeIf { session != null }
         _state.update {
             it.copy(
                 currentUserName = session?.user?.name,
@@ -69,8 +72,10 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                 currentUserMapping = session?.user?.id?.toString()?.let(ombiRepository::mappingFor),
                 ombiUserSession = session?.user?.id?.toString()?.let(ombiRepository::userSession),
                 userCapabilities = ombiRepository.cachedUserCapabilities(session?.user?.id?.toString()),
+                companionCapabilities = previousCompanion,
             )
         }
+        detectCompanion(session)
         val isAdmin = session?.user?.isAdministrator == true
         val userId = session?.user?.id?.toString()
         val canUse = canUseRequests(config, hasApiKey = ombiRepository.hasApiKey(), isAdmin = isAdmin)
@@ -86,6 +91,35 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         }
         if (canUse && session != null && _state.value.availabilityIndex == null) {
             refreshAvailabilityIndex(silent = true)
+        }
+    }
+
+    private fun detectCompanion(session: JellyfinSession?) {
+        if (session == null) {
+            _state.update { it.copy(companionCapabilities = null) }
+            return
+        }
+        viewModelScope.launch {
+            when (val result = ombiRepository.companionCapabilities(session)) {
+                is IntegrationResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            companionCapabilities = result.value,
+                            connectionStatus = if (result.value.requestsReady) "Companion connected" else it.connectionStatus,
+                        )
+                    }
+                    if (result.value.requestsReady) {
+                        if (result.value.requiresUserLogin) {
+                            validateLinkedAccount()
+                        } else {
+                            loadDiscovery()
+                        }
+                    }
+                }
+                is IntegrationResult.Failure -> {
+                    _state.update { it.copy(companionCapabilities = null) }
+                }
+            }
         }
     }
 
@@ -119,6 +153,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
 
     fun checkOmbiUserMatch() {
         val snapshot = _state.value
+        if (snapshot.usesCompanionRequests) return
         if (snapshot.identityMode != OmbiIdentityMode.PerUserAccount || snapshot.currentUserName.isNullOrBlank()) return
         viewModelScope.launch {
             _state.update { it.copy(ombiUserMatch = OmbiUserMatch(OmbiUserMatchState.NotChecked)) }
@@ -384,14 +419,22 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         val userName = snapshot.currentUserName ?: "Vantafyn User"
         viewModelScope.launch {
             _state.update { it.copy(isLinkingOmbi = true, message = null) }
-            when (
-                val result = ombiRepository.loginUser(
+            val companionSession = activeSession?.takeIf { snapshot.companionRequiresUserLogin }
+            val result = if (companionSession != null) {
+                ombiRepository.companionLoginUser(
+                    session = companionSession,
+                    username = snapshot.ombiUsername,
+                    password = snapshot.ombiPassword,
+                )
+            } else {
+                ombiRepository.loginUser(
                     jellyfinUserId = userId,
                     jellyfinUserName = userName,
                     username = snapshot.ombiUsername.ifBlank { snapshot.currentUserMapping?.ombiUserName.orEmpty() },
                     password = snapshot.ombiPassword,
                 )
-            ) {
+            }
+            when (result) {
                 is IntegrationResult.Success -> {
                     refreshConfig()
                     _state.update {
@@ -399,6 +442,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                             isLinkingOmbi = false,
                             ombiPassword = "",
                             ombiUserSession = result.value,
+                            companionCapabilities = it.companionCapabilities?.copy(userLinked = true),
                             message = "Ombi linked as ${result.value.bestName}",
                         )
                     }
@@ -420,16 +464,24 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
 
     fun unlinkOmbiAccount() {
         val userId = _state.value.currentUserId ?: return
-        ombiRepository.unlinkUserSession(userId)
-        refreshConfig()
-        _state.update {
-            it.copy(
-                ombiUserSession = null,
-                ombiPassword = "",
-                discoveryRails = emptyList(),
-                searchResults = emptyList(),
-                message = "Ombi account unlinked from this device.",
-            )
+        val companionSession = activeSession?.takeIf { _state.value.companionRequiresUserLogin }
+        viewModelScope.launch {
+            if (companionSession != null) {
+                ombiRepository.companionLogoutUser(companionSession)
+            } else {
+                ombiRepository.unlinkUserSession(userId)
+            }
+            refreshConfig()
+            _state.update {
+                it.copy(
+                    ombiUserSession = null,
+                    ombiPassword = "",
+                    companionCapabilities = it.companionCapabilities?.copy(userLinked = false),
+                    discoveryRails = emptyList(),
+                    searchResults = emptyList(),
+                    message = "Ombi account unlinked from this device.",
+                )
+            }
         }
     }
 
@@ -460,7 +512,13 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
             val failures = mutableListOf<String>()
             val userId = _state.value.currentUserId
             val perUser = _state.value.usesPerUserSession && userId != null
-            when (val discovery = ombiRepository.searchDiscovery(query, if (perUser) userId else null)) {
+            val companionSession = activeSession?.takeIf { _state.value.companionCapabilities?.requestsReady == true }
+            val discovery = if (companionSession != null) {
+                ombiRepository.companionSearch(companionSession, query, filter.toCompanionFilter())
+            } else {
+                ombiRepository.searchDiscovery(query, if (perUser) userId else null)
+            }
+            when (discovery) {
                 is IntegrationResult.Success -> {
                     val filtered = discovery.value.filter {
                         filter == RequestSearchFilter.All ||
@@ -548,7 +606,12 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                         }
                         return@launch
                     }
-                    if (perUser) ombiRepository.requestMovieForUser(userId, movieDbId) else ombiRepository.requestMovie(movieDbId, _state.value.currentUserName)
+                    val companionSession = activeSession?.takeIf { _state.value.companionCapabilities?.requestsReady == true }
+                    when {
+                        companionSession != null -> ombiRepository.companionRequestMovie(companionSession, movieDbId)
+                        perUser -> ombiRepository.requestMovieForUser(userId, movieDbId)
+                        else -> ombiRepository.requestMovie(movieDbId, _state.value.currentUserName)
+                    }
                 }
                 dev.vantafyn.core.ombi.RequestMediaType.Series -> {
                     if (item.movieDbId.isNullOrBlank() && item.tvDbId.isNullOrBlank()) {
@@ -560,7 +623,11 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                         }
                         return@launch
                     }
-                    if (perUser) {
+                    val companionSession = activeSession?.takeIf { _state.value.companionCapabilities?.requestsReady == true }
+                    if (companionSession != null) {
+                        val providerId = item.tvDbId?.takeIf { it.isNotBlank() } ?: item.movieDbId.orEmpty()
+                        ombiRepository.companionRequestSeries(companionSession, providerId)
+                    } else if (perUser) {
                         ombiRepository.requestTvForUserByIds(userId, item.movieDbId, item.tvDbId, _state.value.tvRequestSelection)
                     } else {
                         ombiRepository.requestTvByIds(item.movieDbId, item.tvDbId, _state.value.currentUserName, _state.value.tvRequestSelection)
@@ -592,9 +659,16 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
             _state.update { it.copy(activeRequestId = item.providerId, message = null) }
             val userId = _state.value.currentUserId
             val perUser = _state.value.usesPerUserSession && userId != null
+            val companionSession = activeSession?.takeIf { _state.value.companionCapabilities?.requestsReady == true }
             val result = when (item.type) {
-                MediaRequestType.Movie -> if (perUser) ombiRepository.requestMovieForUser(userId, item.providerId) else ombiRepository.requestMovie(item.providerId, _state.value.currentUserName)
-                MediaRequestType.Tv -> if (perUser) {
+                MediaRequestType.Movie -> when {
+                    companionSession != null -> ombiRepository.companionRequestMovie(companionSession, item.providerId)
+                    perUser -> ombiRepository.requestMovieForUser(userId, item.providerId)
+                    else -> ombiRepository.requestMovie(item.providerId, _state.value.currentUserName)
+                }
+                MediaRequestType.Tv -> if (companionSession != null) {
+                    ombiRepository.companionRequestSeries(companionSession, item.providerId)
+                } else if (perUser) {
                     ombiRepository.requestTvForUser(userId, item.providerId, _state.value.tvRequestSelection)
                 } else {
                     ombiRepository.requestTv(item.providerId, _state.value.currentUserName, _state.value.tvRequestSelection)
@@ -614,6 +688,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
 
     fun loadRequests() {
         if (!_state.value.canSearchAndRequest && !_state.value.isJellyfinAdmin) return
+        if (_state.value.companionCapabilities?.requestsReady == true && !ombiRepository.hasApiKey()) return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingRequests = true) }
             val userId = _state.value.currentUserId
@@ -633,6 +708,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
 
     fun loadDiscovery() {
         if (!_state.value.canSearchAndRequest) return
+        if (_state.value.companionCapabilities?.requestsReady == true && !ombiRepository.hasApiKey()) return
         viewModelScope.launch {
             _state.update { it.copy(isLoadingDiscovery = true, discoveryError = null) }
             val snapshot = _state.value
@@ -711,13 +787,20 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
         if (!_state.value.canUseRequests) return
         viewModelScope.launch {
             _state.update { it.copy(isValidatingOmbiSession = true) }
-            when (val result = ombiRepository.validateUserSession(userId)) {
+            val companionSession = activeSession?.takeIf { _state.value.companionRequiresUserLogin }
+            val result = if (companionSession != null) {
+                ombiRepository.companionUserSession(companionSession)
+            } else {
+                ombiRepository.validateUserSession(userId)
+            }
+            when (result) {
                 is IntegrationResult.Success -> {
                     refreshConfig()
                     _state.update {
                         it.copy(
                             isValidatingOmbiSession = false,
                             ombiUserSession = result.value,
+                            companionCapabilities = it.companionCapabilities?.copy(userLinked = true),
                             connectionStatus = "Connected",
                         )
                     }
@@ -730,6 +813,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
                         it.copy(
                             isValidatingOmbiSession = false,
                             ombiUserSession = null,
+                            companionCapabilities = it.companionCapabilities?.copy(userLinked = false),
                             message = if (result.reason == dev.vantafyn.core.integrations.IntegrationFailureReason.Unauthorized) {
                                 "Sign in to Ombi again to continue requesting."
                             } else {
@@ -831,9 +915,12 @@ data class RequestsUiState(
     val isRefreshingAvailability: Boolean = false,
     val availabilityMessage: String? = null,
     val tvRequestSelection: OmbiTvRequestSelection = OmbiTvRequestSelection.AllSeasons,
+    val companionCapabilities: VantafynCompanionCapabilities? = null,
 ) {
-    val isConfigured: Boolean get() = config.isConfigured && hasApiKey
-    val canUseRequests: Boolean get() = canUseRequests(config, hasApiKey, isJellyfinAdmin)
+    val usesCompanionRequests: Boolean get() = companionCapabilities?.requestsReady == true
+    val companionRequiresUserLogin: Boolean get() = usesCompanionRequests && companionCapabilities?.requiresUserLogin == true
+    val isConfigured: Boolean get() = usesCompanionRequests || config.isConfigured && hasApiKey
+    val canUseRequests: Boolean get() = usesCompanionRequests || canUseRequests(config, hasApiKey, isJellyfinAdmin)
     val pendingAccessRequestCount: Int get() = accessRequests.count { it.status == OmbiAccessRequestStatus.Pending }
     val hasRequestedAccess: Boolean
         get() = currentUserMapping?.state == OmbiLinkedAccountState.AccessRequested ||
@@ -843,20 +930,28 @@ data class RequestsUiState(
             }
     val canSearchAndRequest: Boolean
         get() = canUseRequests && (
-            identityMode == OmbiIdentityMode.SharedApiKey ||
+            (usesCompanionRequests && (!companionRequiresUserLogin || ombiUserSession != null)) ||
+                identityMode == OmbiIdentityMode.SharedApiKey ||
                 (currentUserMapping?.state == OmbiLinkedAccountState.Linked && ombiUserSession != null)
             )
     val canShowOmbiLogin: Boolean
-        get() = identityMode == OmbiIdentityMode.PerUserAccount &&
+        get() = (companionRequiresUserLogin || identityMode == OmbiIdentityMode.PerUserAccount) &&
             !hasRequestedAccess &&
             ombiUserSession == null &&
             currentUserMapping?.state != OmbiLinkedAccountState.Disabled
     val usesPerUserSession: Boolean
-        get() = identityMode == OmbiIdentityMode.PerUserAccount && ombiUserSession != null
+        get() = (companionRequiresUserLogin || identityMode == OmbiIdentityMode.PerUserAccount) && ombiUserSession != null
 }
 
 private fun canUseRequests(config: OmbiConfig, hasApiKey: Boolean, isAdmin: Boolean): Boolean =
     hasApiKey && config.isAvailableFor(isAdmin)
+
+private fun RequestSearchFilter.toCompanionFilter(): RequestSearchFilterValue =
+    when (this) {
+        RequestSearchFilter.All -> RequestSearchFilterValue.All
+        RequestSearchFilter.Movies -> RequestSearchFilterValue.Movies
+        RequestSearchFilter.TvShows -> RequestSearchFilterValue.Series
+    }
 
 private fun RequestsViewModel.availabilityMatchesFor(
     items: List<RequestMediaSummary>,

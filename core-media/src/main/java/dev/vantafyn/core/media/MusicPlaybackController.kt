@@ -94,7 +94,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private var playbackServiceStarted = false
     private val tracksByMediaId = mutableMapOf<String, VantafynMusicTrack>()
 
-    internal val sessionPlayer: ExoPlayer = ExoPlayer.Builder(context.applicationContext).build().apply {
+    internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.builder(context.applicationContext).build().apply {
         setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)

@@ -49,6 +49,17 @@ interface DownloadRepository {
         updatedAtMillis: Long,
     )
 
+    suspend fun updateLocalSidecarPaths(
+        id: String,
+        localSubtitlePath: String?,
+        localMetadataPath: String?,
+        localLyricsPath: String?,
+        localChaptersPath: String?,
+        localTrickplayPath: String?,
+        offlineFeatureFlags: String?,
+        updatedAtMillis: Long,
+    )
+
     suspend fun delete(id: String)
 
     suspend fun upsertPendingUserDataMutation(mutation: PendingUserDataMutation)

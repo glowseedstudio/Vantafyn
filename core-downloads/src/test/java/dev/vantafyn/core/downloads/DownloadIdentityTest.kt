@@ -60,4 +60,11 @@ class DownloadIdentityTest {
         assertTrue(!DownloadState.Failed.canTransitionTo(DownloadState.Completed))
         assertTrue(!DownloadState.Cancelled.canTransitionTo(DownloadState.Completed))
     }
+
+    @Test
+    fun activeStatesCanReturnToQueuedOnlyThroughRetryOrNewRequest() {
+        assertTrue(DownloadState.Downloading.canTransitionTo(DownloadState.Failed))
+        assertTrue(!DownloadState.Downloading.canTransitionTo(DownloadState.Queued))
+        assertTrue(!DownloadState.Completed.canTransitionTo(DownloadState.Queued))
+    }
 }

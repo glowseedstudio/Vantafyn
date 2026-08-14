@@ -76,6 +76,14 @@ External subtitle delivery URLs from Jellyfin are preserved into `VantafynSubtit
 
 Selecting audio/subtitles now applies an in-place Media3 track override with `TrackSelectionOverride`. Subtitle Off clears text overrides and disables text tracks. The ViewModel updates the selected Jellyfin stream indexes without restarting playback so playback reporting stays aligned with the current selection.
 
+## Media3 Extension Decoders
+
+`core-media` owns `VantafynExoPlayerFactory`, which enables Media3 extension renderers for the built-in player, theme audio, and the foreground music service. Platform/device decoders remain first priority for battery life. Bundled extension decoders are used as fallbacks for formats Android cannot handle cleanly.
+
+Playback Preferences includes a read-only Enhanced Playback panel that reports whether common optional extensions such as FFmpeg audio or libass subtitle support are actually bundled in the app.
+
+See `docs/MEDIA3_EXTENSION_DECODERS.md`.
+
 Cast subtitle switching is implemented for the Google Cast Default Media Receiver when Jellyfin provides a Cast-reachable WebVTT, TTML/DFXP, or CEA-style text delivery URL. The Cast controller uses a separate Cast subtitles sheet and calls `RemoteMediaClient.setActiveMediaTracks(...)`; it does not route through local ExoPlayer track selection.
 
 Cast audio switching remains hidden with the Default Media Receiver. Google documents text tracks as the supported sender media-track path for Default/Styled receivers; reliable audio switching needs a custom receiver or a tested reload/transcode strategy.

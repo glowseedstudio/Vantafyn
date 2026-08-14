@@ -586,6 +586,7 @@ class SdkJellyfinLibraryRepository(
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
+
 }
 
 class SdkJellyfinMediaRepository(
@@ -1772,6 +1773,11 @@ class SdkJellyfinAdminRepository(
                     val result by api.sessionApi.getSessions()
                     result
                 }.getOrDefault(emptyList())
+                val nowPlayingDetails = loadAdminNowPlayingDetails(
+                    api = api,
+                    session = session,
+                    itemIds = allSessions.mapNotNull { it.nowPlayingItem?.id },
+                )
                 val sessions = allSessions
                     .filter { it.nowPlayingItem != null }
                     .sortedWith(
@@ -1784,9 +1790,16 @@ class SdkJellyfinAdminRepository(
                         ),
                     )
                     .map { dto ->
-                        val item = dto.nowPlayingItem
+                        val sessionItem = dto.nowPlayingItem
+                        val technicalItem = sessionItem?.id?.let { nowPlayingDetails[it] }
                         val playState = dto.playState
                         val transcode = dto.transcodingInfo
+                        val mediaSource = technicalItem?.mediaSources.orEmpty().firstOrNull()
+                        val mediaStreams = mediaSource?.mediaStreams.orEmpty().ifEmpty {
+                            technicalItem?.mediaStreams.orEmpty().ifEmpty { sessionItem?.mediaStreams.orEmpty() }
+                        }
+                        val videoStream = mediaStreams.firstOrNull { it.type == MediaStreamType.VIDEO }
+                        val audioStream = mediaStreams.firstOrNull { it.type == MediaStreamType.AUDIO }
                         JellyfinAdminSession(
                             id = dto.id ?: dto.deviceId ?: dto.userId?.toString().orEmpty(),
                             userId = dto.userId,
@@ -1795,11 +1808,11 @@ class SdkJellyfinAdminRepository(
                             client = dto.client,
                             deviceName = dto.deviceName,
                             remoteEndPoint = dto.remoteEndPoint,
-                            nowPlayingTitle = item?.name,
-                            nowPlayingSubtitle = item?.seasonEpisodeLabel() ?: item?.productionYear?.toString(),
-                            nowPlayingImageUrl = item?.primaryImageUrl(api, 420) ?: item?.thumbImageUrl(api, 520),
-                            nowPlayingBackdropUrl = item?.backdropImageUrl(api, 760) ?: item?.thumbImageUrl(api, 760),
-                            nowPlayingType = item?.type?.serialName ?: item?.type?.name,
+                            nowPlayingTitle = sessionItem?.name,
+                            nowPlayingSubtitle = sessionItem?.seasonEpisodeLabel() ?: sessionItem?.productionYear?.toString(),
+                            nowPlayingImageUrl = sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520),
+                            nowPlayingBackdropUrl = sessionItem?.backdropImageUrl(api, 760) ?: sessionItem?.thumbImageUrl(api, 760),
+                            nowPlayingType = sessionItem?.type?.serialName ?: sessionItem?.type?.name,
                             playMethod = playState?.playMethod?.let { method ->
                                 when (method) {
                                     PlayMethod.DIRECT_PLAY -> "Direct Play"
@@ -1809,11 +1822,11 @@ class SdkJellyfinAdminRepository(
                             } ?: if (transcode != null) "Transcoding" else "Unknown",
                             isPaused = playState?.isPaused == true,
                             positionTicks = playState?.positionTicks,
-                            runtimeTicks = item?.runTimeTicks,
-                            videoCodec = transcode?.videoCodec,
-                            audioCodec = transcode?.audioCodec,
-                            container = transcode?.container,
-                            bitrate = transcode?.bitrate,
+                            runtimeTicks = sessionItem?.runTimeTicks ?: technicalItem?.runTimeTicks,
+                            videoCodec = transcode?.videoCodec ?: videoStream?.codec,
+                            audioCodec = transcode?.audioCodec ?: audioStream?.codec,
+                            container = transcode?.container ?: mediaSource?.container ?: technicalItem?.container ?: sessionItem?.container,
+                            bitrate = transcode?.bitrate ?: mediaSource?.bitrate ?: mediaStreams.sumOf { it.bitRate ?: 0 }.takeIf { it > 0 },
                             transcodeReasons = transcode?.transcodeReasons.orEmpty().map { it.serialName },
                             lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
                             isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
@@ -1941,6 +1954,28 @@ class SdkJellyfinAdminRepository(
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
+
+    private suspend fun loadAdminNowPlayingDetails(
+        api: ApiClient,
+        session: JellyfinSession,
+        itemIds: List<java.util.UUID>,
+    ): Map<java.util.UUID, org.jellyfin.sdk.model.api.BaseItemDto> {
+        val ids = itemIds.distinct().take(24)
+        if (ids.isEmpty()) return emptyMap()
+        return runCatching {
+            val result by api.itemsApi.getItems(
+                GetItemsRequest(
+                    userId = session.user.id,
+                    ids = ids,
+                    fields = activeSessionItemFields,
+                    enableImages = false,
+                    enableUserData = false,
+                    enableTotalRecordCount = false,
+                ),
+            )
+            result.items.associateBy { it.id }
+        }.getOrDefault(emptyMap())
+    }
 
     private suspend fun loadPlaybackReportingStatistics(
         api: ApiClient,
@@ -3106,6 +3141,11 @@ private val itemFields = listOf(
     ItemFields.GENRES,
     ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
     ItemFields.SERIES_PRIMARY_IMAGE,
+    ItemFields.MEDIA_STREAMS,
+)
+
+private val activeSessionItemFields = listOf(
+    ItemFields.MEDIA_SOURCES,
     ItemFields.MEDIA_STREAMS,
 )
 

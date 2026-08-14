@@ -7,23 +7,24 @@ Vantafyn treats online and offline media as different sources behind the same ap
 Implemented in this pass:
 
 1. Durable persistence/domain model in `core-downloads`.
-2. WorkManager-backed background video download orchestration for direct-play movies, episodes, and selected TV seasons.
+2. WorkManager-backed background download orchestration for direct-play movies, episodes, selected TV seasons, music tracks, music albums/playlists, and audiobooks.
 3. Atomic `.download` temp files promoted to final files only after transfer completion.
 4. Mobile detail action to queue supported downloads.
-5. Mobile Downloads screen with queued/downloading/completed/failed state, progress, play, cancel, retry, and remove actions.
+5. Mobile Downloads screen with queued/downloading/completed/failed state, progress, play, cancel, retry, remove, delete-all, local search, and media-type filters.
 6. Local video playback through the existing Vantafyn player using `file://` URIs.
 7. Local resume-state persistence on offline player exit and a durable pending mutation record for later reconciliation.
-8. Local poster/backdrop/logo asset caching for completed video downloads.
+8. Local poster/backdrop/logo asset caching for completed downloads where Jellyfin artwork is available.
 9. Offline recovery from a failed saved-session restore directly into the Downloads screen when completed downloads exist.
 10. Constrained WorkManager reconciliation of pending offline playback state when the app has a restored online Jellyfin session.
+11. Offline sidecar manifests containing available local subtitle metadata, Jellyfin media segments, and lyrics when the active Jellyfin APIs expose them for the downloaded item.
+12. A persisted Wi-Fi-only download default used by video, season, music track, album, playlist, and audiobook download queues.
 
 Not yet complete:
 
-1. Full offline browsing/search/library repository adapters.
-2. Music album/track and audiobook downloads.
-3. External subtitles, chapters, trickplay, and complete media-stream metadata download.
-4. Conflict-aware reconciliation that compares Jellyfin timestamps before deciding whether local progress should overwrite server progress.
-5. Download settings such as Wi-Fi-only defaults and delete-all storage management.
+1. Full repository-level offline adapters for the main online Home/Library/Search tabs. Current rich offline browsing is intentionally contained in Downloads so the online screens do not silently switch data sources.
+2. Chapters and trickplay bundle files. The current Vantafyn Jellyfin SDK repository surface used by downloads does not expose a stable chapter/trickplay download endpoint here, so the manifest records those features as unavailable instead of faking them.
+3. Conflict-aware reconciliation that compares Jellyfin timestamps before deciding whether local progress should overwrite server progress.
+4. Per-storage-location selection. Android app-private storage remains the current safe default.
 
 ## Durable Identity
 
@@ -42,7 +43,7 @@ This prevents cross-user and cross-server leakage even when Jellyfin item ids co
 
 - download records
 - explicit state machine
-- local media/artwork/subtitle paths
+- local media/artwork/subtitle/manifest/lyrics/chapter/trickplay paths
 - persisted byte counts
 - selected audio/subtitle metadata
 - pending offline user-data mutations
@@ -60,6 +61,7 @@ Implemented persistence pieces:
 - `OfflineDownloadWorker` for foreground WorkManager transfers.
 - `OfflineDownloadManager` for queue/cancel/retry/remove orchestration.
 - `OfflineUserDataSyncWorker` and `OfflineSyncScheduler` for network-constrained pending playback-state reconciliation.
+- JSON offline manifests written next to completed downloads for local subtitle metadata, media segments, and lyrics.
 - Unit coverage for identity scoping and terminal state behaviour.
 
 ## Playback Integration

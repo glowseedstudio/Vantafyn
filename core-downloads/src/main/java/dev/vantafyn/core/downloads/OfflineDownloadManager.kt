@@ -9,6 +9,8 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
+import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
+import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackMethod
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
@@ -32,7 +34,7 @@ class OfflineDownloadManager(
         requireWifi: Boolean = false,
     ): JellyfinResult<DownloadRecord> {
         val mediaType = detail.downloadMediaType()
-            ?: return JellyfinResult.Failure("Downloads are available for movies and episodes first.")
+            ?: return JellyfinResult.Failure("This item cannot be saved offline yet.")
         val playback = when (
             val result = playbackRepository.getPlaybackInfo(
                 session = session,
@@ -56,6 +58,7 @@ class OfflineDownloadManager(
             itemId = detail.id.toString(),
             mediaSourceId = mediaSourceId,
         )
+        existingReusableRecord(identity)?.let { return JellyfinResult.Success(it) }
         val extension = detail.mediaSources.firstOrNull { it.id == mediaSourceId }?.container
             ?: playback.streamUrl.substringBefore('?').substringAfterLast('.', "bin")
         val target = fileStore.targetFor(identity, DownloadFileKind.Media, extension)
@@ -103,6 +106,71 @@ class OfflineDownloadManager(
         return JellyfinResult.Success(record)
     }
 
+    suspend fun queueMusicTrack(
+        session: JellyfinSession,
+        track: JellyfinMusicTrack,
+        requireWifi: Boolean = false,
+    ): JellyfinResult<DownloadRecord> {
+        val playback = when (
+            val result = playbackRepository.getPlaybackInfo(
+                session = session,
+                itemId = track.id,
+                title = track.title,
+                subtitle = track.artist,
+                startPositionTicks = 0L,
+                forceTranscode = false,
+            )
+        ) {
+            is JellyfinResult.Failure -> return JellyfinResult.Failure(result.message, result.cause)
+            is JellyfinResult.Success -> result.value
+        }
+        if (playback.isLiveStream || playback.method == JellyfinPlaybackMethod.Transcode) {
+            return JellyfinResult.Failure("${track.title} needs a direct audio source before it can be saved offline.")
+        }
+        return queueAudioRecord(
+            session = session,
+            itemId = track.id,
+            mediaSourceId = playback.mediaSourceId ?: "default",
+            mediaType = DownloadMediaType.MusicTrack,
+            title = track.title,
+            sortTitle = listOfNotNull(track.album, track.title).joinToString(" ").ifBlank { track.title },
+            runtimeTicks = playback.runtimeTicks ?: track.durationMs?.let { it * 10_000L },
+            albumId = track.albumId?.toString(),
+            albumName = track.album,
+            artistName = track.artist,
+            remotePosterUrl = track.artworkUrl,
+            playback = playback,
+            requireWifi = requireWifi,
+        )
+    }
+
+    suspend fun queueMusicAlbum(
+        session: JellyfinSession,
+        album: JellyfinMusicAlbum,
+        tracks: List<JellyfinMusicTrack>,
+        requireWifi: Boolean = false,
+    ): JellyfinResult<Int> {
+        if (tracks.isEmpty()) return JellyfinResult.Failure("This album does not have any tracks to save.")
+        var queued = 0
+        var firstFailure: JellyfinResult.Failure? = null
+        tracks.forEach { track ->
+            val enriched = track.copy(
+                album = track.album ?: album.title,
+                albumId = track.albumId ?: album.id,
+                artworkUrl = track.artworkUrl ?: album.artworkUrl,
+            )
+            when (val result = queueMusicTrack(session, enriched, requireWifi)) {
+                is JellyfinResult.Success -> queued += 1
+                is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result
+            }
+        }
+        return when {
+            queued > 0 -> JellyfinResult.Success(queued)
+            firstFailure != null -> firstFailure
+            else -> JellyfinResult.Failure("This album could not be saved offline.")
+        }
+    }
+
     suspend fun queueEpisode(
         session: JellyfinSession,
         series: JellyfinMediaDetail,
@@ -132,6 +200,7 @@ class OfflineDownloadManager(
             itemId = episode.id.toString(),
             mediaSourceId = mediaSourceId,
         )
+        existingReusableRecord(identity)?.let { return JellyfinResult.Success(it) }
         val extension = playback.streamUrl.substringBefore('?').substringAfterLast('.', "bin")
         val target = fileStore.targetFor(identity, DownloadFileKind.Media, extension)
         val storage = fileStore.availabilityFor(requiredBytes = null)
@@ -184,6 +253,7 @@ class OfflineDownloadManager(
     }
 
     suspend fun retry(record: DownloadRecord, requireWifi: Boolean = false) {
+        fileStore.deleteTempFileFor(record)
         repository.updateState(record.id, DownloadState.Queued, System.currentTimeMillis())
         enqueue(record, requireWifi)
     }
@@ -209,11 +279,89 @@ class OfflineDownloadManager(
     }
 
     private fun workName(recordId: String): String = "offline-download-$recordId"
+
+    private suspend fun queueAudioRecord(
+        session: JellyfinSession,
+        itemId: UUID,
+        mediaSourceId: String,
+        mediaType: DownloadMediaType,
+        title: String,
+        sortTitle: String?,
+        runtimeTicks: Long?,
+        albumId: String?,
+        albumName: String?,
+        artistName: String?,
+        remotePosterUrl: String?,
+        playback: dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo,
+        requireWifi: Boolean,
+    ): JellyfinResult<DownloadRecord> {
+        val identity = DownloadIdentity(
+            serverId = session.server.localId,
+            userId = session.user.id.toString(),
+            itemId = itemId.toString(),
+            mediaSourceId = mediaSourceId,
+        )
+        existingReusableRecord(identity)?.let { return JellyfinResult.Success(it) }
+        val extension = playback.streamUrl.substringBefore('?').substringAfterLast('.', "bin")
+        val target = fileStore.targetFor(identity, DownloadFileKind.Media, extension)
+        val storage = fileStore.availabilityFor(requiredBytes = null)
+        if (!storage.available) {
+            return JellyfinResult.Failure("There isn't enough available storage for this download.")
+        }
+        if (!fileStore.ensureParentDirectory(target.tempFile)) {
+            return JellyfinResult.Failure("Vantafyn couldn't prepare offline storage.")
+        }
+        val now = System.currentTimeMillis()
+        val record = DownloadRecord(
+            id = identity.stableKey,
+            profileId = session.profileId,
+            identity = identity,
+            mediaType = mediaType,
+            title = title,
+            sortTitle = sortTitle ?: title,
+            runtimeTicks = runtimeTicks,
+            albumId = albumId,
+            albumName = albumName,
+            artistName = artistName,
+            localMediaPath = target.finalFile.absolutePath,
+            tempMediaPath = target.tempFile.absolutePath,
+            remotePosterUrl = remotePosterUrl,
+            selectedAudioTrackId = playback.audioStreamIndex?.toString(),
+            createdAtMillis = now,
+            updatedAtMillis = now,
+        )
+        repository.upsert(record)
+        enqueue(record, requireWifi)
+        return JellyfinResult.Success(record)
+    }
+
+    private suspend fun existingReusableRecord(identity: DownloadIdentity): DownloadRecord? {
+        val existing = repository.getByIdentity(identity) ?: return null
+        if (existing.state == DownloadState.Completed && fileStore.hasCompletedMediaFile(existing)) {
+            return existing
+        }
+        if (existing.state in setOf(
+                DownloadState.Queued,
+                DownloadState.Preparing,
+                DownloadState.WaitingForNetwork,
+                DownloadState.WaitingForWifi,
+                DownloadState.Downloading,
+                DownloadState.Finalizing,
+            )
+        ) {
+            return existing
+        }
+        fileStore.deleteTempFileFor(existing)
+        return null
+    }
 }
 
 private fun JellyfinMediaDetail.downloadMediaType(): DownloadMediaType? =
     when (itemType?.lowercase()) {
         "movie" -> DownloadMediaType.Movie
         "episode" -> DownloadMediaType.Episode
+        "audio" -> DownloadMediaType.MusicTrack
+        "book",
+        "audiobook" -> DownloadMediaType.Audiobook
         else -> null
     }

@@ -64,6 +64,7 @@ import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Info
@@ -323,7 +324,13 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Album -> {
                     item {
-                        MusicDetailHeader(screen.album.title, screen.album.artist ?: "Album", screen.album.artworkUrl, onBack = viewModel::showHome) {
+                        MusicDetailHeader(
+                            title = screen.album.title,
+                            subtitle = screen.album.artist ?: "Album",
+                            imageUrl = screen.album.artworkUrl,
+                            onBack = viewModel::showHome,
+                            onDownload = { viewModel.queueAlbumDownload(screen.album, screen.tracks) },
+                        ) {
                             screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
                         }
                     }
@@ -353,7 +360,13 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Playlist -> {
                     item {
-                        MusicDetailHeader(screen.playlist.name, "${screen.tracks.size} tracks", screen.playlist.imageUrl, onBack = viewModel::showHome) {
+                        MusicDetailHeader(
+                            title = screen.playlist.name,
+                            subtitle = "${screen.tracks.size} tracks",
+                            imageUrl = screen.playlist.imageUrl,
+                            onBack = viewModel::showHome,
+                            onDownload = { viewModel.queuePlaylistDownload(screen.playlist, screen.tracks) },
+                        ) {
                             screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
                         }
                     }
@@ -470,6 +483,10 @@ fun MusicScreen(
                 onAddToQueue = {
                     actionTrack = null
                     viewModel.addToQueue(track)
+                },
+                onDownload = {
+                    actionTrack = null
+                    viewModel.queueTrackDownload(track)
                 },
                 onChoosePlaylist = {
                     actionTrack = null
@@ -782,7 +799,14 @@ private fun MusicTopBackHeader(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun MusicDetailHeader(title: String, subtitle: String, imageUrl: String?, onBack: () -> Unit, onPlay: (() -> Unit)?) {
+private fun MusicDetailHeader(
+    title: String,
+    subtitle: String,
+    imageUrl: String?,
+    onBack: () -> Unit,
+    onDownload: (() -> Unit)? = null,
+    onPlay: (() -> Unit)?,
+) {
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -812,13 +836,34 @@ private fun MusicDetailHeader(title: String, subtitle: String, imageUrl: String?
             )
         }
         if (onPlay != null) {
-            VantafynButton(
-                "Play",
-                onClick = onPlay,
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 22.dp),
-            )
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                VantafynButton(
+                    "Play",
+                    onClick = onPlay,
+                    modifier = Modifier.weight(1f),
+                )
+                if (onDownload != null) {
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(onClick = onDownload),
+                        variant = VantafynGlassVariant.Card,
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(Icons.Rounded.Download, contentDescription = "Save offline", tint = VantafynColors.Ink)
+                        }
+                    }
+                }
+            }
         }
         Spacer(Modifier.height(2.dp))
     }
@@ -2114,6 +2159,7 @@ private fun MusicTrackContextMenu(
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onDownload: () -> Unit,
     onChoosePlaylist: () -> Unit,
     onGoToAlbum: () -> Unit,
     onTrackDetails: () -> Unit,
@@ -2135,6 +2181,7 @@ private fun MusicTrackContextMenu(
                 MusicMenuAction(Icons.Rounded.PlayArrow, "Play", onPlay)
                 MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
                 MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
+                MusicMenuAction(Icons.Rounded.Download, "Save offline", onDownload)
                 if (playlists.isNotEmpty()) {
                     MusicMenuAction(Icons.Rounded.PlaylistAdd, "Add to playlist", onChoosePlaylist)
                 }

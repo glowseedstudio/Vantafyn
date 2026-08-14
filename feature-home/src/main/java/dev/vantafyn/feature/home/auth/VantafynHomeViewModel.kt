@@ -6,13 +6,16 @@ import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.vantafyn.core.cast.PlaybackOutputCoordinator
+import dev.vantafyn.core.downloads.DownloadMediaType
 import dev.vantafyn.core.downloads.DownloadRecord
+import dev.vantafyn.core.downloads.DownloadStorageSummary
 import dev.vantafyn.core.downloads.DownloadSyncState
 import dev.vantafyn.core.downloads.DownloadState
 import dev.vantafyn.core.downloads.OfflineDownloadManager
 import dev.vantafyn.core.downloads.OfflineSyncScheduler
 import dev.vantafyn.core.downloads.PendingUserDataMutation
 import dev.vantafyn.core.downloads.SqliteDownloadRepository
+import dev.vantafyn.core.downloads.parseDownloadOfflineManifest
 import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
 import dev.vantafyn.core.jellyfin.JellyfinAdminOverview
 import dev.vantafyn.core.jellyfin.JellyfinAdminRepository
@@ -81,9 +84,12 @@ import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.VantafynPlaybackItem
+import dev.vantafyn.core.media.VantafynMusicTrack
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
+import dev.vantafyn.core.integrations.IntegrationResult
 import dev.vantafyn.core.ombi.OmbiRepository
+import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -123,6 +129,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var watchPartyRealtimeJob: Job? = null
     private var watchPartyInviteExpiryJob: Job? = null
     private var isAppForeground = false
+    private var lastCompanionAvailabilityProfileId: String? = null
+    private var lastCompanionAvailabilityCheckAt: Long = 0L
 
     private val _state = MutableStateFlow(
         VantafynHomeUiState(
@@ -140,6 +148,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 .takeIf { value -> value in WATCH_PARTY_INVITE_EXPIRY_OPTIONS }
                 ?: 60,
             mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
+            downloadWifiOnlyDefault = appPreferences.getBoolean(KEY_DOWNLOAD_WIFI_ONLY_DEFAULT, true),
         ),
     )
     val state: StateFlow<VantafynHomeUiState> = _state.asStateFlow()
@@ -413,6 +422,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
+                    refreshOmbiRequestsAvailability(forceCompanionCheck = true)
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isLoading = false, errorMessage = result.message) }
@@ -553,6 +563,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
+                    refreshOmbiRequestsAvailability(forceCompanionCheck = true)
                 }
                 is JellyfinResult.Failure -> {
                     handleRestoreFailure(profile, result)
@@ -607,6 +618,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
+                    refreshOmbiRequestsAvailability(forceCompanionCheck = true)
                 }
                 is JellyfinResult.Failure -> {
                     val reason = (result.cause as? JellyfinSessionRestoreFailure)?.reason
@@ -818,16 +830,43 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    fun refreshOmbiRequestsAvailability() {
+    fun refreshOmbiRequestsAvailability(forceCompanionCheck: Boolean = false) {
         val config = ombiRepository.config()
         val hasApiKey = ombiRepository.hasApiKey()
         _state.update {
             it.copy(
-                ombiConfigured = config.isConfigured && hasApiKey,
-                ombiRequestsEnabledForUsers = config.isEnabledForUsers && hasApiKey,
-                ombiRequestsEnabledForAdmins = config.isEnabledForAdmins && hasApiKey,
+                ombiConfigured = it.companionRequestsReady || config.isConfigured && hasApiKey,
+                ombiRequestsEnabledForUsers = it.companionRequestsReady || config.isEnabledForUsers && hasApiKey,
+                ombiRequestsEnabledForAdmins = it.companionRequestsReady || config.isEnabledForAdmins && hasApiKey,
                 pendingOmbiAccessRequestCount = ombiRepository.pendingAccessRequestCount(),
             )
+        }
+        val session = _state.value.session ?: return
+        val now = System.currentTimeMillis()
+        if (!forceCompanionCheck &&
+            lastCompanionAvailabilityProfileId == session.profileId &&
+            now - lastCompanionAvailabilityCheckAt < 60_000L
+        ) {
+            return
+        }
+        lastCompanionAvailabilityProfileId = session.profileId
+        lastCompanionAvailabilityCheckAt = now
+        viewModelScope.launch {
+            val ready = when (val result = ombiRepository.companionCapabilities(session)) {
+                is IntegrationResult.Success -> result.value.requestsReady
+                is IntegrationResult.Failure -> false
+            }
+            _state.update {
+                val latestConfig = ombiRepository.config()
+                val latestHasKey = ombiRepository.hasApiKey()
+                it.copy(
+                    companionRequestsReady = ready,
+                    ombiConfigured = ready || latestConfig.isConfigured && latestHasKey,
+                    ombiRequestsEnabledForUsers = ready || latestConfig.isEnabledForUsers && latestHasKey,
+                    ombiRequestsEnabledForAdmins = ready || latestConfig.isEnabledForAdmins && latestHasKey,
+                    pendingOmbiAccessRequestCount = ombiRepository.pendingAccessRequestCount(),
+                )
+            }
         }
     }
 
@@ -1605,6 +1644,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun queueCurrentMediaDownload() {
         val session = _state.value.session ?: return
         val detail = _state.value.mediaDetail ?: return
+        val requireWifi = _state.value.downloadWifiOnlyDefault
         viewModelScope.launch {
             _state.update { it.copy(mobileMessage = null) }
             if (detail.itemType.equals("series", ignoreCase = true)) {
@@ -1622,7 +1662,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 var queued = 0
                 var firstFailure: String? = null
                 episodes.forEach { episode ->
-                    when (val result = offlineDownloadManager.queueEpisode(session, detail, episode)) {
+                    when (val result = offlineDownloadManager.queueEpisode(session, detail, episode, requireWifi = requireWifi)) {
                         is JellyfinResult.Success -> queued += 1
                         is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result.message
                     }
@@ -1639,7 +1679,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 loadDownloads()
                 return@launch
             }
-            when (val result = offlineDownloadManager.queueMedia(session, detail)) {
+            when (val result = offlineDownloadManager.queueMedia(session, detail, requireWifi = requireWifi)) {
                 is JellyfinResult.Success -> {
                     _state.update { it.copy(mobileMessage = "Download queued") }
                     loadDownloads()
@@ -1659,11 +1699,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         viewModelScope.launch {
             _state.update { it.copy(isDownloadsLoading = true, downloadsError = null) }
             runCatching {
-                downloadRepository.listForUser(scope.serverId, scope.userId)
-            }.onSuccess { records ->
+                downloadRepository.listForUser(scope.serverId, scope.userId) to
+                    downloadRepository.storageSummary(scope.serverId, scope.userId)
+            }.onSuccess { (records, summary) ->
                 _state.update {
                     it.copy(
                         offlineDownloads = records,
+                        offlineDownloadStorageSummary = summary,
                         isDownloadsLoading = false,
                         downloadsError = null,
                     )
@@ -1687,6 +1729,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private fun openOfflineDownloads(profile: SavedProfile, message: String?) {
         viewModelScope.launch {
             val records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            val summary = downloadRepository.storageSummary(profile.serverRef, profile.jellyfinUserId.toString())
             _state.update {
                 it.copy(
                     step = VantafynSetupStep.Home,
@@ -1705,6 +1748,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     mobileDestination = MobileDestination.Downloads,
                     previousMobileDestination = MobileDestination.Profile,
                     offlineDownloads = records,
+                    offlineDownloadStorageSummary = summary,
                     isDownloadsLoading = false,
                     downloadsError = null,
                     mobileMessage = message,
@@ -1726,8 +1770,29 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun playOfflineDownload(record: DownloadRecord) {
         val path = record.localMediaPath
-        if (record.state != DownloadState.Completed || path.isNullOrBlank()) {
+        val mediaFile = path?.let(::File)
+        if (record.state != DownloadState.Completed || mediaFile == null || !mediaFile.exists() || mediaFile.length() <= 0L) {
             _state.update { it.copy(mobileMessage = "This download is not ready yet") }
+            if (record.state == DownloadState.Completed) loadDownloads()
+            return
+        }
+        if (record.mediaType.isOfflineAudio()) {
+            val localTrack = VantafynMusicTrack(
+                id = runCatching { UUID.fromString(record.identity.itemId) }.getOrNull() ?: UUID.randomUUID(),
+                title = record.title,
+                artist = record.artistName
+                    ?: record.albumName
+                    ?: record.seriesName
+                    ?: if (record.mediaType == DownloadMediaType.Audiobook) "Audiobook" else "Offline",
+                album = record.albumName ?: record.seriesName,
+                albumId = record.albumId?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+                durationMs = record.runtimeTicks?.let { it / 10_000L },
+                streamUrl = mediaFile.toUri().toString(),
+                artworkUrl = record.localPosterPath?.let { File(it).takeIf { file -> file.exists() }?.toUri()?.toString() }
+                    ?: record.remotePosterUrl,
+            )
+            MusicPlaybackController.get(getApplication()).playQueue(listOf(localTrack))
+            _state.update { it.copy(mobileMessage = "Playing offline") }
             return
         }
         val target = PlaybackTarget(
@@ -1749,11 +1814,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     itemId = record.identity.itemId,
                     title = record.title,
                     subtitle = record.seriesName ?: record.albumName,
-                    streamUrl = java.io.File(path).toUri().toString(),
+                    streamUrl = mediaFile.toUri().toString(),
                     startPositionMs = record.localPlaybackPositionTicks / 10_000L,
                     durationMs = record.runtimeTicks?.let { ticks -> ticks / 10_000L },
                     sourceLabel = "Offline",
                     itemType = record.mediaType.name,
+                    selectedSubtitleStreamIndex = record.selectedSubtitleTrackId?.toIntOrNull(),
+                    subtitleTracks = record.offlineSubtitleTracks(),
+                    mediaSegments = record.offlineMediaSegments(),
+                    mediaSegmentBehaviors = it.mediaSegmentBehaviors,
                     autoplaySettings = it.autoplaySettings(),
                 ),
                 activePlaybackTarget = target,
@@ -1777,8 +1846,18 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun retryDownload(record: DownloadRecord) {
         viewModelScope.launch {
-            offlineDownloadManager.retry(record)
+            offlineDownloadManager.retry(record, requireWifi = _state.value.downloadWifiOnlyDefault)
             _state.update { it.copy(mobileMessage = "Download queued") }
+            loadDownloads()
+        }
+    }
+
+    fun removeAllDownloads() {
+        val records = _state.value.offlineDownloads
+        if (records.isEmpty()) return
+        viewModelScope.launch {
+            records.forEach { record -> offlineDownloadManager.remove(record) }
+            _state.update { it.copy(mobileMessage = "Offline library cleared") }
             loadDownloads()
         }
     }
@@ -2216,6 +2295,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val value = seconds.takeIf { it in WATCH_PARTY_INVITE_EXPIRY_OPTIONS } ?: return
         appPreferences.edit().putInt(KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS, value).apply()
         _state.update { it.copy(watchPartyInviteExpirySeconds = value) }
+    }
+
+    fun setDownloadWifiOnlyDefault(enabled: Boolean) {
+        appPreferences.edit().putBoolean(KEY_DOWNLOAD_WIFI_ONLY_DEFAULT, enabled).apply()
+        _state.update { it.copy(downloadWifiOnlyDefault = enabled) }
     }
 
     fun onAppForegrounded() {
@@ -3436,6 +3520,8 @@ data class VantafynHomeUiState(
     val isFavoritesLoading: Boolean = false,
     val favoritesError: String? = null,
     val offlineDownloads: List<DownloadRecord> = emptyList(),
+    val offlineDownloadStorageSummary: DownloadStorageSummary? = null,
+    val downloadWifiOnlyDefault: Boolean = true,
     val isDownloadsLoading: Boolean = false,
     val downloadsError: String? = null,
     val adminOverview: JellyfinAdminOverview? = null,
@@ -3486,6 +3572,7 @@ data class VantafynHomeUiState(
     val ombiConfigured: Boolean = false,
     val ombiRequestsEnabledForUsers: Boolean = false,
     val ombiRequestsEnabledForAdmins: Boolean = false,
+    val companionRequestsReady: Boolean = false,
     val pendingOmbiAccessRequestCount: Int = 0,
     val activeWatchParty: WatchPartySession? = null,
     val watchPartyName: String = "",
@@ -3638,6 +3725,46 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("Book", ignoreCase = true) ||
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
+
+private fun DownloadMediaType.isOfflineAudio(): Boolean =
+    this == DownloadMediaType.MusicTrack || this == DownloadMediaType.MusicAlbum || this == DownloadMediaType.Audiobook
+
+private fun DownloadRecord.offlineManifest() =
+    localMetadataPath
+        ?.let(::File)
+        ?.takeIf { it.exists() && it.length() > 0L }
+        ?.readText()
+        ?.let(::parseDownloadOfflineManifest)
+
+private fun DownloadRecord.offlineSubtitleTracks(): List<VantafynSubtitleTrack> =
+    offlineManifest()
+        ?.subtitles
+        ?.map { subtitle ->
+            VantafynSubtitleTrack(
+                index = subtitle.index,
+                label = subtitle.label,
+                language = subtitle.language,
+                codec = subtitle.codec,
+                isExternal = !subtitle.localPath.isNullOrBlank(),
+                isDefault = subtitle.isDefault,
+                deliveryUrl = subtitle.localPath?.let { File(it).takeIf { file -> file.exists() }?.toUri()?.toString() },
+            )
+        }
+        .orEmpty()
+
+private fun DownloadRecord.offlineMediaSegments(): List<JellyfinMediaSegment> =
+    offlineManifest()
+        ?.segments
+        ?.map { segment ->
+            JellyfinMediaSegment(
+                id = UUID.nameUUIDFromBytes("${id}-${segment.id}".toByteArray()),
+                itemId = runCatching { UUID.fromString(identity.itemId) }.getOrNull() ?: UUID.randomUUID(),
+                type = runCatching { JellyfinMediaSegmentType.valueOf(segment.type) }.getOrNull() ?: JellyfinMediaSegmentType.Unknown,
+                startTicks = segment.startMs * 10_000L,
+                endTicks = segment.endMs * 10_000L,
+            )
+        }
+        .orEmpty()
 
 enum class ThemeMusicVolume(val label: String, val level: Float) {
     Soft("Soft", 0.12f),
@@ -3936,6 +4063,7 @@ private const val KEY_PASSOUT_PROTECTION_ENABLED = "passout_protection_enabled"
 private const val KEY_PASSOUT_PROTECTION_LIMIT_MINUTES = "passout_protection_limit_minutes"
 private const val KEY_VIDEO_PLAYER_PREFERENCE = "video_player_preference"
 private const val KEY_MEDIA_SEGMENT_BEHAVIOR = "media_segment_behavior"
+private const val KEY_DOWNLOAD_WIFI_ONLY_DEFAULT = "download_wifi_only_default"
 
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L

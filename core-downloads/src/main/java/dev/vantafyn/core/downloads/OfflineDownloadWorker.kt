@@ -5,17 +5,22 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.StatFs
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import dev.vantafyn.core.jellyfin.JellyfinResult
+import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
+import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
+import dev.vantafyn.core.jellyfin.JellyfinSubtitleTrack
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.UUID
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
@@ -26,6 +31,7 @@ class OfflineDownloadWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(appContext, params) {
     private val repository = SqliteDownloadRepository(appContext)
+    private val fileStore = DownloadFileStore(appContext)
     private val jellyfin = JellyfinRepositoryProvider(appContext)
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -90,19 +96,29 @@ class OfflineDownloadWorker(
             if (!temp.renameTo(final)) {
                 throw IllegalStateException("Could not finish offline file.")
             }
+            if (!final.exists() || final.length() <= 0L) {
+                if (final.exists()) final.delete()
+                throw IllegalStateException("Downloaded file was empty.")
+            }
             repository.updateProgress(record.id, final.length(), final.length(), System.currentTimeMillis())
             downloadArtwork(record)
+            writeOfflineManifest(record, session, playback)
             repository.updateState(record.id, DownloadState.Completed, System.currentTimeMillis())
             Result.success()
+        } catch (cancelled: CancellationException) {
+            fileStore.deleteTempFileFor(record)
+            throw cancelled
         } catch (throwable: Throwable) {
+            fileStore.deleteTempFileFor(record)
+            val category = throwable.toFailureCategory()
             repository.updateState(
                 record.id,
                 DownloadState.Failed,
                 System.currentTimeMillis(),
-                throwable.toFailureCategory(),
+                category,
                 throwable.userSafeMessage(),
             )
-            Result.retry()
+            category.toWorkResult()
         }
     }
 
@@ -136,14 +152,117 @@ class OfflineDownloadWorker(
         }
     }
 
+    private suspend fun writeOfflineManifest(
+        record: DownloadRecord,
+        session: JellyfinSession,
+        playback: JellyfinPlaybackInfo,
+    ) {
+        val subtitles = playback.subtitleTracks.map { track ->
+            val localPath = track.downloadExternalSubtitle(record)
+            DownloadOfflineSubtitle(
+                index = track.index,
+                label = track.label,
+                language = track.language,
+                codec = track.codec,
+                localPath = localPath,
+                isDefault = track.isDefault,
+            )
+        }
+        val segments = when (val result = jellyfin.mediaSegmentRepository.getItemSegments(session, UUID.fromString(record.identity.itemId))) {
+            is JellyfinResult.Success -> result.value.map { segment ->
+                DownloadOfflineSegment(
+                    id = segment.id.toString(),
+                    type = segment.type.name,
+                    startMs = segment.startMs,
+                    endMs = segment.endMs,
+                )
+            }
+            is JellyfinResult.Failure -> emptyList()
+        }
+        val lyrics = if (record.mediaType == DownloadMediaType.MusicTrack || record.mediaType == DownloadMediaType.Audiobook) {
+            when (val result = jellyfin.musicRepository.getLyrics(session, UUID.fromString(record.identity.itemId))) {
+                is JellyfinResult.Success -> result.value?.let { lyric ->
+                    DownloadOfflineLyrics(
+                        plainText = lyric.plainText,
+                        syncedLines = lyric.syncedLines.map { line ->
+                            DownloadOfflineLyricLine(startMs = line.startMs, text = line.text)
+                        },
+                    )
+                }
+                is JellyfinResult.Failure -> null
+            }
+        } else {
+            null
+        }
+        val manifest = DownloadOfflineManifest(
+            itemId = record.identity.itemId,
+            title = record.title,
+            generatedAtMillis = System.currentTimeMillis(),
+            subtitles = subtitles,
+            segments = segments,
+            lyrics = lyrics,
+            chaptersAvailable = false,
+            trickplayAvailable = false,
+        )
+        val metadataTarget = fileStore.targetFor(record.identity, DownloadFileKind.Metadata, "json")
+        if (metadataTarget.tempFile.parentFile?.let { it.exists() || it.mkdirs() } != true) return
+        metadataTarget.tempFile.writeText(manifest.toJsonString())
+        if (metadataTarget.finalFile.exists() && !metadataTarget.finalFile.delete()) return
+        if (!metadataTarget.tempFile.renameTo(metadataTarget.finalFile)) return
+
+        val lyricsPath = lyrics?.let {
+            val lyricsTarget = fileStore.targetFor(record.identity, DownloadFileKind.Lyrics, "json")
+            if (lyricsTarget.tempFile.parentFile?.let { parent -> parent.exists() || parent.mkdirs() } == true) {
+                lyricsTarget.tempFile.writeText(it.toStandaloneJson())
+                if (lyricsTarget.finalFile.exists()) lyricsTarget.finalFile.delete()
+                if (lyricsTarget.tempFile.renameTo(lyricsTarget.finalFile)) lyricsTarget.finalFile.absolutePath else null
+            } else {
+                null
+            }
+        }
+        repository.updateLocalSidecarPaths(
+            id = record.id,
+            localSubtitlePath = subtitles.firstOrNull { !it.localPath.isNullOrBlank() }?.localPath ?: record.localSubtitlePath,
+            localMetadataPath = metadataTarget.finalFile.absolutePath,
+            localLyricsPath = lyricsPath ?: record.localLyricsPath,
+            localChaptersPath = record.localChaptersPath,
+            localTrickplayPath = record.localTrickplayPath,
+            offlineFeatureFlags = buildList {
+                if (subtitles.any { !it.localPath.isNullOrBlank() }) add("subtitles")
+                if (segments.isNotEmpty()) add("segments")
+                if (lyrics != null) add("lyrics")
+            }.joinToString(",").ifBlank { null },
+            updatedAtMillis = System.currentTimeMillis(),
+        )
+    }
+
+    private suspend fun JellyfinSubtitleTrack.downloadExternalSubtitle(record: DownloadRecord): String? {
+        if (!isExternal || deliveryUrl.isNullOrBlank()) return null
+        val extension = when (codec?.lowercase()) {
+            "subrip", "srt" -> "srt"
+            "webvtt", "vtt" -> "vtt"
+            "ass", "ssa" -> codec.orEmpty().lowercase()
+            "ttml", "dfxp" -> "ttml"
+            else -> "sub"
+        }
+        return downloadOptionalAsset(
+            record = record,
+            url = deliveryUrl,
+            kind = DownloadFileKind.Subtitle,
+            extension = extension,
+            suffix = "subtitle_$index",
+        )
+    }
+
     private suspend fun downloadOptionalAsset(
         record: DownloadRecord,
         url: String?,
         kind: DownloadFileKind,
         extension: String,
+        suffix: String? = null,
     ): String? {
         if (url.isNullOrBlank()) return null
-        val target = DownloadFileStore(applicationContext).targetFor(record.identity, kind, extension)
+        val target = DownloadFileStore(applicationContext).targetFor(record.identity, kind, extension, suffix)
         if (target.tempFile.parentFile?.let { it.exists() || it.mkdirs() } != true) return null
         return runCatching {
             downloadUrlToFile(url, target.tempFile)
@@ -180,6 +299,7 @@ class OfflineDownloadWorker(
                 throw IllegalStateException("Server returned HTTP $code.")
             }
             val totalBytes = connection.contentLengthLong.takeIf { it > 0L }
+            ensureEnoughStorage(tempFile, totalBytes)
             var downloaded = 0L
             var lastProgressAt = 0L
             connection.inputStream.use { input ->
@@ -201,6 +321,18 @@ class OfflineDownloadWorker(
             onProgress?.invoke(downloaded, totalBytes)
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun ensureEnoughStorage(tempFile: File, totalBytes: Long?) {
+        val required = totalBytes ?: return
+        val parent = tempFile.parentFile ?: throw StorageUnavailableException("Offline storage is unavailable.")
+        if (!parent.exists() && !parent.mkdirs()) {
+            throw StorageUnavailableException("Offline storage is unavailable.")
+        }
+        val freeBytes = StatFs(parent.absolutePath).availableBytes
+        if (freeBytes <= required) {
+            throw StorageFullException("There isn't enough available storage for this download.")
         }
     }
 
@@ -246,13 +378,36 @@ class OfflineDownloadWorker(
             ?.let { "${((toDouble() / it.toDouble()) * 100).roundToInt().coerceIn(0, 100)}%" }
             ?: "${this / (1024L * 1024L)} MB"
 
+    private fun DownloadOfflineLyrics.toStandaloneJson(): String =
+        DownloadOfflineManifest(
+            itemId = "",
+            title = "",
+            generatedAtMillis = System.currentTimeMillis(),
+            lyrics = this,
+        ).toJsonString()
+
     private fun Throwable.toFailureCategory(): DownloadFailureCategory =
         when (this) {
             is java.net.UnknownHostException,
             is java.net.SocketTimeoutException -> DownloadFailureCategory.NetworkUnavailable
             is java.io.IOException -> DownloadFailureCategory.DownloadInterrupted
+            is StorageFullException -> DownloadFailureCategory.StorageFull
+            is StorageUnavailableException -> DownloadFailureCategory.StorageUnavailable
             is IllegalStateException -> DownloadFailureCategory.FinalizationFailed
             else -> DownloadFailureCategory.Unknown
+        }
+
+    private fun DownloadFailureCategory.toWorkResult(): Result =
+        when (this) {
+            DownloadFailureCategory.NetworkUnavailable,
+            DownloadFailureCategory.ServerUnavailable,
+            DownloadFailureCategory.DownloadInterrupted,
+            DownloadFailureCategory.Unknown -> Result.retry()
+            DownloadFailureCategory.AuthenticationRequired,
+            DownloadFailureCategory.SourceUnavailable,
+            DownloadFailureCategory.StorageFull,
+            DownloadFailureCategory.StorageUnavailable,
+            DownloadFailureCategory.FinalizationFailed -> Result.failure()
         }
 
     private fun Throwable.userSafeMessage(): String =
@@ -264,3 +419,7 @@ class OfflineDownloadWorker(
         private const val PROGRESS_GRANULARITY_BYTES = 512L * 1024L
     }
 }
+
+private class StorageFullException(message: String) : IllegalStateException(message)
+
+private class StorageUnavailableException(message: String) : IllegalStateException(message)

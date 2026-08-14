@@ -104,8 +104,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
-import androidx.media3.exoplayer.DefaultRenderersFactory
-import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
@@ -120,6 +118,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
 import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.UpNextState
+import dev.vantafyn.core.media.VantafynExoPlayerFactory
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynSubtitleTrack
@@ -271,10 +270,7 @@ private fun PlayerSurface(
     } ?: JellyfinMediaSegmentBehavior.DoNothing
     val trackSelector = remember(item.streamUrl) { DefaultTrackSelector(context) }
     val player = remember(item.streamUrl) {
-        val renderersFactory = DefaultRenderersFactory(context)
-            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-        ExoPlayer.Builder(context, renderersFactory)
-            .setTrackSelector(trackSelector)
+        VantafynExoPlayerFactory.builder(context, trackSelector)
             .setSeekBackIncrementMs(10_000L)
             .setSeekForwardIncrementMs(10_000L)
             .build()

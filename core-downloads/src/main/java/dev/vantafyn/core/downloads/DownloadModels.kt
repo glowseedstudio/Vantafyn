@@ -109,6 +109,11 @@ data class DownloadRecord(
     val localBackdropPath: String? = null,
     val localLogoPath: String? = null,
     val localSubtitlePath: String? = null,
+    val localMetadataPath: String? = null,
+    val localLyricsPath: String? = null,
+    val localChaptersPath: String? = null,
+    val localTrickplayPath: String? = null,
+    val offlineFeatureFlags: String? = null,
     val remotePosterUrl: String? = null,
     val remoteBackdropUrl: String? = null,
     val remoteLogoUrl: String? = null,
@@ -125,6 +130,43 @@ data class DownloadRecord(
     val localPlaybackPositionTicks: Long = 0L,
     val localPlayed: Boolean = false,
     val syncState: DownloadSyncState = DownloadSyncState.None,
+)
+
+data class DownloadOfflineSubtitle(
+    val index: Int,
+    val label: String,
+    val language: String?,
+    val codec: String?,
+    val localPath: String?,
+    val isDefault: Boolean,
+)
+
+data class DownloadOfflineSegment(
+    val id: String,
+    val type: String,
+    val startMs: Long,
+    val endMs: Long,
+)
+
+data class DownloadOfflineLyrics(
+    val plainText: String,
+    val syncedLines: List<DownloadOfflineLyricLine>,
+)
+
+data class DownloadOfflineLyricLine(
+    val startMs: Long?,
+    val text: String,
+)
+
+data class DownloadOfflineManifest(
+    val itemId: String,
+    val title: String,
+    val generatedAtMillis: Long,
+    val subtitles: List<DownloadOfflineSubtitle> = emptyList(),
+    val segments: List<DownloadOfflineSegment> = emptyList(),
+    val lyrics: DownloadOfflineLyrics? = null,
+    val chaptersAvailable: Boolean = false,
+    val trickplayAvailable: Boolean = false,
 )
 
 data class PendingUserDataMutation(

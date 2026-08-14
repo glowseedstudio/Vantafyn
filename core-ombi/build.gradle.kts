@@ -16,6 +16,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core-jellyfin"))
     implementation(project(":core-integrations"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.kotlinx.coroutines.android)

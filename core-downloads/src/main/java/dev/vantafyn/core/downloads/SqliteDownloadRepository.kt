@@ -148,6 +148,29 @@ class SqliteDownloadRepository(
         Unit
     }
 
+    override suspend fun updateLocalSidecarPaths(
+        id: String,
+        localSubtitlePath: String?,
+        localMetadataPath: String?,
+        localLyricsPath: String?,
+        localChaptersPath: String?,
+        localTrickplayPath: String?,
+        offlineFeatureFlags: String?,
+        updatedAtMillis: Long,
+    ) = withContext(dispatcher) {
+        val values = ContentValues().apply {
+            putNullable("local_subtitle_path", localSubtitlePath)
+            putNullable("local_metadata_path", localMetadataPath)
+            putNullable("local_lyrics_path", localLyricsPath)
+            putNullable("local_chapters_path", localChaptersPath)
+            putNullable("local_trickplay_path", localTrickplayPath)
+            putNullable("offline_feature_flags", offlineFeatureFlags)
+            put("updated_at_millis", updatedAtMillis)
+        }
+        database.writableDatabase.update("download_records", values, "id = ?", arrayOf(id))
+        Unit
+    }
+
     override suspend fun delete(id: String) = withContext(dispatcher) {
         database.writableDatabase.delete("download_records", "id = ?", arrayOf(id))
         Unit
@@ -338,6 +361,11 @@ private fun DownloadRecord.toValues(): ContentValues = ContentValues().apply {
     putNullable("local_backdrop_path", localBackdropPath)
     putNullable("local_logo_path", localLogoPath)
     putNullable("local_subtitle_path", localSubtitlePath)
+    putNullable("local_metadata_path", localMetadataPath)
+    putNullable("local_lyrics_path", localLyricsPath)
+    putNullable("local_chapters_path", localChaptersPath)
+    putNullable("local_trickplay_path", localTrickplayPath)
+    putNullable("offline_feature_flags", offlineFeatureFlags)
     putNullable("remote_poster_url", remotePosterUrl)
     putNullable("remote_backdrop_url", remoteBackdropUrl)
     putNullable("remote_logo_url", remoteLogoUrl)
@@ -402,6 +430,11 @@ private fun Cursor.toDownloadRecord(): DownloadRecord {
         localBackdropPath = nullableString("local_backdrop_path"),
         localLogoPath = nullableString("local_logo_path"),
         localSubtitlePath = nullableString("local_subtitle_path"),
+        localMetadataPath = nullableString("local_metadata_path"),
+        localLyricsPath = nullableString("local_lyrics_path"),
+        localChaptersPath = nullableString("local_chapters_path"),
+        localTrickplayPath = nullableString("local_trickplay_path"),
+        offlineFeatureFlags = nullableString("offline_feature_flags"),
         remotePosterUrl = nullableString("remote_poster_url"),
         remoteBackdropUrl = nullableString("remote_backdrop_url"),
         remoteLogoUrl = nullableString("remote_logo_url"),

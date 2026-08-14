@@ -13,11 +13,14 @@ import dev.vantafyn.core.integrations.MediaRequestSearchResult
 import dev.vantafyn.core.integrations.MediaRequestStatus
 import dev.vantafyn.core.integrations.MediaRequestType
 import dev.vantafyn.core.integrations.VantafynIntegration
+import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.jellyfin.openAuthenticatedConnection
 import java.io.BufferedReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.time.Instant
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -264,6 +267,17 @@ data class OmbiConnectionReport(
     val version: String? = null,
     val capabilities: OmbiCapabilities,
 )
+
+data class VantafynCompanionCapabilities(
+    val available: Boolean,
+    val version: String? = null,
+    val requestsReady: Boolean = false,
+    val requestsMessage: String? = null,
+    val requiresUserLogin: Boolean = false,
+    val userLinked: Boolean = false,
+) {
+    val canUseRequests: Boolean get() = available && requestsReady
+}
 
 class OmbiConfigStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences("vantafyn_ombi_config", Context.MODE_PRIVATE)
@@ -609,6 +623,77 @@ class OmbiRepository(
             remainingSeriesRequests = null,
         )
     }
+
+    suspend fun companionCapabilities(session: JellyfinSession): IntegrationResult<VantafynCompanionCapabilities> =
+        runCompanionCatching {
+            val json = companionRequest(session, "/Vantafyn/Capabilities", "GET", null) as JSONObject
+            val requests = json.optJSONObject("requests")
+            val state = requests?.optNullableString("state")
+            VantafynCompanionCapabilities(
+                available = true,
+                version = json.optNullableString("pluginVersion"),
+                requestsReady = requests?.optBoolean("serverConfigured", false) == true || state.equals("ready", ignoreCase = true),
+                requestsMessage = state,
+                requiresUserLogin = requests?.optBoolean("requiresUserLogin", false) == true,
+                userLinked = requests?.optBoolean("userLinked", false) == true,
+            )
+        }
+
+    suspend fun companionUserSession(session: JellyfinSession): IntegrationResult<OmbiUserSession> =
+        runCompanionCatching {
+            val json = companionRequest(session, "/Vantafyn/Requests/UserSession", "GET", null) as JSONObject
+            val sessionJson = json.optJSONObject("session") ?: throw OmbiHttpException(404, "No linked Ombi session.")
+            sessionJson.toCompanionUserSession(session.user.id.toString())
+        }
+
+    suspend fun companionLoginUser(
+        session: JellyfinSession,
+        username: String,
+        password: String,
+    ): IntegrationResult<OmbiUserSession> =
+        runCompanionCatching {
+            if (username.isBlank() || password.isBlank()) {
+                throw IllegalArgumentException("Enter your Ombi username and password.")
+            }
+            val json = companionRequest(
+                session = session,
+                path = "/Vantafyn/Requests/UserSession/Login",
+                method = "POST",
+                body = JSONObject()
+                    .put("username", username.trim())
+                    .put("password", password),
+            ) as JSONObject
+            val sessionJson = json.optJSONObject("session") ?: throw OmbiHttpException(401, "Ombi did not return a user session.")
+            sessionJson.toCompanionUserSession(session.user.id.toString())
+        }
+
+    suspend fun companionLogoutUser(session: JellyfinSession): IntegrationResult<Unit> =
+        runCompanionCatching<Unit> {
+            companionRequest(session, "/Vantafyn/Requests/UserSession", "DELETE", null)
+        }
+
+    suspend fun companionSearch(session: JellyfinSession, query: String, filter: RequestSearchFilterValue = RequestSearchFilterValue.All): IntegrationResult<List<RequestMediaSummary>> =
+        runCompanionCatching {
+            val trimmed = query.trim()
+            if (trimmed.length < 2) return@runCompanionCatching emptyList()
+            val movies = if (filter != RequestSearchFilterValue.Series) {
+                companionSearchType(session, trimmed, "movie", MediaRequestType.Movie)
+            } else {
+                emptyList()
+            }
+            val series = if (filter != RequestSearchFilterValue.Movies) {
+                companionSearchType(session, trimmed, "series", MediaRequestType.Tv)
+            } else {
+                emptyList()
+            }
+            movies + series
+        }
+
+    suspend fun companionRequestMovie(session: JellyfinSession, providerId: String): IntegrationResult<Unit> =
+        companionCreateRequest(session, "/Vantafyn/Requests/Movies", providerId)
+
+    suspend fun companionRequestSeries(session: JellyfinSession, providerId: String): IntegrationResult<Unit> =
+        companionCreateRequest(session, "/Vantafyn/Requests/Series", providerId)
 
     suspend fun loginUser(
         jellyfinUserId: String,
@@ -995,6 +1080,60 @@ class OmbiRepository(
     override suspend fun denyRequest(requestId: String): IntegrationResult<Unit> =
         IntegrationResult.Failure(IntegrationFailureReason.Unsupported, "Deny endpoint varies by Ombi version and is not wired yet.")
 
+    private suspend fun companionCreateRequest(session: JellyfinSession, path: String, providerId: String): IntegrationResult<Unit> =
+        runCompanionCatching {
+            val json = companionRequest(
+                session = session,
+                path = path,
+                method = "POST",
+                body = JSONObject().put("providerId", providerId),
+            ) as JSONObject
+            val success = json.optBoolean("success", true)
+            if (!success) {
+                throw OmbiRequestEngineException(json.optNullableString("state"), json.optNullableString("message") ?: "Requests rejected this title.")
+            }
+        }
+
+    private fun companionSearchType(
+        session: JellyfinSession,
+        query: String,
+        type: String,
+        legacyType: MediaRequestType,
+    ): List<RequestMediaSummary> {
+        val json = companionRequest(
+            session = session,
+            path = "/Vantafyn/Requests/Search?query=${query.urlQuery()}&type=$type",
+            method = "GET",
+            body = null,
+        ) as JSONObject
+        return json.optJSONArray("results")
+            ?.mapJsonObjects { it.toCompanionRequestSummary(legacyType) }
+            .orEmpty()
+    }
+
+    private suspend fun <T> runCompanionCatching(block: suspend () -> T): IntegrationResult<T> =
+        withContext(ioDispatcher) {
+            try {
+                IntegrationResult.Success(withTimeout(8_000L) { block() })
+            } catch (throwable: Throwable) {
+                throwable.toIntegrationFailure()
+            }
+        }
+
+    private fun companionRequest(session: JellyfinSession, path: String, method: String, body: JSONObject?): Any {
+        val connection = session.openAuthenticatedConnection(path, method)
+        if (body != null) {
+            connection.doOutput = true
+            OutputStreamWriter(connection.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
+        }
+        val code = connection.responseCode
+        val response = runCatching {
+            BufferedReader((if (code in 200..299) connection.inputStream else connection.errorStream).reader()).use { it.readText() }
+        }.getOrDefault("")
+        if (code !in 200..299) throw OmbiHttpException(code, response.take(180))
+        return response.parseJsonBody()
+    }
+
     private suspend fun <T> runOmbiCatching(requireApiKey: Boolean = true, block: suspend () -> T): IntegrationResult<T> =
         withContext(ioDispatcher) {
             try {
@@ -1102,6 +1241,12 @@ private class OmbiRequestEngineException(
 ) : RuntimeException(message)
 
 private class OmbiUnexpectedContentException(message: String) : RuntimeException(message)
+
+enum class RequestSearchFilterValue {
+    All,
+    Movies,
+    Series,
+}
 
 private sealed interface OmbiAuth {
     data object ApiKey : OmbiAuth
@@ -1283,6 +1428,36 @@ private fun JSONObject.toRequestMediaSummary(type: MediaRequestType, sourceEndpo
     )
 }
 
+private fun JSONObject.toCompanionRequestSummary(type: MediaRequestType): RequestMediaSummary {
+    val requestType = if (type == MediaRequestType.Movie) RequestMediaType.Movie else RequestMediaType.Series
+    val id = optAnyString("id").orEmpty()
+    val requested = optBoolean("requested", false)
+    val available = optBoolean("available", false)
+    return RequestMediaSummary(
+        externalId = id,
+        movieDbId = if (requestType == RequestMediaType.Movie) id else null,
+        tvDbId = if (requestType == RequestMediaType.Series) id else null,
+        imdbId = null,
+        mediaType = requestType,
+        title = optNullableString("title") ?: "Untitled",
+        originalTitle = null,
+        year = optIntOrNull("year"),
+        posterUrl = normalizeOmbiArtworkUrl(optNullableString("posterPath")),
+        backdropUrl = null,
+        overview = null,
+        rating = null,
+        state = when {
+            available -> RequestState.Available
+            requested -> RequestState.PendingApproval
+            else -> RequestState.NotRequested
+        },
+        requestId = null,
+        isAvailableInJellyfin = available,
+        availableSeasonCount = null,
+        totalSeasonCount = null,
+    )
+}
+
 private fun JSONObject.toRequestMediaDetail(fallback: RequestMediaSummary): RequestMediaDetail {
     val type = fallback.mediaType
     val summary = toRequestMediaSummary(type.toLegacyType()).let {
@@ -1382,6 +1557,26 @@ private fun JSONObject.toUserSession(
         lastValidatedAt = System.currentTimeMillis(),
     )
 }
+
+private fun JSONObject.toCompanionUserSession(jellyfinUserId: String): OmbiUserSession {
+    val username = optNullableString("ombiUserName")
+        ?: optNullableString("OmbiUserName")
+        ?: optNullableString("userName")
+        ?: "Ombi user"
+    return OmbiUserSession(
+        jellyfinUserId = jellyfinUserId,
+        ombiUserName = username,
+        displayName = optNullableString("displayName") ?: optNullableString("DisplayName") ?: username,
+        ombiUserId = optAnyString("ombiUserId") ?: optAnyString("OmbiUserId"),
+        expiresAt = optNullableString("expiresAt") ?: optNullableString("ExpiresAt"),
+        roles = (optJSONArray("roles") ?: optJSONArray("Roles"))?.toClaimLabels().orEmpty(),
+        lastLoginAt = parseInstantMillis(optNullableString("lastLoginAt") ?: optNullableString("LastLoginAt")) ?: System.currentTimeMillis(),
+        lastValidatedAt = parseInstantMillis(optNullableString("lastValidatedAt") ?: optNullableString("LastValidatedAt")) ?: System.currentTimeMillis(),
+    )
+}
+
+private fun parseInstantMillis(value: String?): Long? =
+    value?.let { runCatching { Instant.parse(it).toEpochMilli() }.getOrNull() }
 
 private fun JSONObject.requestStatus(hasGenericIdEvidence: Boolean = false): MediaRequestStatus {
     val statusText = optNullableString("requestStatus")

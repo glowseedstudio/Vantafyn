@@ -12,6 +12,10 @@ enum class DownloadFileKind(
     Backdrop("backdrops"),
     Logo("logos"),
     Subtitle("subtitles"),
+    Metadata("metadata"),
+    Lyrics("lyrics"),
+    Chapters("chapters"),
+    Trickplay("trickplay"),
 }
 
 data class DownloadFileTarget(
@@ -39,10 +43,12 @@ class DownloadFileStore(
         identity: DownloadIdentity,
         kind: DownloadFileKind,
         extension: String,
+        suffix: String? = null,
     ): DownloadFileTarget {
         val directory = File(rootFor(identity.serverId, identity.userId), kind.directoryName)
         val cleanExtension = extension.trim().trimStart('.').ifBlank { "bin" }.safePathSegment()
-        val baseName = "${identity.itemId.safePathSegment()}_${identity.mediaSourceId.safePathSegment()}.$cleanExtension"
+        val extra = suffix?.safePathSegment()?.takeIf { it.isNotBlank() }?.let { "_$it" }.orEmpty()
+        val baseName = "${identity.itemId.safePathSegment()}_${identity.mediaSourceId.safePathSegment()}$extra.$cleanExtension"
         return DownloadFileTarget(
             finalFile = File(directory, baseName),
             tempFile = File(directory, "$baseName.download"),
@@ -61,6 +67,10 @@ class DownloadFileStore(
             record.localBackdropPath,
             record.localLogoPath,
             record.localSubtitlePath,
+            record.localMetadataPath,
+            record.localLyricsPath,
+            record.localChaptersPath,
+            record.localTrickplayPath,
         ).forEach { path ->
             runCatching {
                 val file = File(path)
@@ -68,6 +78,20 @@ class DownloadFileStore(
             }
         }
     }
+
+    fun deleteTempFileFor(record: DownloadRecord) {
+        runCatching {
+            record.tempMediaPath
+                ?.let(::File)
+                ?.takeIf { it.exists() }
+                ?.delete()
+        }
+    }
+
+    fun hasCompletedMediaFile(record: DownloadRecord): Boolean =
+        record.localMediaPath
+            ?.let(::File)
+            ?.takeIf { it.exists() && it.isFile && it.length() > 0L } != null
 
     fun availabilityFor(requiredBytes: Long? = null): DownloadStorageAvailability {
         val filesDir = appContext.filesDir ?: return DownloadStorageAvailability(
