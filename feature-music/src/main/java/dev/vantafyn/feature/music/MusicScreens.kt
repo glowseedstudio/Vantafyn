@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -61,6 +62,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -88,6 +90,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -110,6 +113,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -133,6 +137,7 @@ import dev.vantafyn.core.media.VantafynMusicTrack
 import dev.vantafyn.core.ui.VantafynButton
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynErrorCard
+import dev.vantafyn.core.ui.VantafynGlassChip
 import dev.vantafyn.core.ui.VantafynGlassCard
 import dev.vantafyn.core.ui.VantafynGlassDock
 import dev.vantafyn.core.ui.VantafynGlassModalPanel
@@ -143,6 +148,7 @@ import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -178,6 +184,8 @@ fun MusicScreen(
     var playlistPickerTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
     var showCurrentPlaylistPicker by remember { mutableStateOf(false) }
     var detailsTrack by remember { mutableStateOf<MusicTrackDetails?>(null) }
+    var showCreatePlaylistDialog by remember { mutableStateOf(false) }
+    var createPlaylistTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
     val startMusic: (() -> Unit) -> Unit = { action -> onRequestMusicControlsPermission(action) }
     val showInitialLoading = state.isLoading &&
         state.home == null &&
@@ -185,14 +193,32 @@ fun MusicScreen(
         state.screen == MusicScreenState.Home
     val musicListState = rememberLazyListState()
     val screenScrollKey = state.screen.scrollResetKey()
-    LaunchedEffect(screenScrollKey) {
-        musicListState.scrollToItem(0)
-    }
     var homeRevealActive by remember(session?.profileId) { mutableStateOf(true) }
     LaunchedEffect(session?.profileId) {
         homeRevealActive = true
         delay(1_100L)
         homeRevealActive = false
+    }
+    val playlistRevealActive = remember { mutableStateOf(true) }
+    val songsRevealActive = remember { mutableStateOf(true) }
+    val albumRevealActive = remember { mutableStateOf(true) }
+    LaunchedEffect(screenScrollKey) {
+        musicListState.scrollToItem(0)
+        if (state.screen is MusicScreenState.Playlist) {
+            playlistRevealActive.value = true
+            delay(1_450L)
+            playlistRevealActive.value = false
+        }
+        if (state.screen is MusicScreenState.Songs) {
+            songsRevealActive.value = true
+            delay(1_450L)
+            songsRevealActive.value = false
+        }
+        if (state.screen is MusicScreenState.Album) {
+            albumRevealActive.value = true
+            delay(1_450L)
+            albumRevealActive.value = false
+        }
     }
     LaunchedEffect(session?.profileId) {
         viewModel.bindSession(session)
@@ -324,26 +350,31 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Album -> {
                     item {
-                        MusicDetailHeader(
-                            title = screen.album.title,
-                            subtitle = screen.album.artist ?: "Album",
-                            imageUrl = screen.album.artworkUrl,
-                            onBack = viewModel::showHome,
-                            onDownload = { viewModel.queueAlbumDownload(screen.album, screen.tracks) },
-                        ) {
-                            screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
+                        MusicContentReveal(index = 0, animate = albumRevealActive.value) {
+                            MusicDetailHeader(
+                                title = screen.album.title,
+                                subtitle = screen.album.artist ?: "Album",
+                                imageUrl = screen.album.artworkUrl,
+                                onBack = viewModel::showHome,
+                                onDownload = { viewModel.queueAlbumDownload(screen.album, screen.tracks) },
+                                isDownloaded = state.isPlaylistDownloaded,
+                            ) {
+                                screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
+                            }
                         }
                     }
                     item {
-                        MusicTrackList(
-                            title = "Tracks",
-                            tracks = screen.tracks,
-                            playlists = state.home?.playlists.orEmpty(),
-                            pendingTrackId = state.pendingPlayTrackId,
-                            onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onChoosePlaylist = { playlistPickerTrack = it },
-                            onLongPress = { actionTrack = it },
-                        )
+                        MusicContentReveal(index = 1, animate = albumRevealActive.value) {
+                            MusicTrackList(
+                                title = "Tracks",
+                                tracks = screen.tracks,
+                                playlists = state.home?.playlists.orEmpty(),
+                                pendingTrackId = state.pendingPlayTrackId,
+                                onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
+                                onChoosePlaylist = { playlistPickerTrack = it },
+                                onLongPress = { actionTrack = it },
+                            )
+                        }
                     }
                 }
                 is MusicScreenState.Artist -> {
@@ -352,7 +383,27 @@ fun MusicScreen(
                     }
                     item {
                         if (screen.albums.isEmpty()) {
-                            Text("No albums found for this artist yet.", color = VantafynColors.Muted)
+                            VantafynGlassCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                cornerRadius = 20.dp,
+                                contentPadding = PaddingValues(16.dp),
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(Color.White.copy(alpha = 0.06f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Rounded.Album, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(20.dp))
+                                    }
+                                    Text("No albums found for this artist yet.", color = VantafynColors.Muted)
+                                }
+                            }
                         } else {
                             MusicAlbumRow(screen.albums, onAlbum = viewModel::openAlbum)
                         }
@@ -360,39 +411,47 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Playlist -> {
                     item {
-                        MusicDetailHeader(
-                            title = screen.playlist.name,
-                            subtitle = "${screen.tracks.size} tracks",
-                            imageUrl = screen.playlist.imageUrl,
-                            onBack = viewModel::showHome,
-                            onDownload = { viewModel.queuePlaylistDownload(screen.playlist, screen.tracks) },
-                        ) {
-                            screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
+                        MusicContentReveal(index = 0, animate = playlistRevealActive.value) {
+                            MusicDetailHeader(
+                                title = screen.playlist.name,
+                                subtitle = "${screen.tracks.size} tracks",
+                                imageUrl = screen.playlist.imageUrl,
+                                onBack = viewModel::showHome,
+                                onDownload = { viewModel.queuePlaylistDownload(screen.playlist, screen.tracks) },
+                                isDownloaded = state.isPlaylistDownloaded,
+                                trackImageUrls = screen.playlist.trackImageUrls,
+                            ) {
+                                screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
+                            }
                         }
                     }
                     item {
-                        MusicTrackList(
-                            title = "Playlist",
-                            tracks = screen.tracks,
-                            playlists = state.home?.playlists.orEmpty(),
-                            pendingTrackId = state.pendingPlayTrackId,
-                            onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onChoosePlaylist = { playlistPickerTrack = it },
-                            onLongPress = { actionTrack = it },
-                        )
+                        MusicContentReveal(index = 1, animate = playlistRevealActive.value) {
+                            MusicTrackList(
+                                title = "Playlist",
+                                tracks = screen.tracks,
+                                playlists = state.home?.playlists.orEmpty(),
+                                pendingTrackId = state.pendingPlayTrackId,
+                                onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
+                                onChoosePlaylist = { playlistPickerTrack = it },
+                                onLongPress = { actionTrack = it },
+                            )
+                        }
                     }
                 }
                 is MusicScreenState.Songs -> {
                     item {
-                        MusicTrackList(
-                            title = "All Songs",
-                            tracks = screen.tracks,
-                            playlists = state.home?.playlists.orEmpty(),
-                            pendingTrackId = state.pendingPlayTrackId,
-                            onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onChoosePlaylist = { playlistPickerTrack = it },
-                            onLongPress = { actionTrack = it },
-                        )
+                        MusicContentReveal(index = 0, animate = songsRevealActive.value) {
+                            MusicTrackList(
+                                title = "All Songs",
+                                tracks = screen.tracks,
+                                playlists = state.home?.playlists.orEmpty(),
+                                pendingTrackId = state.pendingPlayTrackId,
+                                onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
+                                onChoosePlaylist = { playlistPickerTrack = it },
+                                onLongPress = { actionTrack = it },
+                            )
+                        }
                     }
                 }
             }
@@ -516,6 +575,11 @@ fun MusicScreen(
                     playlistPickerTrack = null
                     viewModel.addTrackToPlaylist(track, playlist)
                 },
+                onCreateNew = {
+                    playlistPickerTrack = null
+                    createPlaylistTrack = track
+                    showCreatePlaylistDialog = true
+                },
             )
         }
         if (showCurrentPlaylistPicker) {
@@ -526,6 +590,44 @@ fun MusicScreen(
                     showCurrentPlaylistPicker = false
                     viewModel.addCurrentToPlaylist(playlist)
                 },
+                onCreateNew = {
+                    showCurrentPlaylistPicker = false
+                    showCreatePlaylistDialog = true
+                },
+            )
+        }
+        if (showCreatePlaylistDialog) {
+            var newName by remember { mutableStateOf("") }
+            AlertDialog(
+                modifier = Modifier.vantafynAnimatedModalBorder(),
+                onDismissRequest = { showCreatePlaylistDialog = false },
+                containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(28.dp),
+                title = { Text("New playlist") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                        VantafynTextField(
+                            value = newName,
+                            onValueChange = { newName = it },
+                            label = "Playlist name",
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val name = newName.trim().ifBlank { "Vantafyn Playlist" }
+                            val track = createPlaylistTrack
+                            showCreatePlaylistDialog = false
+                            createPlaylistTrack = null
+                            viewModel.createPlaylistAndAddTrack(name, track)
+                        },
+                        enabled = newName.isNotBlank(),
+                    ) {
+                        Text("Create")
+                    }
+                },
+                dismissButton = { TextButton(onClick = { showCreatePlaylistDialog = false }) { Text("Cancel") } },
             )
         }
     }
@@ -711,7 +813,7 @@ private fun MusicPlaylistRow(playlists: List<JellyfinMusicPlaylist>, onPlaylist:
         Text("Playlists", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(playlists, key = { index, playlist -> "${playlist.id}-$index" }) { _, playlist ->
-                MusicArtworkTile(playlist.imageUrl, playlist.name, "${playlist.trackCount ?: 0} tracks") { onPlaylist(playlist) }
+                MusicArtworkTile(playlist.imageUrl, playlist.name, "${playlist.trackCount ?: 0} tracks", trackImageUrls = playlist.trackImageUrls) { onPlaylist(playlist) }
             }
         }
     }
@@ -751,7 +853,19 @@ private fun MusicTrackList(
                         VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                     }
                     if (playlists.isNotEmpty()) {
-                        MiniControl("+") { onChoosePlaylist(track) }
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .clickable { onChoosePlaylist(track) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "+",
+                                color = VantafynColors.Ink,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
                 }
             }
@@ -763,7 +877,38 @@ private fun MusicTrackList(
 private fun MusicSectionHeader(title: String, action: String, onAction: () -> Unit) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-        MiniControl(action, onAction)
+        VantafynGlassChip(selected = true, onClick = onAction) {
+            Text(action, color = VantafynColors.Ink, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun MusicChevronBackButton(onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(42.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(19.dp)) {
+            val stroke = 2.35.dp.toPx()
+            drawLine(
+                color = VantafynColors.Ink,
+                start = Offset(11.5.dp.toPx(), 3.dp.toPx()),
+                end = Offset(5.dp.toPx(), 9.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = VantafynColors.Ink,
+                start = Offset(5.dp.toPx(), 9.dp.toPx()),
+                end = Offset(11.5.dp.toPx(), 15.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+        }
     }
 }
 
@@ -774,7 +919,7 @@ private fun MusicSimpleHeader(title: String, onBack: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FlatMusicIconButton(Icons.Rounded.ArrowBack, "Back", onBack, size = 42)
+        MusicChevronBackButton(onBack)
         Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -783,14 +928,14 @@ private fun MusicSimpleHeader(title: String, onBack: () -> Unit) {
 private fun MusicTopBackHeader(title: String, onBack: () -> Unit) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        FlatMusicIconButton(Icons.Rounded.ArrowBack, "Back", onBack, size = 42)
+        MusicChevronBackButton(onBack)
         Text(
             title,
             color = VantafynColors.Ink,
-            style = MaterialTheme.typography.headlineLarge,
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -805,6 +950,8 @@ private fun MusicDetailHeader(
     imageUrl: String?,
     onBack: () -> Unit,
     onDownload: (() -> Unit)? = null,
+    isDownloaded: Boolean = false,
+    trackImageUrls: List<String> = emptyList(),
     onPlay: (() -> Unit)?,
 ) {
     Column(
@@ -812,7 +959,11 @@ private fun MusicDetailHeader(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        MusicCollectionArtwork(imageUrl, Modifier.size(188.dp))
+        if (trackImageUrls.size >= 2) {
+            PlaylistArtGrid(trackImageUrls, Modifier.size(188.dp))
+        } else {
+            MusicCollectionArtwork(imageUrl, Modifier.size(188.dp))
+        }
         Text(
             title,
             color = VantafynColors.Ink,
@@ -853,13 +1004,17 @@ private fun MusicDetailHeader(
                         modifier = Modifier
                             .size(54.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .clickable(onClick = onDownload),
+                            .clickable(enabled = !isDownloaded, onClick = onDownload),
                         variant = VantafynGlassVariant.Card,
                         cornerRadius = 18.dp,
                         contentPadding = PaddingValues(0.dp),
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Icon(Icons.Rounded.Download, contentDescription = "Save offline", tint = VantafynColors.Ink)
+                            Icon(
+                                imageVector = if (isDownloaded) Icons.Rounded.Check else Icons.Rounded.Download,
+                                contentDescription = if (isDownloaded) "Downloaded" else "Save offline",
+                                tint = if (isDownloaded) Color.White else VantafynColors.Ink,
+                            )
                         }
                     }
                 }
@@ -902,7 +1057,7 @@ private fun MusicCollectionArtwork(imageUrl: String?, modifier: Modifier = Modif
 }
 
 @Composable
-private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String, isLoading: Boolean = false, onClick: () -> Unit) {
+private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String, isLoading: Boolean = false, trackImageUrls: List<String> = emptyList(), onClick: () -> Unit) {
     Column(
         modifier = Modifier
             .width(128.dp)
@@ -910,7 +1065,11 @@ private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String,
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
-            MusicArt(imageUrl, Modifier.size(128.dp))
+            if (trackImageUrls.size >= 2) {
+                PlaylistArtGrid(trackImageUrls, Modifier.size(128.dp))
+            } else {
+                MusicArt(imageUrl, Modifier.size(128.dp))
+            }
             if (isLoading) {
                 Box(
                     Modifier
@@ -923,23 +1082,37 @@ private fun MusicArtworkTile(imageUrl: String?, title: String, subtitle: String,
                 }
             }
         }
-        Text(title, color = VantafynColors.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Text(subtitle, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(title, color = VantafynColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = rememberLifecycleAwareMarquee())
+        Text(subtitle, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = rememberLifecycleAwareMarquee())
     }
 }
 
 @Composable
 private fun VantafynGradientLoadingRing(modifier: Modifier = Modifier, strokeWidth: androidx.compose.ui.unit.Dp = 2.dp) {
-    val transition = rememberInfiniteTransition(label = "musicGradientLoadingRing")
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 960, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "musicGradientLoadingRotation",
-    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val rotation by if (isResumed) {
+        val transition = rememberInfiniteTransition(label = "musicGradientLoadingRing")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 960, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "musicGradientLoadingRotation",
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
     val ringColors = remember {
         listOf(
             Color(0xFF31D7FF),
@@ -1466,6 +1639,15 @@ private fun VantafynMarqueeText(
     modifier: Modifier = Modifier,
     textAlign: TextAlign = TextAlign.Start,
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     Text(
         text = text,
         color = style.color,
@@ -1476,11 +1658,17 @@ private fun VantafynMarqueeText(
         textAlign = textAlign,
         modifier = modifier
             .fillMaxWidth()
-            .basicMarquee(
-                iterations = Int.MAX_VALUE,
-                initialDelayMillis = 900,
-                repeatDelayMillis = 4200,
-                velocity = 28.dp,
+            .then(
+                if (lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) {
+                    Modifier.basicMarquee(
+                        iterations = Int.MAX_VALUE,
+                        initialDelayMillis = 900,
+                        repeatDelayMillis = 4200,
+                        velocity = 28.dp,
+                    )
+                } else {
+                    Modifier
+                }
             ),
     )
 }
@@ -2062,9 +2250,14 @@ private fun LyricsEmptyState(title: String, subtitle: String) {
         cornerRadius = 24.dp,
         contentPadding = PaddingValues(20.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-            Text(subtitle, color = VantafynColors.Muted)
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Icon(Icons.Rounded.Article, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(30.dp))
+            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+            Text(subtitle, color = VantafynColors.Muted, textAlign = TextAlign.Center)
         }
     }
 }
@@ -2100,6 +2293,7 @@ private fun MusicPlaylistPickerSheet(
     playlists: List<JellyfinMusicPlaylist>,
     onDismiss: () -> Unit,
     onPlaylist: (JellyfinMusicPlaylist) -> Unit,
+    onCreateNew: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -2128,22 +2322,25 @@ private fun MusicPlaylistPickerSheet(
                         Icon(Icons.Rounded.Close, contentDescription = "Close", tint = VantafynColors.Ink)
                     }
                 }
-                if (playlists.isEmpty()) {
-                    Text("Create a playlist from Now Playing first.", color = VantafynColors.Muted)
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(320.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(playlists, key = { it.id }) { playlist ->
-                            MusicMenuAction(
-                                icon = Icons.Rounded.PlaylistAdd,
-                                label = playlist.name,
-                                onClick = { onPlaylist(playlist) },
-                            )
-                        }
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(320.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item(key = "__create_new__") {
+                        MusicMenuAction(
+                            icon = Icons.Rounded.Add,
+                            label = "Create new playlist",
+                            onClick = { onCreateNew() },
+                        )
+                    }
+                    items(playlists, key = { it.id }) { playlist ->
+                        MusicMenuAction(
+                            icon = Icons.Rounded.PlaylistAdd,
+                            label = playlist.name,
+                            onClick = { onPlaylist(playlist) },
+                        )
                     }
                 }
             }
@@ -2249,6 +2446,46 @@ private fun QueuePanel(queue: List<VantafynMusicTrack>, index: Int, onTrack: (In
                         Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PlaylistArtGrid(trackImageUrls: List<String>, modifier: Modifier = Modifier) {
+    val urls = trackImageUrls.take(4)
+    val fallback = urls.firstOrNull()
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.66f)),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            for (row in 0 until 2) {
+                Row(Modifier.weight(1f)) {
+                    for (col in 0 until 2) {
+                        val idx = row * 2 + col
+                        val url = urls.getOrNull(idx) ?: fallback
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(1.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (url != null) {
+                                AsyncImage(
+                                    model = url,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                Text("♪", color = VantafynColors.Ink)
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2383,22 +2620,23 @@ private fun MusicContentReveal(
     animate: Boolean,
     content: @Composable () -> Unit,
 ) {
-    if (!animate) {
-        content()
-        return
+    var progress by remember { mutableFloatStateOf(if (animate) 0f else 1f) }
+    LaunchedEffect(index, animate) {
+        if (animate) {
+            progress = 0f
+            delay((index.coerceAtMost(8) * 112L).coerceAtMost(780L))
+            Animatable(0f).animateTo(1f, animationSpec = tween(durationMillis = 680, easing = FastOutSlowInEasing)) {
+                progress = value
+            }
+        } else {
+            progress = 1f
+        }
     }
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(index) {
-        delay((index.coerceAtMost(8) * 112L).coerceAtMost(780L))
-        visible = true
-    }
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(animationSpec = tween(durationMillis = 680, easing = FastOutSlowInEasing)) +
-            slideInVertically(
-                animationSpec = tween(durationMillis = 740, easing = FastOutSlowInEasing),
-                initialOffsetY = { it / 8 },
-            ),
+    Box(
+        modifier = Modifier.graphicsLayer {
+            alpha = progress
+            translationY = (1f - progress) * size.height / 8f
+        },
     ) {
         content()
     }

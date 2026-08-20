@@ -3,6 +3,7 @@ package dev.vantafyn.core.media
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -108,6 +109,7 @@ class MusicPlaybackController private constructor(context: Context) {
         addListener(
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
+                    Log.d(TAG, "isPlaying changed: $isPlaying (track=${_state.value.currentTrack?.title?.take(20)})")
                     _state.update { it.copy(isPlaying = isPlaying, errorMessage = null) }
                     _state.value.currentTrack?.let { track ->
                         emitEvent(VantafynMusicPlaybackEvent.PauseChanged(track, currentPosition.coerceAtLeast(0L), !isPlaying))
@@ -400,6 +402,7 @@ class MusicPlaybackController private constructor(context: Context) {
             tickerJob?.cancel()
             tickerJob = null
             LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "music paused")
+            Log.d(TAG, "Ticker stopped (paused)")
             return
         }
         if (tickerJob != null) return
@@ -409,6 +412,8 @@ class MusicPlaybackController private constructor(context: Context) {
             owner = "MusicPlaybackController",
             state = "playing",
         )
+        val isForeground = AppForegroundStateRepository.isForeground.value
+        Log.d(TAG, "Ticker started (foreground=$isForeground)")
         tickerJob = scope.launch {
             while (isActive) {
                 _state.update { state ->
@@ -448,10 +453,9 @@ class MusicPlaybackController private constructor(context: Context) {
         val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
         runCatching {
             androidx.core.content.ContextCompat.startForegroundService(appContext, intent)
-        }.recoverCatching {
-            appContext.startService(intent)
-        }.onSuccess {
             playbackServiceStarted = true
+        }.onFailure { e ->
+            Log.w(TAG, "Failed to start playback service: ${e.message}")
         }
     }
 
@@ -479,6 +483,7 @@ class MusicPlaybackController private constructor(context: Context) {
             .build()
 
     companion object {
+        private const val TAG = "MusicPlaybackController"
         private const val MUSIC_TICKER_TASK_ID = "music.positionTicker"
         private const val ForegroundTickerIntervalMs = 1_000L
         private const val BackgroundTickerIntervalMs = 10_000L

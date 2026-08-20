@@ -21,6 +21,7 @@ import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.media.MusicPlaybackController
+import dev.vantafyn.core.media.AppForegroundStateRepository
 import dev.vantafyn.core.media.VantafynMusicPlaybackEvent
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import dev.vantafyn.core.media.VantafynMusicStopReason
@@ -184,7 +185,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _state.update { it.copy(errorMessage = null) }
             when (val result = musicRepository.getAlbumTracks(activeSession, album.id)) {
-                is JellyfinResult.Success -> _state.update { it.copy(screen = MusicScreenState.Album(album, result.value)) }
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(screen = MusicScreenState.Album(album, result.value)) }
+                    checkPlaylistDownloadStatus(activeSession, album.id.toString(), result.value.size)
+                }
                 is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
             }
         }
@@ -195,10 +199,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _state.update { it.copy(errorMessage = null) }
             when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
-                is JellyfinResult.Success -> _state.update { it.copy(screen = MusicScreenState.Playlist(playlist, result.value)) }
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(screen = MusicScreenState.Playlist(playlist, result.value)) }
+                    checkPlaylistDownloadStatus(activeSession, playlist.id.toString(), result.value.size)
+                }
                 is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
             }
         }
+    }
+
+    private suspend fun checkPlaylistDownloadStatus(
+        session: dev.vantafyn.core.jellyfin.JellyfinSession,
+        playlistId: String,
+        trackCount: Int,
+    ) {
+        val uuid = runCatching { UUID.fromString(playlistId) }.getOrNull() ?: return
+        val downloaded = offlineDownloadManager.isPlaylistFullyDownloaded(session, uuid, trackCount)
+        _state.update { it.copy(isPlaylistDownloaded = downloaded) }
     }
 
     fun openArtist(artist: JellyfinMusicArtist) {
@@ -321,24 +338,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             _state.update { it.copy(errorMessage = null, message = null) }
-            var queued = 0
-            var firstFailure: String? = null
-            val requireWifi = readDownloadWifiOnlyDefault()
-            tracks.forEach { track ->
-                when (val result = offlineDownloadManager.queueMusicTrack(activeSession, track, requireWifi = requireWifi)) {
-                    is JellyfinResult.Success -> queued += 1
-                    is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result.message
-                }
-            }
-            _state.update {
-                it.copy(
-                    message = when {
-                        queued > 0 && firstFailure == null -> "${queued} tracks queued"
-                        queued > 0 -> "${queued} tracks queued. Some could not be saved."
-                        else -> firstFailure ?: "${playlist.name} could not be saved offline."
-                    },
-                    errorMessage = null,
+            when (
+                val result = offlineDownloadManager.queueMusicPlaylist(
+                    session = activeSession,
+                    playlist = playlist,
+                    tracks = tracks,
+                    requireWifi = readDownloadWifiOnlyDefault(),
                 )
+            ) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(message = "${result.value} tracks queued as ${playlist.name}", errorMessage = null)
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(message = null, errorMessage = result.message)
+                }
             }
         }
     }
@@ -482,6 +495,30 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun createPlaylistAndAddTrack(name: String, track: JellyfinMusicTrack?) {
+        val activeSession = session ?: return
+        val trackIds = listOfNotNull(track?.id)
+        viewModelScope.launch {
+            _state.update { it.copy(isPlaylistSaving = true, errorMessage = null, message = null) }
+            when (val result = musicRepository.createPlaylist(activeSession, name, trackIds)) {
+                is JellyfinResult.Success -> {
+                    val loaded = refreshHomeForPlaylist(activeSession, name, result.value)
+                    if (!loaded) {
+                        _state.update { state ->
+                            state.copy(
+                                isPlaylistSaving = false,
+                                message = "Playlist created",
+                            )
+                        }
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { it.copy(isPlaylistSaving = false, errorMessage = result.message) }
+                }
+            }
+        }
+    }
+
     fun clearMessage() {
         _state.update { it.copy(message = null) }
     }
@@ -549,7 +586,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun shouldPrefetchLyrics(): Boolean = musicScreenActive && (_state.value.showNowPlaying || _state.value.showLyricsScreen)
+    private fun shouldPrefetchLyrics(): Boolean = musicScreenActive && AppForegroundStateRepository.isForeground.value && (_state.value.showNowPlaying || _state.value.showLyricsScreen)
 
     private suspend fun preparePlaybackInfo(activeSession: JellyfinSession, track: JellyfinMusicTrack): JellyfinPlaybackInfo? =
         when (
@@ -590,7 +627,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val track = playback.currentTrack ?: return
         if (!playback.isPlaying) return
         val now = System.currentTimeMillis()
-        if (lastProgressTrackId != track.id || now - lastProgressReportMs >= MusicProgressReportIntervalMs) {
+        val interval = if (AppForegroundStateRepository.isForeground.value) MusicProgressReportIntervalMs else MusicBackgroundProgressReportIntervalMs
+        if (lastProgressTrackId != track.id || now - lastProgressReportMs >= interval) {
             reportProgress(track, playback.positionMs, isPaused = false, force = true)
             lastProgressTrackId = track.id
             lastProgressReportMs = now
@@ -613,7 +651,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val activeSession = session ?: return
         val info = playbackInfoByTrack[track.id] ?: track.toFallbackPlaybackInfo()
         val now = System.currentTimeMillis()
-        if (!force && lastProgressTrackId == track.id && now - lastProgressReportMs < MusicProgressReportIntervalMs) return
+        val interval = if (AppForegroundStateRepository.isForeground.value) MusicProgressReportIntervalMs else MusicBackgroundProgressReportIntervalMs
+        if (!force && lastProgressTrackId == track.id && now - lastProgressReportMs < interval) return
         if (force || lastPausedState != isPaused) {
             lastPausedState = isPaused
         }
@@ -673,6 +712,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 data class MusicUiState(
     val isLoading: Boolean = false,
     val isPlaylistSaving: Boolean = false,
+    val isPlaylistDownloaded: Boolean = false,
     val errorMessage: String? = null,
     val message: String? = null,
     val home: JellyfinMusicHome? = null,
@@ -770,4 +810,5 @@ private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L
 
 private const val MusicProgressReportIntervalMs = 10_000L
+private const val MusicBackgroundProgressReportIntervalMs = 30_000L
 private const val KEY_DOWNLOAD_WIFI_ONLY_DEFAULT = "download_wifi_only_default"

@@ -43,3 +43,7 @@ Ombi communication only happens when the server administrator configures Ombi in
 ## Install
 
 See [docs/INSTALL.md](docs/INSTALL.md).
+
+## Server Testing
+
+See [docs/SERVER_TESTING.md](docs/SERVER_TESTING.md) for manual install, Plugin Manager/catalog install requirements, Companion configuration, and app test steps.

@@ -39,5 +39,8 @@ dependencies {
     implementation(libs.androidx.fragment)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
+    implementation(libs.androidx.glance.appwidget)
+    implementation(libs.androidx.glance.material3)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

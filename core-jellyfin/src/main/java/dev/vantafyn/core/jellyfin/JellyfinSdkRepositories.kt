@@ -414,6 +414,7 @@ class SdkJellyfinLibraryRepository(
                 val pageSize = limit.coerceAtLeast(200)
                 var totalRecordCount: Int? = null
                 var pageItemCount: Int
+                val isMusic = library.collectionType.isMusicCollection()
                 do {
                     val response by api.itemsApi.getItems(
                         GetItemsRequest(
@@ -424,11 +425,11 @@ class SdkJellyfinLibraryRepository(
                             limit = pageSize,
                             sortBy = listOf(ItemSortBy.DATE_CREATED),
                             sortOrder = listOf(SortOrder.DESCENDING),
-                            fields = itemFields,
+                            fields = if (isMusic) musicItemFields else itemFields,
                             includeItemTypes = includeTypesFor(library.collectionType),
                             enableUserData = true,
                             imageTypeLimit = 2,
-                            enableImageTypes = itemImageTypes,
+                            enableImageTypes = if (isMusic) listOf(ImageType.PRIMARY) else itemImageTypes,
                             enableImages = true,
                             enableTotalRecordCount = true,
                         ),
@@ -483,6 +484,7 @@ class SdkJellyfinLibraryRepository(
                     JellyfinLibraryItemFilter.Favorites,
                     JellyfinLibraryItemFilter.Unwatched -> listOf(SortOrder.ASCENDING)
                 }
+                val isMusic = library.collectionType.isMusicCollection()
                 val response by api.itemsApi.getItems(
                     GetItemsRequest(
                         userId = session.user.id,
@@ -492,13 +494,13 @@ class SdkJellyfinLibraryRepository(
                         limit = limit,
                         sortBy = sortBy,
                         sortOrder = sortOrder,
-                        fields = itemFields,
+                        fields = if (isMusic) musicItemFields else itemFields,
                         includeItemTypes = includeTypesFor(library.collectionType),
                         isFavorite = true.takeIf { filter == JellyfinLibraryItemFilter.Favorites },
                         isPlayed = false.takeIf { filter == JellyfinLibraryItemFilter.Unwatched },
                         enableUserData = true,
                         imageTypeLimit = 2,
-                        enableImageTypes = itemImageTypes,
+                        enableImageTypes = if (isMusic) listOf(ImageType.PRIMARY) else itemImageTypes,
                         enableImages = true,
                         enableTotalRecordCount = true,
                     ),
@@ -606,6 +608,11 @@ class SdkJellyfinMediaRepository(
                 }
                 val related = fetchRelated(api, session, item.id)
                 val themeSongUrl = fetchThemeSongUrl(api, session, item.id)
+                val collectionItems = if (item.type == BaseItemKind.BOX_SET) {
+                    fetchCollectionItems(api, session, item.id)
+                } else {
+                    emptyList()
+                }
                 JellyfinResult.Success(
                     item.toDetail(
                         api = api,
@@ -613,6 +620,7 @@ class SdkJellyfinMediaRepository(
                         episodes = episodes,
                         related = related,
                         themeSongUrl = themeSongUrl,
+                        collectionItems = collectionItems,
                     ),
                 )
             } catch (throwable: Throwable) {
@@ -725,6 +733,36 @@ class SdkJellyfinMediaRepository(
             }
         }
 
+    override suspend fun getPersonFilmography(
+        session: JellyfinSession,
+        personId: java.util.UUID,
+    ): JellyfinResult<List<JellyfinMediaItem>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.itemsApi.getItems(
+                    GetItemsRequest(
+                        userId = session.user.id,
+                        personIds = listOf(personId),
+                        recursive = true,
+                        limit = 30,
+                        sortBy = listOf(ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                        fields = itemFields,
+                        includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                        enableImages = true,
+                        imageTypeLimit = 1,
+                        enableImageTypes = listOf(ImageType.PRIMARY),
+                        enableUserData = true,
+                        enableTotalRecordCount = false,
+                    ),
+                )
+                JellyfinResult.Success(response.items.map { it.toMediaItem(api, shapeFor(it.type)) })
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
     private suspend fun fetchSeasons(
         api: ApiClient,
         session: JellyfinSession,
@@ -747,6 +785,9 @@ class SdkJellyfinMediaRepository(
                     id = it.id,
                     title = it.name ?: "Season ${it.indexNumber ?: ""}".trim(),
                     indexNumber = it.indexNumber,
+                    isPlayed = it.userData?.played == true,
+                    imageUrl = it.primaryImageUrl(api, 360),
+                    unplayedItemCount = it.userData?.unplayedItemCount ?: 0,
                 )
             }
         }.getOrDefault(emptyList())
@@ -788,6 +829,32 @@ class SdkJellyfinMediaRepository(
                     userId = session.user.id,
                     limit = 16,
                     fields = itemFields,
+                ),
+            )
+            response.items.map { it.toMediaItem(api, shapeFor(it.type)) }
+        }.getOrDefault(emptyList())
+
+    private suspend fun fetchCollectionItems(
+        api: ApiClient,
+        session: JellyfinSession,
+        boxSetId: java.util.UUID,
+    ): List<JellyfinMediaItem> =
+        runCatching {
+            val response by api.itemsApi.getItems(
+                GetItemsRequest(
+                    userId = session.user.id,
+                    parentId = boxSetId,
+                    recursive = true,
+                    limit = 50,
+                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                    sortOrder = listOf(SortOrder.ASCENDING),
+                    fields = itemFields,
+                    includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                    enableImages = true,
+                    imageTypeLimit = 1,
+                    enableImageTypes = listOf(ImageType.PRIMARY),
+                    enableUserData = true,
+                    enableTotalRecordCount = false,
                 ),
             )
             response.items.map { it.toMediaItem(api, shapeFor(it.type)) }
@@ -1400,6 +1467,7 @@ class SdkJellyfinMusicRepository(
                         playlistId = playlistId,
                         userId = session.user.id,
                         fields = musicItemFields,
+                        limit = 300,
                         enableImages = true,
                         enableUserData = true,
                         imageTypeLimit = 2,
@@ -1594,22 +1662,26 @@ class SdkJellyfinMusicRepository(
                         userId = session.user.id,
                         fields = musicItemFields,
                         limit = 20,
-                        enableImages = false,
+                        enableImages = true,
                         enableUserData = false,
-                        imageTypeLimit = 0,
-                        enableImageTypes = emptyList(),
+                        imageTypeLimit = 1,
+                        enableImageTypes = listOf(ImageType.PRIMARY),
                     ),
                 )
                 playlistItems.items
             }.getOrElse { emptyList() }
             val hasItems = items.isNotEmpty()
-            val audioCount = items.count { it.type == BaseItemKind.AUDIO || it.mediaType == MediaType.AUDIO }
+            val audioItems = items.filter { it.type == BaseItemKind.AUDIO || it.mediaType == MediaType.AUDIO }
+            val audioCount = audioItems.size
             val videoCount = items.count {
                 it.type in setOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE, BaseItemKind.SERIES, BaseItemKind.BOX_SET) ||
                     it.mediaType == MediaType.VIDEO
             }
             when {
-                hasItems && audioCount > 0 && videoCount == 0 -> playlist.toMusicPlaylist(api, audioCount)
+                hasItems && audioCount > 0 && videoCount == 0 -> {
+                    val trackImageUrls = audioItems.take(4).mapNotNull { it.primaryImageUrl(api, 200) }
+                    playlist.toMusicPlaylist(api, trackImageUrls = trackImageUrls)
+                }
                 hasItems -> null
                 else -> null
             }
@@ -1809,8 +1881,24 @@ class SdkJellyfinAdminRepository(
                             deviceName = dto.deviceName,
                             remoteEndPoint = dto.remoteEndPoint,
                             nowPlayingTitle = sessionItem?.name,
-                            nowPlayingSubtitle = sessionItem?.seasonEpisodeLabel() ?: sessionItem?.productionYear?.toString(),
-                            nowPlayingImageUrl = sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520),
+                            nowPlayingSubtitle = run {
+                                val isAudio = sessionItem?.type == BaseItemKind.AUDIO
+                                if (isAudio) null else sessionItem?.seasonEpisodeLabel()
+                            } ?: sessionItem?.productionYear?.toString(),
+                            nowPlayingImageUrl = run {
+                                val isEpisode = sessionItem?.type == BaseItemKind.EPISODE
+                                if (isEpisode) {
+                                    val seriesId = sessionItem?.seriesId
+                                    val seriesTag = sessionItem?.seriesPrimaryImageTag
+                                    if (seriesId != null && !seriesTag.isNullOrBlank()) {
+                                        itemImageUrl(api, seriesId, ImageType.PRIMARY, seriesTag, maxWidth = 420)
+                                    } else {
+                                        sessionItem?.primaryImageUrl(api, 420)
+                                    }
+                                } else {
+                                    sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520)
+                                }
+                            },
                             nowPlayingBackdropUrl = sessionItem?.backdropImageUrl(api, 760) ?: sessionItem?.thumbImageUrl(api, 760),
                             nowPlayingType = sessionItem?.type?.serialName ?: sessionItem?.type?.name,
                             playMethod = playState?.playMethod?.let { method ->
@@ -2133,6 +2221,7 @@ class SdkJellyfinAdminRepository(
                         title = title,
                         type = row.firstString("type", "item_type", "Type").takeIf { it.isNotBlank() },
                         posterUrl = null,
+                        logoUrl = null,
                         playCount = row.firstInt("count", "total_count", "TotalCount", "plays", "Value"),
                         totalWatchTimeSeconds = row.firstLong("total_time", "duration", "Duration", "TotalTime", "time", "Time"),
                         uniqueUsers = row.firstIntOrNull("users", "unique_users", "UniqueUsers"),
@@ -2142,12 +2231,14 @@ class SdkJellyfinAdminRepository(
                 .sortedWith(compareByDescending<JellyfinMediaWatchStats> { it.totalWatchTimeSeconds }.thenByDescending { it.playCount })
                 .take(12)
             val artworkById = loadPlaybackReportingArtwork(api, session, stats.mapNotNull { it.itemId })
-            val missingArtwork = stats.filter { item -> item.itemId?.let { artworkById[it] } == null }
+            val missingArtwork = stats.filter { item -> item.itemId?.let { artworkById[it]?.first } == null }
             val artworkByTitle = loadPlaybackReportingArtworkByTitle(api, session, missingArtwork)
             stats.map { item ->
+                val art = item.itemId?.let { artworkById[it] }
+                val titleArt = artworkByTitle[item.title.normalizedPlaybackReportingTitle()]
                 item.copy(
-                    posterUrl = item.itemId?.let { artworkById[it] }
-                        ?: artworkByTitle[item.title.normalizedPlaybackReportingTitle()],
+                    posterUrl = art?.first ?: titleArt?.first,
+                    logoUrl = art?.second ?: titleArt?.second,
                 )
             }
         }.getOrDefault(emptyList())
@@ -2156,7 +2247,7 @@ class SdkJellyfinAdminRepository(
         api: ApiClient,
         session: JellyfinSession,
         itemIds: List<java.util.UUID>,
-    ): Map<java.util.UUID, String?> {
+    ): Map<java.util.UUID, Pair<String?, String?>> {
         val ids = itemIds.distinct().take(24)
         if (ids.isEmpty()) return emptyMap()
         return runCatching {
@@ -2166,14 +2257,17 @@ class SdkJellyfinAdminRepository(
                     ids = ids,
                     fields = itemFields,
                     imageTypeLimit = 2,
-                    enableImageTypes = itemImageTypes,
+                    enableImageTypes = listOf(ImageType.PRIMARY, ImageType.LOGO),
                     enableImages = true,
                     enableUserData = false,
                     enableTotalRecordCount = false,
                 ),
             )
             result.items.associate { item ->
-                item.id to (item.primaryImageUrl(api, 260) ?: item.thumbImageUrl(api, 360) ?: item.backdropImageUrl(api, 360))
+                val logoTag = item.imageTags?.get(ImageType.LOGO)?.takeIf { it.isNotBlank() }
+                val logoUrl = logoTag?.let { itemImageUrl(api, item.id, ImageType.LOGO, it, maxWidth = 420) }
+                val posterUrl: String? = item.primaryImageUrl(api, 260) ?: item.thumbImageUrl(api, 360) ?: item.backdropImageUrl(api, 360)
+                item.id to (posterUrl to logoUrl)
             }
         }.getOrDefault(emptyMap())
     }
@@ -2182,7 +2276,7 @@ class SdkJellyfinAdminRepository(
         api: ApiClient,
         session: JellyfinSession,
         items: List<JellyfinMediaWatchStats>,
-    ): Map<String, String?> {
+    ): Map<String, Pair<String?, String?>> {
         if (items.isEmpty()) return emptyMap()
         return items.take(12).mapNotNull { stats ->
             runCatching {
@@ -2209,12 +2303,12 @@ class SdkJellyfinAdminRepository(
                     ?: response.searchHints.firstOrNull()
                     ?: return@runCatching null
                 val itemId = hint.itemId ?: hint.id ?: return@runCatching null
-                val imageUrl = hint.primaryImageTag?.takeIf { it.isNotBlank() }?.let {
+                val posterUrl: String? = hint.primaryImageTag?.takeIf { it.isNotBlank() }?.let {
                     itemImageUrl(api, itemId, ImageType.PRIMARY, it, maxWidth = 260)
                 } ?: hint.backdropImageTag?.takeIf { it.isNotBlank() }?.let {
                     itemImageUrl(api, itemId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
                 }
-                normalizedTitle to imageUrl
+                normalizedTitle to (posterUrl to null as String?)
             }.getOrNull()
         }.toMap()
     }
@@ -2659,6 +2753,38 @@ class SdkJellyfinHomeRepository(
             response
         }.getOrDefault(emptyList())
 
+    override suspend fun getLatestMedia(
+        session: JellyfinSession,
+        limit: Int,
+    ): List<JellyfinMediaItem> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val types = listOf(
+                    BaseItemKind.MOVIE,
+                    BaseItemKind.SERIES,
+                    BaseItemKind.EPISODE,
+                    BaseItemKind.MUSIC_ALBUM,
+                )
+                val response by api.userLibraryApi.getLatestMedia(
+                    GetLatestMediaRequest(
+                        userId = session.user.id,
+                        fields = homeFields,
+                        includeItemTypes = types,
+                        enableImages = true,
+                        imageTypeLimit = 2,
+                        enableImageTypes = homeImageTypes,
+                        enableUserData = true,
+                        limit = maxOf(limit, 25),
+                        groupItems = false,
+                    ),
+                )
+                response.map { it.toMediaItem(api, shapeFor(it.type)) }
+            } catch (_: Throwable) {
+                emptyList()
+            }
+        }
+
     private suspend fun smartRow(
         api: ApiClient,
         userId: java.util.UUID,
@@ -2939,7 +3065,10 @@ class SdkJellyfinWatchPartyRepository(
                     sessions
                         .filter { it.isActive }
                         .filter { !it.id.isNullOrBlank() }
-                        .filterNot { it.userId == session.user.id && it.client == "Vantafyn" }
+                        .filterNot { dto ->
+                            dto.userId == session.user.id ||
+                                dto.userName.equals(session.user.name, ignoreCase = true)
+                        }
                         .map { dto ->
                             WatchPartyInviteRecipient(
                                 sessionId = dto.id.orEmpty(),
@@ -2952,7 +3081,11 @@ class SdkJellyfinWatchPartyRepository(
                                 supportsRemoteControl = dto.supportsRemoteControl,
                             )
                         }
-                        .distinctBy { it.sessionId },
+                        .distinctBy { recipient ->
+                            recipient.userId?.toString()
+                                ?: recipient.displayName.trim().lowercase()
+                                    .ifBlank { recipient.sessionId }
+                        },
                 )
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -3174,8 +3307,11 @@ private fun includeTypesFor(collectionType: String?): List<BaseItemKind> =
         "boxsets", "collections" -> listOf(BaseItemKind.BOX_SET)
         "music" -> listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)
         "books" -> listOf(BaseItemKind.BOOK)
-        else -> mediaItemTypes
+        else -> listOf(BaseItemKind.SERIES, BaseItemKind.MOVIE, BaseItemKind.BOX_SET, BaseItemKind.MUSIC_ALBUM, BaseItemKind.BOOK)
     }
+
+private fun String?.isMusicCollection(): Boolean =
+    this?.lowercase() == "music"
 
 private fun String?.isLiveTvCollection(): Boolean =
     this?.lowercase()?.replace(" ", "") in setOf("livetv", "livetvchannels")
@@ -3200,6 +3336,8 @@ private fun BaseItemDto.toCard(api: ApiClient, shape: JellyfinMediaCardShape): J
         progress = userData?.playedPercentage?.toFloat()?.div(100f)?.coerceIn(0f, 1f),
         shape = shape,
         isFavorite = userData?.isFavorite == true,
+        isPlayed = userData?.played == true,
+        unplayedItemCount = userData?.unplayedItemCount ?: 0,
     )
 
 private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShape): JellyfinMediaItem =
@@ -3216,6 +3354,12 @@ private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShap
         progress = userData.progress(),
         shape = shape,
         isFavorite = userData?.isFavorite == true,
+        isPlayed = userData?.played == true,
+        unplayedItemCount = userData?.unplayedItemCount ?: 0,
+        mediaType = mediaType?.serialName,
+        seriesId = seriesId,
+        seasonNumber = parentIndexNumber,
+        episodeNumber = indexNumber,
     )
 
 private fun BaseItemDto.toWatchPartyCandidate(api: ApiClient, serverId: String?): WatchPartyCandidate =
@@ -3289,12 +3433,13 @@ private fun BaseItemDto.toMusicArtist(api: ApiClient): JellyfinMusicArtist =
         imageUrl = primaryImageUrl(api, 520),
     )
 
-private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: Int? = null): JellyfinMusicPlaylist =
+private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: Int? = null, trackImageUrls: List<String> = emptyList()): JellyfinMusicPlaylist =
     JellyfinMusicPlaylist(
         id = id,
         name = name ?: "Playlist",
         imageUrl = primaryImageUrl(api, 520),
         trackCount = classifiedTrackCount ?: childCount ?: recursiveItemCount,
+        trackImageUrls = trackImageUrls,
     )
 
 private fun Long.toLyricMillis(): Long =
@@ -3306,6 +3451,7 @@ private fun BaseItemDto.toDetail(
     episodes: List<JellyfinEpisode> = emptyList(),
     related: List<JellyfinMediaItem> = emptyList(),
     themeSongUrl: String? = null,
+    collectionItems: List<JellyfinMediaItem> = emptyList(),
 ): JellyfinMediaDetail =
     JellyfinMediaDetail(
         id = id,
@@ -3332,6 +3478,7 @@ private fun BaseItemDto.toDetail(
         seasons = seasons,
         episodes = episodes,
         related = related,
+        collectionItems = collectionItems,
         externalLinks = externalUrls.orEmpty().mapNotNull { url ->
             val name = url.name?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
             val href = url.url?.takeIf { it.isNotBlank() } ?: return@mapNotNull null

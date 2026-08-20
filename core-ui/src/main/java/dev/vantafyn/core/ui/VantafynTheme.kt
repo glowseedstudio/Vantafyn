@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -195,6 +196,8 @@ fun PosterCard(
             color = if (focused) VantafynColors.Ink else VantafynColors.Muted,
             style = MaterialTheme.typography.bodyLarge,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = rememberLifecycleAwareMarquee(),
         )
     }
 }

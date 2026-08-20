@@ -37,5 +37,17 @@
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
+
+        <receiver
+            android:name=".VantafynMusicWidgetReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="dev.vantafyn.music.action.PLAYBACK_STATE_CHANGED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/vantafyn_music_widget_info" />
+        </receiver>
     </application>
 </manifest>

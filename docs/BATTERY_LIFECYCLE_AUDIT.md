@@ -1,40 +1,107 @@
-# Battery / Lifecycle Audit
+# Battery Lifecycle Audit
 
-This pass audited long-running work that can affect idle battery use. No new product features were added.
+## Overview
+This document tracks all lifecycle-aware optimizations across the Vantafyn codebase to reduce battery drain when the app is backgrounded.
 
-## Long-running components
+## Foreground State Detection
 
-- `core-media` music playback service: owns the Media3 music player/session and should only run as a foreground media service while there is an active music session.
-- `core-cast` Google Cast target: listens for Cast sessions while the mobile app is active and now only runs a position ticker when a Cast session has active media.
-- `feature-player` mobile player: local video position and Jellyfin progress reporting loops are now lifecycle-gated to `STARTED`. Local video already pauses on app `ON_STOP`.
-- `feature-home` Watch Party realtime: Jellyfin websocket is now demand-gated. It starts for the Watch Party screen, active Watch Party work, or active party sessions, not for every idle logged-in foreground session.
-- `feature-home` admin dashboard refresh: still refreshes while the admin screen is visible, and is now tracked in diagnostics.
-- `feature-requests` hero carousel: now lifecycle-gated to `STARTED`.
-- Quick Connect polling: bounded to 60 attempts at 2 seconds and cancelled when leaving Quick Connect.
+### AppForegroundStateRepository
+**File**: `core-media/src/main/java/dev/vantafyn/core/media/AppForegroundStateRepository.kt`
 
-## Fixes made
+Singleton that tracks app foreground state via `StateFlow<Boolean>`. Set by `HomeContentReveal` composable in `HomeScreens.kt`.
 
-- Added `LongRunningTaskRegistry` in `core-media` for admin diagnostics.
-- Added `AppForegroundStateRepository` in `core-media` for visible foreground/background state.
-- Reduced the Cast position ticker from an unconditional 1-second loop to an active-media-only 5-second loop.
-- Fixed `GoogleCastPlaybackTarget.stop()` so the singleton can be restarted cleanly after the coroutine scope is cancelled.
-- Stopped Cast ticker immediately on idle, disconnect, or target stop.
-- Prevented music service from starting a blank foreground notification when Android Auto/system browsing touches the service without an active track.
-- Tracked music service and music position ticker lifecycle.
-- Stopped idle Watch Party websocket behavior after login/restore/foreground unless Watch Party is actually needed.
-- Stopped Watch Party realtime when leaving the Watch Party screen and no active party remains.
-- Gated Requests carousel and local video loops with lifecycle `repeatOnLifecycle`.
-- Added Admin -> Battery / Lifecycle diagnostics panel showing active long-running work without tokens or server URLs.
+```kotlin
+object AppForegroundStateRepository {
+    private val _isForeground = MutableStateFlow(false)
+    val isForeground: StateFlow<Boolean> = _isForeground.asStateFlow()
+    fun setForeground(value: Boolean) { _isForeground.value = value }
+}
+```
 
-## Remaining intentionally active work
+## Lifecycle-Gated Animations
 
-- Music playback stays active in background/lockscreen while music is playing.
-- Active Cast sessions keep Cast state updates while media is loaded.
-- Active Watch Party sessions may keep realtime connected in background so party state is not silently lost.
-- Admin dashboard refreshes while the admin screen is visible.
+All animations are gated with `LocalLifecycleOwner` observer pattern and `AccessibilityManager.isTouchExplorationEnabled` for accessibility.
 
-## No evidence found
+### 1. Background Drift Animation
+**File**: `core-ui/src/main/java/dev/vantafyn/core/ui/VantafynComponents.kt`
+- Component: `VantafynOnboardingBackground`
+- Animation: `bgDrift` (25s translate cycle)
+- Gate: `isResumed && !isTouchExplorationEnabled`
 
-- No `WorkManager`, jobscheduler, or alarm-based recurring work in Vantafyn source.
-- No `GlobalScope` usage.
-- No broad background polling loop outside visible UI, active media, Cast, or active Watch Party after this pass.
+### 2. Search Sparkle
+**File**: `feature-home/src/main/java/dev/vantafyn/feature/home/HomeScreens.kt`
+- Component: `VantafynOnboardingBackground`
+- Animation: `searchSparkle` (2s pulse)
+- Gate: `isResumed`
+
+### 3. What's New Dot
+**File**: `feature-home/src/main/java/dev/vantafyn/feature/home/HomeScreens.kt`
+- Component: `WhatsNewHeader`
+- Animation: `whatsNewDot` (1.5s pulse)
+- Gate: `isResumed`
+
+### 4. Server Border Glow
+**File**: `feature-home/src/main/java/dev/vantafyn/feature/home/HomeScreens.kt`
+- Component: `ServerDiscoveryCard`
+- Animation: `serverBorder` (1.2s glow)
+- Gate: `isResumed`
+
+### 5. Admin Task Progress
+**File**: `feature-home/src/main/java/dev/vantafyn/feature/home/HomeScreens.kt`
+- Component: `AdminTaskCard`
+- Animation: `adminTaskProgress` (1.5s fade)
+- Gate: `isResumed`
+
+## Music Background Optimizations
+
+### Position Ticker
+**File**: `core-media/src/main/java/dev/vantafyn/core/media/MusicPlaybackController.kt`
+- Foreground: 1s interval
+- Background: 10s interval
+- Source: `AppForegroundStateRepository.isForeground`
+
+### Progress Reporting
+**File**: `feature-music/src/main/java/dev/vantafyn/feature/music/MusicViewModel.kt`
+- Foreground: 10s interval
+- Background: 30s interval
+- Source: `AppForegroundStateRepository.isForeground`
+
+### Lyrics Prefetching
+**File**: `feature-music/src/main/java/dev/vantafyn/feature/music/MusicViewModel.kt`
+- Gated: `musicScreenActive && AppForegroundStateRepository.isForeground.value`
+- Skips API calls when backgrounded
+
+### Notification Updates
+**File**: `core-media/src/main/java/dev/vantafyn/core/media/VantafynMusicPlaybackService.kt`
+- Initial: `startForeground()` (required by Android)
+- Subsequent: `NotificationManager.notify()` (lightweight)
+
+## Monitoring
+
+### Debug Logs
+```bash
+# Music service lifecycle
+adb logcat -s MusicPlaybackService:D
+
+# Music ticker and play state
+adb logcat -s MusicPlaybackController:D
+
+# All Vantafyn battery-related logs
+adb logcat | grep -E "MusicPlayback|AppForeground|isResumed"
+```
+
+### Battery Stats
+```bash
+# Detailed battery usage
+adb shell dumpsys batterystats
+
+# App-specific battery usage
+adb shell dumpsys batterystats --charged | grep -A 20 "vantafyn"
+```
+
+## Future Optimizations
+
+1. **ExoPlayer wake mode**: Currently `WAKE_MODE_NETWORK` — consider `WAKE_MODE_NONE` when backgrounded if network not needed
+2. **Audio offload**: Already enabled via `enableCompatibleAudioOffload()` — reduces CPU during playback
+3. **Notification artwork**: Could skip loading large icon when backgrounded
+4. **Palette extraction**: Not currently triggered in background, but should verify

@@ -10,6 +10,7 @@ import androidx.work.WorkManager
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
+import dev.vantafyn.core.jellyfin.JellyfinMusicPlaylist
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackMethod
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
@@ -110,6 +111,8 @@ class OfflineDownloadManager(
         session: JellyfinSession,
         track: JellyfinMusicTrack,
         requireWifi: Boolean = false,
+        playlistId: UUID? = null,
+        playlistName: String? = null,
     ): JellyfinResult<DownloadRecord> {
         val playback = when (
             val result = playbackRepository.getPlaybackInfo(
@@ -135,13 +138,52 @@ class OfflineDownloadManager(
             title = track.title,
             sortTitle = listOfNotNull(track.album, track.title).joinToString(" ").ifBlank { track.title },
             runtimeTicks = playback.runtimeTicks ?: track.durationMs?.let { it * 10_000L },
+            parentId = playlistId?.toString(),
             albumId = track.albumId?.toString(),
-            albumName = track.album,
+            albumName = playlistName ?: track.album,
             artistName = track.artist,
             remotePosterUrl = track.artworkUrl,
             playback = playback,
             requireWifi = requireWifi,
         )
+    }
+
+    suspend fun queueMusicPlaylist(
+        session: JellyfinSession,
+        playlist: JellyfinMusicPlaylist,
+        tracks: List<JellyfinMusicTrack>,
+        requireWifi: Boolean = false,
+    ): JellyfinResult<Int> {
+        if (tracks.isEmpty()) return JellyfinResult.Failure("This playlist does not have any tracks to save.")
+        var queued = 0
+        var firstFailure: JellyfinResult.Failure? = null
+        tracks.forEachIndexed { index, track ->
+            val enriched = track.copy(
+                album = playlist.name,
+                artworkUrl = track.artworkUrl ?: playlist.imageUrl,
+            )
+            when (
+                val result = queueMusicTrack(
+                    session = session,
+                    track = enriched,
+                    requireWifi = requireWifi,
+                    playlistId = playlist.id,
+                    playlistName = playlist.name,
+                )
+            ) {
+                is JellyfinResult.Success -> {
+                    val ordered = result.value.copy(sortTitle = index.toString().padStart(5, '0') + " ${track.title}")
+                    repository.upsert(ordered)
+                    queued += 1
+                }
+                is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result
+            }
+        }
+        return when {
+            queued > 0 -> JellyfinResult.Success(queued)
+            firstFailure != null -> firstFailure
+            else -> JellyfinResult.Failure("This playlist could not be saved offline.")
+        }
     }
 
     suspend fun queueMusicAlbum(
@@ -288,6 +330,7 @@ class OfflineDownloadManager(
         title: String,
         sortTitle: String?,
         runtimeTicks: Long?,
+        parentId: String? = null,
         albumId: String?,
         albumName: String?,
         artistName: String?,
@@ -301,7 +344,17 @@ class OfflineDownloadManager(
             itemId = itemId.toString(),
             mediaSourceId = mediaSourceId,
         )
-        existingReusableRecord(identity)?.let { return JellyfinResult.Success(it) }
+        existingReusableRecord(identity)?.let { existing ->
+            val updated = existing.copy(
+                parentId = parentId ?: existing.parentId,
+                albumName = albumName ?: existing.albumName,
+                sortTitle = sortTitle ?: existing.sortTitle,
+                remotePosterUrl = remotePosterUrl ?: existing.remotePosterUrl,
+                updatedAtMillis = System.currentTimeMillis(),
+            )
+            if (updated != existing) repository.upsert(updated)
+            return JellyfinResult.Success(updated)
+        }
         val extension = playback.streamUrl.substringBefore('?').substringAfterLast('.', "bin")
         val target = fileStore.targetFor(identity, DownloadFileKind.Media, extension)
         val storage = fileStore.availabilityFor(requiredBytes = null)
@@ -320,6 +373,7 @@ class OfflineDownloadManager(
             title = title,
             sortTitle = sortTitle ?: title,
             runtimeTicks = runtimeTicks,
+            parentId = parentId,
             albumId = albumId,
             albumName = albumName,
             artistName = artistName,
@@ -353,6 +407,22 @@ class OfflineDownloadManager(
         }
         fileStore.deleteTempFileFor(existing)
         return null
+    }
+
+    suspend fun isPlaylistFullyDownloaded(
+        session: JellyfinSession,
+        playlistId: UUID,
+        expectedTrackCount: Int,
+    ): Boolean {
+        if (expectedTrackCount <= 0) return false
+        val all = repository.listForUser(
+            serverId = session.server.localId,
+            userId = session.user.id.toString(),
+        )
+        val completedCount = all.count { record ->
+            record.parentId == playlistId.toString() && record.state == DownloadState.Completed
+        }
+        return completedCount >= expectedTrackCount
     }
 }
 

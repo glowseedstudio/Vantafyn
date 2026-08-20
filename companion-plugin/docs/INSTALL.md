@@ -1,5 +1,7 @@
 # Install Vantafyn Companion
 
+For a complete server test checklist, including Jellyfin Plugin Manager/catalog setup, see [SERVER_TESTING.md](SERVER_TESTING.md).
+
 ## Build
 
 ```bash

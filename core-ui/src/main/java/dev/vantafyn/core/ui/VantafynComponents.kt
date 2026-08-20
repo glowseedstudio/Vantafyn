@@ -13,6 +13,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
@@ -37,13 +38,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -63,12 +69,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +85,14 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalLifecycleOwner
 
 enum class VantafynGlassVariant {
     Panel,
@@ -611,16 +628,30 @@ fun Modifier.vantafynAnimatedModalBorder(
     durationMillis: Int = 5200,
     alpha: Float = 1f,
 ): Modifier {
-    val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
-    val shift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = durationMillis, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "vantafynModalBorderShift",
-    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val shift by if (isResumed) {
+        val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = durationMillis, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "vantafynModalBorderShift",
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
     val shape = RoundedCornerShape(cornerRadius)
     return this.clip(shape).drawWithContent {
         drawContent()
@@ -693,12 +724,48 @@ fun VantafynOnboardingBackground(
         tv -> 0.68f
         else -> 0.72f
     }
+    val context = LocalContext.current
+    val reduceMotion = remember {
+        val am = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+        am != null && am.isTouchExplorationEnabled
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var bgLifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            bgLifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = bgLifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val driftX = if (reduceMotion || !isResumed) {
+        0f
+    } else {
+        val infiniteTransition = rememberInfiniteTransition(label = "bgDrift")
+        val driftOffset by infiniteTransition.animateFloat(
+            initialValue = -0.02f,
+            targetValue = 0.02f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 25_000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "bgDriftX",
+        )
+        driftOffset
+    }
     Box(modifier = modifier.fillMaxSize()) {
         Crossfade(targetState = backgroundResId, animationSpec = tween(durationMillis = 420), label = "vantafynBackground") { resId ->
             Image(
                 painter = painterResource(id = resId),
                 contentDescription = null,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        scaleX = 1.04f
+                        scaleY = 1.04f
+                        translationX = size.width * driftX
+                    },
                 contentScale = ContentScale.Crop,
             )
         }
@@ -998,16 +1065,30 @@ fun VantafynGradientSpinner(
     modifier: Modifier = Modifier,
     strokeWidth: Dp = 3.dp,
 ) {
-    val transition = rememberInfiniteTransition(label = "vantafynSpinner")
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1_250, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "vantafynSpinnerRotation",
-    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val rotation by if (isResumed) {
+        val transition = rememberInfiniteTransition(label = "vantafynSpinner")
+        transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1_250, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "vantafynSpinnerRotation",
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
     Canvas(modifier = modifier) {
         val strokePx = strokeWidth.toPx()
         val arcSize = Size(size.width - strokePx, size.height - strokePx)
@@ -1045,13 +1126,29 @@ fun VantafynErrorCard(
     action: (@Composable RowScope.() -> Unit)? = null,
 ) {
     VantafynCard(modifier = modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
-            Text("Something needs attention", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge)
-            Text(message, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
-            if (action != null) {
-                Spacer(Modifier.height(VantafynSpacing.xs))
-                Row(content = action)
+        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.Top) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(VantafynColors.Destructive.copy(alpha = 0.14f)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.ErrorOutline,
+                    contentDescription = null,
+                    tint = VantafynColors.Destructive,
+                    modifier = Modifier.size(22.dp),
+                )
             }
+            Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs), modifier = Modifier.weight(1f)) {
+                Text("Something needs attention", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge)
+                Text(message, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+        if (action != null) {
+            Spacer(Modifier.height(VantafynSpacing.sm))
+            Row(content = action)
         }
     }
 }
@@ -1189,12 +1286,17 @@ fun VantafynProfileCard(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(VantafynRadii.button))
-                        .background(VantafynColors.Destructive.copy(alpha = 0.22f))
-                        .border(BorderStroke(1.dp, VantafynColors.Destructive.copy(alpha = 0.38f)), RoundedCornerShape(VantafynRadii.button))
+                        .background(VantafynColors.Destructive.copy(alpha = 0.18f))
+                        .border(BorderStroke(1.dp, VantafynColors.Destructive.copy(alpha = 0.42f)), RoundedCornerShape(VantafynRadii.button))
                         .clickable(onClick = onRemove)
-                        .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.xs),
+                        .padding(horizontal = VantafynSpacing.md, vertical = 7.dp),
                 ) {
-                    Text("Remove")
+                    Text(
+                        "Remove",
+                        color = Color.White.copy(alpha = 0.92f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -1217,7 +1319,7 @@ fun VantafynLogoHeader(
             modifier = Modifier
                 .size(if (tv) 92.dp else 76.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White.copy(alpha = 0.06f))
+                .background(Color.Black)
                 .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(20.dp))
                 .padding(if (tv) 12.dp else 10.dp),
             contentAlignment = Alignment.Center,
@@ -1263,7 +1365,7 @@ fun VantafynSetupHeader(
             modifier = Modifier
                 .size(if (tv) 92.dp else 76.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(Color.White.copy(alpha = 0.06f))
+                .background(Color.Black)
                 .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(20.dp))
                 .padding(if (tv) 12.dp else 10.dp),
             contentAlignment = Alignment.Center,
@@ -1303,11 +1405,12 @@ fun VantafynPermissionSheet(
     onSecondary: () -> Unit,
     modifier: Modifier = Modifier,
     trustNote: String? = null,
+    icon: ImageVector? = null,
 ) {
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.54f))
+            .background(Color.Black.copy(alpha = 0.62f))
             .padding(VantafynSpacing.lg),
         contentAlignment = Alignment.Center,
     ) {
@@ -1319,28 +1422,48 @@ fun VantafynPermissionSheet(
             contentPadding = PaddingValues(VantafynSpacing.lg),
         ) {
             Column(
-                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                horizontalAlignment = Alignment.Start,
+                verticalArrangement = Arrangement.spacedBy(15.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
+                icon?.let {
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(999.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = it,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
                 Text(
                     title,
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
                 )
                 Text(
                     body,
                     color = VantafynColors.Muted,
                     style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
                 )
                 trustNote?.let {
                     Text(
                         it,
                         color = VantafynColors.Muted.copy(alpha = 0.82f),
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
                     )
                 }
-                Spacer(Modifier.height(VantafynSpacing.xs))
+                Spacer(Modifier.height(2.dp))
                 VantafynButton(
                     text = primaryAction,
                     onClick = onPrimary,
@@ -1367,6 +1490,7 @@ fun VantafynPermissionExplainerScreen(
     onSecondary: () -> Unit,
     modifier: Modifier = Modifier,
     trustNote: String? = null,
+    icon: ImageVector? = null,
 ) = VantafynPermissionSheet(
     title = title,
     body = body,
@@ -1376,4 +1500,36 @@ fun VantafynPermissionExplainerScreen(
     onSecondary = onSecondary,
     modifier = modifier,
     trustNote = trustNote,
+    icon = icon,
 )
+
+fun Modifier.cardTitleMarquee(): Modifier = basicMarquee(
+    iterations = Int.MAX_VALUE,
+    repeatDelayMillis = 3_200,
+)
+
+@Composable
+fun rememberLifecycleAwareMarquee(
+    iterations: Int = Int.MAX_VALUE,
+    initialDelayMillis: Int = 900,
+    repeatDelayMillis: Int = 3_200,
+): Modifier {
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    return if (lifecycleState.isAtLeast(Lifecycle.State.RESUMED)) {
+        Modifier.basicMarquee(
+            iterations = iterations,
+            initialDelayMillis = initialDelayMillis,
+            repeatDelayMillis = repeatDelayMillis,
+        )
+    } else {
+        Modifier
+    }
+}

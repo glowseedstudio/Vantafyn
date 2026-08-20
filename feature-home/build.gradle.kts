@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.viewmodel.ktx)
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
     implementation(libs.kotlinx.coroutines.android)

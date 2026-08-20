@@ -1,41 +1,113 @@
-# Android Auto Music
+# Android Auto Music Integration
 
-Vantafyn exposes music to Android Auto through the Media3 `MediaLibraryService` in `core-media`.
+## Overview
+Vantafyn supports Android Auto via `MediaLibraryService` and a custom `VantafynMusicMediaLibraryProvider`.
 
-## Browse Roots
+## Architecture
 
-- Recently added
-- Albums
-- Artists
-- Playlists
-- Songs
-- Now playing queue
+### Service
+**File**: `core-media/src/main/java/dev/vantafyn/core/media/VantafynMusicPlaybackService.kt`
 
-If no saved Jellyfin profile can be restored, Android Auto receives a single browsable sign-in item instructing the user to open Vantafyn on the phone.
+Extends `MediaLibraryService` (not `MediaSessionService`) to support Android Auto browsing.
 
-## Data Source
+Key features:
+- Notification with transport controls (previous/play-pause/next)
+- Foreground service with `FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK`
+- Media library browsing via `MediaLibrarySession.Callback`
 
-`VantafynMusicMediaLibraryProvider` restores the active saved Jellyfin profile through `JellyfinRepositoryProvider`, then loads `musicRepository.getMusicHome(...)`.
+### Media Library Provider
+**File**: `core-media/src/main/java/dev/vantafyn/core/media/VantafynMusicMediaLibraryProvider.kt`
 
-Album, artist, playlist, song, queue, and search children are real Jellyfin data. No local fake music catalog is exposed.
+Provides browsable media tree for Android Auto:
 
-## Playback
+```
+Root
+├── Recently Played (RECENT_ID)
+├── Songs (SONGS_ID)
+├── Queue (QUEUE_ID)
+├── Albums (ALBUM_PREFIX)
+│   └── {albumId}
+├── Playlists (PLAYLIST_PREFIX)
+│   └── {playlistId}
+└── Search (SEARCH_PREFIX)
+    └── {query}
+```
 
-When Android Auto selects a playable item, `VantafynMusicPlaybackService` resolves the source container into a queue and passes it to `MusicPlaybackController.adoptSystemQueue(...)`.
+### Playback Controller
+**File**: `core-media/src/main/java/dev/vantafyn/core/media/MusicPlaybackController.kt`
 
-The existing controller-owned ExoPlayer then handles playback, notification state, lock-screen state, queue advancement, shuffle, repeat, and UI updates.
+Singleton controller managing ExoPlayer and playback state.
 
-## IDs And Secrets
+## Battery Considerations
 
-Media IDs contain only Vantafyn route/container IDs and Jellyfin item UUIDs. They do not include server URLs, access tokens, or signed stream URLs.
+### Wake Lock
+- ExoPlayer uses `C.WAKE_MODE_NETWORK` to keep network alive for streaming
+- Held for entire playback duration (expected behavior)
+- Released when playback stops or service is destroyed
 
-Playable `MediaItem` URIs use Jellyfin stream URLs because ExoPlayer requires them.
+### Ticker
+- Foreground: 1s updates for UI
+- Background: 10s updates for notification/Android Auto
+- Source: `AppForegroundStateRepository.isForeground`
 
-## Manifest
+### Notification Updates
+- Initial: `startForeground()` (required by Android)
+- Subsequent: `NotificationManager.notify()` (lightweight)
+- Only updates on track change or play/pause state change
 
-`app-mobile` declares:
+### Progress Reporting
+- Foreground: 10s to Jellyfin server
+- Background: 30s to Jellyfin server
+- Ensures "Continue Watching" shows correct progress
 
-- `com.google.android.gms.car.application` metadata;
-- `@xml/automotive_app_desc` with `<uses name="media" />`.
+## Android Auto Browsing
 
-`core-media` declares `VantafynMusicPlaybackService` with Media3 library/session actions, legacy media browser action, and media playback foreground-service type.
+### Data Flow
+1. Auto requests root → `onGetLibraryRoot()` returns root item
+2. Auto requests children → `onGetChildren()` returns paged list
+3. Auto plays item → `onSetMediaItems()` resolves queue and starts playback
+
+### Queue Resolution
+When Auto plays a track/album/playlist:
+1. `resolveQueue()` fetches all tracks from Jellyfin
+2. Creates `VantafynMusicTrack` list
+3. `adoptSystemQueue()` updates ExoPlayer
+4. Playback starts
+
+### Search
+1. Auto sends search query → `onSearch()`
+2. `search()` fetches matching tracks from Jellyfin
+3. `notifySearchResultChanged()` updates Auto UI
+4. `onGetSearchResult()` returns paged results
+
+## Debug Logs
+
+```bash
+# Service lifecycle
+adb logcat -s MusicPlaybackService:D
+
+# Playback controller
+adb logcat -s MusicPlaybackController:D
+
+# Media library provider
+adb logcat -s MusicMediaLibraryProvider:D
+
+# All music-related logs
+adb logcat | grep -E "MusicPlayback|MusicMedia|MusicController"
+```
+
+## Testing
+
+### Emulator
+1. Start Android Auto emulator
+2. Open Vantafyn in Auto
+3. Browse Recently Played, Albums, Playlists
+4. Play tracks, verify notification controls
+5. Test search functionality
+
+### Physical Device
+1. Connect device via USB
+2. Enable Android Auto developer mode
+3. Launch Vantafyn in Auto
+4. Verify browsing and playback
+5. Test with screen off to verify background optimizations

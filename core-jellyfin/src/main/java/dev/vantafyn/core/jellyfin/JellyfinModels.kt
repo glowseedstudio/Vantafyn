@@ -40,6 +40,17 @@ enum class JellyfinMediaCardShape {
     Library,
 }
 
+enum class LibraryViewMode {
+    Poster,
+    Landscape,
+    Thumbnail,
+}
+
+enum class LibrariesViewMode {
+    List,
+    Grid,
+}
+
 data class JellyfinMediaCard(
     val id: UUID,
     val title: String,
@@ -53,6 +64,8 @@ data class JellyfinMediaCard(
     val progress: Float?,
     val shape: JellyfinMediaCardShape,
     val isFavorite: Boolean = false,
+    val isPlayed: Boolean = false,
+    val unplayedItemCount: Int = 0,
 )
 
 data class JellyfinHeroMediaItem(
@@ -95,6 +108,12 @@ data class JellyfinMediaItem(
     val progress: Float?,
     val shape: JellyfinMediaCardShape,
     val isFavorite: Boolean = false,
+    val isPlayed: Boolean = false,
+    val unplayedItemCount: Int = 0,
+    val mediaType: String? = null,
+    val seriesId: UUID? = null,
+    val seasonNumber: Int? = null,
+    val episodeNumber: Int? = null,
 )
 
 enum class MediaAvailabilityState {
@@ -235,6 +254,7 @@ data class JellyfinMediaDetail(
     val episodes: List<JellyfinEpisode> = emptyList(),
     val related: List<JellyfinMediaItem> = emptyList(),
     val externalLinks: List<JellyfinExternalLink> = emptyList(),
+    val collectionItems: List<JellyfinMediaItem> = emptyList(),
     val themeSongUrl: String? = null,
     val seriesId: UUID? = null,
     val seasonId: UUID? = null,
@@ -321,6 +341,9 @@ data class JellyfinSeason(
     val id: UUID,
     val title: String,
     val indexNumber: Int?,
+    val isPlayed: Boolean = false,
+    val imageUrl: String? = null,
+    val unplayedItemCount: Int = 0,
 )
 
 data class JellyfinEpisode(
@@ -659,6 +682,7 @@ data class JellyfinMusicPlaylist(
     val name: String,
     val imageUrl: String?,
     val trackCount: Int?,
+    val trackImageUrls: List<String> = emptyList(),
 )
 
 data class JellyfinMusicHome(
@@ -759,6 +783,7 @@ data class JellyfinMediaWatchStats(
     val title: String,
     val type: String?,
     val posterUrl: String?,
+    val logoUrl: String?,
     val playCount: Int,
     val totalWatchTimeSeconds: Long,
     val uniqueUsers: Int?,
@@ -1009,6 +1034,7 @@ interface JellyfinLibraryRepository {
 
 interface JellyfinHomeRepository {
     suspend fun getHome(session: JellyfinSession, libraries: List<JellyfinLibrary>): JellyfinResult<JellyfinHome>
+    suspend fun getLatestMedia(session: JellyfinSession, limit: Int = 10): List<JellyfinMediaItem>
 }
 
 interface JellyfinMediaRepository {
@@ -1022,6 +1048,7 @@ interface JellyfinMediaRepository {
         setFavorite(session, itemId, false)
     suspend fun refreshFavoriteState(session: JellyfinSession, itemId: UUID): JellyfinResult<Boolean>
     suspend fun setPlayed(session: JellyfinSession, itemId: UUID, isPlayed: Boolean): JellyfinResult<Boolean>
+    suspend fun getPersonFilmography(session: JellyfinSession, personId: UUID): JellyfinResult<List<JellyfinMediaItem>>
 }
 
 interface JellyfinPlaybackRepository {

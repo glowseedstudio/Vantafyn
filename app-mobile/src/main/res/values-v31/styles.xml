@@ -17,6 +17,6 @@
         <item name="dialogTheme">@style/VantafynCastDialogTheme</item>
         <item name="alertDialogTheme">@style/VantafynCastDialogTheme</item>
         <item name="android:windowSplashScreenBackground">#070A12</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
     </style>
 </resources>

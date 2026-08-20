@@ -40,6 +40,10 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Inbox
+import androidx.compose.material.icons.rounded.MailOutline
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -53,6 +57,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -533,13 +538,6 @@ private fun RequestsSetupHeader(title: String, onBack: () -> Unit) {
                     color = Color.White,
                     start = Offset(5.dp.toPx(), 9.dp.toPx()),
                     end = Offset(11.5.dp.toPx(), 15.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-                drawLine(
-                    color = Color.White,
-                    start = Offset(5.5.dp.toPx(), 9.dp.toPx()),
-                    end = Offset(16.dp.toPx(), 9.dp.toPx()),
                     strokeWidth = stroke,
                     cap = StrokeCap.Round,
                 )
@@ -1263,7 +1261,7 @@ private fun RequestPosterCard(item: RequestMediaSummary, availableMatch: Any?, o
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.basicMarquee(),
+            modifier = Modifier.basicMarquee(initialDelayMillis = 900),
         )
         Text(listOfNotNull(item.mediaType.label, item.year?.toString()).joinToString(" · "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -1574,7 +1572,7 @@ private fun RequestHistory(items: List<MediaRequestItem>, admin: Boolean, loadin
             if (loading) {
                 VantafynLoadingIndicator("Loading requests")
             } else if (items.isEmpty()) {
-                Text("No requests returned by Ombi yet.", color = VantafynColors.Muted)
+                MessageCard("No requests returned by Ombi yet.", Icons.Rounded.Inbox)
             } else {
                 items.take(16).forEach { item ->
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1733,7 +1731,7 @@ private fun AccessRequestsSection(requests: List<OmbiAccessRequest>, viewModel: 
     ManageSection(title = "Access Requests") {
         val visible = requests.filter { it.status != OmbiAccessRequestStatus.Dismissed }
         if (visible.isEmpty()) {
-            Text("No pending Ombi access requests.", color = VantafynColors.Muted)
+            MessageCard("No pending Ombi access requests.", Icons.Rounded.MailOutline)
         } else {
             visible.forEach { request ->
                 Column(
@@ -1899,9 +1897,25 @@ private fun Poster(url: String?, title: String, small: Boolean = false) {
 }
 
 @Composable
-private fun MessageCard(message: String) {
-    VantafynGlassCard(cornerRadius = 20.dp) {
-        Text(message, color = VantafynColors.Ink)
+private fun MessageCard(message: String, icon: ImageVector? = null) {
+    VantafynGlassCard(cornerRadius = 20.dp, contentPadding = PaddingValues(16.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (icon != null) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.06f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(icon, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(20.dp))
+                }
+            }
+            Text(message, color = VantafynColors.Ink, modifier = Modifier.weight(1f))
+        }
     }
 }
 
