@@ -179,7 +179,34 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun onServerUrlChanged(value: String) {
-        _state.update { it.copy(serverUrl = value, errorMessage = null) }
+        _state.update {
+            it.copy(
+                serverUrl = value,
+                localServerUrl = value,
+                remoteServerUrl = "",
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onLocalServerUrlChanged(value: String) {
+        _state.update { state ->
+            state.copy(
+                localServerUrl = value,
+                serverUrl = value.ifBlank { state.remoteServerUrl },
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onRemoteServerUrlChanged(value: String) {
+        _state.update { state ->
+            state.copy(
+                remoteServerUrl = value,
+                serverUrl = state.localServerUrl.ifBlank { value },
+                errorMessage = null,
+            )
+        }
     }
 
     fun onUsernameChanged(value: String) {
@@ -296,7 +323,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     private fun applyAddProfileTarget(snapshot: VantafynHomeUiState) {
         val existingServer = snapshot.server ?: snapshot.savedProfiles.maxByOrNull { it.lastUsedAt }?.let {
-            JellyfinServerConfig(url = it.serverUrl, name = it.serverName, localId = it.serverRef)
+            JellyfinServerConfig(
+                url = it.serverUrl,
+                name = it.serverName,
+                localUrl = it.localServerUrl,
+                remoteUrl = it.remoteServerUrl,
+                localId = it.serverRef,
+            )
         }
         if (existingServer != null) {
             _state.update {
@@ -305,6 +338,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     isLoading = false,
                     server = existingServer,
                     serverUrl = existingServer.url,
+                    localServerUrl = existingServer.localUrl.orEmpty(),
+                    remoteServerUrl = existingServer.remoteUrl.orEmpty(),
                     username = "",
                     password = "",
                     publicUsers = emptyList(),
@@ -324,6 +359,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             it.copy(
                 step = VantafynSetupStep.ConnectServer,
                 serverUrl = "",
+                localServerUrl = "",
+                remoteServerUrl = "",
                 username = "",
                 password = "",
                 server = null,
@@ -371,10 +408,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun connectToServer() {
-        val url = _state.value.serverUrl
+        val snapshot = _state.value
+        val localUrl = snapshot.localServerUrl.ifBlank { if (snapshot.remoteServerUrl.isBlank()) snapshot.serverUrl else "" }
+        val remoteUrl = snapshot.remoteServerUrl
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, errorMessage = null) }
-            when (val result = authRepository.testServer(url)) {
+            when (val result = authRepository.testServer(localUrl, remoteUrl)) {
                 is JellyfinResult.Success -> {
                     val publicUsers = when (val usersResult = authRepository.publicUsers(result.value)) {
                         is JellyfinResult.Success -> usersResult.value
@@ -386,6 +425,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             isLoading = false,
                             server = result.value,
                             serverUrl = result.value.url,
+                            localServerUrl = result.value.localUrl.orEmpty(),
+                            remoteServerUrl = result.value.remoteUrl.orEmpty(),
                             publicUsers = publicUsers,
                         )
                     }
@@ -403,7 +444,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             _state.update { it.copy(isLoading = true, errorMessage = null) }
             when (
                 val result = authRepository.login(
-                    serverUrl = snapshot.serverUrl,
+                    localUrl = snapshot.localServerUrl.ifBlank { if (snapshot.remoteServerUrl.isBlank()) snapshot.serverUrl else "" },
+                    remoteUrl = snapshot.remoteServerUrl,
                     username = snapshot.username,
                     password = snapshot.password,
                 )
@@ -417,6 +459,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             password = "",
                             session = result.value,
                             server = result.value.server,
+                            serverUrl = result.value.server.url,
+                            localServerUrl = result.value.server.localUrl.orEmpty(),
+                            remoteServerUrl = result.value.server.remoteUrl.orEmpty(),
                             step = VantafynSetupStep.Home,
                             homeLayout = readHomeLayout(result.value.profileId),
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
@@ -479,6 +524,86 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun retryQuickConnect() {
         startQuickConnect()
+    }
+
+    fun openDeviceQuickConnect() {
+        if (_state.value.session == null) return
+        quickConnectJob?.cancel()
+        quickConnectJob = null
+        _state.update {
+            it.copy(
+                mobileDestination = MobileDestination.DeviceQuickConnect,
+                previousMobileDestination = MobileDestination.Profile,
+                deviceQuickConnectCode = "",
+                deviceQuickConnectMessage = null,
+                deviceQuickConnectError = null,
+                isDeviceQuickConnectAuthorizing = false,
+                mobileMessage = null,
+            )
+        }
+    }
+
+    fun closeDeviceQuickConnect() {
+        _state.update {
+            it.copy(
+                mobileDestination = MobileDestination.Profile,
+                deviceQuickConnectCode = "",
+                deviceQuickConnectMessage = null,
+                deviceQuickConnectError = null,
+                isDeviceQuickConnectAuthorizing = false,
+            )
+        }
+    }
+
+    fun onDeviceQuickConnectCodeChanged(value: String) {
+        val normalized = value
+            .filter { it.isLetterOrDigit() || it == '-' || it == ' ' }
+            .uppercase()
+            .take(16)
+        _state.update {
+            it.copy(
+                deviceQuickConnectCode = normalized,
+                deviceQuickConnectMessage = null,
+                deviceQuickConnectError = null,
+            )
+        }
+    }
+
+    fun authorizeDeviceQuickConnect() {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        if (snapshot.isDeviceQuickConnectAuthorizing) return
+        val code = snapshot.deviceQuickConnectCode.trim()
+        if (code.isBlank()) {
+            _state.update { it.copy(deviceQuickConnectError = "Enter the code shown on the other Jellyfin device.") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    isDeviceQuickConnectAuthorizing = true,
+                    deviceQuickConnectMessage = null,
+                    deviceQuickConnectError = null,
+                )
+            }
+            when (val result = quickConnectRepository.authorizeDevice(session, code)) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(
+                        isDeviceQuickConnectAuthorizing = false,
+                        deviceQuickConnectCode = "",
+                        deviceQuickConnectMessage = "Device authorized. You can continue using Vantafyn.",
+                        deviceQuickConnectError = null,
+                    )
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(
+                        isDeviceQuickConnectAuthorizing = false,
+                        deviceQuickConnectMessage = null,
+                        deviceQuickConnectError = result.message,
+                    )
+                }
+            }
+        }
     }
 
     fun cancelQuickConnect() {
@@ -559,6 +684,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             session = result.value,
                             server = result.value.server,
                             serverUrl = result.value.server.url,
+                            localServerUrl = result.value.server.localUrl.orEmpty(),
+                            remoteServerUrl = result.value.server.remoteUrl.orEmpty(),
                             username = result.value.user.name,
                             password = "",
                             homeLayout = readHomeLayout(result.value.profileId),
@@ -600,7 +727,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val profile = snapshot.restoreFailureProfile ?: return
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, errorMessage = null) }
-            when (val result = authRepository.updateSavedServerUrl(profile.id, snapshot.serverUrl)) {
+            when (
+                val result = authRepository.updateSavedServerUrls(
+                    profileId = profile.id,
+                    localUrl = snapshot.localServerUrl.ifBlank { if (snapshot.remoteServerUrl.isBlank()) snapshot.serverUrl else "" },
+                    remoteUrl = snapshot.remoteServerUrl,
+                )
+            ) {
                 is JellyfinResult.Success -> {
                     markSetupCompleted()
                     _state.update {
@@ -612,6 +745,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             session = result.value,
                             server = result.value.server,
                             serverUrl = result.value.server.url,
+                            localServerUrl = result.value.server.localUrl.orEmpty(),
+                            remoteServerUrl = result.value.server.remoteUrl.orEmpty(),
                             username = result.value.user.name,
                             password = "",
                             restoreFailureProfile = null,
@@ -666,6 +801,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 step = VantafynSetupStep.ConnectServer,
                 isLoading = false,
                 serverUrl = "",
+                localServerUrl = "",
+                remoteServerUrl = "",
                 username = "",
                 password = "",
                 server = null,
@@ -693,9 +830,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 server = JellyfinServerConfig(
                     url = serverUrl,
                     name = profile.serverName,
+                    localUrl = profile.localServerUrl,
+                    remoteUrl = profile.remoteServerUrl,
                     localId = profile.serverRef,
                 ),
                 serverUrl = serverUrl,
+                localServerUrl = profile.localServerUrl.orEmpty(),
+                remoteServerUrl = profile.remoteServerUrl.orEmpty(),
                 username = profile.displayName,
                 password = "",
                 restoreFailureProfile = null,
@@ -724,8 +865,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         isStartupResolved = true,
                         session = null,
                         offlineProfile = profile,
-                        server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                        server = JellyfinServerConfig(
+                            url = profile.serverUrl,
+                            name = profile.serverName,
+                            localUrl = profile.localServerUrl,
+                            remoteUrl = profile.remoteServerUrl,
+                            localId = profile.serverRef,
+                        ),
                         serverUrl = profile.serverUrl,
+                        localServerUrl = profile.localServerUrl.orEmpty(),
+                        remoteServerUrl = profile.remoteServerUrl.orEmpty(),
                         username = profile.displayName,
                         password = "",
                         restoreFailureProfile = null,
@@ -749,8 +898,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     selectedProfileId = profile.id,
                     isLoading = false,
                     isStartupResolved = true,
-                    server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                    server = JellyfinServerConfig(
+                        url = profile.serverUrl,
+                        name = profile.serverName,
+                        localUrl = profile.localServerUrl,
+                        remoteUrl = profile.remoteServerUrl,
+                        localId = profile.serverRef,
+                    ),
                     serverUrl = profile.serverUrl,
+                    localServerUrl = profile.localServerUrl.orEmpty(),
+                    remoteServerUrl = profile.remoteServerUrl.orEmpty(),
                     username = profile.displayName,
                     password = "",
                     restoreFailureProfile = profile,
@@ -770,6 +927,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 step = VantafynSetupStep.Login,
                 server = user.server,
                 serverUrl = user.server.url,
+                localServerUrl = user.server.localUrl.orEmpty(),
+                remoteServerUrl = user.server.remoteUrl.orEmpty(),
                 username = user.displayName,
                 password = "",
                 errorMessage = null,
@@ -1134,6 +1293,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Downloads -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
             MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
+            MobileDestination.DeviceQuickConnect -> closeDeviceQuickConnect()
             MobileDestination.AdminUserSettings -> closeAdminUser()
             MobileDestination.Libraries,
             MobileDestination.Search,
@@ -1902,8 +2062,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     isStartupResolved = true,
                     session = null,
                     offlineProfile = profile,
-                    server = JellyfinServerConfig(url = profile.serverUrl, name = profile.serverName, localId = profile.serverRef),
+                    server = JellyfinServerConfig(
+                        url = profile.serverUrl,
+                        name = profile.serverName,
+                        localUrl = profile.localServerUrl,
+                        remoteUrl = profile.remoteServerUrl,
+                        localId = profile.serverRef,
+                    ),
                     serverUrl = profile.serverUrl,
+                    localServerUrl = profile.localServerUrl.orEmpty(),
+                    remoteServerUrl = profile.remoteServerUrl.orEmpty(),
                     username = profile.displayName,
                     password = "",
                     restoreFailureProfile = null,
@@ -2207,19 +2375,29 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         )
     }
 
-    fun loadWatchParty() {
+    fun loadWatchParty(resetDeckHistory: Boolean = false, resetVotes: Boolean = false) {
         val session = _state.value.session ?: return
         startWatchPartyRealtime(session)
         viewModelScope.launch {
             _state.update { it.copy(isWatchPartyLoading = true, watchPartyError = null) }
             val rules = _state.value.watchPartyRules
+            val existingSeen = if (resetDeckHistory) {
+                emptySet()
+            } else {
+                _state.value.watchPartySeenCandidateIds + _state.value.watchPartyVotes.map { it.candidateId }
+            }
             when (val result = watchPartyRepository.getCandidates(session, rules, limit = 48)) {
                 is JellyfinResult.Success -> _state.update {
+                    val uniquePool = result.value.distinctBy { candidate -> candidate.id }
+                    val freshDeck = uniquePool.filterNot { candidate -> candidate.id in existingSeen }
+                    val deck = if (freshDeck.size >= 10 || freshDeck.size >= uniquePool.size / 2) freshDeck else uniquePool
                     it.copy(
                         isWatchPartyLoading = false,
-                        watchPartyCandidates = result.value,
+                        watchPartyCandidates = deck.take(48),
                         watchPartyCurrentIndex = 0,
-                        watchPartyVotes = emptyList(),
+                        watchPartyVotes = if (resetVotes) emptyList() else it.watchPartyVotes,
+                        watchPartySeenCandidateIds = existingSeen,
+                        watchPartyDeckGeneration = it.watchPartyDeckGeneration + 1,
                         watchPartyMatch = null,
                         watchPartyError = null,
                     )
@@ -2229,6 +2407,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         }
+    }
+
+    fun shuffleWatchPartyDeck() {
+        loadWatchParty(resetDeckHistory = false, resetVotes = false)
     }
 
     fun createWatchParty() {
@@ -2254,7 +2436,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             watchPartyError = null,
                         )
                     }
-                    loadWatchParty()
+                    loadWatchParty(resetDeckHistory = true, resetVotes = true)
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(
@@ -2326,6 +2508,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 watchPartyCandidates = emptyList(),
                 watchPartyCurrentIndex = 0,
                 watchPartyVotes = emptyList(),
+                watchPartySeenCandidateIds = emptySet(),
+                watchPartyDeckGeneration = it.watchPartyDeckGeneration + 1,
                 watchPartyMatch = null,
                 watchPartyError = null,
             )
@@ -2795,6 +2979,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val snapshot = _state.value
         val candidate = snapshot.currentWatchPartyCandidate ?: return
         val memberId = snapshot.session?.user?.id?.toString() ?: return
+        if (snapshot.watchPartyVotes.any { it.candidateId == candidate.id && it.memberId == memberId }) return
         val vote = WatchPartyVote(candidate.id, memberId, value)
         val votes = snapshot.watchPartyVotes.filterNot { it.candidateId == candidate.id && it.memberId == memberId } + vote
         val match = if (value == WatchPartyVoteValue.Yes && snapshot.watchPartyRules.isMatched(votes, candidate.id, memberCount = 1)) {
@@ -2805,6 +2990,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 watchPartyVotes = votes,
+                watchPartySeenCandidateIds = it.watchPartySeenCandidateIds + candidate.id,
                 watchPartyCurrentIndex = (it.watchPartyCurrentIndex + 1).coerceAtMost(it.watchPartyCandidates.size),
                 watchPartyMatch = match ?: it.watchPartyMatch,
             )
@@ -3649,6 +3835,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     session = jellyfinSession,
                                     server = jellyfinSession.server,
                                     serverUrl = jellyfinSession.server.url,
+                                    localServerUrl = jellyfinSession.server.localUrl.orEmpty(),
+                                    remoteServerUrl = jellyfinSession.server.remoteUrl.orEmpty(),
                                     username = jellyfinSession.user.name,
                                     password = "",
                                     step = VantafynSetupStep.Home,
@@ -3695,6 +3883,8 @@ data class VantafynHomeUiState(
     val isLibrariesLoading: Boolean = false,
     val isHomeLoading: Boolean = false,
     val serverUrl: String = "",
+    val localServerUrl: String = "",
+    val remoteServerUrl: String = "",
     val username: String = "",
     val password: String = "",
     val server: JellyfinServerConfig? = null,
@@ -3795,6 +3985,10 @@ data class VantafynHomeUiState(
     val hasReportedPlaybackStart: Boolean = false,
     val quickConnectSession: JellyfinQuickConnectSession? = null,
     val quickConnectMessage: String? = null,
+    val deviceQuickConnectCode: String = "",
+    val isDeviceQuickConnectAuthorizing: Boolean = false,
+    val deviceQuickConnectMessage: String? = null,
+    val deviceQuickConnectError: String? = null,
     val ombiConfigured: Boolean = false,
     val ombiRequestsEnabledForUsers: Boolean = false,
     val ombiRequestsEnabledForAdmins: Boolean = false,
@@ -3820,6 +4014,8 @@ data class VantafynHomeUiState(
     val watchPartyRealtimeError: String? = null,
     val watchPartyCandidates: List<WatchPartyCandidate> = emptyList(),
     val watchPartyCurrentIndex: Int = 0,
+    val watchPartyDeckGeneration: Int = 0,
+    val watchPartySeenCandidateIds: Set<UUID> = emptySet(),
     val watchPartyVotes: List<WatchPartyVote> = emptyList(),
     val watchPartyMatch: WatchPartyMatch? = null,
     val isWatchPartyLoading: Boolean = false,
@@ -4046,6 +4242,7 @@ enum class MobileDestination {
     Profile,
     HomeLayout,
     PlaybackPreferences,
+    DeviceQuickConnect,
     LibraryDetail,
     MediaDetail,
     Player,
@@ -4066,6 +4263,7 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.Downloads,
         MobileDestination.HomeLayout,
         MobileDestination.PlaybackPreferences,
+        MobileDestination.DeviceQuickConnect,
         MobileDestination.LibraryDetail,
         MobileDestination.MediaDetail,
         MobileDestination.Player -> false

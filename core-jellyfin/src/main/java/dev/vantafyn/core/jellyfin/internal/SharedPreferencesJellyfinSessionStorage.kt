@@ -50,6 +50,8 @@ class SharedPreferencesJellyfinSessionStorage(
                 .putStringSet(KEY_PROFILE_IDS, ids)
                 .putString(KEY_LAST_PROFILE_ID, session.profileId)
                 .putString(key(session.profileId, KEY_SERVER_URL), session.serverUrl)
+                .putString(key(session.profileId, KEY_LOCAL_SERVER_URL), session.localServerUrl)
+                .putString(key(session.profileId, KEY_REMOTE_SERVER_URL), session.remoteServerUrl)
                 .putString(key(session.profileId, KEY_SERVER_NAME), session.serverName)
                 .putString(key(session.profileId, KEY_SERVER_VERSION), session.serverVersion)
                 .putString(key(session.profileId, KEY_SERVER_ID), session.serverId)
@@ -71,6 +73,8 @@ class SharedPreferencesJellyfinSessionStorage(
                 .edit()
                 .putStringSet(KEY_PROFILE_IDS, ids)
                 .remove(key(profileId, KEY_SERVER_URL))
+                .remove(key(profileId, KEY_LOCAL_SERVER_URL))
+                .remove(key(profileId, KEY_REMOTE_SERVER_URL))
                 .remove(key(profileId, KEY_SERVER_NAME))
                 .remove(key(profileId, KEY_SERVER_VERSION))
                 .remove(key(profileId, KEY_SERVER_ID))
@@ -108,6 +112,10 @@ class SharedPreferencesJellyfinSessionStorage(
         return StoredJellyfinSession(
             profileId = profileId,
             serverUrl = serverUrl,
+            localServerUrl = preferences.getString(key(profileId, KEY_LOCAL_SERVER_URL), null)
+                ?: serverUrl.takeIf(::looksLikeLocalServerAddress),
+            remoteServerUrl = preferences.getString(key(profileId, KEY_REMOTE_SERVER_URL), null)
+                ?: serverUrl.takeUnless(::looksLikeLocalServerAddress),
             serverName = preferences.getString(key(profileId, KEY_SERVER_NAME), null),
             serverVersion = preferences.getString(key(profileId, KEY_SERVER_VERSION), null),
             serverId = preferences.getString(key(profileId, KEY_SERVER_ID), null),
@@ -139,6 +147,8 @@ class SharedPreferencesJellyfinSessionStorage(
             .putStringSet(KEY_PROFILE_IDS, setOf(profileId))
             .putString(KEY_LAST_PROFILE_ID, profileId)
             .putString(key(profileId, KEY_SERVER_URL), serverUrl)
+            .putString(key(profileId, KEY_LOCAL_SERVER_URL), serverUrl.takeIf(::looksLikeLocalServerAddress))
+            .putString(key(profileId, KEY_REMOTE_SERVER_URL), serverUrl.takeUnless(::looksLikeLocalServerAddress))
             .putString(key(profileId, KEY_SERVER_NAME), preferences.getString(KEY_SERVER_NAME, null))
             .putString(key(profileId, KEY_SERVER_VERSION), preferences.getString(KEY_SERVER_VERSION, null))
             .putString(key(profileId, KEY_SERVER_ID), preferences.getString(KEY_SERVER_ID, null))
@@ -154,6 +164,8 @@ class SharedPreferencesJellyfinSessionStorage(
         const val KEY_PROFILE_IDS = "profiles.ids"
         const val KEY_LAST_PROFILE_ID = "profiles.last"
         const val KEY_SERVER_URL = "server.url"
+        const val KEY_LOCAL_SERVER_URL = "server.local_url"
+        const val KEY_REMOTE_SERVER_URL = "server.remote_url"
         const val KEY_SERVER_NAME = "server.name"
         const val KEY_SERVER_VERSION = "server.version"
         const val KEY_SERVER_ID = "server.id"
@@ -165,6 +177,17 @@ class SharedPreferencesJellyfinSessionStorage(
 
         fun key(profileId: String, field: String): String = "profile.$profileId.$field"
         fun profileId(serverUrl: String, userId: UUID): String = "${serverUrl.hashCode().toUInt()}-$userId"
+
+        fun looksLikeLocalServerAddress(url: String): Boolean {
+            val host = runCatching { java.net.URI(url).host.orEmpty().lowercase() }.getOrDefault("")
+            if (host == "localhost" || host.endsWith(".local")) return true
+            val parts = host.split('.').mapNotNull { it.toIntOrNull() }
+            if (parts.size != 4) return false
+            return parts[0] == 10 ||
+                parts[0] == 127 ||
+                parts[0] == 192 && parts[1] == 168 ||
+                parts[0] == 172 && parts[1] in 16..31
+        }
     }
 }
 

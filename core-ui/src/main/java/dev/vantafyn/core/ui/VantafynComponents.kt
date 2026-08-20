@@ -1,5 +1,6 @@
 package dev.vantafyn.core.ui
 
+import android.provider.Settings
 import android.view.KeyEvent
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateColorAsState
@@ -1058,6 +1059,66 @@ fun VantafynLoadingIndicator(text: String, modifier: Modifier = Modifier) {
         VantafynGradientSpinner(modifier = Modifier.size(24.dp))
         Text(text, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
     }
+}
+
+@Composable
+fun VantafynSkeletonBrush(): Brush {
+    val context = LocalContext.current
+    val reducedMotion = remember {
+        val animatorScale = runCatching {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE)
+        }.getOrDefault(1f)
+        val transitionScale = runCatching {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.TRANSITION_ANIMATION_SCALE)
+        }.getOrDefault(1f)
+        animatorScale == 0f || transitionScale == 0f
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val shift = if (reducedMotion || !isResumed) {
+        0.42f
+    } else {
+        val transition = rememberInfiniteTransition(label = "vantafynSkeleton")
+        val animatedShift by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1800, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "vantafynSkeletonShift",
+        )
+        animatedShift
+    }
+    return Brush.linearGradient(
+        colors = listOf(
+            Color.White.copy(alpha = 0.050f),
+            Color.White.copy(alpha = 0.105f),
+            Color.White.copy(alpha = 0.045f),
+        ),
+        start = Offset(-260f + shift * 520f, 0f),
+        end = Offset(shift * 520f, 220f),
+    )
+}
+
+@Composable
+fun VantafynSkeletonBlock(
+    modifier: Modifier,
+    cornerRadius: Dp = 999.dp,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(cornerRadius))
+            .background(VantafynSkeletonBrush()),
+    )
 }
 
 @Composable

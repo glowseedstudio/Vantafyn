@@ -279,7 +279,7 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
             _state.update { it.copy(isTesting = true, message = null) }
             runCatching {
                 ombiRepository.saveConfig(
-                    accessMode = OmbiAccessMode.Disabled,
+                    accessMode = OmbiAccessMode.AllUsers,
                     baseUrl = snapshot.baseUrl,
                     apiKey = snapshot.apiKey,
                     apiAlias = snapshot.currentUserName,
@@ -319,10 +319,11 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
     fun finishSetup() {
         if (!requireAdmin()) return
         val snapshot = _state.value
+        val enabledAccessMode = if (snapshot.accessMode == OmbiAccessMode.Disabled) OmbiAccessMode.AllUsers else snapshot.accessMode
         viewModelScope.launch {
             runCatching {
                 ombiRepository.saveConfig(
-                    accessMode = snapshot.accessMode,
+                    accessMode = enabledAccessMode,
                     baseUrl = snapshot.baseUrl,
                     apiKey = snapshot.apiKey,
                     apiAlias = snapshot.currentUserName,
@@ -333,7 +334,15 @@ class RequestsViewModel(application: Application) : AndroidViewModel(application
             }
             refreshConfig()
             ombiRepository.cleanupAccessRequests()
-            _state.update { it.copy(mode = RequestsScreenMode.Requests, setupStep = OmbiSetupStep.Finish, message = "Requests are ready") }
+            _state.update {
+                it.copy(
+                    mode = RequestsScreenMode.Requests,
+                    setupStep = OmbiSetupStep.Finish,
+                    accessMode = enabledAccessMode,
+                    config = ombiRepository.config(),
+                    message = "Requests are ready",
+                )
+            }
             loadRequests()
         }
     }

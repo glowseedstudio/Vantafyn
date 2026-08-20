@@ -8,6 +8,8 @@ data class JellyfinServerConfig(
     val name: String? = null,
     val version: String? = null,
     val serverId: String? = null,
+    val localUrl: String? = null,
+    val remoteUrl: String? = null,
     val localId: String = serverId ?: url,
 )
 
@@ -952,6 +954,8 @@ sealed interface JellyfinConnectionState {
 data class StoredJellyfinSession(
     val profileId: String,
     val serverUrl: String,
+    val localServerUrl: String? = null,
+    val remoteServerUrl: String? = null,
     val serverName: String?,
     val serverVersion: String?,
     val serverId: String?,
@@ -976,6 +980,8 @@ data class SavedProfile(
     val serverRef: String,
     val serverName: String?,
     val serverUrl: String,
+    val localServerUrl: String? = null,
+    val remoteServerUrl: String? = null,
     val jellyfinUserId: UUID,
     val displayName: String,
     val userImageTag: String?,
@@ -1012,9 +1018,12 @@ interface JellyfinAuthRepository {
     suspend fun savedProfiles(): List<SavedProfile>
     suspend fun restoreSession(profileId: String): JellyfinResult<JellyfinSession>
     suspend fun updateSavedServerUrl(profileId: String, serverUrl: String): JellyfinResult<JellyfinSession>
+    suspend fun updateSavedServerUrls(profileId: String, localUrl: String?, remoteUrl: String?): JellyfinResult<JellyfinSession>
     suspend fun testServer(serverUrl: String): JellyfinResult<JellyfinServerConfig>
+    suspend fun testServer(localUrl: String?, remoteUrl: String?): JellyfinResult<JellyfinServerConfig>
     suspend fun publicUsers(server: JellyfinServerConfig): JellyfinResult<List<JellyfinPublicUser>>
     suspend fun login(serverUrl: String, username: String, password: String): JellyfinResult<JellyfinSession>
+    suspend fun login(localUrl: String?, remoteUrl: String?, username: String, password: String): JellyfinResult<JellyfinSession>
     suspend fun removeProfile(profileId: String)
     suspend fun logout()
 }
@@ -1140,6 +1149,7 @@ interface JellyfinUserPreferencesRepository {
 interface JellyfinQuickConnectRepository {
     suspend fun initiate(server: JellyfinServerConfig): JellyfinResult<JellyfinQuickConnectSession>
     suspend fun poll(session: JellyfinQuickConnectSession): JellyfinResult<JellyfinSession?>
+    suspend fun authorizeDevice(session: JellyfinSession, code: String): JellyfinResult<Unit>
 }
 
 interface JellyfinWatchPartyRepository {

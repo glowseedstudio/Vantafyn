@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -63,7 +64,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.Article
-import androidx.compose.material.icons.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
@@ -146,6 +146,7 @@ import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
+import dev.vantafyn.core.ui.VantafynSkeletonBrush
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
 import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
@@ -193,31 +194,20 @@ fun MusicScreen(
         state.screen == MusicScreenState.Home
     val musicListState = rememberLazyListState()
     val screenScrollKey = state.screen.scrollResetKey()
-    var homeRevealActive by remember(session?.profileId) { mutableStateOf(true) }
-    LaunchedEffect(session?.profileId) {
+    val homeRevealKey = "${session?.profileId}-${state.home != null}-${state.searchResults.isNotEmpty()}"
+    var homeRevealActive by remember(homeRevealKey) { mutableStateOf(true) }
+    LaunchedEffect(homeRevealKey) {
         homeRevealActive = true
         delay(1_100L)
         homeRevealActive = false
     }
-    val playlistRevealActive = remember { mutableStateOf(true) }
-    val songsRevealActive = remember { mutableStateOf(true) }
-    val albumRevealActive = remember { mutableStateOf(true) }
+    var nestedRevealActive by remember(screenScrollKey) { mutableStateOf(state.screen != MusicScreenState.Home) }
     LaunchedEffect(screenScrollKey) {
         musicListState.scrollToItem(0)
-        if (state.screen is MusicScreenState.Playlist) {
-            playlistRevealActive.value = true
+        if (state.screen != MusicScreenState.Home) {
+            nestedRevealActive = true
             delay(1_450L)
-            playlistRevealActive.value = false
-        }
-        if (state.screen is MusicScreenState.Songs) {
-            songsRevealActive.value = true
-            delay(1_450L)
-            songsRevealActive.value = false
-        }
-        if (state.screen is MusicScreenState.Album) {
-            albumRevealActive.value = true
-            delay(1_450L)
-            albumRevealActive.value = false
+            nestedRevealActive = false
         }
     }
     LaunchedEffect(session?.profileId) {
@@ -253,13 +243,14 @@ fun MusicScreen(
             state = musicListState,
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)),
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .imePadding(),
             contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
             item {
                 if (state.screen == MusicScreenState.Home) {
-                    MusicContentReveal(index = 0, animate = homeRevealActive) {
+                    MusicContentReveal(index = 0, animate = homeRevealActive, revealKey = homeRevealKey) {
                         MusicHomeHeader()
                     }
                 } else {
@@ -268,14 +259,14 @@ fun MusicScreen(
             }
             state.errorMessage?.let { message ->
                 item {
-                    MusicContentReveal(index = 1, animate = state.screen == MusicScreenState.Home && homeRevealActive) {
+                    MusicContentReveal(index = 1, animate = state.screen == MusicScreenState.Home && homeRevealActive, revealKey = homeRevealKey) {
                         VantafynErrorCard(message) { VantafynButton("Retry", onClick = viewModel::loadHome) }
                     }
                 }
             }
             if (state.screen == MusicScreenState.Home) {
                 item {
-                    MusicContentReveal(index = 1, animate = homeRevealActive) {
+                    MusicContentReveal(index = 1, animate = homeRevealActive, revealKey = homeRevealKey) {
                         VantafynTextField(
                             value = state.searchQuery,
                             onValueChange = viewModel::search,
@@ -287,7 +278,7 @@ fun MusicScreen(
             }
             if (showInitialLoading) {
                 item(key = "music-loading-skeleton") {
-                    MusicContentReveal(index = 2, animate = homeRevealActive) {
+                    MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
                         MusicLoadingSkeleton()
                     }
                 }
@@ -296,7 +287,7 @@ fun MusicScreen(
                 MusicScreenState.Home -> {
                     if (state.searchResults.isNotEmpty()) {
                         item {
-                            MusicContentReveal(index = 2, animate = homeRevealActive) {
+                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
                                 MusicTrackList(
                                     title = "Search Results",
                                     tracks = state.searchResults,
@@ -311,27 +302,27 @@ fun MusicScreen(
                     }
                     state.home?.let { home ->
                         if (home.recentlyAdded.isNotEmpty()) item {
-                            MusicContentReveal(index = 2, animate = homeRevealActive) {
+                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
                                 MusicTrackRow("Recently Added", home.recentlyAdded, pendingTrackId = state.pendingPlayTrackId) { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } }
                             }
                         }
                         if (home.albums.isNotEmpty()) item {
-                            MusicContentReveal(index = 3, animate = homeRevealActive) {
+                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
                                 MusicAlbumRow(home.albums, onAlbum = viewModel::openAlbum)
                             }
                         }
                         if (home.artists.isNotEmpty()) item {
-                            MusicContentReveal(index = 4, animate = homeRevealActive) {
+                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
                                 MusicArtistRow(home.artists, onArtist = viewModel::openArtist)
                             }
                         }
                         if (home.playlists.isNotEmpty()) item {
-                            MusicContentReveal(index = 5, animate = homeRevealActive) {
+                            MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
                                 MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
                             }
                         }
                         if (home.songs.isNotEmpty()) item {
-                            MusicContentReveal(index = 6, animate = homeRevealActive) {
+                            MusicContentReveal(index = 6, animate = homeRevealActive, revealKey = homeRevealKey) {
                                 Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                                     MusicSectionHeader("Songs", "View all", viewModel::showSongs)
                                     MusicTrackList(
@@ -350,7 +341,7 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Album -> {
                     item {
-                        MusicContentReveal(index = 0, animate = albumRevealActive.value) {
+                        MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicDetailHeader(
                                 title = screen.album.title,
                                 subtitle = screen.album.artist ?: "Album",
@@ -364,7 +355,7 @@ fun MusicScreen(
                         }
                     }
                     item {
-                        MusicContentReveal(index = 1, animate = albumRevealActive.value) {
+                        MusicContentReveal(index = 1, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicTrackList(
                                 title = "Tracks",
                                 tracks = screen.tracks,
@@ -379,39 +370,43 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Artist -> {
                     item {
-                        MusicDetailHeader(screen.artist.name, "Artist", screen.artist.imageUrl, onBack = viewModel::showHome, onPlay = null)
+                        MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = screenScrollKey) {
+                            MusicDetailHeader(screen.artist.name, "Artist", screen.artist.imageUrl, onBack = viewModel::showHome, onPlay = null)
+                        }
                     }
                     item {
-                        if (screen.albums.isEmpty()) {
-                            VantafynGlassCard(
-                                modifier = Modifier.fillMaxWidth(),
-                                cornerRadius = 20.dp,
-                                contentPadding = PaddingValues(16.dp),
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
+                        MusicContentReveal(index = 1, animate = nestedRevealActive, revealKey = screenScrollKey) {
+                            if (screen.albums.isEmpty()) {
+                                VantafynGlassCard(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    cornerRadius = 20.dp,
+                                    contentPadding = PaddingValues(16.dp),
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(Color.White.copy(alpha = 0.06f)),
-                                        contentAlignment = Alignment.Center,
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Icon(Icons.Rounded.Album, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(20.dp))
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .clip(RoundedCornerShape(12.dp))
+                                                .background(Color.White.copy(alpha = 0.06f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(Icons.Rounded.Album, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(20.dp))
+                                        }
+                                        Text("No albums found for this artist yet.", color = VantafynColors.Muted)
                                     }
-                                    Text("No albums found for this artist yet.", color = VantafynColors.Muted)
                                 }
+                            } else {
+                                MusicAlbumRow(screen.albums, onAlbum = viewModel::openAlbum)
                             }
-                        } else {
-                            MusicAlbumRow(screen.albums, onAlbum = viewModel::openAlbum)
                         }
                     }
                 }
                 is MusicScreenState.Playlist -> {
                     item {
-                        MusicContentReveal(index = 0, animate = playlistRevealActive.value) {
+                        MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicDetailHeader(
                                 title = screen.playlist.name,
                                 subtitle = "${screen.tracks.size} tracks",
@@ -426,7 +421,7 @@ fun MusicScreen(
                         }
                     }
                     item {
-                        MusicContentReveal(index = 1, animate = playlistRevealActive.value) {
+                        MusicContentReveal(index = 1, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicTrackList(
                                 title = "Playlist",
                                 tracks = screen.tracks,
@@ -441,7 +436,7 @@ fun MusicScreen(
                 }
                 is MusicScreenState.Songs -> {
                     item {
-                        MusicContentReveal(index = 0, animate = songsRevealActive.value) {
+                        MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicTrackList(
                                 title = "All Songs",
                                 tracks = screen.tracks,
@@ -599,7 +594,9 @@ fun MusicScreen(
         if (showCreatePlaylistDialog) {
             var newName by remember { mutableStateOf("") }
             AlertDialog(
-                modifier = Modifier.vantafynAnimatedModalBorder(),
+                modifier = Modifier
+                    .imePadding()
+                    .vantafynAnimatedModalBorder(),
                 onDismissRequest = { showCreatePlaylistDialog = false },
                 containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
                 shape = RoundedCornerShape(28.dp),
@@ -744,25 +741,7 @@ private fun MusicSkeletonArtworkRow(labelWidth: androidx.compose.ui.unit.Dp) {
 
 @Composable
 private fun musicSkeletonBrush(): Brush {
-    val transition = rememberInfiniteTransition(label = "musicSkeleton")
-    val shift by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "musicSkeletonShift",
-    )
-    return Brush.linearGradient(
-        colors = listOf(
-            Color.White.copy(alpha = 0.050f),
-            Color.White.copy(alpha = 0.105f),
-            Color.White.copy(alpha = 0.045f),
-        ),
-        start = Offset(-260f + shift * 520f, 0f),
-        end = Offset(shift * 520f, 220f),
-    )
+    return VantafynSkeletonBrush()
 }
 
 @Composable
@@ -1454,7 +1433,9 @@ private fun NowPlayingDialog(
     if (showPlaylistName) {
         var name by remember { mutableStateOf("") }
         AlertDialog(
-            modifier = Modifier.vantafynAnimatedModalBorder(),
+            modifier = Modifier
+                .imePadding()
+                .vantafynAnimatedModalBorder(),
             onDismissRequest = { showPlaylistName = false },
             containerColor = VantafynModalContainerColor,
             shape = RoundedCornerShape(28.dp),
@@ -2618,10 +2599,11 @@ private fun progressFraction(positionMs: Long, durationMs: Long): Float =
 private fun MusicContentReveal(
     index: Int,
     animate: Boolean,
+    revealKey: Any? = index,
     content: @Composable () -> Unit,
 ) {
-    var progress by remember { mutableFloatStateOf(if (animate) 0f else 1f) }
-    LaunchedEffect(index, animate) {
+    var progress by remember(revealKey, index, animate) { mutableFloatStateOf(if (animate) 0f else 1f) }
+    LaunchedEffect(revealKey, index, animate) {
         if (animate) {
             progress = 0f
             delay((index.coerceAtMost(8) * 112L).coerceAtMost(780L))

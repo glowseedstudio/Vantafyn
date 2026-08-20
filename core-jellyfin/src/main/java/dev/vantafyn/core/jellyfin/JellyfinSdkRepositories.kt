@@ -11,6 +11,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+import kotlin.random.Random
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -117,7 +118,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.5.0",
+            version = "0.8.0",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -188,6 +189,8 @@ class SdkJellyfinAuthRepository(
                     serverRef = stored.serverId ?: stored.serverUrl,
                     serverName = stored.serverName,
                     serverUrl = stored.serverUrl,
+                    localServerUrl = stored.localServerUrl,
+                    remoteServerUrl = stored.remoteServerUrl,
                     jellyfinUserId = stored.userId,
                     displayName = stored.userName,
                     userImageTag = stored.userImageTag,
@@ -204,14 +207,20 @@ class SdkJellyfinAuthRepository(
         }
 
     override suspend fun updateSavedServerUrl(profileId: String, serverUrl: String): JellyfinResult<JellyfinSession> =
+        updateSavedServerUrls(profileId, serverUrl, null)
+
+    override suspend fun updateSavedServerUrls(profileId: String, localUrl: String?, remoteUrl: String?): JellyfinResult<JellyfinSession> =
         runCatchingRestoreResult {
             val stored = storage.read(profileId) ?: throw SessionRestoreException("Saved profile was not found")
-            val server = when (val result = testServer(serverUrl)) {
+            val server = when (val result = testServer(localUrl, remoteUrl)) {
                 is JellyfinResult.Success -> result.value
                 is JellyfinResult.Failure -> throw result.cause ?: IllegalArgumentException(result.message)
             }
+            validateSameServer(stored.serverId, server.serverId)
             val updated = stored.copy(
                 serverUrl = server.url,
+                localServerUrl = server.localUrl,
+                remoteServerUrl = server.remoteUrl,
                 serverName = server.name ?: stored.serverName,
                 serverVersion = server.version ?: stored.serverVersion,
                 serverId = server.serverId ?: stored.serverId,
@@ -221,23 +230,11 @@ class SdkJellyfinAuthRepository(
         }
 
     override suspend fun testServer(serverUrl: String): JellyfinResult<JellyfinServerConfig> =
+        testServer(serverUrl, null)
+
+    override suspend fun testServer(localUrl: String?, remoteUrl: String?): JellyfinResult<JellyfinServerConfig> =
         runCatchingResult {
-            var lastFailure: Throwable? = null
-            JellyfinServerUrlNormalizer.candidates(serverUrl).forEach { normalizedUrl ->
-                try {
-                    val api = jellyfin.createApi(baseUrl = normalizedUrl)
-                    val systemInfo = getPublicSystemInfo(api, JellyfinServerConfig(normalizedUrl))
-                    return@runCatchingResult JellyfinServerConfig(
-                        url = normalizedUrl,
-                        name = systemInfo.name,
-                        version = systemInfo.version,
-                        serverId = systemInfo.id,
-                    )
-                } catch (throwable: Throwable) {
-                    lastFailure = throwable
-                }
-            }
-            throw lastFailure ?: IllegalArgumentException("Enter a valid server URL")
+            resolveServerEndpoint(localUrl = localUrl, remoteUrl = remoteUrl, expectedServerId = null)
         }
 
     override suspend fun publicUsers(server: JellyfinServerConfig): JellyfinResult<List<JellyfinPublicUser>> =
@@ -268,24 +265,31 @@ class SdkJellyfinAuthRepository(
         username: String,
         password: String,
     ): JellyfinResult<JellyfinSession> =
+        login(localUrl = serverUrl, remoteUrl = null, username = username, password = password)
+
+    override suspend fun login(
+        localUrl: String?,
+        remoteUrl: String?,
+        username: String,
+        password: String,
+    ): JellyfinResult<JellyfinSession> =
         runCatchingResult {
-            val normalizedUrl = JellyfinServerUrlNormalizer.normalize(serverUrl)
-            val api = jellyfin.createApi(baseUrl = normalizedUrl)
+            val server = resolveServerEndpoint(localUrl = localUrl, remoteUrl = remoteUrl, expectedServerId = null)
+            val api = jellyfin.createApi(baseUrl = server.url)
             val auth by api.userApi.authenticateUserByName(
                 username = username.trim(),
                 password = password,
             )
             val accessToken = auth.accessToken ?: throw AuthenticationException("Server did not return an access token")
             val authenticatedUser = auth.user ?: throw AuthenticationException("Server did not return a user")
-            val authedApi = jellyfin.createApi(baseUrl = normalizedUrl, accessToken = accessToken)
+            val authedApi = jellyfin.createApi(baseUrl = server.url, accessToken = accessToken)
             val currentUser by authedApi.userApi.getCurrentUser()
             val systemInfo = getPublicSystemInfo(
                 authedApi,
-                JellyfinServerConfig(normalizedUrl, serverId = auth.serverId),
+                server.copy(serverId = auth.serverId ?: server.serverId),
             )
             val session = JellyfinSession(
-                server = JellyfinServerConfig(
-                    url = normalizedUrl,
+                server = server.copy(
                     name = systemInfo.name ?: authenticatedUser.serverName,
                     version = systemInfo.version,
                     serverId = systemInfo.id ?: auth.serverId,
@@ -297,7 +301,7 @@ class SdkJellyfinAuthRepository(
                     primaryImageTag = currentUser.primaryImageTag ?: authenticatedUser.primaryImageTag,
                     isAdministrator = currentUser.policy?.isAdministrator == true,
                 ),
-                profileId = profileId(normalizedUrl, currentUser.id),
+                profileId = profileId(systemInfo.id ?: auth.serverId ?: server.url, currentUser.id),
                 accessToken = accessToken,
             )
             storage.write(session.toStoredSession())
@@ -334,8 +338,11 @@ class SdkJellyfinAuthRepository(
         }
 
     private suspend fun restoreStoredSession(stored: StoredJellyfinSession): JellyfinSession {
-        val server = JellyfinServerConfig(
-            url = stored.serverUrl,
+        val server = resolveServerEndpoint(
+            localUrl = stored.localServerUrl ?: stored.serverUrl,
+            remoteUrl = stored.remoteServerUrl,
+            expectedServerId = stored.serverId,
+        ).copy(
             name = stored.serverName,
             version = stored.serverVersion,
             serverId = stored.serverId,
@@ -365,6 +372,76 @@ class SdkJellyfinAuthRepository(
 
     private companion object {
         const val RESTORE_TIMEOUT_MS = 12_000L
+        const val CONNECTION_TIMEOUT_MS = 5_000L
+    }
+
+    private suspend fun resolveServerEndpoint(
+        localUrl: String?,
+        remoteUrl: String?,
+        expectedServerId: String?,
+    ): JellyfinServerConfig {
+        val endpoints = serverEndpointCandidates(localUrl, remoteUrl)
+        var lastFailure: Throwable? = null
+        endpoints.forEach { endpoint ->
+            endpoint.candidates.forEach { normalizedUrl ->
+                try {
+                    val api = jellyfin.createApi(baseUrl = normalizedUrl)
+                    val systemInfo = withTimeout(CONNECTION_TIMEOUT_MS) {
+                        getPublicSystemInfo(api, JellyfinServerConfig(normalizedUrl))
+                    }
+                    validateSameServer(expectedServerId, systemInfo.id)
+                    return JellyfinServerConfig(
+                        url = normalizedUrl,
+                        name = systemInfo.name,
+                        version = systemInfo.version,
+                        serverId = systemInfo.id,
+                        localUrl = endpoint.normalizedLocal,
+                        remoteUrl = endpoint.normalizedRemote,
+                    )
+                } catch (throwable: Throwable) {
+                    lastFailure = throwable
+                }
+            }
+        }
+        throw lastFailure ?: IllegalArgumentException("Enter a local or remote Jellyfin server address")
+    }
+
+    private fun serverEndpointCandidates(localUrl: String?, remoteUrl: String?): List<ServerEndpointCandidate> {
+        val localCandidates = normalizedCandidates(localUrl)
+        val remoteCandidates = normalizedCandidates(remoteUrl)
+        require(localCandidates.isNotEmpty() || remoteCandidates.isNotEmpty()) {
+            "Enter a local or remote Jellyfin server address"
+        }
+        val normalizedLocal = localCandidates.firstOrNull()
+        val normalizedRemote = remoteCandidates.firstOrNull()
+        return buildList {
+            if (localCandidates.isNotEmpty()) {
+                add(ServerEndpointCandidate(localCandidates, normalizedLocal, normalizedRemote))
+            }
+            val remoteOnly = remoteCandidates.filterNot { it in localCandidates }
+            if (remoteOnly.isNotEmpty()) {
+                add(ServerEndpointCandidate(remoteOnly, normalizedLocal, normalizedRemote))
+            }
+        }
+    }
+
+    private fun normalizedCandidates(url: String?): List<String> =
+        url?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let(JellyfinServerUrlNormalizer::candidates)
+            .orEmpty()
+}
+
+private data class ServerEndpointCandidate(
+    val candidates: List<String>,
+    val normalizedLocal: String?,
+    val normalizedRemote: String?,
+)
+
+private fun validateSameServer(expectedServerId: String?, actualServerId: String?) {
+    if (expectedServerId.isNullOrBlank() || actualServerId.isNullOrBlank()) return
+    if (!expectedServerId.equals(actualServerId, ignoreCase = true)) {
+        throw SecurityException("That address belongs to a different Jellyfin server.")
     }
 }
 
@@ -1747,9 +1824,9 @@ class SdkJellyfinUserPreferencesRepository(
                 val user by api.userApi.getCurrentUser()
                 val current = user.configuration ?: return@withContext JellyfinResult.Failure("Jellyfin did not return user playback preferences")
                 val updated = current.copy(
-                    audioLanguagePreference = preferences.audioLanguagePreference?.takeIf { it.isNotBlank() },
+                    audioLanguagePreference = preferences.audioLanguagePreference?.trim()?.takeIf { it.isNotBlank() },
                     playDefaultAudioTrack = preferences.playDefaultAudioTrack,
-                    subtitleLanguagePreference = preferences.subtitleLanguagePreference?.takeIf { it.isNotBlank() },
+                    subtitleLanguagePreference = preferences.subtitleLanguagePreference?.trim()?.takeIf { it.isNotBlank() },
                     subtitleMode = preferences.subtitleMode.toSubtitlePlaybackMode(current.subtitleMode),
                     rememberAudioSelections = preferences.rememberAudioSelections,
                     rememberSubtitleSelections = preferences.rememberSubtitleSelections,
@@ -2879,11 +2956,25 @@ class SdkJellyfinQuickConnectRepository(
                         primaryImageTag = currentUser.primaryImageTag ?: authenticatedUser.primaryImageTag,
                         isAdministrator = currentUser.policy?.isAdministrator == true,
                     ),
-                    profileId = profileId(session.server.url, currentUser.id),
+                    profileId = profileId(systemInfo.id ?: auth.serverId ?: session.server.url, currentUser.id),
                     accessToken = accessToken,
                 )
                 storage.write(restored.toStoredSession())
                 JellyfinResult.Success(restored)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun authorizeDevice(session: JellyfinSession, code: String): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val normalizedCode = code.trim().uppercase(Locale.US)
+                if (normalizedCode.isBlank()) throw AuthenticationException("Enter the Quick Connect code shown on the other device")
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val authorized by api.quickConnectApi.authorizeQuickConnect(normalizedCode, session.user.id)
+                if (!authorized) throw AuthenticationException("That Quick Connect code could not be authorized")
+                JellyfinResult.Success(Unit)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
@@ -2994,6 +3085,7 @@ class SdkJellyfinWatchPartyRepository(
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val poolLimit = (limit * 4).coerceAtLeast(120).coerceAtMost(300)
                 val itemTypes = when (rules.mediaScope) {
                     WatchPartyMediaScope.MoviesOnly -> listOf(BaseItemKind.MOVIE)
                     WatchPartyMediaScope.TvShowsOnly -> listOf(BaseItemKind.SERIES)
@@ -3007,7 +3099,7 @@ class SdkJellyfinWatchPartyRepository(
                         val resume by api.itemsApi.getResumeItems(
                             GetResumeItemsRequest(
                                 userId = session.user.id,
-                                limit = limit,
+                                limit = poolLimit,
                                 fields = watchPartyFields,
                                 includeItemTypes = itemTypes,
                                 enableUserData = true,
@@ -3022,12 +3114,16 @@ class SdkJellyfinWatchPartyRepository(
                             GetItemsRequest(
                                 userId = session.user.id,
                                 recursive = true,
-                                limit = limit,
+                                limit = poolLimit,
                                 isFavorite = true.takeIf { rules.mediaScope == WatchPartyMediaScope.MyListOnly },
                                 isPlayed = false.takeIf { rules.unwatchedOnly },
                                 maxOfficialRating = "PG".takeIf { rules.kidFriendlyOnly },
                                 genres = rules.genres.takeIf { it.isNotEmpty() },
-                                sortBy = listOf(ItemSortBy.DATE_CREATED),
+                                sortBy = if (rules.mediaScope == WatchPartyMediaScope.RecentlyAdded) {
+                                    listOf(ItemSortBy.DATE_CREATED)
+                                } else {
+                                    listOf(ItemSortBy.RANDOM)
+                                },
                                 sortOrder = listOf(SortOrder.DESCENDING),
                                 fields = watchPartyFields,
                                 includeItemTypes = itemTypes,
@@ -3050,6 +3146,8 @@ class SdkJellyfinWatchPartyRepository(
                         .filterNot { it.type == BaseItemKind.EPISODE && rules.mediaScope != WatchPartyMediaScope.ContinueWatchingOnly }
                         .map { it.toWatchPartyCandidate(api, session.server.serverId ?: session.server.localId) }
                         .distinctBy { it.id }
+                        .shuffled(Random(System.nanoTime()))
+                        .take(poolLimit)
                 )
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -3186,6 +3284,8 @@ private fun JellyfinSession.toStoredSession(): StoredJellyfinSession =
     StoredJellyfinSession(
         profileId = profileId,
         serverUrl = server.url,
+        localServerUrl = server.localUrl,
+        remoteServerUrl = server.remoteUrl,
         serverName = server.name,
         serverVersion = server.version,
         serverId = server.serverId,
@@ -4160,6 +4260,7 @@ private fun toUserMessage(throwable: Throwable): String {
     return when {
         throwable is SessionRestoreException -> throwable.message ?: "No saved Jellyfin session"
         throwable is AuthenticationException -> throwable.message ?: "Unable to authenticate"
+        throwable is SecurityException -> throwable.message ?: "That address belongs to a different Jellyfin server"
         className.contains("InvalidStatusException") && message.contains("401") -> "Invalid username or password"
         message.contains("CLEARTEXT", ignoreCase = true) -> "Android blocked cleartext HTTP for this server"
         className.contains("SSL", ignoreCase = true) ||
@@ -4185,6 +4286,7 @@ private fun Throwable.toRestoreFailure(): JellyfinSessionRestoreFailure {
     val reason = when {
         this is kotlinx.coroutines.TimeoutCancellationException -> JellyfinRestoreFailureReason.ServerUnreachable
         this is SessionRestoreException -> JellyfinRestoreFailureReason.AuthExpired
+        this is SecurityException -> JellyfinRestoreFailureReason.InvalidServerUrl
         this is IllegalArgumentException -> JellyfinRestoreFailureReason.InvalidServerUrl
         className.contains("InvalidStatusException") && message.contains("401") -> JellyfinRestoreFailureReason.AuthExpired
         className.contains("InvalidStatusException") && message.contains("403") -> JellyfinRestoreFailureReason.Unauthorized

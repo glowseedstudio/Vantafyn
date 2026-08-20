@@ -10,11 +10,13 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -37,6 +40,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,10 +57,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.SpanStyle
@@ -100,6 +108,7 @@ import dev.vantafyn.core.ui.VantafynGlassCard
 import dev.vantafyn.core.ui.VantafynGlassChip
 import dev.vantafyn.core.ui.VantafynGlassPanel
 import dev.vantafyn.core.ui.VantafynLoadingIndicator
+import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
 import java.net.URI
@@ -150,15 +159,17 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         delay(1_100L)
         revealActive = false
     }
+    val revealKey = "requests-${state.currentUserId}-${state.isConfigured}-${state.config.identityMode}"
     LazyColumn(
         modifier = modifier
-            .fillMaxSize(),
+            .fillMaxSize()
+            .imePadding(),
         contentPadding = PaddingValues(bottom = 164.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (!state.config.isEnabledForAdmins || !state.canUseRequests) {
             item {
-                RequestContentReveal(index = 0, animate = revealActive) {
+                RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) {
                     RequestInset {
                         if (state.isJellyfinAdmin) {
                             UnavailableState(
@@ -183,7 +194,7 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
         }
         if (state.connectionStatus == "Connection failed") {
             item {
-                RequestContentReveal(index = 0, animate = revealActive) {
+                RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) {
                     RequestInset {
                         if (state.isJellyfinAdmin) {
                             UnavailableState(
@@ -206,23 +217,23 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
             }
         }
         if (state.config.identityMode == OmbiIdentityMode.PerUserAccount && !state.canSearchAndRequest) {
-            item { RequestContentReveal(index = 0, animate = revealActive) { RequestInset { OmbiAccessNeededState(state, viewModel) } } }
+            item { RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) { RequestInset { OmbiAccessNeededState(state, viewModel) } } }
             return@LazyColumn
         }
-        item { RequestContentReveal(index = 0, animate = revealActive) { RequestsHero(state, viewModel, onOpenMedia) } }
-        item { RequestContentReveal(index = 1, animate = revealActive) { RequestInset { RequestsToolbar(state, viewModel) } } }
-        state.message?.let { item { RequestContentReveal(index = 2, animate = revealActive) { RequestInset { MessageCard(it) } } } }
+        item { RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) { RequestsHero(state, viewModel, onOpenMedia) } }
+        item { RequestContentReveal(index = 1, animate = revealActive, revealKey = revealKey) { RequestInset { RequestsToolbar(state, viewModel) } } }
+        state.message?.let { item { RequestContentReveal(index = 2, animate = revealActive, revealKey = revealKey) { RequestInset { MessageCard(it) } } } }
         when (state.activeRequestsView) {
             RequestsView.Discover -> {
-                if (state.isLoadingDiscovery) item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { DiscoverySkeleton() } } }
+                if (state.isLoadingDiscovery) item { RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) { RequestInset { DiscoverySkeleton() } } }
                 state.discoveryError?.let {
-                    item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { InlineRetryCard(it, "Retry discovery", viewModel::loadDiscovery) } } }
+                    item { RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) { RequestInset { InlineRetryCard(it, "Retry discovery", viewModel::loadDiscovery) } } }
                 }
                 if (!state.isLoadingDiscovery && state.discoveryRails.isEmpty() && state.discoveryError == null) {
-                    item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { MessageCard("Search for a movie or series to start building your Requests queue.") } } }
+                    item { RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) { RequestInset { MessageCard("Search for a movie or series to start building your Requests queue.") } } }
                 }
                 itemsIndexed(state.discoveryRails, key = { _, rail -> rail.kind.name }) { index, rail ->
-                    RequestContentReveal(index = index + 3, animate = revealActive) {
+                    RequestContentReveal(index = index + 3, animate = revealActive, revealKey = revealKey) {
                         RequestInset {
                             DiscoveryRail(rail = rail, state = state, onOpen = viewModel::openRequestItem, onOpenAvailable = { viewModel.openAvailableItem(it, onOpenMedia) })
                         }
@@ -230,15 +241,15 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
                 }
             }
             RequestsView.Search -> {
-                if (state.isSearching) item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { VantafynLoadingIndicator("Searching Ombi") } } }
+                if (state.isSearching) item { RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) { RequestInset { RequestSearchSkeleton() } } }
                 if (!state.isSearching && state.searchResults.isEmpty() && state.query.length > 1) {
-                    item { RequestContentReveal(index = 3, animate = revealActive) { RequestInset { MessageCard("No matching request results yet.") } } }
+                    item { RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) { RequestInset { MessageCard("No matching request results yet.") } } }
                 }
                 itemsIndexed(
                     state.searchResults,
                     key = { index, item -> "search-${item.mediaType}-${item.externalId}-${item.movieDbId.orEmpty()}-${item.tvDbId.orEmpty()}-$index" },
                 ) { index, item ->
-                    RequestContentReveal(index = index + 3, animate = revealActive) {
+                    RequestContentReveal(index = index + 3, animate = revealActive, revealKey = revealKey) {
                         RequestInset {
                             RequestPosterListCard(
                                 item = item,
@@ -254,7 +265,7 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
             }
             RequestsView.MyRequests -> {
                 item {
-                    RequestContentReveal(index = 3, animate = revealActive) {
+                    RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) {
                         RequestInset {
                             RequestHistory(state.requests, state.isJellyfinAdmin, state.isLoadingRequests, onRefresh = viewModel::loadRequests)
                         }
@@ -269,14 +280,15 @@ private fun RequestsContent(state: RequestsUiState, viewModel: RequestsViewModel
 private fun RequestContentReveal(
     index: Int,
     animate: Boolean,
+    revealKey: Any? = index,
     content: @Composable () -> Unit,
 ) {
     if (!animate) {
         content()
         return
     }
-    var visible by remember { mutableStateOf(false) }
-    LaunchedEffect(index) {
+    var visible by remember(revealKey, index, animate) { mutableStateOf(false) }
+    LaunchedEffect(revealKey, index, animate) {
         delay((index.coerceAtMost(8) * 78L).coerceAtMost(620L))
         visible = true
     }
@@ -323,8 +335,7 @@ private fun RequestsHero(state: RequestsUiState, viewModel: RequestsViewModel, o
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(264.dp)
-            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.52f)),
+            .height(264.dp),
     ) {
         if (heroItems.isEmpty()) {
             RequestsHeroSlide(
@@ -364,21 +375,6 @@ private fun RequestsHero(state: RequestsUiState, viewModel: RequestsViewModel, o
                 }
             }
         }
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(74.dp)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color.Transparent,
-                            VantafynColors.Graphite.copy(alpha = 0.72f),
-                            VantafynColors.Graphite,
-                        ),
-                    ),
-                ),
-        )
         Row(
             modifier = Modifier
                 .align(Alignment.TopStart)
@@ -406,31 +402,68 @@ private fun RequestsHeroSlide(
     modifier: Modifier = Modifier,
 ) {
     val heroAvailable = hero?.let { state.availabilityMatches[it.availabilityKey()] }
-    Box(modifier = modifier.background(VantafynColors.SurfaceHigh.copy(alpha = 0.52f))) {
+    Box(modifier = modifier) {
         val artwork = hero?.backdropUrl ?: hero?.posterUrl
-        if (hero != null && artwork != null) {
-            AsyncImage(
-                model = artwork,
-                contentDescription = hero.title,
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
-                alignment = Alignment.TopCenter,
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Black,
+                                0.58f to Color.Black,
+                                0.78f to Color.Black.copy(alpha = 0.76f),
+                                0.91f to Color.Black.copy(alpha = 0.24f),
+                                1.00f to Color.Transparent,
+                            ),
+                        ),
+                        blendMode = BlendMode.DstIn,
+                    )
+                },
+        ) {
+            if (hero != null && artwork != null) {
+                AsyncImage(
+                    model = artwork,
+                    contentDescription = hero.title,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(VantafynColors.SurfaceHigh.copy(alpha = 0.52f)),
+                    contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(VantafynColors.SurfaceHigh.copy(alpha = 0.52f)),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(Color.Black.copy(alpha = 0.80f), Color.Black.copy(alpha = 0.48f), Color.Transparent),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Transparent,
+                                0.76f to Color.Black.copy(alpha = 0.42f),
+                                1.00f to Color.Transparent,
+                            ),
+                        ),
+                    ),
             )
         }
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(
-                    Brush.horizontalGradient(
-                        listOf(Color.Black.copy(alpha = 0.80f), Color.Black.copy(alpha = 0.48f), Color.Transparent),
-                    ),
-                ),
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.76f)))),
-        )
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
@@ -459,55 +492,76 @@ private fun RequestsHeroSlide(
 
 @Composable
 private fun OmbiSetupWizard(state: RequestsUiState, viewModel: RequestsViewModel, modifier: Modifier) {
-    LazyColumn(
+    val revealKey = "ombi-setup-${state.currentUserId}"
+    val topPadding = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 14.dp
+    var revealActive by remember(revealKey) { mutableStateOf(true) }
+    LaunchedEffect(revealKey) {
+        revealActive = true
+        delay(1_100L)
+        revealActive = false
+    }
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(
-            top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 42.dp,
-            bottom = 108.dp,
-        ),
-        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+            .imePadding()
+            .padding(horizontal = 8.dp)
+            .padding(top = topPadding, bottom = 138.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        item {
-            RequestsSetupHeader(
-                title = "Connect Ombi",
-                onBack = viewModel::previousSetupStep,
-            )
-        }
-        item {
-            VantafynGlassPanel(cornerRadius = 24.dp) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    StepBadge(state.setupStep.stepTitle)
-                    AnimatedContent(
-                        targetState = state.setupStep,
-                        transitionSpec = {
-                            (
-                                fadeIn(animationSpec = tween(durationMillis = 760, delayMillis = 90, easing = RequestsSetupCinematicEasing)) +
-                                    slideInVertically(
-                                        animationSpec = tween(durationMillis = 820, delayMillis = 90, easing = RequestsSetupCinematicEasing),
-                                        initialOffsetY = { it / 16 },
-                                    )
-                                ).togetherWith(
-                                fadeOut(animationSpec = tween(durationMillis = 360, easing = RequestsSetupCinematicEasing)),
-                            ).using(SizeTransform(clip = false))
-                        },
-                        label = "ombiSetupStep",
-                    ) { step ->
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            when (step) {
-                                OmbiSetupStep.Connect -> ConnectStep(state, viewModel)
-                                OmbiSetupStep.Authentication -> RequestModeStep(state, viewModel)
-                                OmbiSetupStep.Test -> UserAccessStep(state, viewModel)
-                                OmbiSetupStep.Access -> UserAccessStep(state, viewModel)
-                                OmbiSetupStep.Finish -> FinishStep(state, viewModel)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+        ) {
+            RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) {
+                RequestsSetupHeader(
+                    title = "Connect Ombi",
+                    onBack = viewModel::previousSetupStep,
+                )
+            }
+            RequestContentReveal(index = 1, animate = revealActive, revealKey = revealKey) {
+                VantafynGlassPanel(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 28.dp,
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                        StepBadge(state.setupStep.stepTitle)
+                        AnimatedContent(
+                            targetState = state.setupStep,
+                            transitionSpec = {
+                                (
+                                    fadeIn(animationSpec = tween(durationMillis = 760, delayMillis = 90, easing = RequestsSetupCinematicEasing)) +
+                                        slideInVertically(
+                                            animationSpec = tween(durationMillis = 820, delayMillis = 90, easing = RequestsSetupCinematicEasing),
+                                            initialOffsetY = { it / 16 },
+                                        )
+                                    ).togetherWith(
+                                    fadeOut(animationSpec = tween(durationMillis = 360, easing = RequestsSetupCinematicEasing)),
+                                ).using(SizeTransform(clip = false))
+                            },
+                            label = "ombiSetupStep",
+                        ) { step ->
+                            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                when (step) {
+                                    OmbiSetupStep.Connect -> ConnectStep(state, viewModel)
+                                    OmbiSetupStep.Authentication -> RequestModeStep(state, viewModel)
+                                    OmbiSetupStep.Test -> UserAccessStep(state, viewModel)
+                                    OmbiSetupStep.Access -> UserAccessStep(state, viewModel)
+                                    OmbiSetupStep.Finish -> FinishStep(state, viewModel)
+                                }
                             }
                         }
                     }
                 }
             }
+            state.message?.let {
+                RequestContentReveal(index = 2, animate = revealActive, revealKey = revealKey) {
+                    MessageCard(it)
+                }
+            }
         }
-        state.message?.let { item { MessageCard(it) } }
     }
 }
 
@@ -518,31 +572,7 @@ private fun RequestsSetupHeader(title: String, onBack: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(42.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .clickable(onClick = onBack),
-            contentAlignment = Alignment.Center,
-        ) {
-            Canvas(modifier = Modifier.size(19.dp)) {
-                val stroke = 2.35.dp.toPx()
-                drawLine(
-                    color = Color.White,
-                    start = Offset(11.5.dp.toPx(), 3.dp.toPx()),
-                    end = Offset(5.dp.toPx(), 9.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-                drawLine(
-                    color = Color.White,
-                    start = Offset(5.dp.toPx(), 9.dp.toPx()),
-                    end = Offset(11.5.dp.toPx(), 15.dp.toPx()),
-                    strokeWidth = stroke,
-                    cap = StrokeCap.Round,
-                )
-            }
-        }
+        RequestsBackButton(onClick = onBack)
         Text(
             title,
             color = VantafynColors.Ink,
@@ -551,6 +581,39 @@ private fun RequestsSetupHeader(title: String, onBack: () -> Unit) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
+    }
+}
+
+@Composable
+private fun RequestsBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.size(19.dp)) {
+            val stroke = 2.35.dp.toPx()
+            drawLine(
+                color = VantafynColors.Ink,
+                start = Offset(11.5.dp.toPx(), 3.dp.toPx()),
+                end = Offset(5.dp.toPx(), 9.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = VantafynColors.Ink,
+                start = Offset(5.dp.toPx(), 9.dp.toPx()),
+                end = Offset(11.5.dp.toPx(), 15.dp.toPx()),
+                strokeWidth = stroke,
+                cap = StrokeCap.Round,
+            )
+        }
     }
 }
 
@@ -629,9 +692,17 @@ private fun FinishStep(state: RequestsUiState, viewModel: RequestsViewModel) {
 
 @Composable
 private fun OmbiManageScreen(state: RequestsUiState, viewModel: RequestsViewModel, modifier: Modifier) {
+    val revealKey = "ombi-manage-${state.currentUserId}"
+    var revealActive by remember(revealKey) { mutableStateOf(true) }
+    LaunchedEffect(revealKey) {
+        revealActive = true
+        delay(1_100L)
+        revealActive = false
+    }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
             .padding(horizontal = 8.dp),
         contentPadding = PaddingValues(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
@@ -640,25 +711,43 @@ private fun OmbiManageScreen(state: RequestsUiState, viewModel: RequestsViewMode
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            OmbiManageHero(state = state, viewModel = viewModel)
+            RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) {
+                OmbiManageHero(state = state, viewModel = viewModel)
+            }
         }
         item {
-            OmbiManageStatusSection(state = state, viewModel = viewModel)
+            RequestContentReveal(index = 1, animate = revealActive, revealKey = revealKey) {
+                OmbiManageStatusSection(state = state, viewModel = viewModel)
+            }
         }
         item {
-            OmbiManageRequestModeSection(state = state, viewModel = viewModel)
+            RequestContentReveal(index = 2, animate = revealActive, revealKey = revealKey) {
+                OmbiManageRequestModeSection(state = state, viewModel = viewModel)
+            }
         }
         if (state.config.identityMode == OmbiIdentityMode.PerUserAccount) {
             item {
-                OmbiManageUsersSummary(state)
+                RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) {
+                    OmbiManageUsersSummary(state)
+                }
             }
-            item { AccessRequestsSection(state.accessRequests, viewModel) }
-            item { UserMappingsSection(state.userMappings, viewModel) }
+            item {
+                RequestContentReveal(index = 4, animate = revealActive, revealKey = revealKey) {
+                    AccessRequestsSection(state.accessRequests, viewModel)
+                }
+            }
+            item {
+                RequestContentReveal(index = 5, animate = revealActive, revealKey = revealKey) {
+                    UserMappingsSection(state.userMappings, viewModel)
+                }
+            }
         }
         item {
-            OmbiManageAdvancedSection(state = state, viewModel = viewModel)
+            RequestContentReveal(index = 6, animate = revealActive, revealKey = revealKey) {
+                OmbiManageAdvancedSection(state = state, viewModel = viewModel)
+            }
         }
-        state.message?.let { item { MessageCard(it) } }
+        state.message?.let { item { RequestContentReveal(index = 7, animate = revealActive, revealKey = revealKey) { MessageCard(it) } } }
     }
 }
 
@@ -818,9 +907,17 @@ private fun OmbiManageAdvancedSection(state: RequestsUiState, viewModel: Request
 
 @Composable
 private fun OmbiSetupHealthScreen(state: RequestsUiState, viewModel: RequestsViewModel, modifier: Modifier) {
+    val revealKey = "ombi-health-${state.currentUserId}"
+    var revealActive by remember(revealKey) { mutableStateOf(true) }
+    LaunchedEffect(revealKey) {
+        revealActive = true
+        delay(1_100L)
+        revealActive = false
+    }
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
             .padding(horizontal = 8.dp),
         contentPadding = PaddingValues(
             top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
@@ -828,59 +925,71 @@ private fun OmbiSetupHealthScreen(state: RequestsUiState, viewModel: RequestsVie
         ),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
-        item { Header("Setup Health", "Admin checks for Requests readiness.", action = "Ombi", onAction = viewModel::manageOmbi) }
+        item { RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) { Header("Setup Health", "Admin checks for Requests readiness.", action = "Ombi", onAction = viewModel::manageOmbi) } }
         item {
-            HealthCard(
-                title = "Ombi server",
-                status = state.connectionStatus,
-                body = state.config.baseUrl.ifBlank { "No Ombi server configured" },
-                fix = urlHealthHint(state.config.baseUrl),
-            )
+            RequestContentReveal(index = 1, animate = revealActive, revealKey = revealKey) {
+                HealthCard(
+                    title = "Ombi server",
+                    status = state.connectionStatus,
+                    body = state.config.baseUrl.ifBlank { "No Ombi server configured" },
+                    fix = urlHealthHint(state.config.baseUrl),
+                )
+            }
         }
         item {
-            HealthCard(
-                title = "Admin API key",
-                status = if (state.hasApiKey && state.connectionStatus != "Connection failed") "Valid or ready" else if (state.hasApiKey) "Needs test" else "Missing",
-                body = "Used for admin setup and shared request mode. The key is never shown.",
-                fix = if (state.hasApiKey) "Run Test connection after changing Ombi settings." else "Paste an Ombi API key in setup.",
-            )
+            RequestContentReveal(index = 2, animate = revealActive, revealKey = revealKey) {
+                HealthCard(
+                    title = "Admin API key",
+                    status = if (state.hasApiKey && state.connectionStatus != "Connection failed") "Valid or ready" else if (state.hasApiKey) "Needs test" else "Missing",
+                    body = "Used for admin setup and shared request mode. The key is never shown.",
+                    fix = if (state.hasApiKey) "Run Test connection after changing Ombi settings." else "Paste an Ombi API key in setup.",
+                )
+            }
         }
         item {
-            HealthCard(
-                title = "Ombi media server connection",
-                status = "Not verified",
-                body = "Ombi must be connected to Jellyfin for accurate availability checks.",
-                fix = "Vantafyn verifies availability directly against the active Jellyfin server. Ombi-side media server settings are not exposed by the confirmed API yet.",
-            )
+            RequestContentReveal(index = 3, animate = revealActive, revealKey = revealKey) {
+                HealthCard(
+                    title = "Ombi media server connection",
+                    status = "Not verified",
+                    body = "Ombi must be connected to Jellyfin for accurate availability checks.",
+                    fix = "Vantafyn verifies availability directly against the active Jellyfin server. Ombi-side media server settings are not exposed by the confirmed API yet.",
+                )
+            }
         }
         item {
-            HealthCard(
-                title = "Request engines",
-                status = "Not verified by API",
-                body = "Movie and TV request capabilities are inferred from working Ombi search/request endpoints.",
-                fix = "Check Radarr and Sonarr in Ombi if requests fail.",
-            )
+            RequestContentReveal(index = 4, animate = revealActive, revealKey = revealKey) {
+                HealthCard(
+                    title = "Request engines",
+                    status = "Not verified by API",
+                    body = "Movie and TV request capabilities are inferred from working Ombi search/request endpoints.",
+                    fix = "Check Radarr and Sonarr in Ombi if requests fail.",
+                )
+            }
         }
         item {
-            HealthCard(
-                title = "User identity mode",
-                status = state.config.identityMode.label,
-                body = if (state.config.identityMode == OmbiIdentityMode.SharedApiKey) {
-                    "Requests may appear under the configured Ombi account."
-                } else {
-                    "Per-user Ombi login is recommended if you want requests tied to each person."
-                },
-                fix = "Create Ombi accounts for users, then they can link them in Vantafyn.",
-            )
+            RequestContentReveal(index = 5, animate = revealActive, revealKey = revealKey) {
+                HealthCard(
+                    title = "User identity mode",
+                    status = state.config.identityMode.label,
+                    body = if (state.config.identityMode == OmbiIdentityMode.SharedApiKey) {
+                        "Requests may appear under the configured Ombi account."
+                    } else {
+                        "Per-user Ombi login is recommended if you want requests tied to each person."
+                    },
+                    fix = "Create Ombi accounts for users, then they can link them in Vantafyn.",
+                )
+            }
         }
         item {
-            HealthCard(
-                title = "Jellyfin availability index",
-                status = state.availabilityIndex?.let { "Ready" } ?: "Not built",
-                body = state.availabilityIndex?.let { "Indexed ${it.moviesCount} movies and ${it.seriesCount} series." }
-                    ?: "Vantafyn can match Ombi items to Jellyfin by provider IDs after the index is built.",
-                fix = "Use Refresh availability index from Ombi management.",
-            )
+            RequestContentReveal(index = 6, animate = revealActive, revealKey = revealKey) {
+                HealthCard(
+                    title = "Jellyfin availability index",
+                    status = state.availabilityIndex?.let { "Ready" } ?: "Not built",
+                    body = state.availabilityIndex?.let { "Indexed ${it.moviesCount} movies and ${it.seriesCount} series." }
+                        ?: "Vantafyn can match Ombi items to Jellyfin by provider IDs after the index is built.",
+                    fix = "Use Refresh availability index from Ombi management.",
+                )
+            }
         }
     }
 }
@@ -1005,6 +1114,7 @@ private fun UnconfiguredRequestsScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .imePadding()
             .padding(horizontal = 8.dp)
             .padding(bottom = 164.dp),
         contentAlignment = Alignment.Center,
@@ -1298,106 +1408,120 @@ private fun RequestDetailScreen(item: RequestMediaSummary, state: RequestsUiStat
     val detail = state.selectedRequestDetail
     val display = detail?.summary ?: item
     val availableMatch = state.availabilityMatches[display.availabilityKey()]
+    val revealKey = "request-detail-${display.mediaType}-${display.externalId}-${display.movieDbId.orEmpty()}-${display.tvDbId.orEmpty()}"
+    var revealActive by remember(revealKey) { mutableStateOf(true) }
+    LaunchedEffect(revealKey) {
+        revealActive = true
+        delay(1_100L)
+        revealActive = false
+    }
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 108.dp),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(390.dp)
-                    .background(VantafynColors.Surface.copy(alpha = 0.2f)),
-            ) {
-                if (!display.backdropUrl.isNullOrBlank() || !display.posterUrl.isNullOrBlank()) {
-                    AsyncImage(
-                        model = display.backdropUrl ?: display.posterUrl,
-                        contentDescription = display.title,
-                        modifier = Modifier.fillMaxSize(),
-                        contentScale = ContentScale.Crop,
-                    )
-                }
-                Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.18f), Color.Black.copy(alpha = 0.9f)))))
-                TextButton(
-                    onClick = viewModel::closeRequestItem,
+            RequestContentReveal(index = 0, animate = revealActive, revealKey = revealKey) {
+                Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(10.dp),
-                ) { Text("‹", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium) }
-                Column(
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(horizontal = 8.dp, vertical = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                        .fillMaxWidth()
+                        .height(390.dp)
+                        .background(VantafynColors.Surface.copy(alpha = 0.2f)),
                 ) {
-                    TypeChip(display.resolvedLabel(availableMatch != null), selected = true, onClick = {})
-                    Text(display.title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    RequestRatingMetadata(
-                        values = listOfNotNull(
-                            display.mediaType.label,
-                            display.year?.toString(),
-                            detail?.runtimeMinutes?.let { "${it}m" },
-                            detail?.certification,
-                            detail?.network,
-                            display.rating?.let { "★ %.1f".format(it) },
-                        ),
-                    )
-                    if (display.mediaType == RequestMediaType.Series && display.state == RequestState.NotRequested && availableMatch == null) {
-                        TvRequestOptions(state.tvRequestSelection, viewModel::onTvRequestSelectionChanged)
+                    if (!display.backdropUrl.isNullOrBlank() || !display.posterUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = display.backdropUrl ?: display.posterUrl,
+                            contentDescription = display.title,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
                     }
-                    VantafynButton(
-                        if (availableMatch != null) "Watch now" else display.primaryActionLabel(),
-                        onClick = {
-                            if (availableMatch != null) viewModel.openAvailableItem(display, onOpenMedia)
-                            else if (display.state == RequestState.NotRequested) viewModel.request(display)
-                        },
-                        enabled = availableMatch != null || display.state == RequestState.NotRequested,
-                        modifier = Modifier.fillMaxWidth(),
+                    Box(modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.18f), Color.Black.copy(alpha = 0.9f)))))
+                    RequestsBackButton(
+                        onClick = viewModel::closeRequestItem,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(
+                                start = 16.dp,
+                                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 12.dp,
+                            ),
                     )
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(horizontal = 8.dp, vertical = 22.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        TypeChip(display.resolvedLabel(availableMatch != null), selected = true, onClick = {})
+                        Text(display.title, color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        RequestRatingMetadata(
+                            values = listOfNotNull(
+                                display.mediaType.label,
+                                display.year?.toString(),
+                                detail?.runtimeMinutes?.let { "${it}m" },
+                                detail?.certification,
+                                detail?.network,
+                                display.rating?.let { "★ %.1f".format(it) },
+                            ),
+                        )
+                        if (display.mediaType == RequestMediaType.Series && display.state == RequestState.NotRequested && availableMatch == null) {
+                            TvRequestOptions(state.tvRequestSelection, viewModel::onTvRequestSelectionChanged)
+                        }
+                        VantafynButton(
+                            if (availableMatch != null) "Watch now" else display.primaryActionLabel(),
+                            onClick = {
+                                if (availableMatch != null) viewModel.openAvailableItem(display, onOpenMedia)
+                                else if (display.state == RequestState.NotRequested) viewModel.request(display)
+                            },
+                            enabled = availableMatch != null || display.state == RequestState.NotRequested,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
             }
         }
         item {
-            Column(modifier = Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (state.isLoadingRequestDetail) {
-                    VantafynLoadingIndicator("Loading details")
-                }
-                state.requestDetailError?.let {
-                    InlineRetryCard(it, "Retry details") { viewModel.openRequestItem(display) }
-                }
-                detail?.tagline?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                }
-                if (detail?.genres?.isNotEmpty() == true) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(detail.genres.take(6)) { genre -> TypeChip(genre, selected = true, onClick = {}) }
+            RequestContentReveal(index = 1, animate = revealActive, revealKey = revealKey) {
+                Column(modifier = Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (state.isLoadingRequestDetail) {
+                        RequestDetailSkeleton()
                     }
-                }
-                display.overview?.let {
-                    Text("Overview", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    Text(it, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
-                }
-                RequestStatusSummary(
-                    display = display,
-                    verifiedAvailable = availableMatch != null,
-                    serverName = availableMatch?.serverName,
-                    matchedTitle = availableMatch?.title,
-                )
-                detail?.let { RequestDetailMetadataChips(it) }
-                RequestArtworkSection(display, detail)
-                if (detail != null && detail.seasons.isNotEmpty()) {
-                    SeriesSeasonSection(detail)
-                }
-                if (detail != null && detail.similar.isNotEmpty()) {
-                    DiscoveryRail(
-                        OmbiDiscoverRail(dev.vantafyn.core.ombi.OmbiDiscoverRailKind.SearchResults, "More like this", detail.similar),
-                        state = state,
-                        onOpen = viewModel::openRequestItem,
-                        onOpenAvailable = { viewModel.openAvailableItem(it, onOpenMedia) },
+                    state.requestDetailError?.let {
+                        InlineRetryCard(it, "Retry details") { viewModel.openRequestItem(display) }
+                    }
+                    detail?.tagline?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (detail?.genres?.isNotEmpty() == true) {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(detail.genres.take(6)) { genre -> TypeChip(genre, selected = true, onClick = {}) }
+                        }
+                    }
+                    display.overview?.let {
+                        Text("Overview", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(it, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
+                    }
+                    RequestStatusSummary(
+                        display = display,
+                        verifiedAvailable = availableMatch != null,
+                        serverName = availableMatch?.serverName,
+                        matchedTitle = availableMatch?.title,
                     )
+                    detail?.let { RequestDetailMetadataChips(it) }
+                    RequestArtworkSection(display, detail)
+                    if (detail != null && detail.seasons.isNotEmpty()) {
+                        SeriesSeasonSection(detail)
+                    }
+                    if (detail != null && detail.similar.isNotEmpty()) {
+                        DiscoveryRail(
+                            OmbiDiscoverRail(dev.vantafyn.core.ombi.OmbiDiscoverRailKind.SearchResults, "More like this", detail.similar),
+                            state = state,
+                            onOpen = viewModel::openRequestItem,
+                            onOpenAvailable = { viewModel.openAvailableItem(it, onOpenMedia) },
+                        )
+                    }
+                    state.message?.let { MessageCard(it) }
                 }
-                state.message?.let { MessageCard(it) }
             }
         }
     }
@@ -1520,16 +1644,82 @@ private fun SeriesSeasonSection(detail: RequestMediaDetail) {
 
 @Composable
 private fun DiscoverySkeleton() {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Loading discovery", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        VantafynSkeletonBlock(
+            modifier = Modifier
+                .width(172.dp)
+                .height(22.dp),
+            cornerRadius = 8.dp,
+        )
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             items(5) {
-                Box(
-                    modifier = Modifier
-                        .size(width = 132.dp, height = 190.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(VantafynColors.SurfaceHigh.copy(alpha = 0.52f)),
-                )
+                Column(
+                    modifier = Modifier.width(132.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    VantafynSkeletonBlock(
+                        modifier = Modifier.size(width = 132.dp, height = 190.dp),
+                        cornerRadius = 18.dp,
+                    )
+                    VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.86f).height(13.dp), cornerRadius = 5.dp)
+                    VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.58f).height(11.dp), cornerRadius = 5.dp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RequestSearchSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        repeat(3) {
+            VantafynGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    VantafynSkeletonBlock(modifier = Modifier.size(width = 72.dp, height = 104.dp), cornerRadius = 16.dp)
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.78f).height(16.dp), cornerRadius = 6.dp)
+                        VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.48f).height(12.dp), cornerRadius = 5.dp)
+                        VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.92f).height(11.dp), cornerRadius = 5.dp)
+                    }
+                    VantafynSkeletonBlock(modifier = Modifier.size(width = 86.dp, height = 38.dp), cornerRadius = 999.dp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RequestDetailSkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.72f).height(22.dp), cornerRadius = 8.dp)
+        VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.92f).height(14.dp), cornerRadius = 6.dp)
+        VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.84f).height(14.dp), cornerRadius = 6.dp)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(3) {
+                VantafynSkeletonBlock(modifier = Modifier.width(88.dp).height(34.dp), cornerRadius = 999.dp)
+            }
+        }
+        VantafynGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(14.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.44f).height(16.dp), cornerRadius = 6.dp)
+                VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth().height(12.dp), cornerRadius = 5.dp)
+                VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.86f).height(12.dp), cornerRadius = 5.dp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RequestHistorySkeleton() {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        repeat(4) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                VantafynSkeletonBlock(modifier = Modifier.size(width = 54.dp, height = 78.dp), cornerRadius = 12.dp)
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.7f).height(14.dp), cornerRadius = 5.dp)
+                    VantafynSkeletonBlock(modifier = Modifier.fillMaxWidth(0.52f).height(12.dp), cornerRadius = 5.dp)
+                }
+                VantafynSkeletonBlock(modifier = Modifier.width(82.dp).height(30.dp), cornerRadius = 999.dp)
             }
         }
     }
@@ -1570,7 +1760,7 @@ private fun RequestHistory(items: List<MediaRequestItem>, admin: Boolean, loadin
                 TextButton(onClick = onRefresh) { Text("Refresh") }
             }
             if (loading) {
-                VantafynLoadingIndicator("Loading requests")
+                RequestHistorySkeleton()
             } else if (items.isEmpty()) {
                 MessageCard("No requests returned by Ombi yet.", Icons.Rounded.Inbox)
             } else {
