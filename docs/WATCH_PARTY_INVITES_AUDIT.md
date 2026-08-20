@@ -19,7 +19,13 @@ The SDK also exposes websocket infrastructure:
 
 ## Current Vantafyn State
 
-Vantafyn does not yet keep an app-wide Jellyfin websocket listener alive for logged-in sessions. Because of that, this pass does not claim reliable Vantafyn-to-Vantafyn invite receipt.
+Vantafyn keeps a Jellyfin websocket listener alive while Watch Party messaging/sync needs it. The listener handles:
+
+- SyncPlay group updates
+- SyncPlay playback commands
+- playstate commands
+- active session updates
+- general command messages used for Vantafyn Watch Party invites and admin display messages
 
 ## Chosen First Implementation
 
@@ -30,14 +36,13 @@ Phase 2 invites use Jellyfin active sessions:
 3. Vantafyn creates a real SyncPlay group if needed.
 4. Vantafyn sends a `MessageCommand` to the selected active session ids.
 
-The message includes a compact `VANTAFYN_WATCH_PARTY_INVITE` payload that a future Vantafyn websocket listener can parse.
+The message includes a compact `VANTAFYN_WATCH_PARTY_INVITE` payload. Vantafyn parses this from incoming Jellyfin general command messages and shows the premium invite card when the target app session is active and connected.
 
 ## Limitations
 
-- Invites are in-app/active-session only.
+- Invites are active-session only.
 - Closed-app or background push delivery is not implemented.
 - Push notifications require a future backend and FCM implementation.
-- Cross-device premium receive cards require the app-wide websocket listener phase.
 - Jellyfin may expose only sessions visible to the current user/server policy.
 
 The UI reflects this with copy: invites are delivered through Jellyfin active sessions and push requires a future backend.

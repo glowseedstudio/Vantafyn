@@ -131,6 +131,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMusicArtist
 import dev.vantafyn.core.jellyfin.JellyfinLyricLine
 import dev.vantafyn.core.jellyfin.JellyfinMusicPlaylist
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
+import dev.vantafyn.core.jellyfin.JellyfinMusicTrackPage
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.media.VantafynMusicRepeatMode
 import dev.vantafyn.core.media.VantafynMusicTrack
@@ -167,10 +168,10 @@ private val MusicBottomSheetRailClearance = 112.dp
 private fun MusicScreenState.scrollResetKey(): String =
     when (this) {
         MusicScreenState.Home -> "home"
-        is MusicScreenState.Album -> "album:${album.id}"
+        is MusicScreenState.Album -> "album:${album.id}:${page.startIndex}"
         is MusicScreenState.Artist -> "artist:${artist.id}"
-        is MusicScreenState.Playlist -> "playlist:${playlist.id}"
-        is MusicScreenState.Songs -> "songs"
+        is MusicScreenState.Playlist -> "playlist:${playlist.id}:${page.startIndex}"
+        is MusicScreenState.Songs -> "songs:${page.startIndex}"
     }
 
 @Composable
@@ -359,6 +360,10 @@ fun MusicScreen(
                             MusicTrackList(
                                 title = "Tracks",
                                 tracks = screen.tracks,
+                                page = screen.page,
+                                isPageLoading = state.isMusicPageLoading,
+                                onPreviousPage = viewModel::previousMusicPage,
+                                onNextPage = viewModel::nextMusicPage,
                                 playlists = state.home?.playlists.orEmpty(),
                                 pendingTrackId = state.pendingPlayTrackId,
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
@@ -409,7 +414,7 @@ fun MusicScreen(
                         MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicDetailHeader(
                                 title = screen.playlist.name,
-                                subtitle = "${screen.tracks.size} tracks",
+                                subtitle = "${screen.page.totalItems.coerceAtLeast(screen.tracks.size)} tracks",
                                 imageUrl = screen.playlist.imageUrl,
                                 onBack = viewModel::showHome,
                                 onDownload = { viewModel.queuePlaylistDownload(screen.playlist, screen.tracks) },
@@ -425,6 +430,10 @@ fun MusicScreen(
                             MusicTrackList(
                                 title = "Playlist",
                                 tracks = screen.tracks,
+                                page = screen.page,
+                                isPageLoading = state.isMusicPageLoading,
+                                onPreviousPage = viewModel::previousMusicPage,
+                                onNextPage = viewModel::nextMusicPage,
                                 playlists = state.home?.playlists.orEmpty(),
                                 pendingTrackId = state.pendingPlayTrackId,
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
@@ -440,6 +449,10 @@ fun MusicScreen(
                             MusicTrackList(
                                 title = "All Songs",
                                 tracks = screen.tracks,
+                                page = screen.page,
+                                isPageLoading = state.isMusicPageLoading,
+                                onPreviousPage = viewModel::previousMusicPage,
+                                onNextPage = viewModel::nextMusicPage,
                                 playlists = state.home?.playlists.orEmpty(),
                                 pendingTrackId = state.pendingPlayTrackId,
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
@@ -802,6 +815,10 @@ private fun MusicPlaylistRow(playlists: List<JellyfinMusicPlaylist>, onPlaylist:
 private fun MusicTrackList(
     title: String,
     tracks: List<JellyfinMusicTrack>,
+    page: JellyfinMusicTrackPage? = null,
+    isPageLoading: Boolean = false,
+    onPreviousPage: () -> Unit = {},
+    onNextPage: () -> Unit = {},
     playlists: List<JellyfinMusicPlaylist> = emptyList(),
     pendingTrackId: java.util.UUID? = null,
     onTrack: (JellyfinMusicTrack) -> Unit,
@@ -810,6 +827,14 @@ private fun MusicTrackList(
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (title.isNotBlank()) Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        if (page != null && page.totalItems > page.pageSize) {
+            MusicPageControls(
+                page = page,
+                loading = isPageLoading,
+                onPrevious = onPreviousPage,
+                onNext = onNextPage,
+            )
+        }
         tracks.forEach { track ->
             VantafynGlassCard(
                 modifier = Modifier
@@ -850,6 +875,76 @@ private fun MusicTrackList(
             }
         }
     }
+}
+
+@Composable
+private fun MusicPageControls(
+    page: JellyfinMusicTrackPage,
+    loading: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+) {
+    val firstItem = if (page.totalItems == 0) 0 else page.startIndex + 1
+    val lastItem = (page.startIndex + page.tracks.size).coerceAtMost(page.totalItems)
+    val display = MusicPageControlDisplay(
+        firstItem = firstItem,
+        lastItem = lastItem,
+        totalItems = page.totalItems,
+        hasPrevious = page.hasPrevious,
+        hasNext = page.hasNext,
+        loading = loading,
+    )
+    AnimatedContent(
+        targetState = display,
+        transitionSpec = {
+            fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) togetherWith
+                fadeOut(animationSpec = tween(170, easing = FastOutSlowInEasing))
+        },
+        label = "musicPageControlsFade",
+    ) { target ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MusicPageAction("Prev", enabled = target.hasPrevious && !target.loading, onClick = onPrevious)
+            Text(
+                "${target.firstItem}-${target.lastItem} of ${target.totalItems.groupedMusicCountLabel()}",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyLarge,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            MusicPageAction("Next", enabled = target.hasNext && !target.loading, onClick = onNext)
+        }
+    }
+}
+
+private data class MusicPageControlDisplay(
+    val firstItem: Int,
+    val lastItem: Int,
+    val totalItems: Int,
+    val hasPrevious: Boolean,
+    val hasNext: Boolean,
+    val loading: Boolean,
+)
+
+@Composable
+private fun MusicPageAction(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Text(
+        text = label,
+        color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.42f),
+        style = MaterialTheme.typography.bodyLarge,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    )
 }
 
 @Composable
@@ -2654,3 +2749,5 @@ private fun Long.formatTime(): String {
     val seconds = totalSeconds % 60L
     return "$minutes:${seconds.toString().padStart(2, '0')}"
 }
+
+private fun Int.groupedMusicCountLabel(): String = "%,d".format(this)

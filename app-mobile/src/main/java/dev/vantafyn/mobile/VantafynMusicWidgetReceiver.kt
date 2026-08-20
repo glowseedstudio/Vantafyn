@@ -30,7 +30,8 @@ class VantafynMusicWidgetReceiver : GlanceAppWidgetReceiver() {
             }
             VantafynMusicPlaybackService.ACTION_TOGGLE_PLAYBACK,
             VantafynMusicPlaybackService.ACTION_PREVIOUS,
-            VantafynMusicPlaybackService.ACTION_NEXT -> {
+            VantafynMusicPlaybackService.ACTION_NEXT,
+            VantafynMusicPlaybackService.ACTION_STOP -> {
                 try {
                     context.startForegroundService(
                         Intent(context, VantafynMusicPlaybackService::class.java).setAction(intent.action)

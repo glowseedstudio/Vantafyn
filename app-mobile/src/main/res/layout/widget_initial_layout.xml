@@ -2,15 +2,15 @@
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#070A12"
-    android:padding="8dp">
+    android:background="#111827"
+    android:padding="10dp">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
-        android:text="Vantafyn"
-        android:textColor="#8EA2FF"
-        android:textSize="14sp"
+        android:text="Vantafyn Music"
+        android:textColor="#F5F7FF"
+        android:textSize="15sp"
         android:textStyle="bold" />
 </FrameLayout>

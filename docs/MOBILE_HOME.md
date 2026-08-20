@@ -1,18 +1,21 @@
-# Mobile Home Navigation
+# Mobile Home And Navigation
 
-This pass makes the logged-in mobile experience navigable without adding playback.
+This document describes the current logged-in Android phone experience. It replaces the early skeleton notes from the first mobile milestone.
 
 ## Implemented Screens
 
-- Home with real Jellyfin hero/row data and tappable media/library cards.
-- Libraries with real Jellyfin views.
-- Library Detail with a first-page grid of real Jellyfin items.
-- Search with debounced Jellyfin search hints.
-- Favorites with real Jellyfin favorite items.
-- Admin, shown only for Jellyfin administrators, with read-only real server/library/user/session data.
-- Profile/Settings with profile, server, switch user, add profile, Quick Connect, and log out actions.
-- Media Detail placeholder with real metadata/artwork and a non-playing Watch/Open action.
-- Home Sections settings for per-profile section visibility, order, artwork type, card shape, card size, and spacing.
+- Home with real Jellyfin hero and row data.
+- Libraries with real Jellyfin views and user-specific ordering.
+- Library detail pages with paged Jellyfin item loading, filters, sorting and media cards.
+- Search with debounced Jellyfin search, grouped filters and result navigation.
+- My List backed by Jellyfin favourites/user-data APIs.
+- Downloads with completed/offline media rails, local playback, removal actions, progress and recovery.
+- Music with service-backed playback, playlists, lyrics, queues, downloads and mini-player surfaces.
+- Requests with optional Ombi setup, discovery, search, details and request history.
+- Admin, shown only for Jellyfin administrators, with real server users, active sessions, tools, plugins, tasks, media stats and playback-reporting statistics when available.
+- Profile/Settings with profile image editing, saved profiles, Quick Connect device authorization, playback preferences, permissions, home-section customisation, downloads, app version/about and logout.
+- Media detail pages for movies, series, episodes, collections, people and related content.
+- Watch Party / Swipe to Match surfaces with SyncPlay foundations.
 
 ## Home Layout
 
@@ -27,65 +30,79 @@ The mobile Home screen is composed from `HomeSectionType` and `HomeSectionPrefer
 7. Smart Rows
 8. Other libraries
 
-Preferences are stored in app-private `SharedPreferences` under `vantafyn_home_layout`, keyed by Jellyfin profile id. This keeps visibility, ordering, artwork type, shape, size, and spacing local to the saved profile and survives app restarts. The Profile screen links to Home Sections, where each row can be hidden/shown, moved up/down, tuned, or reset to defaults.
+Preferences are stored in app-private `SharedPreferences` under `vantafyn_home_layout`, keyed by Jellyfin profile id. This keeps visibility, ordering, artwork type, shape, card size, and spacing local to the saved profile and survives app restarts.
 
-The media bar uses the `JellyfinHome.heroItems` list, which is built from continue/resume items first, then latest movies, next-up episodes, and latest TV. This gives priority to relevant active viewing while still providing a featured item when there is no resume state.
+The media bar uses `JellyfinHome.heroItems`, built from continue/resume items first, then latest movies, next-up episodes, and latest TV. This gives priority to relevant active viewing while still providing a featured item when there is no resume state.
 
-The hero is a full-width cinematic banner, not a card. Mobile uses Android edge-to-edge so the hero artwork can extend behind the status area while profile controls still respect safe insets. It uses Backdrop first, overlays Logo artwork when Jellyfin exposes it, falls back to a title when no logo exists, and uses scrims/gradients so compact metadata remains readable. The hero deliberately has no overview/body text and no Watch button; tapping the hero opens Media Detail.
+The hero is a full-width cinematic banner, not a card. Mobile uses Android edge-to-edge so hero artwork can extend behind the status area while profile controls still respect safe insets. The hero prefers Backdrop artwork, overlays Logo artwork when Jellyfin exposes it, falls back to title text when needed, and fades into the app background instead of hard-stopping.
 
-Live TV is not shown as a fake standalone section. If the Jellyfin server exposes Live TV as a real user library/view, it appears in My Media with the rest of the user's libraries. A dedicated Live TV Channels row appears only when `LiveTvApi` returns real channels or recommended/on-now programs. Opening the Live TV library queries real channels and shows a simple Guide row from recommended/on-now programs when available. If no guide data is returned, Vantafyn shows "Guide data unavailable"; if no channels are returned, it shows "No Live TV channels found" instead of a blank screen.
-
-Smart Rows are a foundation backed by real metadata queries. Current definitions include New in Crime, New in Thrillers, Highly Rated, Recently Released Movies, and Recently Released TV. Empty smart rows are hidden from Home; no smart-row results are fabricated.
+The Home top status-bar scrim is scroll-aware. It fades in only after the hero/header has passed behind the status bar so row titles do not clash with system icons.
 
 ## Navigation
 
-The mobile shell uses a fixed-height glass bottom dock with equal-width icon slots so selected items do not expand and small phones do not clip the right edge. Normal users see Home, Libraries, Search, Favorites, and Profile. Administrators see Home, Libraries, Search, Admin, and Profile so the dock remains stable at five tabs.
+The mobile shell uses a fixed-height glass bottom dock with equal-width icon slots. Normal users and administrators keep a stable dock count, with role-specific destinations where needed.
 
-The mobile Home header intentionally omits app name, server name, logged-in text, and search. The only Home header control is the compact profile avatar at top-right; Search remains available from the bottom navigation.
+Android back navigation is app-owned through the mobile destination state. Nested screens return to their parent destination, Home is the final in-app root, and explicit Logout is the intentional path that clears an authenticated session.
 
-The bottom dock uses local vector-style glyphs drawn in Compose Canvas: home, library grid, search, favorite/admin shield, and profile. No external icon pack was added in this pass, keeping the build dependency-free while improving icon clarity.
-
-## Image Strategy
-
-Jellyfin image URL generation stays in `core-jellyfin` helpers. Hero items prefer Backdrop artwork with Logo overlays when Jellyfin exposes a Logo image. Poster rows use Primary images, wide/episode rows prefer Thumb or Backdrop, user/profile views use Primary user images, and library cards use available library artwork. Missing images fall back to Vantafyn-styled surfaces rather than empty black boxes.
-
-Default row artwork rules are:
-
-- Recently Added Movies: poster cards using Primary artwork.
-- Recently Added TV: wide cards using Thumb/Backdrop.
-- Continue Watching / Next Up: wide cards using Thumb/Backdrop with progress.
-- My Media and More Libraries: wide library cards using library artwork.
-- Live TV Channels: wide cards from channel/program images returned by Jellyfin.
+Most major screens use the shared one-shot reveal animation. The animation is keyed by the opened destination/content identity so navigating between albums, playlists, libraries, details, settings pages and admin pages does not replay stale index state.
 
 ## Jellyfin SDK APIs
+
+The mobile experience uses real Jellyfin SDK data through `core-jellyfin` repositories.
+
+Key API areas include:
 
 - Home rows: `itemsApi.getResumeItems()`, `tvShowsApi.getNextUp()`, `userLibraryApi.getLatestMedia()`.
 - Libraries: `userViewsApi.getUserViews()`.
 - Library detail: `itemsApi.getItems(GetItemsRequest)`.
-- Media detail: `userLibraryApi.getItem()`.
+- Media detail: `userLibraryApi.getItem()`, episode queries, people and related media.
 - Search: `searchApi.getSearchHints(GetSearchHintsRequest)`.
-- Favorites: `itemsApi.getItems(GetItemsRequest(isFavorite = true))`.
-- Live TV: `liveTvApi.getLiveTvChannels(GetLiveTvChannelsRequest(addCurrentProgram = true))` and `liveTvApi.getRecommendedPrograms(GetRecommendedProgramsRequest(isAiring = true))`.
-- Smart Rows: `itemsApi.getItems(GetItemsRequest(... genres/minCommunityRating/sortBy ...))` with real Jellyfin metadata filters.
-- Quick Connect: `quickConnectApi` plus `userApi.authenticateWithQuickConnect()`.
-- Admin visibility: `userApi.getCurrentUser()` / authentication responses expose `UserPolicy.isAdministrator`; the mobile Admin tab is shown only when that flag is true.
-- Admin overview: `systemApi.getSystemInfo()`, `sessionApi.getSessions()`, `userApi.getUsers(...)`, and `itemsApi.getItems(GetItemsRequest(... enableTotalRecordCount = true ...))`.
-- Server found avatar: the card prefers a public administrator image only when Jellyfin exposes that policy data pre-login, then falls back to the saved/current matching user image. Jellyfin public system info does not expose a dedicated admin avatar.
+- Favourites/My List: Jellyfin user-data favourite APIs.
+- Live TV: `liveTvApi.getLiveTvChannels(...)`, `liveTvApi.getRecommendedPrograms(...)`, playback-info/open-stream APIs.
+- Playback: `mediaInfoApi.getPostedPlaybackInfo(...)`, play-state start/progress/stop reporting, media stream metadata, Live TV open/close, Cast-specific playback negotiation and Media Segments.
+- Quick Connect: app login with initiate/poll/authenticate, and authenticated device authorization with `authorizeQuickConnect(...)`.
+- Admin: system info, sessions, users, item counts, plugins, scheduled tasks and Playback Reporting plugin endpoints where available.
+- Profile images: Jellyfin image upload/delete APIs through the repository boundary.
 
-## Intentional Placeholders
+## Playback Entry Points
 
-- Playback is not implemented. Watch/Open shows a "Playback coming next" dialog.
-- The Home hero has no Watch button; tapping the artwork opens Media Detail.
-- Downloads, audiobook playback, and plugin features are not implemented.
-- Admin watch-time totals and historical playback analytics are not fabricated. Jellyfin core does not expose those totals through the current SDK flow, so the Admin screen marks them as requiring a future plugin or external reporting source.
-- Search has no persisted recent searches yet.
-- Library sorting/filter chips are visual placeholders for now.
-- Smart row management currently exposes the foundation through Home Sections; richer add/remove/edit flows can build on the persisted models.
-- Series seasons/episodes are noted in Media Detail but not expanded yet.
+Media cards and detail actions route into the existing mobile player where the item type is playable.
+
+Implemented mobile playback includes:
+
+- movies and episodes;
+- Live TV channels/programs where Jellyfin provides a playable channel/source;
+- direct play and transcoding fallback;
+- subtitle and audio track switching;
+- resume and watch-from-beginning;
+- Up Next/autoplay;
+- Jellyfin Media Segments prompt/auto-skip;
+- Google Cast handoff;
+- offline local video playback.
+
+Music uses the separate service-owned music stack rather than the fullscreen video player.
+
+## Downloads And Offline
+
+Downloads are surfaced from Home/Profile navigation and backed by `core-downloads`.
+
+The offline experience is intentionally centred in Downloads instead of silently replacing online Home/Library/Search with offline data. Completed downloads show local artwork/metadata where available, support local playback, and can be removed through Vantafyn-styled actions.
+
+If a saved profile cannot restore because the server is unreachable and completed downloads exist for that profile, Vantafyn can recover into Downloads instead of trapping the user at a network error.
+
+## Admin Boundaries
+
+Admin surfaces must display real server data only.
+
+- Active sessions come from Jellyfin sessions and update progress/bitrate where the server exposes it.
+- Media stats come from Jellyfin item-count queries.
+- Watch-time and historical statistics use the Playback Reporting plugin when its endpoints are available.
+- Missing plugin/stat data is shown as unavailable, not fabricated.
 
 ## Known Limits
 
-- Library detail loads a reasonable first page rather than infinite paging.
-- Favorites uses the broad Jellyfin item query with `isFavorite = true`; exact grouping by media type can be refined later.
-- Mobile navigation is currently ViewModel state driven inside `feature-home`; a dedicated navigation graph can be introduced when feature modules split further.
-- Home section reordering currently uses up/down controls instead of drag-and-drop to keep the first implementation simple and reliable.
+- Android TV parity is still in progress.
+- Full source/quality ladder selection is not yet a complete user-facing UI.
+- TV playback UI remains TODO.
+- Offline browsing is richest inside Downloads; full offline adapters for the normal online tabs remain future polish.
+- Some Jellyfin features depend on server plugins, server configuration, tuner/provider support, or Jellyfin exposing the needed API fields.

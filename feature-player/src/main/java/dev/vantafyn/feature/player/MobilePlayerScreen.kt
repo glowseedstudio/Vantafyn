@@ -123,6 +123,7 @@ import dev.vantafyn.core.media.UpNextState
 import dev.vantafyn.core.media.VantafynExoPlayerFactory
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.VantafynPlaybackItem
+import dev.vantafyn.core.media.VantafynSyncPlaybackCommand
 import dev.vantafyn.core.media.VantafynSubtitleTrack
 import dev.vantafyn.core.media.VantafynTrackInfo
 import dev.vantafyn.core.ui.VantafynButton
@@ -158,6 +159,10 @@ fun MobilePlayerScreen(
     onPrepareCastPlayback: (Long) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
+    onSyncPlayPause: (Long) -> Unit = {},
+    onSyncPlayResume: (Long) -> Unit = {},
+    onSyncPlaySeek: (Long) -> Unit = {},
+    syncPlaybackCommand: VantafynSyncPlaybackCommand? = null,
     suppressUpNext: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
@@ -189,6 +194,10 @@ fun MobilePlayerScreen(
                 onPrepareCastPlayback = onPrepareCastPlayback,
                 onSelectAudioTrack = onSelectAudioTrack,
                 onSelectSubtitleTrack = onSelectSubtitleTrack,
+                onSyncPlayPause = onSyncPlayPause,
+                onSyncPlayResume = onSyncPlayResume,
+                onSyncPlaySeek = onSyncPlaySeek,
+                syncPlaybackCommand = syncPlaybackCommand,
                 suppressUpNext = suppressUpNext,
             )
             isLoading -> PlayerLoadingIndicator(
@@ -224,6 +233,10 @@ private fun PlayerSurface(
     onPrepareCastPlayback: (Long) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
+    onSyncPlayPause: (Long) -> Unit,
+    onSyncPlayResume: (Long) -> Unit,
+    onSyncPlaySeek: (Long) -> Unit,
+    syncPlaybackCommand: VantafynSyncPlaybackCommand?,
     suppressUpNext: Boolean,
 ) {
     val context = LocalContext.current
@@ -248,6 +261,7 @@ private fun PlayerSurface(
     var previousStarted by remember(item.itemId) { mutableStateOf(false) }
     var lastCastProgressReportMs by remember(item.itemId) { mutableLongStateOf(-1L) }
     var autoSkippedSegmentIds by remember(item.itemId) { mutableStateOf(emptySet<String>()) }
+    var lastAppliedSyncCommandKey by remember(item.itemId) { mutableLongStateOf(0L) }
     val previousCandidate = item.previousCandidate
     val upNextCandidate = item.upNextCandidate
     val autoplaySettings = item.autoplaySettings
@@ -417,6 +431,56 @@ private fun PlayerSurface(
         }
     }
 
+    LaunchedEffect(syncPlaybackCommand, item.itemId, isCastingThisItem) {
+        val command = syncPlaybackCommand ?: return@LaunchedEffect
+        if (command.key <= lastAppliedSyncCommandKey) return@LaunchedEffect
+        if (command.itemId != null && command.itemId != item.itemId) return@LaunchedEffect
+        lastAppliedSyncCommandKey = command.key
+        val position = command.positionMs?.coerceAtLeast(0L)
+        if (isCastingThisItem) {
+            if (position != null) {
+                outputCoordinator.seekTo(position)
+                positionMs = position
+                onPosition(position)
+            }
+            when {
+                command.command.isSyncPlayStopCommand() -> {
+                    outputCoordinator.disconnect(stopPlayback = true)
+                    onProgress(position ?: castState.positionMs, true)
+                }
+                command.isSyncPlayPause() -> {
+                    if (castState.isPlaying) outputCoordinator.playPause()
+                    onProgress(position ?: castState.positionMs, true)
+                }
+                command.isSyncPlayResume() || command.isPlaying == true -> {
+                    if (!castState.isPlaying) outputCoordinator.playPause()
+                    onProgress(position ?: castState.positionMs, false)
+                }
+            }
+        } else {
+            if (position != null) {
+                player.seekTo(position)
+                positionMs = position
+                onPosition(position)
+            }
+            when {
+                command.command.isSyncPlayStopCommand() -> {
+                    player.pause()
+                    onProgress(player.currentPosition, true)
+                    onBack()
+                }
+                command.isSyncPlayPause() -> {
+                    player.pause()
+                    onProgress(player.currentPosition, true)
+                }
+                command.isSyncPlayResume() || command.isPlaying == true -> {
+                    player.play()
+                    onProgress(player.currentPosition, false)
+                }
+            }
+        }
+    }
+
     LaunchedEffect(player, isCastingThisItem, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
@@ -540,11 +604,22 @@ private fun PlayerSurface(
                 errorMessage = outputState.lastErrorMessage,
                 subtitleTracks = castState.subtitleTracks,
                 activeSubtitleTrackId = castState.activeSubtitleTrackId,
-                onPlayPause = outputCoordinator::playPause,
-                onSeekTo = outputCoordinator::seekTo,
+                onPlayPause = {
+                    if (castState.isPlaying) {
+                        onSyncPlayPause(castState.positionMs)
+                    } else {
+                        onSyncPlayResume(castState.positionMs)
+                    }
+                    outputCoordinator.playPause()
+                },
+                onSeekTo = {
+                    outputCoordinator.seekTo(it)
+                    onSyncPlaySeek(it)
+                },
                 onSeekBy = { delta ->
                     val target = (castState.positionMs + delta).coerceIn(0L, (castState.durationMs.takeIf { it > 0L } ?: durationMs).coerceAtLeast(0L))
                     outputCoordinator.seekTo(target)
+                    onSyncPlaySeek(target)
                     onProgress(target, !castState.isPlaying)
                 },
                 onPlayPrevious = {
@@ -619,16 +694,25 @@ private fun PlayerSurface(
                 selectedSubtitleIndex = selectedSubtitleIndex,
                 onBack = onBack,
                 onPlayPause = {
-                    if (player.isPlaying) player.pause() else player.play()
+                    if (player.isPlaying) {
+                        player.pause()
+                        onSyncPlayPause(player.currentPosition)
+                    } else {
+                        player.play()
+                        onSyncPlayResume(player.currentPosition)
+                    }
                     onProgress(player.currentPosition, !player.isPlaying)
                 },
                 onSeekBy = {
-                    player.seekTo((player.currentPosition + it).coerceIn(0L, durationMs.coerceAtLeast(player.currentPosition + it)))
-                    onProgress(player.currentPosition, !player.isPlaying)
+                    val target = (player.currentPosition + it).coerceIn(0L, durationMs.coerceAtLeast(player.currentPosition + it))
+                    player.seekTo(target)
+                    onSyncPlaySeek(target)
+                    onProgress(target, !player.isPlaying)
                 },
                 onSeekTo = {
                     player.seekTo(it)
-                    onProgress(player.currentPosition, !player.isPlaying)
+                    onSyncPlaySeek(it)
+                    onProgress(it, !player.isPlaying)
                 },
                 onAudio = { sheet = PlayerSheet.Audio },
                 onSubtitles = { sheet = PlayerSheet.Subtitles },
@@ -1731,6 +1815,20 @@ private enum class PlayerSheet(val title: String, val subtitle: String) {
     Speed("Playback Speed", "Adjust video speed for this session."),
     Resize("Screen Fit", "Choose how video fills the display."),
 }
+
+private fun VantafynSyncPlaybackCommand.isSyncPlayPause(): Boolean =
+    command.equals("Pause", ignoreCase = true) || isPlaying == false
+
+private fun VantafynSyncPlaybackCommand.isSyncPlayResume(): Boolean =
+    command.equals("Unpause", ignoreCase = true) ||
+        command.equals("Play", ignoreCase = true) ||
+        command.equals("PlayQueue", ignoreCase = true) ||
+        isPlaying == true
+
+private fun String.isSyncPlayStopCommand(): Boolean =
+    equals("Stop", ignoreCase = true) ||
+        equals("GroupLeft", ignoreCase = true) ||
+        equals("NotInGroup", ignoreCase = true)
 
 private enum class PlayerResizeMode(
     val label: String,

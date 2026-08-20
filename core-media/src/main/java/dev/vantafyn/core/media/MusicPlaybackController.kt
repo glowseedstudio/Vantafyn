@@ -93,6 +93,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private var tickerJob: Job? = null
     private var lastTransitionReason: VantafynMusicStopReason = VantafynMusicStopReason.QueueChange
     private var playbackServiceStarted = false
+    private var lastRegistryTickMs: Long = 0L
     private val tracksByMediaId = mutableMapOf<String, VantafynMusicTrack>()
 
     internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.builder(context.applicationContext).build().apply {
@@ -426,7 +427,16 @@ class MusicPlaybackController private constructor(context: Context) {
                         isPlaying = sessionPlayer.isPlaying,
                     )
                 }
-                LongRunningTaskRegistry.tick(MUSIC_TICKER_TASK_ID, if (sessionPlayer.isPlaying) "playing" else "paused")
+                val now = System.currentTimeMillis()
+                val registryTickInterval = if (AppForegroundStateRepository.isForeground.value) {
+                    ForegroundTickerIntervalMs
+                } else {
+                    BackgroundRegistryTickIntervalMs
+                }
+                if (now - lastRegistryTickMs >= registryTickInterval) {
+                    lastRegistryTickMs = now
+                    LongRunningTaskRegistry.tick(MUSIC_TICKER_TASK_ID, if (sessionPlayer.isPlaying) "playing" else "paused")
+                }
                 delay(if (AppForegroundStateRepository.isForeground.value) ForegroundTickerIntervalMs else BackgroundTickerIntervalMs)
             }
         }
@@ -487,6 +497,7 @@ class MusicPlaybackController private constructor(context: Context) {
         private const val MUSIC_TICKER_TASK_ID = "music.positionTicker"
         private const val ForegroundTickerIntervalMs = 1_000L
         private const val BackgroundTickerIntervalMs = 10_000L
+        private const val BackgroundRegistryTickIntervalMs = 60_000L
 
         @Volatile
         private var instance: MusicPlaybackController? = null

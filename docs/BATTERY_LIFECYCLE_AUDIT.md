@@ -63,7 +63,7 @@ All animations are gated with `LocalLifecycleOwner` observer pattern and `Access
 ### Progress Reporting
 **File**: `feature-music/src/main/java/dev/vantafyn/feature/music/MusicViewModel.kt`
 - Foreground: 10s interval
-- Background: 30s interval
+- Background: 60s interval
 - Source: `AppForegroundStateRepository.isForeground`
 
 ### Lyrics Prefetching
@@ -71,10 +71,24 @@ All animations are gated with `LocalLifecycleOwner` observer pattern and `Access
 - Gated: `musicScreenActive && AppForegroundStateRepository.isForeground.value`
 - Skips API calls when backgrounded
 
+### UI Playback State Publication
+**File**: `feature-music/src/main/java/dev/vantafyn/feature/music/MusicViewModel.kt`
+- Playback service state remains active for reporting and lifecycle events.
+- UI-facing state avoids plain position-tick publication while backgrounded unless music UI or popup lyrics are visible.
+
 ### Notification Updates
 **File**: `core-media/src/main/java/dev/vantafyn/core/media/VantafynMusicPlaybackService.kt`
 - Initial: `startForeground()` (required by Android)
 - Subsequent: `NotificationManager.notify()` (lightweight)
+- Notifications update on track/play-state changes rather than every background position tick.
+
+### Music Widget Updates
+**Files**:
+- `core-media/src/main/java/dev/vantafyn/core/media/VantafynMusicPlaybackService.kt`
+- `app-mobile/src/main/java/dev/vantafyn/mobile/VantafynMusicWidget.kt`
+- Widget broadcasts are content-aware and throttled.
+- Background widget progress-only refreshes are suppressed.
+- Widget artwork is cached locally after first load.
 
 ## Monitoring
 
@@ -103,5 +117,5 @@ adb shell dumpsys batterystats --charged | grep -A 20 "vantafyn"
 
 1. **ExoPlayer wake mode**: Currently `WAKE_MODE_NETWORK` — consider `WAKE_MODE_NONE` when backgrounded if network not needed
 2. **Audio offload**: Already enabled via `enableCompatibleAudioOffload()` — reduces CPU during playback
-3. **Notification artwork**: Could skip loading large icon when backgrounded
-4. **Palette extraction**: Not currently triggered in background, but should verify
+3. **Palette extraction**: Not currently triggered in background, but should verify
+4. **Long-run packet audit**: Repeat a clean screen-off playback test after install and compare Wi-Fi packet count against the user-reported 6h46m run

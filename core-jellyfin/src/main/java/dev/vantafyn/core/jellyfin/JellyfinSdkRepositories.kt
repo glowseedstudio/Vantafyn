@@ -58,6 +58,7 @@ import org.jellyfin.sdk.model.api.DeviceProfile
 import org.jellyfin.sdk.model.api.DirectPlayProfile
 import org.jellyfin.sdk.model.api.DlnaProfileType
 import org.jellyfin.sdk.model.api.EncodingContext
+import org.jellyfin.sdk.model.api.GeneralCommandType
 import org.jellyfin.sdk.model.api.ImageFormat
 import org.jellyfin.sdk.model.api.ImageType
 import org.jellyfin.sdk.model.api.ItemFields
@@ -529,20 +530,30 @@ class SdkJellyfinLibraryRepository(
         startIndex: Int,
         limit: Int,
         filter: JellyfinLibraryItemFilter,
+        alphabetKey: String?,
     ): JellyfinResult<JellyfinLibraryPage> =
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val normalizedAlphabetKey = alphabetKey?.trim()?.uppercase()?.takeIf {
+                    it == "#" || (it.length == 1 && it[0] in 'A'..'Z')
+                }
                 if (library.collectionType.isLiveTvCollection()) {
                     val allChannels = fetchLiveTvChannels(api, session, limit = 1_000)
+                    val filteredChannels = when (normalizedAlphabetKey) {
+                        null -> allChannels
+                        "#" -> allChannels.filter { channel -> channel.name.firstOrNull()?.isLetter() != true }
+                        else -> allChannels.filter { channel -> channel.name.startsWith(normalizedAlphabetKey, ignoreCase = true) }
+                    }
                     val safeStart = startIndex.coerceAtLeast(0)
-                    val pageItems = allChannels.drop(safeStart).take(limit).map { it.toMediaItem() }
+                    val pageItems = filteredChannels.drop(safeStart).take(limit).map { it.toMediaItem() }
                     return@withContext JellyfinResult.Success(
                         JellyfinLibraryPage(
                             items = pageItems,
                             startIndex = safeStart,
                             pageSize = limit,
-                            totalItems = allChannels.size,
+                            totalItems = filteredChannels.size,
+                            alphabetKey = normalizedAlphabetKey,
                         ),
                     )
                 }
@@ -575,6 +586,8 @@ class SdkJellyfinLibraryRepository(
                         includeItemTypes = includeTypesFor(library.collectionType),
                         isFavorite = true.takeIf { filter == JellyfinLibraryItemFilter.Favorites },
                         isPlayed = false.takeIf { filter == JellyfinLibraryItemFilter.Unwatched },
+                        nameStartsWith = normalizedAlphabetKey?.takeIf { it != "#" },
+                        nameLessThan = "A".takeIf { normalizedAlphabetKey == "#" },
                         enableUserData = true,
                         imageTypeLimit = 2,
                         enableImageTypes = if (isMusic) listOf(ImageType.PRIMARY) else itemImageTypes,
@@ -588,6 +601,7 @@ class SdkJellyfinLibraryRepository(
                         startIndex = safeStart,
                         pageSize = limit,
                         totalItems = response.totalRecordCount,
+                        alphabetKey = normalizedAlphabetKey,
                     ),
                 )
             } catch (throwable: Throwable) {
@@ -976,10 +990,13 @@ class SdkJellyfinPlaybackRepository(
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
         isLiveTv: Boolean,
+        maxStreamingBitrate: Int?,
     ): JellyfinResult<JellyfinPlaybackInfo> =
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val resolvedBitrate = maxStreamingBitrate.validVideoStreamingBitrate()
+                val deviceProfile = androidMobileDeviceProfile(maxVideoStreamingBitrate = resolvedBitrate)
                 val info = try {
                     getAutoPlaybackInfo(
                         api = api,
@@ -991,6 +1008,8 @@ class SdkJellyfinPlaybackRepository(
                         forceTranscode = forceTranscode,
                         audioStreamIndex = audioStreamIndex,
                         subtitleStreamIndex = subtitleStreamIndex,
+                        deviceProfile = deviceProfile,
+                        maxStreamingBitrate = resolvedBitrate ?: DEFAULT_MAX_VIDEO_STREAMING_BITRATE,
                     )
                 } catch (throwable: Throwable) {
                     if (!isLiveTv) throw throwable
@@ -1004,6 +1023,8 @@ class SdkJellyfinPlaybackRepository(
                         forceTranscode = forceTranscode,
                         audioStreamIndex = audioStreamIndex,
                         subtitleStreamIndex = subtitleStreamIndex,
+                        deviceProfile = deviceProfile,
+                        maxStreamingBitrate = resolvedBitrate ?: DEFAULT_MAX_VIDEO_STREAMING_BITRATE,
                     )
                 }
                 JellyfinResult.Success(info)
@@ -1179,7 +1200,7 @@ class SdkJellyfinPlaybackRepository(
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
         deviceProfile: DeviceProfile = androidMobileDeviceProfile(),
-        maxStreamingBitrate: Int = 60_000_000,
+        maxStreamingBitrate: Int = DEFAULT_MAX_VIDEO_STREAMING_BITRATE,
         maxAudioChannels: Int = 8,
     ): JellyfinPlaybackInfo {
         val response by api.mediaInfoApi.getPostedPlaybackInfo(
@@ -1233,7 +1254,7 @@ class SdkJellyfinPlaybackRepository(
         audioStreamIndex: Int?,
         subtitleStreamIndex: Int?,
         deviceProfile: DeviceProfile = androidMobileDeviceProfile(),
-        maxStreamingBitrate: Int = 60_000_000,
+        maxStreamingBitrate: Int = DEFAULT_MAX_VIDEO_STREAMING_BITRATE,
         maxAudioChannels: Int = 8,
     ): JellyfinPlaybackInfo {
         val profile = deviceProfile
@@ -1509,6 +1530,31 @@ class SdkJellyfinMusicRepository(
             }
         }
 
+    override suspend fun getAlbumTracksPage(
+        session: JellyfinSession,
+        albumId: java.util.UUID,
+        startIndex: Int,
+        limit: Int,
+    ): JellyfinResult<JellyfinMusicTrackPage> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                JellyfinResult.Success(
+                    getMusicTracksPage(
+                        api = api,
+                        session = session,
+                        startIndex = startIndex,
+                        limit = limit,
+                        parentId = albumId,
+                        sortBy = listOf(ItemSortBy.PARENT_INDEX_NUMBER, ItemSortBy.INDEX_NUMBER, ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
     override suspend fun getArtistAlbums(session: JellyfinSession, artistId: java.util.UUID): JellyfinResult<List<JellyfinMusicAlbum>> =
         withContext(ioDispatcher) {
             try {
@@ -1552,6 +1598,64 @@ class SdkJellyfinMusicRepository(
                     ),
                 )
                 JellyfinResult.Success(response.items.filter { it.type == BaseItemKind.AUDIO }.map { it.toMusicTrack(api, session) })
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getPlaylistItemsPage(
+        session: JellyfinSession,
+        playlistId: java.util.UUID,
+        startIndex: Int,
+        limit: Int,
+    ): JellyfinResult<JellyfinMusicTrackPage> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val safeStart = startIndex.coerceAtLeast(0)
+                val response by api.playlistsApi.getPlaylistItems(
+                    GetPlaylistItemsRequest(
+                        playlistId = playlistId,
+                        userId = session.user.id,
+                        fields = musicItemFields,
+                        startIndex = safeStart,
+                        limit = limit,
+                        enableImages = true,
+                        enableUserData = true,
+                        imageTypeLimit = 2,
+                        enableImageTypes = listOf(ImageType.PRIMARY),
+                    ),
+                )
+                val tracks = response.items
+                    .filter { it.type == BaseItemKind.AUDIO || it.mediaType == MediaType.AUDIO }
+                    .map { it.toMusicTrack(api, session) }
+                JellyfinResult.Success(
+                    JellyfinMusicTrackPage(
+                        tracks = tracks,
+                        startIndex = safeStart,
+                        pageSize = limit,
+                        totalItems = response.totalRecordCount,
+                    ),
+                )
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getSongsPage(session: JellyfinSession, startIndex: Int, limit: Int): JellyfinResult<JellyfinMusicTrackPage> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                JellyfinResult.Success(
+                    getMusicTracksPage(
+                        api = api,
+                        session = session,
+                        startIndex = startIndex,
+                        limit = limit,
+                        sortBy = listOf(ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                    ),
+                )
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
@@ -1674,6 +1778,45 @@ class SdkJellyfinMusicRepository(
             ),
         )
         return response.items.map { it.toMusicTrack(api, session) }
+    }
+
+    private suspend fun getMusicTracksPage(
+        api: ApiClient,
+        session: JellyfinSession,
+        startIndex: Int,
+        limit: Int,
+        parentId: java.util.UUID? = null,
+        searchTerm: String? = null,
+        sortBy: List<ItemSortBy>,
+        sortOrder: List<SortOrder>,
+    ): JellyfinMusicTrackPage {
+        val safeStart = startIndex.coerceAtLeast(0)
+        val response by api.itemsApi.getItems(
+            GetItemsRequest(
+                userId = session.user.id,
+                parentId = parentId,
+                recursive = parentId == null,
+                searchTerm = searchTerm,
+                startIndex = safeStart,
+                limit = limit,
+                sortBy = sortBy,
+                sortOrder = sortOrder,
+                fields = musicItemFields,
+                includeItemTypes = listOf(BaseItemKind.AUDIO),
+                mediaTypes = listOf(MediaType.AUDIO),
+                enableUserData = true,
+                imageTypeLimit = 2,
+                enableImageTypes = listOf(ImageType.PRIMARY),
+                enableImages = true,
+                enableTotalRecordCount = true,
+            ),
+        )
+        return JellyfinMusicTrackPage(
+            tracks = response.items.map { it.toMusicTrack(api, session) },
+            startIndex = safeStart,
+            pageSize = limit,
+            totalItems = response.totalRecordCount,
+        )
     }
 
     private suspend fun getMusicAlbums(api: ApiClient, session: JellyfinSession, limit: Int): List<JellyfinMusicAlbum> {
@@ -1988,6 +2131,7 @@ class SdkJellyfinAdminRepository(
                             isPaused = playState?.isPaused == true,
                             positionTicks = playState?.positionTicks,
                             runtimeTicks = sessionItem?.runTimeTicks ?: technicalItem?.runTimeTicks,
+                            streamQuality = videoStream?.videoQualityLabel(),
                             videoCodec = transcode?.videoCodec ?: videoStream?.codec,
                             audioCodec = transcode?.audioCodec ?: audioStream?.codec,
                             container = transcode?.container ?: mediaSource?.container ?: technicalItem?.container ?: sessionItem?.container,
@@ -1995,6 +2139,7 @@ class SdkJellyfinAdminRepository(
                             transcodeReasons = transcode?.transcodeReasons.orEmpty().map { it.serialName },
                             lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
                             isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
+                            supportsDisplayMessage = dto.supportedCommands.orEmpty().contains(GeneralCommandType.DISPLAY_MESSAGE),
                         )
                     }
                 val users = runCatching {
@@ -2673,6 +2818,40 @@ class SdkJellyfinAdminRepository(
                 } else {
                     api.scheduledTasksApi.stopTask(taskId)
                 }
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun sendSessionMessage(
+        session: JellyfinSession,
+        targetSessionId: String,
+        header: String?,
+        text: String,
+        timeoutMs: Long,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            if (!session.user.isAdministrator) {
+                return@withContext JellyfinResult.Failure("Admin access is not available for this user")
+            }
+            if (targetSessionId.isBlank()) {
+                return@withContext JellyfinResult.Failure("This active session cannot receive messages")
+            }
+            val trimmedText = text.trim()
+            if (trimmedText.isBlank()) {
+                return@withContext JellyfinResult.Failure("Enter a message")
+            }
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.sessionApi.sendMessageCommand(
+                    targetSessionId,
+                    MessageCommand(
+                        header = header?.trim()?.takeIf { it.isNotBlank() },
+                        text = trimmedText,
+                        timeoutMs = timeoutMs.coerceIn(1_500L, 60_000L),
+                    ),
+                )
                 JellyfinResult.Success(Unit)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -3677,6 +3856,19 @@ private fun MediaStream.resolutionLabel(): String? {
     return "${width}x$height"
 }
 
+private fun MediaStream.videoQualityLabel(): String? {
+    val width = width ?: 0
+    val height = height ?: 0
+    return when {
+        width >= 3840 || height >= 2160 -> "4K"
+        width >= 2560 || height >= 1440 -> "1440p"
+        height >= 1080 -> "1080p"
+        height >= 720 -> "720p"
+        width > 0 || height > 0 -> "SD"
+        else -> null
+    }
+}
+
 private fun Long.fileSizeLabel(): String {
     val gib = this / 1_073_741_824.0
     val mib = this / 1_048_576.0
@@ -3957,18 +4149,17 @@ private fun BaseItemDto.thumbImageUrl(api: ApiClient, maxWidth: Int): String? {
 }
 
 private fun BaseItemDto.streamInfo(): List<String> {
-    val streams = mediaStreams.orEmpty()
+    val streams = mediaSources.orEmpty()
+        .firstOrNull { source -> source.mediaStreams.orEmpty().any { it.type == MediaStreamType.VIDEO } }
+        ?.mediaStreams
+        .orEmpty()
+        .ifEmpty { mediaStreams.orEmpty() }
     val video = streams.firstOrNull { it.type == MediaStreamType.VIDEO }
     val audio = streams.firstOrNull { it.type == MediaStreamType.AUDIO }
     val subtitle = streams.firstOrNull { it.type == MediaStreamType.SUBTITLE }
     return listOfNotNull(
         video?.let {
-            val quality = when {
-                (it.height ?: 0) >= 2160 -> "4K"
-                (it.height ?: 0) >= 1080 -> "HD"
-                (it.height ?: 0) >= 720 -> "HD"
-                else -> null
-            }
+            val quality = it.videoQualityLabel()
             val range = it.videoRange?.serialName ?: it.videoRangeType?.serialName
             listOfNotNull(quality, range).joinToString(" ").takeIf { value -> value.isNotBlank() }
         },
@@ -3981,12 +4172,12 @@ private fun BaseItemDto.streamInfo(): List<String> {
     )
 }
 
-private fun androidMobileDeviceProfile(): DeviceProfile =
+private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): DeviceProfile =
     DeviceProfile(
         name = "Vantafyn Android Mobile",
         id = null,
-        maxStreamingBitrate = 60_000_000,
-        maxStaticBitrate = 100_000_000,
+        maxStreamingBitrate = maxVideoStreamingBitrate ?: DEFAULT_MAX_VIDEO_STREAMING_BITRATE,
+        maxStaticBitrate = maxVideoStreamingBitrate ?: DEFAULT_MAX_VIDEO_STATIC_BITRATE,
         musicStreamingTranscodingBitrate = 384_000,
         maxStaticMusicBitrate = 1_000_000,
         directPlayProfiles = listOf(
@@ -4039,6 +4230,12 @@ private fun androidMobileDeviceProfile(): DeviceProfile =
             SubtitleProfile("dvdsub", SubtitleDeliveryMethod.ENCODE, null, null, null),
         ),
     )
+
+private fun Int?.validVideoStreamingBitrate(): Int? =
+    this?.takeIf { it in 1_000_000..DEFAULT_MAX_VIDEO_STREAMING_BITRATE }
+
+private const val DEFAULT_MAX_VIDEO_STREAMING_BITRATE = 120_000_000
+private const val DEFAULT_MAX_VIDEO_STATIC_BITRATE = 160_000_000
 
 private fun googleCastDeviceProfile(): DeviceProfile =
     DeviceProfile(
@@ -4106,14 +4303,9 @@ private fun JellyfinPlaybackMethod.toSdkPlayMethod(): PlayMethod =
     }
 
 private fun sourceLabel(source: MediaSourceInfo, method: JellyfinPlaybackMethod): String {
-    val quality = source.mediaStreams.orEmpty().firstOrNull { it.type == MediaStreamType.VIDEO }?.height?.let {
-        when {
-            it >= 2160 -> "4K"
-            it >= 1080 -> "1080p"
-            it >= 720 -> "720p"
-            else -> "${it}p"
-        }
-    }
+    val quality = source.mediaStreams.orEmpty()
+        .firstOrNull { it.type == MediaStreamType.VIDEO }
+        ?.videoQualityLabel()
     val methodLabel = when (method) {
         JellyfinPlaybackMethod.DirectPlay -> "Direct Play"
         JellyfinPlaybackMethod.DirectStream -> "Direct Stream"

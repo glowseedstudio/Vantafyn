@@ -11,11 +11,14 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
-import android.graphics.drawable.AdaptiveIconDrawable
-import android.graphics.drawable.BitmapDrawable
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Shader
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
@@ -42,35 +45,18 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastNotificationTrackId: UUID? = null
     private var lastNotificationPlaying: Boolean? = null
+    private var lastWidgetTrackId: UUID? = null
+    private var lastWidgetPlaying: Boolean? = null
+    private var lastWidgetArtworkUrl: String? = null
+    private var lastWidgetDurationMs: Long = Long.MIN_VALUE
+    private var lastWidgetPositionBucket: Long = Long.MIN_VALUE
+    private var lastWidgetUpdateAtMs: Long = 0L
     private var isForegroundService = false
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
     private val artworkCache = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > MAX_ARTWORK_CACHE_SIZE
     }
-    private val appIconBitmap: Bitmap by lazy {
-        val icon = packageManager.getApplicationIcon(packageName)
-        when (icon) {
-            is BitmapDrawable -> icon.bitmap
-            is AdaptiveIconDrawable -> {
-                val size = (48 * resources.displayMetrics.density).toInt()
-                val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                icon.background.setBounds(0, 0, size, size)
-                icon.background.draw(canvas)
-                icon.foreground.setBounds(0, 0, size, size)
-                icon.foreground.draw(canvas)
-                bitmap
-            }
-            else -> {
-                val size = (48 * resources.displayMetrics.density).toInt()
-                val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-                val canvas = Canvas(bitmap)
-                icon.setBounds(0, 0, size, size)
-                icon.draw(canvas)
-                bitmap
-            }
-        }
-    }
+    private val appIconBitmap: Bitmap by lazy { createFallbackNotificationArtwork() }
 
     override fun onCreate() {
         super.onCreate()
@@ -121,12 +107,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                         Log.d(TAG, "State change → notify (track=${trackId?.toString()?.take(8)}, playing=${state.isPlaying})")
                         updateNotificationOnly(state, loadLargeIcon = true)
                     }
-                    persistWidgetState(state)
-                    sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).setPackage(packageName))
-                } else if (state.isPlaying) {
-                    persistWidgetState(state)
-                    sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).setPackage(packageName))
                 }
+                maybePersistWidgetState(state, force = trackId != lastWidgetTrackId || state.isPlaying != lastWidgetPlaying)
             }
         }
     }
@@ -199,6 +181,35 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         super.onDestroy()
     }
 
+    private fun maybePersistWidgetState(state: VantafynMusicPlaybackState, force: Boolean = false) {
+        val track = state.currentTrack
+        val now = System.currentTimeMillis()
+        val intervalMs = if (AppForegroundStateRepository.isForeground.value) {
+            WIDGET_FOREGROUND_REFRESH_MS
+        } else {
+            WIDGET_BACKGROUND_REFRESH_MS
+        }
+        val positionBucket = if (state.isPlaying) state.positionMs / intervalMs else state.positionMs / WIDGET_FOREGROUND_REFRESH_MS
+        val contentChanged = track?.id != lastWidgetTrackId ||
+            state.isPlaying != lastWidgetPlaying ||
+            track?.artworkUrl != lastWidgetArtworkUrl ||
+            state.durationMs != lastWidgetDurationMs
+        val shouldUpdateProgress = AppForegroundStateRepository.isForeground.value &&
+            state.isPlaying &&
+            positionBucket != lastWidgetPositionBucket &&
+            now - lastWidgetUpdateAtMs >= intervalMs
+        if (!force && !contentChanged && !shouldUpdateProgress) return
+
+        lastWidgetTrackId = track?.id
+        lastWidgetPlaying = state.isPlaying
+        lastWidgetArtworkUrl = track?.artworkUrl
+        lastWidgetDurationMs = state.durationMs
+        lastWidgetPositionBucket = positionBucket
+        lastWidgetUpdateAtMs = now
+        persistWidgetState(state)
+        sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).setPackage(packageName))
+    }
+
     private fun persistWidgetState(state: VantafynMusicPlaybackState) {
         val track = state.currentTrack
         getSharedPreferences(WIDGET_PREFS, MODE_PRIVATE).edit().apply {
@@ -210,7 +221,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             putBoolean(KEY_HAS_TRACK, track != null)
             putLong(KEY_POSITION_MS, state.positionMs)
             putLong(KEY_DURATION_MS, state.durationMs)
-            commit()
+            apply()
         }
     }
 
@@ -257,7 +268,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private fun startForegroundWithMediaNotification(
         session: MediaSession,
         state: VantafynMusicPlaybackState,
-        largeIcon: Bitmap? = cachedLargeIcon(state.currentTrack?.artworkUrl) ?: appIconBitmap,
+        largeIcon: Bitmap? = cachedLargeIcon(state.currentTrack?.artworkUrl),
         loadLargeIcon: Boolean = false,
     ) {
         val track = state.currentTrack
@@ -276,7 +287,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "Vantafyn Music")
             .setContentText(subtitle)
             .setSubText(track?.album?.takeIf { it.isNotBlank() })
-            .setLargeIcon(largeIcon)
+            .setLargeIcon(largeIcon ?: appIconBitmap)
             .setContentIntent(createLaunchPendingIntent())
             .setDeleteIntent(serviceIntent(ACTION_STOP, 4))
             .setOnlyAlertOnce(true)
@@ -412,6 +423,69 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         )
     }
 
+    private fun createFallbackNotificationArtwork(): Bitmap {
+        val size = NOTIFICATION_ARTWORK_MAX_SIZE
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        val bounds = RectF(0f, 0f, size.toFloat(), size.toFloat())
+        val corner = size * 0.22f
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        paint.shader = LinearGradient(
+            0f,
+            0f,
+            size.toFloat(),
+            size.toFloat(),
+            intArrayOf(
+                0xFF101827.toInt(),
+                0xFF17233A.toInt(),
+                0xFF1A1732.toInt(),
+                0xFF281544.toInt(),
+            ),
+            null,
+            Shader.TileMode.CLAMP,
+        )
+        canvas.drawRoundRect(bounds, corner, corner, paint)
+
+        paint.shader = LinearGradient(
+            0f,
+            0f,
+            size.toFloat(),
+            size.toFloat(),
+            intArrayOf(0xFF36D8FF.toInt(), 0xFF6C75FF.toInt(), 0xFFB45CFF.toInt()),
+            null,
+            Shader.TileMode.CLAMP,
+        )
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = size * 0.018f
+        val ringInset = paint.strokeWidth / 2f
+        canvas.drawRoundRect(
+            RectF(ringInset, ringInset, size - ringInset, size - ringInset),
+            corner,
+            corner,
+            paint,
+        )
+
+        val brandDrawable = loadBestBrandDrawable()
+        val iconInset = (size * 0.18f).toInt()
+        brandDrawable.setBounds(iconInset, iconInset, size - iconInset, size - iconInset)
+        brandDrawable.draw(canvas)
+        return bitmap
+    }
+
+    private fun loadBestBrandDrawable() =
+        listOf(
+            "vantafyn_logo" to "drawable",
+            "ic_launcher_foreground" to "drawable",
+            "ic_launcher" to "mipmap",
+        )
+            .firstNotNullOfOrNull { (name, type) ->
+                resources.getIdentifier(name, type, packageName)
+                    .takeIf { it != 0 }
+                    ?.let { ContextCompat.getDrawable(this, it) }
+            }
+            ?: packageManager.getApplicationIcon(packageName)
+
     private fun serviceIntent(action: String, requestCode: Int): PendingIntent =
         PendingIntent.getForegroundService(
             this,
@@ -454,6 +528,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         private const val MUSIC_SERVICE_TASK_ID = "music.playbackService"
         private const val MAX_ARTWORK_CACHE_SIZE = 8
         private const val NOTIFICATION_ARTWORK_MAX_SIZE = 512
+        private const val WIDGET_FOREGROUND_REFRESH_MS = 30_000L
+        private const val WIDGET_BACKGROUND_REFRESH_MS = 5 * 60_000L
         const val ACTION_TOGGLE_PLAYBACK = "dev.vantafyn.music.action.TOGGLE_PLAYBACK"
         const val ACTION_PREVIOUS = "dev.vantafyn.music.action.PREVIOUS"
         const val ACTION_NEXT = "dev.vantafyn.music.action.NEXT"

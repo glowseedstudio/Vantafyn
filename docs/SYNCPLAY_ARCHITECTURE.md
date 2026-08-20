@@ -59,19 +59,57 @@ Candidate discovery uses:
 
 `feature-player` remains the player surface. `feature-home` overlays the current mobile Watch Party pill while player-specific member sheets remain pending.
 
-## Current Limitation
+## Current Playback Integration
 
-This is not yet full synchronized multi-device playback. Jellyfin group commands are real, and Vantafyn now subscribes to Jellyfin websocket/session events for connection, active sessions, SyncPlay commands, and group updates. The websocket events do not by themselves prove exact clock sync across all players, so Vantafyn still does not show `Synced`.
+Vantafyn now treats Jellyfin SyncPlay as the playback authority for Watch Party sessions.
 
-Until that is implemented:
+- Creating, joining, leaving, queue start, pause, resume, and seek use native Jellyfin SyncPlay SDK calls.
+- Incoming Jellyfin SyncPlay websocket events are mapped into a single `VantafynSyncPlaybackCommand`.
+- `feature-home` forwards that command into the existing `feature-player` surface.
+- `feature-player` applies the command to the existing Media3 player or active Cast route.
+- Local player pause, resume, and seek actions publish native Jellyfin SyncPlay commands when a Watch Party is active.
 
-- Vantafyn can create or leave a real SyncPlay group.
-- Vantafyn can set the group queue when starting a matched item.
-- The swipe matcher uses local vote state only.
-- The UI does not claim remote participants are synchronized.
-- Vantafyn lobby readiness is local readiness, not Jellyfin playback readiness.
-- Invite sending is real for active Jellyfin sessions. Mobile now listens app-wide for Vantafyn invite messages while open/connected and shows a premium top-slide receiver card.
-- Accept joins the real Jellyfin SyncPlay group and opens the Watch Party lobby. Decline dismisses locally. Sender acknowledgement remains delivery-unknown until Jellyfin exposes a reliable response transport or Vantafyn adds a backend/plugin.
+This deliberately does not create another player, another MediaSession, another progress loop, or a Companion-plugin playback sync path.
+
+The mobile app can now:
+
+- create a real SyncPlay group
+- invite active Jellyfin sessions through native Jellyfin display messages
+- accept an invite and join the real SyncPlay group
+- start a matched or fixed title by setting the SyncPlay queue
+- apply incoming SyncPlay play queue, play, pause, and seek commands to the active player
+- send local pause, resume, and seek controls back to the active SyncPlay group
+- keep solo playback paths unchanged when no Watch Party is active
+
+The UI still avoids overclaiming exact per-device clock accuracy. Jellyfin owns that group timing, while Vantafyn presents the active party state and applies Jellyfin's commands to its existing player.
+
+## Companion Boundary
+
+The Vantafyn Companion plugin contains a Watch Party orchestration foundation: party records, invitations, participants, snapshots, and a realtime transport abstraction.
+
+The Android app does not currently depend on those plugin endpoints for playback sync. That is intentional:
+
+- Jellyfin SyncPlay remains the playback sync source of truth.
+- Companion should be used only for Vantafyn-specific orchestration such as richer invitations, metadata, user/device mapping, and future deep-link/push support.
+- Servers without the Companion plugin can still use the current active-session invite and native SyncPlay flow.
+
+## Remaining Work
+
+The remaining Watch Party work is product/orchestration hardening rather than a second playback stack:
+
+- persistent Companion-backed invitations and party metadata
+- richer accept/decline feedback to the host
+- host-owned group Up Next
+- deeper reconnect/member-state presentation
+- player member/status sheet
+- TV UI reuse
+
+## Compatibility Notes
+
+- The swipe matcher still uses Vantafyn app state for choosing a title together.
+- Vantafyn lobby readiness is separate from Jellyfin playback readiness.
+- Invite delivery uses Jellyfin active sessions and works only for reachable sessions.
+- Closed-app push delivery remains a future Companion/backend feature.
 
 ## TV Reuse Plan
 

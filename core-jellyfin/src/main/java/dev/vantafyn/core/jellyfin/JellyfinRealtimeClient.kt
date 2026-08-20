@@ -9,13 +9,19 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onStart
 import org.jellyfin.sdk.Jellyfin
+import org.jellyfin.sdk.api.client.extensions.sessionApi
 import org.jellyfin.sdk.model.api.GeneralCommandMessage
+import org.jellyfin.sdk.model.api.GeneralCommandType
+import org.jellyfin.sdk.model.api.GroupStateUpdateGroupUpdate
+import org.jellyfin.sdk.model.api.MediaType
 import org.jellyfin.sdk.model.api.OutboundWebSocketMessage
 import org.jellyfin.sdk.model.api.PlaystateMessage
+import org.jellyfin.sdk.model.api.PlayQueueUpdateGroupUpdate
 import org.jellyfin.sdk.model.api.SessionInfoDto
 import org.jellyfin.sdk.model.api.SessionsMessage
 import org.jellyfin.sdk.model.api.SyncPlayCommandMessage
 import org.jellyfin.sdk.model.api.SyncPlayGroupUpdateCommandMessage
+import org.jellyfin.sdk.model.api.request.PostCapabilitiesRequest
 
 class SdkJellyfinRealtimeClient(
     private val jellyfin: Jellyfin,
@@ -39,7 +45,20 @@ class SdkJellyfinRealtimeClient(
         }
         val messageEvents = socket.subscribeAll().map { message -> message.toVantafynEvent() }
         return merge(connectionEvents, messageEvents)
-            .onStart { emit(JellyfinWebSocketEvent.ConnectionChanged(SyncPlayConnectionState.Connecting)) }
+            .onStart {
+                runCatching<Unit> {
+                    api.sessionApi.postCapabilities(
+                        PostCapabilitiesRequest(
+                            id = null,
+                            playableMediaTypes = listOf(MediaType.VIDEO, MediaType.AUDIO),
+                            supportedCommands = listOf(GeneralCommandType.DISPLAY_MESSAGE),
+                            supportsMediaControl = true,
+                            supportsPersistentIdentifier = true,
+                        ),
+                    )
+                }
+                emit(JellyfinWebSocketEvent.ConnectionChanged(SyncPlayConnectionState.Connecting))
+            }
             .catch { throwable ->
                 val message = throwable.toRealtimeUserMessage()
                 emit(JellyfinWebSocketEvent.Error(message, recoverable = true))
@@ -60,9 +79,18 @@ private fun OutboundWebSocketMessage.toVantafynEvent(): JellyfinWebSocketEvent =
             if (payload == null) {
                 JellyfinWebSocketEvent.UnknownMessage(messageType.serialName)
             } else {
+                val playQueue = payload as? PlayQueueUpdateGroupUpdate
+                val stateUpdate = payload as? GroupStateUpdateGroupUpdate
+                val currentQueueItem = playQueue
+                    ?.data
+                    ?.playlist
+                    ?.getOrNull(playQueue.data.playingItemIndex)
                 JellyfinWebSocketEvent.SyncPlayGroupUpdated(
                     groupId = payload.groupId,
                     updateType = payload.type.serialName,
+                    itemId = currentQueueItem?.itemId,
+                    startPositionTicks = playQueue?.data?.startPositionTicks,
+                    isPlaying = playQueue?.data?.isPlaying ?: stateUpdate?.data?.state?.serialName?.equals("Playing", ignoreCase = true),
                 )
             }
         }

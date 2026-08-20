@@ -11,6 +11,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
 import dev.vantafyn.core.jellyfin.JellyfinMusicArtist
 import dev.vantafyn.core.jellyfin.JellyfinMusicHome
 import dev.vantafyn.core.jellyfin.JellyfinMusicPlaylist
+import dev.vantafyn.core.jellyfin.JellyfinMusicTrackPage
 import dev.vantafyn.core.jellyfin.JellyfinMusicRepository
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
@@ -51,6 +52,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var lastProgressTrackId: UUID? = null
     private var lastPausedState: Boolean? = null
     private var playRequestJob: Job? = null
+    private var musicPageJob: Job? = null
     private var pendingPlayTrackId: UUID? = null
     private var musicScreenActive = false
     private var popupLyricsActive = false
@@ -63,7 +65,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     init {
         viewModelScope.launch {
             playbackController.state.collect { playback ->
-                _state.update { it.copy(playback = playback) }
+                if (shouldPublishPlaybackToUi(playback)) {
+                    _state.update { it.copy(playback = playback) }
+                }
                 val track = playback.currentTrack
                 if (track != null && (_state.value.showLyricsScreen || popupLyricsActive) && track.id != _state.value.lyricsTrackId) {
                     loadLyrics(track.id)
@@ -145,13 +149,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = musicRepository.getAlbumTracks(activeSession, album.id)) {
                 is JellyfinResult.Success -> {
-                    _state.update {
-                        it.copy(
-                            screen = MusicScreenState.Album(album, result.value),
-                            errorMessage = if (result.value.isEmpty()) "No tracks found for this album." else null,
-                        )
-                    }
                     result.value.firstOrNull()?.let { playTrack(it, result.value) }
+                    openAlbum(album)
+                    if (result.value.isEmpty()) _state.update { it.copy(errorMessage = "No tracks found for this album.") }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(errorMessage = result.message) }
@@ -165,13 +165,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
                 is JellyfinResult.Success -> {
-                    _state.update {
-                        it.copy(
-                            screen = MusicScreenState.Playlist(playlist, result.value),
-                            errorMessage = if (result.value.isEmpty()) "This playlist is empty." else null,
-                        )
-                    }
                     result.value.firstOrNull()?.let { playTrack(it, result.value) }
+                    openPlaylist(playlist)
+                    if (result.value.isEmpty()) _state.update { it.copy(errorMessage = "This playlist is empty.") }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(errorMessage = result.message) }
@@ -181,29 +177,65 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openAlbum(album: JellyfinMusicAlbum) {
+        loadAlbumPage(album, startIndex = 0)
+    }
+
+    fun openPlaylist(playlist: JellyfinMusicPlaylist) {
+        loadPlaylistPage(playlist, startIndex = 0)
+    }
+
+    private fun loadAlbumPage(album: JellyfinMusicAlbum, startIndex: Int) {
         val activeSession = session ?: return
-        viewModelScope.launch {
-            _state.update { it.copy(errorMessage = null) }
-            when (val result = musicRepository.getAlbumTracks(activeSession, album.id)) {
+        musicPageJob?.cancel()
+        musicPageJob = viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    screen = MusicScreenState.Album(album, it.musicTrackPageFor(album.id, startIndex)),
+                    isMusicPageLoading = true,
+                    errorMessage = null,
+                )
+            }
+            when (val result = musicRepository.getAlbumTracksPage(activeSession, album.id, startIndex)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(screen = MusicScreenState.Album(album, result.value)) }
-                    checkPlaylistDownloadStatus(activeSession, album.id.toString(), result.value.size)
+                    _state.update {
+                        it.copy(
+                            screen = MusicScreenState.Album(album, result.value),
+                            isMusicPageLoading = false,
+                        )
+                    }
+                    checkPlaylistDownloadStatus(activeSession, album.id.toString(), result.value.totalItems)
                 }
-                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(isMusicPageLoading = false, errorMessage = result.message)
+                }
             }
         }
     }
 
-    fun openPlaylist(playlist: JellyfinMusicPlaylist) {
+    private fun loadPlaylistPage(playlist: JellyfinMusicPlaylist, startIndex: Int) {
         val activeSession = session ?: return
-        viewModelScope.launch {
-            _state.update { it.copy(errorMessage = null) }
-            when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
+        musicPageJob?.cancel()
+        musicPageJob = viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    screen = MusicScreenState.Playlist(playlist, it.musicTrackPageFor(playlist.id, startIndex)),
+                    isMusicPageLoading = true,
+                    errorMessage = null,
+                )
+            }
+            when (val result = musicRepository.getPlaylistItemsPage(activeSession, playlist.id, startIndex)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(screen = MusicScreenState.Playlist(playlist, result.value)) }
-                    checkPlaylistDownloadStatus(activeSession, playlist.id.toString(), result.value.size)
+                    _state.update {
+                        it.copy(
+                            screen = MusicScreenState.Playlist(playlist, result.value),
+                            isMusicPageLoading = false,
+                        )
+                    }
+                    checkPlaylistDownloadStatus(activeSession, playlist.id.toString(), result.value.totalItems)
                 }
-                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(isMusicPageLoading = false, errorMessage = result.message)
+                }
             }
         }
     }
@@ -230,8 +262,46 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun showSongs() {
-        _state.value.home?.songs?.let { songs ->
-            _state.update { it.copy(screen = MusicScreenState.Songs(songs)) }
+        loadSongsPage(startIndex = 0)
+    }
+
+    private fun loadSongsPage(startIndex: Int) {
+        val activeSession = session ?: return
+        musicPageJob?.cancel()
+        musicPageJob = viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    screen = MusicScreenState.Songs(it.musicTrackPageFor(null, startIndex)),
+                    isMusicPageLoading = true,
+                    errorMessage = null,
+                )
+            }
+            when (val result = musicRepository.getSongsPage(activeSession, startIndex)) {
+                is JellyfinResult.Success -> _state.update {
+                    it.copy(screen = MusicScreenState.Songs(result.value), isMusicPageLoading = false)
+                }
+                is JellyfinResult.Failure -> _state.update {
+                    it.copy(isMusicPageLoading = false, errorMessage = result.message)
+                }
+            }
+        }
+    }
+
+    fun previousMusicPage() {
+        when (val screen = _state.value.screen) {
+            is MusicScreenState.Album -> if (screen.page.hasPrevious) loadAlbumPage(screen.album, (screen.page.startIndex - screen.page.pageSize).coerceAtLeast(0))
+            is MusicScreenState.Playlist -> if (screen.page.hasPrevious) loadPlaylistPage(screen.playlist, (screen.page.startIndex - screen.page.pageSize).coerceAtLeast(0))
+            is MusicScreenState.Songs -> if (screen.page.hasPrevious) loadSongsPage((screen.page.startIndex - screen.page.pageSize).coerceAtLeast(0))
+            else -> Unit
+        }
+    }
+
+    fun nextMusicPage() {
+        when (val screen = _state.value.screen) {
+            is MusicScreenState.Album -> if (screen.page.hasNext) loadAlbumPage(screen.album, screen.page.startIndex + screen.page.pageSize)
+            is MusicScreenState.Playlist -> if (screen.page.hasNext) loadPlaylistPage(screen.playlist, screen.page.startIndex + screen.page.pageSize)
+            is MusicScreenState.Songs -> if (screen.page.hasNext) loadSongsPage(screen.page.startIndex + screen.page.pageSize)
+            else -> Unit
         }
     }
 
@@ -266,8 +336,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun setMusicScreenActive(active: Boolean) {
         musicScreenActive = active
         if (active) {
+            _state.update { it.copy(playback = playbackController.state.value) }
             playbackController.state.value.currentTrack?.id?.takeIf { shouldPrefetchLyrics() }?.let(::prefetchLyrics)
         }
+    }
+
+    private fun shouldPublishPlaybackToUi(playback: VantafynMusicPlaybackState): Boolean {
+        if (AppForegroundStateRepository.isForeground.value || musicScreenActive || popupLyricsActive) return true
+        val current = _state.value.playback
+        return current.currentTrack?.id != playback.currentTrack?.id ||
+            current.queueIndex != playback.queueIndex ||
+            current.queue.size != playback.queue.size ||
+            current.isPlaying != playback.isPlaying ||
+            current.durationMs != playback.durationMs ||
+            playback.errorMessage != null
     }
 
     fun openLyrics() {
@@ -374,7 +456,6 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun openCurrentAlbum() {
         val current = playbackController.state.value.currentTrack ?: return
         val albumId = current.albumId ?: return
-        val activeSession = session ?: return
         val album = _state.value.home?.albums?.firstOrNull { it.id == albumId }
             ?: JellyfinMusicAlbum(
                 id = albumId,
@@ -383,14 +464,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 year = null,
                 artworkUrl = current.artworkUrl,
             )
-        viewModelScope.launch {
-            when (val result = musicRepository.getAlbumTracks(activeSession, albumId)) {
-                is JellyfinResult.Success -> _state.update {
-                    it.copy(screen = MusicScreenState.Album(album, result.value), showNowPlaying = false)
-                }
-                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
-            }
-        }
+        _state.update { it.copy(showNowPlaying = false) }
+        openAlbum(album)
     }
 
     fun openCurrentArtist() {
@@ -711,6 +786,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
 data class MusicUiState(
     val isLoading: Boolean = false,
+    val isMusicPageLoading: Boolean = false,
     val isPlaylistSaving: Boolean = false,
     val isPlaylistDownloaded: Boolean = false,
     val errorMessage: String? = null,
@@ -743,11 +819,37 @@ private fun JellyfinSession.lyricsCacheKey(trackId: UUID): LyricsCacheKey =
 
 sealed interface MusicScreenState {
     data object Home : MusicScreenState
-    data class Album(val album: JellyfinMusicAlbum, val tracks: List<JellyfinMusicTrack>) : MusicScreenState
+    data class Album(val album: JellyfinMusicAlbum, val page: JellyfinMusicTrackPage) : MusicScreenState {
+        val tracks: List<JellyfinMusicTrack>
+            get() = page.tracks
+    }
     data class Artist(val artist: JellyfinMusicArtist, val albums: List<JellyfinMusicAlbum>) : MusicScreenState
-    data class Playlist(val playlist: JellyfinMusicPlaylist, val tracks: List<JellyfinMusicTrack>) : MusicScreenState
-    data class Songs(val tracks: List<JellyfinMusicTrack>) : MusicScreenState
+    data class Playlist(val playlist: JellyfinMusicPlaylist, val page: JellyfinMusicTrackPage) : MusicScreenState {
+        val tracks: List<JellyfinMusicTrack>
+            get() = page.tracks
+    }
+    data class Songs(val page: JellyfinMusicTrackPage) : MusicScreenState {
+        val tracks: List<JellyfinMusicTrack>
+            get() = page.tracks
+    }
 }
+
+private fun MusicUiState.musicTrackPageFor(parentId: UUID?, startIndex: Int): JellyfinMusicTrackPage {
+    val currentPage = when (val current = screen) {
+        is MusicScreenState.Album -> current.page.takeIf { current.album.id == parentId }
+        is MusicScreenState.Playlist -> current.page.takeIf { current.playlist.id == parentId }
+        is MusicScreenState.Songs -> current.page.takeIf { parentId == null }
+        else -> null
+    }
+    return JellyfinMusicTrackPage(
+        tracks = emptyList(),
+        startIndex = startIndex.coerceAtLeast(0),
+        pageSize = currentPage?.pageSize ?: MusicTrackPageSize,
+        totalItems = currentPage?.totalItems ?: 0,
+    )
+}
+
+private const val MusicTrackPageSize = 60
 
 fun List<JellyfinLyricLine>.activeIndex(positionMs: Long): Int =
     indexOfLast { line -> line.startMs?.let { it <= positionMs } == true }.coerceAtLeast(0)
@@ -810,5 +912,5 @@ private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L
 
 private const val MusicProgressReportIntervalMs = 10_000L
-private const val MusicBackgroundProgressReportIntervalMs = 30_000L
+private const val MusicBackgroundProgressReportIntervalMs = 60_000L
 private const val KEY_DOWNLOAD_WIFI_ONLY_DEFAULT = "download_wifi_only_default"

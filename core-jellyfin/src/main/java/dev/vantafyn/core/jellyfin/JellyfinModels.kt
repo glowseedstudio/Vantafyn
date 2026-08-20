@@ -191,6 +191,7 @@ data class JellyfinLibraryPage(
     val startIndex: Int,
     val pageSize: Int,
     val totalItems: Int,
+    val alphabetKey: String? = null,
 ) {
     val currentPage: Int
         get() = if (pageSize <= 0) 1 else (startIndex / pageSize) + 1
@@ -602,7 +603,13 @@ data class WatchPartyMemberRealtimeState(
 sealed interface JellyfinWebSocketEvent {
     data class ConnectionChanged(val state: SyncPlayConnectionState, val message: String? = null) : JellyfinWebSocketEvent
     data class SessionsUpdated(val members: List<WatchPartyMemberRealtimeState>) : JellyfinWebSocketEvent
-    data class SyncPlayGroupUpdated(val groupId: UUID?, val updateType: String) : JellyfinWebSocketEvent
+    data class SyncPlayGroupUpdated(
+        val groupId: UUID?,
+        val updateType: String,
+        val itemId: UUID? = null,
+        val startPositionTicks: Long? = null,
+        val isPlaying: Boolean? = null,
+    ) : JellyfinWebSocketEvent
     data class SyncPlayCommandReceived(
         val groupId: UUID?,
         val command: String,
@@ -695,6 +702,19 @@ data class JellyfinMusicHome(
     val playlists: List<JellyfinMusicPlaylist>,
     val songs: List<JellyfinMusicTrack>,
 )
+
+data class JellyfinMusicTrackPage(
+    val tracks: List<JellyfinMusicTrack>,
+    val startIndex: Int,
+    val pageSize: Int,
+    val totalItems: Int,
+) {
+    val hasPrevious: Boolean
+        get() = startIndex > 0
+
+    val hasNext: Boolean
+        get() = startIndex + tracks.size < totalItems
+}
 
 data class JellyfinLyricLine(
     val startMs: Long?,
@@ -866,6 +886,7 @@ data class JellyfinAdminSession(
     val isPaused: Boolean,
     val positionTicks: Long?,
     val runtimeTicks: Long?,
+    val streamQuality: String?,
     val videoCodec: String?,
     val audioCodec: String?,
     val container: String?,
@@ -873,6 +894,14 @@ data class JellyfinAdminSession(
     val transcodeReasons: List<String>,
     val lastPlaybackCheckIn: String?,
     val isTranscoding: Boolean,
+    val supportsDisplayMessage: Boolean,
+)
+
+data class JellyfinDisplayMessage(
+    val id: Long,
+    val header: String?,
+    val text: String,
+    val timeoutMs: Long,
 )
 
 data class JellyfinAdminUser(
@@ -1037,6 +1066,7 @@ interface JellyfinLibraryRepository {
         startIndex: Int,
         limit: Int = 60,
         filter: JellyfinLibraryItemFilter = JellyfinLibraryItemFilter.All,
+        alphabetKey: String? = null,
     ): JellyfinResult<JellyfinLibraryPage>
     suspend fun buildAvailabilityIndex(session: JellyfinSession): JellyfinResult<JellyfinAvailabilityIndex>
 }
@@ -1071,6 +1101,7 @@ interface JellyfinPlaybackRepository {
         audioStreamIndex: Int? = null,
         subtitleStreamIndex: Int? = null,
         isLiveTv: Boolean = false,
+        maxStreamingBitrate: Int? = null,
     ): JellyfinResult<JellyfinPlaybackInfo>
 
     suspend fun getCastPlaybackInfo(
@@ -1101,8 +1132,11 @@ interface JellyfinFavoritesRepository {
 interface JellyfinMusicRepository {
     suspend fun getMusicHome(session: JellyfinSession): JellyfinResult<JellyfinMusicHome>
     suspend fun getAlbumTracks(session: JellyfinSession, albumId: UUID): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getAlbumTracksPage(session: JellyfinSession, albumId: UUID, startIndex: Int, limit: Int = 60): JellyfinResult<JellyfinMusicTrackPage>
     suspend fun getArtistAlbums(session: JellyfinSession, artistId: UUID): JellyfinResult<List<JellyfinMusicAlbum>>
     suspend fun getPlaylistItems(session: JellyfinSession, playlistId: UUID): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getPlaylistItemsPage(session: JellyfinSession, playlistId: UUID, startIndex: Int, limit: Int = 60): JellyfinResult<JellyfinMusicTrackPage>
+    suspend fun getSongsPage(session: JellyfinSession, startIndex: Int, limit: Int = 60): JellyfinResult<JellyfinMusicTrackPage>
     suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int = 50): JellyfinResult<List<JellyfinMusicTrack>>
     suspend fun getLyrics(session: JellyfinSession, trackId: UUID): JellyfinResult<JellyfinLyrics?>
     suspend fun createPlaylist(session: JellyfinSession, name: String, itemIds: List<UUID>): JellyfinResult<UUID>
@@ -1129,6 +1163,13 @@ interface JellyfinAdminRepository {
     suspend fun scanLibrary(session: JellyfinSession): JellyfinResult<Unit>
     suspend fun setPluginEnabled(session: JellyfinSession, pluginId: UUID, version: String, enabled: Boolean): JellyfinResult<Unit>
     suspend fun setScheduledTaskRunning(session: JellyfinSession, taskId: String, running: Boolean): JellyfinResult<Unit>
+    suspend fun sendSessionMessage(
+        session: JellyfinSession,
+        targetSessionId: String,
+        header: String?,
+        text: String,
+        timeoutMs: Long,
+    ): JellyfinResult<Unit>
 }
 
 interface JellyfinMediaSegmentRepository {

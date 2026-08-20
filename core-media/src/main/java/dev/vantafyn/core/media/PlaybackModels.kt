@@ -82,6 +82,14 @@ data class VantafynPlaybackItem(
     val continuousPlaybackStartedAtMs: Long = System.currentTimeMillis(),
 )
 
+data class VantafynSyncPlaybackCommand(
+    val key: Long,
+    val command: String,
+    val itemId: String?,
+    val positionMs: Long?,
+    val isPlaying: Boolean?,
+)
+
 data class PlaybackRequest(
     val itemId: String,
     val title: String,

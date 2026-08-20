@@ -48,6 +48,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -140,6 +141,7 @@ import androidx.compose.material.icons.rounded.QueuePlayNext
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SwitchAccount
 import androidx.compose.material.icons.rounded.SkipNext
@@ -177,6 +179,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -256,6 +259,7 @@ import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinHeroMediaItem
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.jellyfin.SyncPlayConnectionState
+import dev.vantafyn.core.jellyfin.JellyfinDisplayMessage
 import dev.vantafyn.core.jellyfin.WatchPartyCandidate
 import dev.vantafyn.core.jellyfin.WatchPartyInvite
 import dev.vantafyn.core.jellyfin.WatchPartyMatchRule
@@ -319,6 +323,7 @@ import dev.vantafyn.feature.home.auth.MobileDestination
 import dev.vantafyn.feature.home.auth.ThemeMusicVolume
 import dev.vantafyn.feature.home.auth.BottomRailAccent
 import dev.vantafyn.feature.home.auth.HomeSectionPreference
+import dev.vantafyn.feature.home.auth.MAX_STREAMING_BITRATE_MBPS_OPTIONS
 import dev.vantafyn.feature.home.auth.VantafynAppBackground
 import dev.vantafyn.feature.home.auth.VantafynArtworkType
 import dev.vantafyn.feature.home.auth.VantafynCardShape
@@ -534,6 +539,7 @@ fun VantafynAppContent(
                         onSetLibrariesViewMode = viewModel::setLibrariesViewMode,
                         onRetryLibrary = viewModel::retryLibraryItems,
                         onSetLibraryFilter = viewModel::setLibraryItemsFilter,
+                        onSetLibraryAlphabet = viewModel::setLibraryAlphabetKey,
                         onSetViewMode = viewModel::setLibraryViewMode,
                         onPreviousLibraryPage = viewModel::previousLibraryItemsPage,
                         onNextLibraryPage = viewModel::nextLibraryItemsPage,
@@ -586,9 +592,12 @@ fun VantafynAppContent(
                 onPlayNextEpisode = viewModel::playNextEpisode,
                 onPlayPreviousEpisode = viewModel::playPreviousEpisode,
             onPlayerError = viewModel::handlePlayerError,
-            onPrepareCastPlayback = viewModel::prepareCastPlayback,
-            onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
+                onPrepareCastPlayback = viewModel::prepareCastPlayback,
+                onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
                 onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
+                onSyncPlayPause = viewModel::sendWatchPartyPause,
+                onSyncPlayResume = viewModel::sendWatchPartyResume,
+                onSyncPlaySeek = viewModel::sendWatchPartySeek,
                 onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
                 onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
                 onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
@@ -597,6 +606,7 @@ fun VantafynAppContent(
                 onTogglePassoutProtection = viewModel::togglePassoutProtection,
                 onSetPassoutProtectionLimitMinutes = viewModel::setPassoutProtectionLimitMinutes,
                 onSelectVideoPlayerPreference = viewModel::selectVideoPlayerPreference,
+                onSetMaxStreamingBitrateMbps = viewModel::setMaxStreamingBitrateMbps,
                 onSetMediaSegmentBehavior = viewModel::setMediaSegmentBehavior,
                 onExternalVideoPlayerLaunched = viewModel::externalVideoPlayerLaunched,
                 onExternalVideoPlayerLaunchFailed = viewModel::externalVideoPlayerLaunchFailed,
@@ -634,6 +644,9 @@ fun VantafynAppContent(
                 onToggleWatchPartyInviteAnimationEnabled = viewModel::toggleWatchPartyInviteAnimationEnabled,
                 onSetWatchPartyInviteExpirySeconds = viewModel::setWatchPartyInviteExpirySeconds,
                 onSetAdminSpeedLimit = viewModel::setAdminSpeedLimitMbps,
+                onSendAdminSessionMessage = viewModel::sendAdminSessionMessage,
+                onSendAdminBroadcastMessage = viewModel::sendAdminBroadcastMessage,
+                onClearAdminSessionMessageError = viewModel::clearAdminSessionMessageError,
                 onNavigateBack = viewModel::navigateMobileBack,
                 notificationPermissionState = notificationPermissionState,
                 onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -643,6 +656,12 @@ fun VantafynAppContent(
         }
         }
         if (!tv) {
+            DisplayMessageOverlay(
+                message = state.displayMessage,
+                compact = state.mobileDestination == MobileDestination.Player,
+                onDismiss = viewModel::dismissDisplayMessage,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
             WatchPartyInviteOverlay(
                 invite = state.activeIncomingWatchPartyInvite,
                 message = state.incomingWatchPartyMessage,
@@ -651,6 +670,90 @@ fun VantafynAppContent(
                 onClearMessage = viewModel::clearIncomingWatchPartyMessage,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
+        }
+    }
+}
+
+@Composable
+private fun DisplayMessageOverlay(
+    message: JellyfinDisplayMessage?,
+    compact: Boolean,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    AnimatedVisibility(
+        visible = message != null,
+        modifier = modifier
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp, vertical = if (compact) 8.dp else 12.dp),
+        enter = slideInVertically(
+            initialOffsetY = { -it - 24 },
+            animationSpec = tween(420, easing = FastOutSlowInEasing),
+        ) + fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+        exit = slideOutVertically(
+            targetOffsetY = { -it - 24 },
+            animationSpec = tween(280, easing = FastOutSlowInEasing),
+        ) + fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing)),
+    ) {
+        message?.let { current ->
+            VantafynGlassSurface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 520.dp)
+                    .vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.2.dp, durationMillis = 5200),
+                variant = VantafynGlassVariant.Modal,
+                cornerRadius = 24.dp,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = if (compact) 12.dp else 14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (compact) 36.dp else 42.dp)
+                            .clip(RoundedCornerShape(15.dp))
+                            .background(VantafynGradients.accentHorizontal()),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Send,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(if (compact) 18.dp else 21.dp),
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            current.header ?: "Jellyfin message",
+                            color = VantafynColors.Ink,
+                            style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            current.text,
+                            color = VantafynColors.Muted.copy(alpha = 0.92f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = if (compact) 2 else 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Dismiss message",
+                            tint = VantafynColors.Ink.copy(alpha = 0.86f),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1438,6 +1541,7 @@ private fun MobileProfilePickerScreen(
     backgroundResId: Int,
     modifier: Modifier = Modifier,
 ) {
+    val revealKey = "mobile-profile-picker-${state.savedProfiles.size}-${state.publicUsers.size}-${showBack}"
     VantafynOnboardingBackground(tv = false, modifier = modifier, backgroundResId = backgroundResId) {
         Box(
             modifier = Modifier
@@ -1461,62 +1565,77 @@ private fun MobileProfilePickerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Spacer(Modifier.height(52.dp))
-                Text(
-                    "Who's watching?",
-                    color = VantafynColors.Ink,
-                    style = MaterialTheme.typography.headlineMedium,
-                    textAlign = TextAlign.Center,
-                )
+                HomeContentReveal(index = 0, animate = true, revealKey = revealKey) {
+                    Text(
+                        "Who's watching?",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.headlineMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.height(VantafynSpacing.xl))
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
+                HomeContentReveal(
+                    index = 1,
+                    animate = true,
+                    revealKey = revealKey,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                    verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                    contentPadding = PaddingValues(bottom = VantafynSpacing.xl),
                 ) {
-                    gridItems(state.savedProfiles, key = { it.id }) { profile ->
-                        SavedProfileTile(
-                            profile = profile,
-                            showServer = state.savedProfiles.map { it.serverRef }.distinct().size > 1,
-                            warning = if (profile.id in state.failedProfileIds) "Server unreachable" else null,
-                            manageMode = state.manageProfiles,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(198.dp),
-                            onSelect = { onSelect(profile) },
-                            onRemove = { onRequestRemove(profile) },
-                        )
-                    }
-                    gridItems(state.publicUsers, key = { it.id }) { user ->
-                        PublicUserTile(
-                            user = user,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(198.dp),
-                            onSelect = { onSelectPublicUser(user) },
-                        )
-                    }
-                    item {
-                        AddProfileTile(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(198.dp),
-                            onClick = onAddProfile,
-                        )
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(2),
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                        contentPadding = PaddingValues(bottom = VantafynSpacing.xl),
+                    ) {
+                        gridItems(state.savedProfiles, key = { it.id }) { profile ->
+                            SavedProfileTile(
+                                profile = profile,
+                                showServer = state.savedProfiles.map { it.serverRef }.distinct().size > 1,
+                                warning = if (profile.id in state.failedProfileIds) "Server unreachable" else null,
+                                manageMode = state.manageProfiles,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(198.dp),
+                                onSelect = { onSelect(profile) },
+                                onRemove = { onRequestRemove(profile) },
+                            )
+                        }
+                        gridItems(state.publicUsers, key = { it.id }) { user ->
+                            PublicUserTile(
+                                user = user,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(198.dp),
+                                onSelect = { onSelectPublicUser(user) },
+                            )
+                        }
+                        item {
+                            AddProfileTile(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(198.dp),
+                                onClick = onAddProfile,
+                            )
+                        }
                     }
                 }
             }
-            ProfilePickerFeedback(
-                state = state,
-                onCancelRemove = onCancelRemove,
-                onConfirmRemove = onConfirmRemove,
+            HomeContentReveal(
+                index = 2,
+                animate = true,
+                revealKey = revealKey,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 8.dp),
-            )
+            ) {
+                ProfilePickerFeedback(
+                    state = state,
+                    onCancelRemove = onCancelRemove,
+                    onConfirmRemove = onConfirmRemove,
+                )
+            }
         }
     }
 }
@@ -1536,6 +1655,7 @@ private fun TvProfilePickerScreen(
     backgroundResId: Int,
     modifier: Modifier = Modifier,
 ) {
+    val revealKey = "tv-profile-picker-${state.savedProfiles.size}-${state.publicUsers.size}-${showBack}"
     VantafynOnboardingBackground(tv = true, modifier = modifier, backgroundResId = backgroundResId) {
         Box(
             modifier = Modifier
@@ -1561,58 +1681,68 @@ private fun TvProfilePickerScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
-                Text(
-                    "Who's watching?",
-                    color = VantafynColors.Ink,
-                    style = MaterialTheme.typography.displayLarge,
-                    textAlign = TextAlign.Center,
-                )
+                HomeContentReveal(index = 0, animate = true, revealKey = revealKey) {
+                    Text(
+                        "Who's watching?",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.displayLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                }
                 Spacer(Modifier.height(46.dp))
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
-                    contentPadding = PaddingValues(horizontal = VantafynSpacing.xl),
-                ) {
-                    items(state.savedProfiles, key = { it.id }) { profile ->
-                        SavedProfileTile(
-                            profile = profile,
-                            showServer = state.savedProfiles.map { it.serverRef }.distinct().size > 1,
-                            warning = if (profile.id in state.failedProfileIds) "Server unreachable" else null,
-                            manageMode = state.manageProfiles,
-                            modifier = Modifier
-                                .width(150.dp)
-                                .height(202.dp),
-                            onSelect = { onSelect(profile) },
-                            onRemove = { onRequestRemove(profile) },
-                        )
-                    }
-                    items(state.publicUsers, key = { it.id }) { user ->
-                        PublicUserTile(
-                            user = user,
-                            modifier = Modifier
-                                .width(150.dp)
-                                .height(202.dp),
-                            onSelect = { onSelectPublicUser(user) },
-                        )
-                    }
-                    item {
-                        AddProfileTile(
-                            modifier = Modifier
-                                .width(150.dp)
-                                .height(202.dp),
-                            onClick = onAddProfile,
-                        )
+                HomeContentReveal(index = 1, animate = true, revealKey = revealKey, modifier = Modifier.fillMaxWidth()) {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+                        contentPadding = PaddingValues(horizontal = VantafynSpacing.xl),
+                    ) {
+                        items(state.savedProfiles, key = { it.id }) { profile ->
+                            SavedProfileTile(
+                                profile = profile,
+                                showServer = state.savedProfiles.map { it.serverRef }.distinct().size > 1,
+                                warning = if (profile.id in state.failedProfileIds) "Server unreachable" else null,
+                                manageMode = state.manageProfiles,
+                                modifier = Modifier
+                                    .width(150.dp)
+                                    .height(202.dp),
+                                onSelect = { onSelect(profile) },
+                                onRemove = { onRequestRemove(profile) },
+                            )
+                        }
+                        items(state.publicUsers, key = { it.id }) { user ->
+                            PublicUserTile(
+                                user = user,
+                                modifier = Modifier
+                                    .width(150.dp)
+                                    .height(202.dp),
+                                onSelect = { onSelectPublicUser(user) },
+                            )
+                        }
+                        item {
+                            AddProfileTile(
+                                modifier = Modifier
+                                    .width(150.dp)
+                                    .height(202.dp),
+                                onClick = onAddProfile,
+                            )
+                        }
                     }
                 }
             }
-            ProfilePickerFeedback(
-                state = state,
-                onCancelRemove = onCancelRemove,
-                onConfirmRemove = onConfirmRemove,
+            HomeContentReveal(
+                index = 2,
+                animate = true,
+                revealKey = revealKey,
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 10.dp),
-            )
+            ) {
+                ProfilePickerFeedback(
+                    state = state,
+                    onCancelRemove = onCancelRemove,
+                    onConfirmRemove = onConfirmRemove,
+                )
+            }
         }
     }
 }
@@ -1659,34 +1789,25 @@ private fun ProfilePickerFeedback(
                     message = "${profile.displayName} will be removed from this device. Jellyfin stays unchanged.",
                     icon = Icons.Rounded.Delete,
                 ) {
-                    val actionButtonHeight = 52.dp
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        VantafynGlassChip(
-                            selected = false,
+                        ProfileRemovalActionButton(
+                            text = "Cancel",
                             onClick = onCancelRemove,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(actionButtonHeight),
-                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
-                        ) {
-                            Text(
-                                "Cancel",
-                                color = VantafynColors.Ink,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                        }
-                        VantafynButton(
+                                .height(50.dp),
+                            destructive = false,
+                        )
+                        ProfileRemovalActionButton(
                             text = "Remove",
                             onClick = onConfirmRemove,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(actionButtonHeight),
+                                .height(50.dp),
+                            destructive = true,
                         )
                     }
                 }
@@ -1697,6 +1818,64 @@ private fun ProfilePickerFeedback(
                 icon = Icons.Rounded.Info,
             )
         }
+    }
+}
+
+@Composable
+private fun ProfileRemovalActionButton(
+    text: String,
+    onClick: () -> Unit,
+    destructive: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(999.dp)
+    val background = if (destructive) {
+        VantafynGradients.accentHorizontal()
+    } else {
+        Brush.horizontalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.08f),
+                VantafynColors.SurfaceHigh.copy(alpha = 0.74f),
+                Color.White.copy(alpha = 0.05f),
+            ),
+        )
+    }
+    val border = if (destructive) {
+        Brush.horizontalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.34f),
+                Color.White.copy(alpha = 0.12f),
+            ),
+        )
+    } else {
+        Brush.horizontalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.28f),
+                VantafynColors.Muted.copy(alpha = 0.14f),
+            ),
+        )
+    }
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(background)
+            .border(1.dp, border, shape)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = Color(0xFFF8FAFF),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+        )
     }
 }
 
@@ -2415,6 +2594,7 @@ private fun HomeScreen(
     onSetLibrariesViewMode: (LibrariesViewMode) -> Unit,
     onRetryLibrary: () -> Unit,
     onSetLibraryFilter: (JellyfinLibraryItemFilter) -> Unit,
+    onSetLibraryAlphabet: (String?) -> Unit,
     onSetViewMode: (LibraryViewMode) -> Unit,
     onPreviousLibraryPage: () -> Unit,
     onNextLibraryPage: () -> Unit,
@@ -2470,6 +2650,9 @@ private fun HomeScreen(
     onPrepareCastPlayback: (Long) -> Unit,
     onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
     onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
+    onSyncPlayPause: (Long) -> Unit,
+    onSyncPlayResume: (Long) -> Unit,
+    onSyncPlaySeek: (Long) -> Unit,
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
@@ -2478,6 +2661,7 @@ private fun HomeScreen(
     onTogglePassoutProtection: () -> Unit,
     onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
+    onSetMaxStreamingBitrateMbps: (Int?) -> Unit,
     onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
     onExternalVideoPlayerLaunched: () -> Unit,
     onExternalVideoPlayerLaunchFailed: () -> Unit,
@@ -2515,6 +2699,9 @@ private fun HomeScreen(
     onToggleWatchPartyInviteAnimationEnabled: () -> Unit,
     onSetWatchPartyInviteExpirySeconds: (Int) -> Unit,
     onSetAdminSpeedLimit: (Int?) -> Unit,
+    onSendAdminSessionMessage: (String, String?, String, Long) -> Unit,
+    onSendAdminBroadcastMessage: (String?, String, Long) -> Unit,
+    onClearAdminSessionMessageError: () -> Unit,
     onNavigateBack: () -> Unit,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
@@ -2539,6 +2726,7 @@ private fun HomeScreen(
             onSetLibrariesViewMode = onSetLibrariesViewMode,
             onRetryLibrary = onRetryLibrary,
             onSetLibraryFilter = onSetLibraryFilter,
+            onSetLibraryAlphabet = onSetLibraryAlphabet,
             onSetViewMode = onSetViewMode,
             onPreviousLibraryPage = onPreviousLibraryPage,
             onNextLibraryPage = onNextLibraryPage,
@@ -2594,6 +2782,9 @@ private fun HomeScreen(
             onPrepareCastPlayback = onPrepareCastPlayback,
             onSelectPlaybackAudioTrack = onSelectPlaybackAudioTrack,
             onSelectPlaybackSubtitleTrack = onSelectPlaybackSubtitleTrack,
+            onSyncPlayPause = onSyncPlayPause,
+            onSyncPlayResume = onSyncPlayResume,
+            onSyncPlaySeek = onSyncPlaySeek,
             onStartLiveTvPlayback = onStartLiveTvPlayback,
             onEditPlaybackPreferences = onEditPlaybackPreferences,
             onSavePlaybackPreferences = onSavePlaybackPreferences,
@@ -2602,6 +2793,7 @@ private fun HomeScreen(
             onTogglePassoutProtection = onTogglePassoutProtection,
             onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
             onSelectVideoPlayerPreference = onSelectVideoPlayerPreference,
+            onSetMaxStreamingBitrateMbps = onSetMaxStreamingBitrateMbps,
             onSetMediaSegmentBehavior = onSetMediaSegmentBehavior,
             onExternalVideoPlayerLaunched = onExternalVideoPlayerLaunched,
             onExternalVideoPlayerLaunchFailed = onExternalVideoPlayerLaunchFailed,
@@ -2639,6 +2831,9 @@ private fun HomeScreen(
             onToggleWatchPartyInviteAnimationEnabled = onToggleWatchPartyInviteAnimationEnabled,
             onSetWatchPartyInviteExpirySeconds = onSetWatchPartyInviteExpirySeconds,
             onSetAdminSpeedLimit = onSetAdminSpeedLimit,
+            onSendAdminSessionMessage = onSendAdminSessionMessage,
+            onSendAdminBroadcastMessage = onSendAdminBroadcastMessage,
+            onClearAdminSessionMessageError = onClearAdminSessionMessageError,
             onNavigateBack = onNavigateBack,
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -2705,6 +2900,7 @@ private fun MobileShellScreen(
     onSetLibrariesViewMode: (LibrariesViewMode) -> Unit,
     onRetryLibrary: () -> Unit,
     onSetLibraryFilter: (JellyfinLibraryItemFilter) -> Unit,
+    onSetLibraryAlphabet: (String?) -> Unit,
     onSetViewMode: (LibraryViewMode) -> Unit,
     onPreviousLibraryPage: () -> Unit,
     onNextLibraryPage: () -> Unit,
@@ -2760,6 +2956,9 @@ private fun MobileShellScreen(
     onPrepareCastPlayback: (Long) -> Unit,
     onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
     onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
+    onSyncPlayPause: (Long) -> Unit,
+    onSyncPlayResume: (Long) -> Unit,
+    onSyncPlaySeek: (Long) -> Unit,
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
     onSavePlaybackPreferences: () -> Unit,
@@ -2768,6 +2967,7 @@ private fun MobileShellScreen(
     onTogglePassoutProtection: () -> Unit,
     onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
+    onSetMaxStreamingBitrateMbps: (Int?) -> Unit,
     onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
     onExternalVideoPlayerLaunched: () -> Unit,
     onExternalVideoPlayerLaunchFailed: () -> Unit,
@@ -2805,6 +3005,9 @@ private fun MobileShellScreen(
     onToggleWatchPartyInviteAnimationEnabled: () -> Unit,
     onSetWatchPartyInviteExpirySeconds: (Int) -> Unit,
     onSetAdminSpeedLimit: (Int?) -> Unit,
+    onSendAdminSessionMessage: (String, String?, String, Long) -> Unit,
+    onSendAdminBroadcastMessage: (String?, String, Long) -> Unit,
+    onClearAdminSessionMessageError: () -> Unit,
     onNavigateBack: () -> Unit,
     notificationPermissionState: VantafynPermissionUiState,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
@@ -2903,6 +3106,10 @@ private fun MobileShellScreen(
                             onPrepareCastPlayback = onPrepareCastPlayback,
                             onSelectAudioTrack = onSelectPlaybackAudioTrack,
                             onSelectSubtitleTrack = onSelectPlaybackSubtitleTrack,
+                            onSyncPlayPause = onSyncPlayPause,
+                            onSyncPlayResume = onSyncPlayResume,
+                            onSyncPlaySeek = onSyncPlaySeek,
+                            syncPlaybackCommand = state.watchPartyPlaybackCommand,
                             suppressUpNext = state.activeWatchParty != null,
                         )
                     }
@@ -2968,6 +3175,9 @@ private fun MobileShellScreen(
                             onRunTask = onRunAdminTask,
                             onStopTask = onStopAdminTask,
                             onSetSpeedLimit = onSetAdminSpeedLimit,
+                            onSendSessionMessage = onSendAdminSessionMessage,
+                            onSendBroadcastMessage = onSendAdminBroadcastMessage,
+                            onClearSessionMessageError = onClearAdminSessionMessageError,
                         )
                         MobileDestination.AdminUserSettings -> AdminUserSettingsScreen(
                             state = state,
@@ -3019,6 +3229,7 @@ private fun MobileShellScreen(
                             onTogglePassoutProtection = onTogglePassoutProtection,
                             onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
                             onSelectVideoPlayerPreference = onSelectVideoPlayerPreference,
+                            onSetMaxStreamingBitrateMbps = onSetMaxStreamingBitrateMbps,
                             onSetMediaSegmentBehavior = onSetMediaSegmentBehavior,
                         )
                         MobileDestination.HomeLayout -> HomeLayoutScreen(
@@ -3039,6 +3250,7 @@ private fun MobileShellScreen(
                             onBack = onNavigateBack,
                             onRetry = onRetryLibrary,
                             onSetFilter = onSetLibraryFilter,
+                            onSetAlphabet = onSetLibraryAlphabet,
                             onSetViewMode = onSetViewMode,
                             onPreviousPage = onPreviousLibraryPage,
                             onNextPage = onNextLibraryPage,
@@ -4120,6 +4332,7 @@ private fun HomeContentReveal(
     index: Int,
     animate: Boolean,
     revealKey: Any? = index,
+    modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
     var progress by remember(revealKey, index, animate) { mutableFloatStateOf(if (animate) 0f else 1f) }
@@ -4135,10 +4348,11 @@ private fun HomeContentReveal(
         }
     }
     Box(
-        modifier = Modifier.graphicsLayer {
-            alpha = progress
-            translationY = (1f - progress) * size.height / 8f
-        },
+        modifier = modifier
+            .graphicsLayer {
+                alpha = progress
+                translationY = (1f - progress) * size.height / 8f
+            },
     ) {
         content()
     }
@@ -4957,6 +5171,7 @@ private fun LibraryDetailScreen(
     onBack: () -> Unit,
     onRetry: () -> Unit,
     onSetFilter: (JellyfinLibraryItemFilter) -> Unit,
+    onSetAlphabet: (String?) -> Unit,
     onSetViewMode: (LibraryViewMode) -> Unit,
     onPreviousPage: () -> Unit,
     onNextPage: () -> Unit,
@@ -4967,6 +5182,7 @@ private fun LibraryDetailScreen(
 ) {
     val library = state.selectedLibrary
     val liveTv = library?.collectionType.isLiveTvCollection()
+    val showAlphabetRail = !liveTv && state.libraryItemsFilter.supportsLibraryAlphabetRail()
     val visibleItems = if (state.isLibraryItemsLoading) emptyList() else state.libraryItems
     val screenRevealKey = library?.id?.toString().orEmpty()
     var screenRevealActive by remember(screenRevealKey) { mutableStateOf(true) }
@@ -4975,7 +5191,7 @@ private fun LibraryDetailScreen(
         delay(1_100L)
         screenRevealActive = false
     }
-    val contentRevealKey = "${library?.id}-${state.libraryItemsPage?.startIndex ?: -1}-${state.libraryItemsFilter.name}-${state.libraryItemsPage?.totalItems ?: -1}"
+    val contentRevealKey = "${library?.id}-${state.libraryItemsPage?.startIndex ?: -1}-${state.libraryItemsFilter.name}-${state.libraryItemsAlphabetKey.orEmpty()}-${state.libraryItemsPage?.totalItems ?: -1}"
     var contentRevealActive by remember(contentRevealKey, state.isLibraryItemsLoading) { mutableStateOf(!state.isLibraryItemsLoading) }
     LaunchedEffect(contentRevealKey, state.isLibraryItemsLoading) {
         if (!state.isLibraryItemsLoading) {
@@ -4992,7 +5208,7 @@ private fun LibraryDetailScreen(
             .imePadding()
             .padding(horizontal = 8.dp),
         contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
-        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         item {
             HomeContentReveal(index = 0, animate = screenRevealActive, revealKey = screenRevealKey) {
@@ -5015,9 +5231,26 @@ private fun LibraryDetailScreen(
                 }
             }
         }
+        item {
+            AnimatedVisibility(
+                visible = showAlphabetRail,
+                enter = fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) +
+                    expandVertically(animationSpec = tween(260, easing = FastOutSlowInEasing)),
+                exit = fadeOut(animationSpec = tween(160, easing = FastOutSlowInEasing)) +
+                    shrinkVertically(animationSpec = tween(220, easing = FastOutSlowInEasing)),
+            ) {
+                HomeContentReveal(index = 2, animate = screenRevealActive, revealKey = screenRevealKey) {
+                    LibraryAlphabetRail(
+                        selected = state.libraryItemsAlphabetKey,
+                        enabled = !state.isLibraryItemsLoading,
+                        onSelected = onSetAlphabet,
+                    )
+                }
+            }
+        }
         state.libraryItemsPage?.let { page ->
             item {
-                HomeContentReveal(index = 2, animate = screenRevealActive, revealKey = screenRevealKey) {
+                HomeContentReveal(index = 3, animate = screenRevealActive, revealKey = screenRevealKey) {
                     LibraryPageControls(
                         page = page,
                         loading = state.isLibraryItemsLoading,
@@ -5027,9 +5260,9 @@ private fun LibraryDetailScreen(
                 }
             }
         }
-        if (state.isLibraryItemsLoading) item { HomeContentReveal(index = 3, animate = contentRevealActive, revealKey = contentRevealKey) { HomeLoadingShelf() } }
+        if (state.isLibraryItemsLoading) item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { HomeLoadingShelf() } }
         state.libraryItemsError?.let { message ->
-            item { HomeContentReveal(index = 3, animate = contentRevealActive, revealKey = contentRevealKey) { VantafynErrorCard(message) { VantafynButton("Retry", onClick = onRetry) } } }
+            item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { VantafynErrorCard(message) { VantafynButton("Retry", onClick = onRetry) } } }
         }
         if (liveTv) {
             item {
@@ -5169,6 +5402,138 @@ private fun LibraryFilterChips(selected: JellyfinLibraryItemFilter, isMusic: Boo
 }
 
 @Composable
+private fun LibraryAlphabetRail(
+    selected: String?,
+    enabled: Boolean,
+    onSelected: (String?) -> Unit,
+) {
+    val letters = remember { listOf("#") + ('A'..'Z').map { it.toString() } }
+    val selectedIndex = selected?.let { letters.indexOf(it).takeIf { index -> index >= 0 } } ?: -1
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(selectedIndex) {
+        if (selectedIndex >= 0) {
+            listState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .drawWithContent {
+                drawContent()
+                val edge = 28.dp.toPx()
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to VantafynColors.Graphite,
+                        1f to Color.Transparent,
+                        startX = 0f,
+                        endX = edge,
+                    ),
+                    size = Size(edge, size.height),
+                )
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to Color.Transparent,
+                        1f to VantafynColors.Graphite,
+                        startX = size.width - edge,
+                        endX = size.width,
+                    ),
+                    topLeft = Offset(size.width - edge, 0f),
+                    size = Size(edge, size.height),
+                )
+            },
+    ) {
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items(letters, key = { it }) { letter ->
+                LibraryAlphabetLetter(
+                    label = letter,
+                    selected = selected == letter,
+                    enabled = enabled,
+                    onClick = {
+                        scope.launch {
+                            val index = letters.indexOf(letter).takeIf { it >= 0 } ?: 0
+                            listState.animateScrollToItem((index - 3).coerceAtLeast(0))
+                        }
+                        onSelected(if (selected == letter) null else letter)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LibraryAlphabetLetter(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.96f else 1f,
+        animationSpec = spring(stiffness = 520f, dampingRatio = 0.82f),
+        label = "libraryAlphabetPress",
+    )
+    Box(
+        modifier = Modifier
+            .height(32.dp)
+            .widthIn(min = 32.dp)
+            .scale(scale)
+            .clip(RoundedCornerShape(999.dp))
+            .then(
+                if (selected) {
+                    Modifier
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.17f),
+                                    VantafynColors.Surface.copy(alpha = 0.72f),
+                                    VantafynColors.Graphite.copy(alpha = 0.58f),
+                                ),
+                            ),
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = VantafynGradients.accentHorizontal(),
+                            shape = RoundedCornerShape(999.dp),
+                        )
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = when {
+                !enabled -> VantafynColors.Muted.copy(alpha = 0.38f)
+                selected -> VantafynColors.Ink
+                else -> VantafynColors.Muted.copy(alpha = 0.86f)
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+        )
+    }
+}
+
+@Composable
 private fun LibraryPageControls(
     page: JellyfinLibraryPage,
     loading: Boolean,
@@ -5271,6 +5636,9 @@ private val JellyfinLibraryItemFilter.label: String
         JellyfinLibraryItemFilter.Favorites -> "Favorites"
         JellyfinLibraryItemFilter.Unwatched -> "Unwatched"
     }
+
+private fun JellyfinLibraryItemFilter.supportsLibraryAlphabetRail(): Boolean =
+    this != JellyfinLibraryItemFilter.RecentlyAdded
 
 private fun String?.isLiveTvCollection(): Boolean =
     this?.lowercase()?.replace(" ", "") in setOf("livetv", "livetvchannels")
@@ -6223,6 +6591,9 @@ private fun AdminScreen(
     onRunTask: (String) -> Unit,
     onStopTask: (String) -> Unit,
     onSetSpeedLimit: (Int?) -> Unit,
+    onSendSessionMessage: (String, String?, String, Long) -> Unit,
+    onSendBroadcastMessage: (String?, String, Long) -> Unit,
+    onClearSessionMessageError: () -> Unit,
 ) {
     val overview = state.adminOverview
     val adminUser = overview?.users?.firstOrNull { it.id == state.session?.user?.id }
@@ -6235,6 +6606,7 @@ private fun AdminScreen(
     val adminRevealKey = "${state.session?.profileId}-${overview != null}"
     var revealActive by remember(adminRevealKey) { mutableStateOf(true) }
     var showSpeedLimitDialog by remember { mutableStateOf(false) }
+    var messageTarget by remember { mutableStateOf<AdminMessageTarget?>(null) }
     LaunchedEffect(adminRevealKey) {
         revealActive = true
         delay(1_250L)
@@ -6272,7 +6644,7 @@ private fun AdminScreen(
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item { HomeContentReveal(index = 0, animate = revealActive, revealKey = adminRevealKey) { ScreenTitle("Admin", overview?.serverName ?: state.server?.name ?: "Jellyfin Server") } }
-        if (state.isAdminLoading) item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminDashboardSkeleton() } }
+        if (state.isAdminLoading && overview == null) item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminDashboardSkeleton() } }
         state.adminError?.let { item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { VantafynErrorCard(it) } } }
         if (overview != null) {
             item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminHeroCard(state = state, overview = overview, adminImageUrl = adminUser?.imageUrl, onAvatarClick = onOpenSettings) } }
@@ -6327,6 +6699,8 @@ private fun AdminScreen(
                     sessions = overview.activeSessions,
                     speedLimitMbps = state.adminSpeedLimitMbps,
                     onTapSpeedLimit = { showSpeedLimitDialog = true },
+                    onBroadcast = { messageTarget = AdminMessageTarget.Broadcast(overview.activeSessions) },
+                    onMessage = { messageTarget = AdminMessageTarget.Session(it) },
                 )
             } }
             item { HomeContentReveal(index = 6, animate = revealActive, revealKey = adminRevealKey) { AdminStatisticsPanel(overview, expanded = statisticsExpanded, onToggle = { statisticsExpanded = !statisticsExpanded }) } }
@@ -6352,6 +6726,53 @@ private fun AdminScreen(
                 showSpeedLimitDialog = false
             },
         )
+    }
+    messageTarget?.let { target ->
+        AdminSessionMessageComposer(
+            target = target,
+            isSending = state.isAdminSessionMessageSending,
+            sentKey = state.adminSessionMessageSentKey,
+            sentSummary = state.adminSessionMessageSentSummary,
+            errorMessage = state.adminSessionMessageError,
+            onDismiss = {
+                onClearSessionMessageError()
+                messageTarget = null
+            },
+            onClearError = onClearSessionMessageError,
+            onSend = { header, text, timeoutMs ->
+                when (target) {
+                    is AdminMessageTarget.Session -> onSendSessionMessage(target.session.id, header, text, timeoutMs)
+                    is AdminMessageTarget.Broadcast -> onSendBroadcastMessage(header, text, timeoutMs)
+                }
+            },
+        )
+    }
+}
+
+private sealed interface AdminMessageTarget {
+    val id: String
+    val title: String
+    val recipientSummary: String
+
+    data class Session(
+        val session: dev.vantafyn.core.jellyfin.JellyfinAdminSession,
+    ) : AdminMessageTarget {
+        override val id: String = "session-${session.id}"
+        override val title: String = "Send message"
+        override val recipientSummary: String =
+            listOfNotNull(session.userName, session.client, session.deviceName)
+                .joinToString(" · ")
+                .ifBlank { "Active Jellyfin session" }
+    }
+
+    data class Broadcast(
+        val sessions: List<dev.vantafyn.core.jellyfin.JellyfinAdminSession>,
+    ) : AdminMessageTarget {
+        private val compatibleCount = sessions.count { it.supportsDisplayMessage }
+        override val id: String = "broadcast-${sessions.map { it.id }.sorted().joinToString("-")}"
+        override val title: String = "Broadcast message"
+        override val recipientSummary: String =
+            "$compatibleCount active ${if (compatibleCount == 1) "device" else "devices"}"
     }
 }
 
@@ -7363,9 +7784,12 @@ private fun AdminSessionsSection(
     sessions: List<dev.vantafyn.core.jellyfin.JellyfinAdminSession>,
     speedLimitMbps: Int?,
     onTapSpeedLimit: () -> Unit,
+    onBroadcast: () -> Unit,
+    onMessage: (dev.vantafyn.core.jellyfin.JellyfinAdminSession) -> Unit,
 ) {
     val measuredBitrates = sessions.mapNotNull { it.bitrate?.takeIf { bitrate -> bitrate > 0 } }
     val totalBitrate = measuredBitrates.sum().takeIf { it > 0 }
+    val compatibleMessageTargets = sessions.count { it.supportsDisplayMessage }
     GlassPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             AdminSectionHeader(title = "Active Sessions", icon = Icons.Rounded.Tv, modifier = Modifier.weight(1f))
@@ -7376,11 +7800,53 @@ private fun AdminSessionsSection(
             speedLimitMbps = speedLimitMbps,
             onTap = onTapSpeedLimit,
         )
+        if (compatibleMessageTargets > 0) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onBroadcast() },
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.08f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            "Broadcast Message",
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            "$compatibleMessageTargets active ${if (compatibleMessageTargets == 1) "device" else "devices"}",
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Clip,
+                        )
+                    }
+                }
+            }
+        }
         if (sessions.isEmpty()) {
             AdminEmptySessionsCard()
         }
         sessions.take(12).forEach { session ->
-            AdminSessionCard(session)
+            AdminSessionCard(session = session, onMessage = onMessage)
         }
     }
 }
@@ -7501,6 +7967,198 @@ private fun SpeedLimitDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun AdminSessionMessageComposer(
+    target: AdminMessageTarget,
+    isSending: Boolean,
+    sentKey: Long,
+    sentSummary: String?,
+    errorMessage: String?,
+    onDismiss: () -> Unit,
+    onClearError: () -> Unit,
+    onSend: (String?, String, Long) -> Unit,
+) {
+    var header by remember(target.id) { mutableStateOf("") }
+    var message by remember(target.id) { mutableStateOf("") }
+    var durationMs by remember(target.id) { mutableStateOf(8_000L) }
+    var dispatched by remember(target.id) { mutableStateOf(false) }
+    val initialSentKey = remember(target.id) { sentKey }
+    LaunchedEffect(sentKey, isSending) {
+        if (sentKey != initialSentKey && sentKey > 0L && !isSending) {
+            dispatched = true
+            delay(980L)
+            onDismiss()
+        }
+    }
+    val scale by animateFloatAsState(
+        targetValue = if (dispatched) 0.92f else 1f,
+        animationSpec = spring(stiffness = 420f, dampingRatio = 0.78f),
+        label = "adminMessageScale",
+    )
+    val lift by animateFloatAsState(
+        targetValue = if (dispatched) -92f else 0f,
+        animationSpec = tween(620, easing = FastOutSlowInEasing),
+        label = "adminMessageLift",
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (dispatched) 0f else 1f,
+        animationSpec = tween(520, easing = FastOutSlowInEasing),
+        label = "adminMessageAlpha",
+    )
+    AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                translationY = lift
+                this.alpha = alpha
+            }
+            .vantafynAnimatedModalBorder(),
+        onDismissRequest = {
+            if (!isSending && !dispatched) {
+                onClearError()
+                onDismiss()
+            }
+        },
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        icon = {
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(VantafynGradients.accentHorizontal()),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(Icons.Rounded.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(25.dp))
+            }
+        },
+        title = {
+            Text(
+                if (dispatched) sentSummary ?: "Sent" else target.title,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    target.recipientSummary,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                VantafynTextField(
+                    value = header,
+                    onValueChange = { header = it.take(48) },
+                    label = "Title (optional)",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                )
+                VantafynTextField(
+                    value = message,
+                    onValueChange = { message = it.take(240) },
+                    label = "Message",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(5_000L to "5s", 8_000L to "8s", 15_000L to "15s").forEach { (value, label) ->
+                        VantafynGlassChip(
+                            selected = durationMs == value,
+                            onClick = { durationMs = value },
+                        ) {
+                            Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+                errorMessage?.let {
+                    Text(
+                        it,
+                        color = Color(0xFFFFB4B4),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            VantafynButton(
+                text = if (isSending) "Sending" else "Send",
+                onClick = { onSend(header, message, durationMs) },
+                enabled = message.isNotBlank() && !isSending && !dispatched,
+            )
+        },
+        dismissButton = {
+            AdminMessageSecondaryButton(
+                text = "Cancel",
+                enabled = !isSending && !dispatched,
+                onClick = {
+                    onClearError()
+                    onDismiss()
+                },
+            )
+        },
+    )
+}
+
+@Composable
+private fun AdminMessageSecondaryButton(
+    text: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Box(
+        modifier = modifier
+            .widthIn(min = 132.dp)
+            .height(58.dp)
+            .padding(2.dp)
+            .clip(shape)
+            .background(
+                Brush.horizontalGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (enabled) 0.10f else 0.04f),
+                        VantafynColors.SurfaceHigh.copy(alpha = if (enabled) 0.76f else 0.38f),
+                        Color.White.copy(alpha = if (enabled) 0.06f else 0.03f),
+                    ),
+                ),
+            )
+            .border(
+                BorderStroke(
+                    1.dp,
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color.White.copy(alpha = if (enabled) 0.24f else 0.08f),
+                            VantafynColors.Muted.copy(alpha = if (enabled) 0.16f else 0.06f),
+                        ),
+                    ),
+                ),
+                shape,
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = VantafynSpacing.lg),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = text,
+            color = if (enabled) Color(0xFFF8FAFF) else VantafynColors.Muted.copy(alpha = 0.55f),
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+        )
+    }
 }
 
 @Composable
@@ -7973,7 +8631,10 @@ private fun AdminEmptySessionsCard() {
 }
 
 @Composable
-private fun AdminSessionCard(session: dev.vantafyn.core.jellyfin.JellyfinAdminSession) {
+private fun AdminSessionCard(
+    session: dev.vantafyn.core.jellyfin.JellyfinAdminSession,
+    onMessage: (dev.vantafyn.core.jellyfin.JellyfinAdminSession) -> Unit,
+) {
     val playMethodLabel = session.playMethod ?: if (session.isTranscoding) "Transcoding" else "Direct Play"
     val playMethodForeground = if (session.isTranscoding) Color(0xFFFFC077) else Color(0xFF91F0B6)
     val playMethodBackground = if (session.isTranscoding) Color(0xFF3A2113).copy(alpha = 0.92f) else Color(0xFF123421).copy(alpha = 0.92f)
@@ -8047,6 +8708,21 @@ private fun AdminSessionCard(session: dev.vantafyn.core.jellyfin.JellyfinAdminSe
                         Text(listOfNotNull(session.nowPlayingSubtitle, session.nowPlayingType).joinToString(" · "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
+                if (session.supportsDisplayMessage) {
+                    IconButton(
+                        onClick = { onMessage(session) },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(10.dp)
+                            .size(42.dp),
+                    ) {
+                        GradientIcon(
+                            imageVector = Icons.Rounded.Send,
+                            contentDescription = "Send message",
+                            modifier = Modifier.size(22.dp),
+                        )
+                    }
+                }
             }
             Column(
                 modifier = Modifier.padding(VantafynSpacing.md),
@@ -8073,6 +8749,30 @@ private fun AdminSessionCard(session: dev.vantafyn.core.jellyfin.JellyfinAdminSe
             }
         }
     }
+}
+
+@Composable
+private fun GradientIcon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+) {
+    Icon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        tint = Color.White,
+        modifier = modifier
+            .graphicsLayer {
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = VantafynGradients.accentHorizontal(),
+                    blendMode = BlendMode.SrcIn,
+                )
+            },
+    )
 }
 
 @Composable
@@ -8109,6 +8809,7 @@ private fun AdminSessionProgress(session: dev.vantafyn.core.jellyfin.JellyfinAdm
 @Composable
 private fun AdminSessionTechnicalLine(session: dev.vantafyn.core.jellyfin.JellyfinAdminSession) {
     val details = buildList {
+        session.streamQuality?.takeIf { it.isNotBlank() }?.let { add(it.uppercase()) }
         session.container?.uppercase()?.let { container ->
             val audioCodec = session.audioCodec?.uppercase()
             if (audioCodec == null || container != audioCodec) add(container)
@@ -10692,6 +11393,7 @@ private fun PlaybackPreferencesScreen(
     onTogglePassoutProtection: () -> Unit,
     onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
     onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
+    onSetMaxStreamingBitrateMbps: (Int?) -> Unit,
     onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
 ) {
     val preferences = state.editablePlaybackPreferences
@@ -10732,6 +11434,13 @@ private fun PlaybackPreferencesScreen(
                                 )
                             }
                         }
+                        CompactSectionTitle("Maximum streaming bitrate", Icons.Rounded.Speed)
+                        PreferenceChipGroup(
+                            items = listOf<Int?>(null) + MAX_STREAMING_BITRATE_MBPS_OPTIONS,
+                            label = { it.maxStreamingBitrateLabel() },
+                            selected = { option -> state.maxStreamingBitrateMbps == option },
+                            onSelect = onSetMaxStreamingBitrateMbps,
+                        )
                     }
                 }
             }
@@ -11069,6 +11778,9 @@ private fun UpNextDisplayMode.upNextDisplayLabel(): String =
         UpNextDisplayMode.BeforeEnd -> "Before the end"
         UpNextDisplayMode.AfterCompletion -> "After episode ends"
     }
+
+private fun Int?.maxStreamingBitrateLabel(): String =
+    this?.let { "${it} Mbps" } ?: "Auto / Unlimited"
 
 private fun String.subtitleModeDisplayLabel(): String =
     when (this) {
@@ -13214,19 +13926,133 @@ private fun DetailActionPanel(
 
 @Composable
 private fun DetailAction(icon: String, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    VantafynGlassTile(
-        modifier = modifier.height(72.dp),
-        onClick = onClick,
-        cornerRadius = 18.dp,
-        contentPadding = PaddingValues(vertical = VantafynSpacing.sm),
+    val isFavoriteAction = icon == "♥"
+    val reducedMotion = rememberReducedMotionPreference()
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && !reducedMotion) 0.976f else 1f,
+        animationSpec = if (reducedMotion) {
+            snap()
+        } else {
+            spring(
+                dampingRatio = 0.78f,
+                stiffness = 620f,
+            )
+        },
+        label = "detailActionPressedScale",
+    )
+    val pressDepth by animateFloatAsState(
+        targetValue = if (pressed) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(durationMillis = 120, easing = FastOutSlowInEasing),
+        label = "detailActionPressDepth",
+    )
+    val activeGlow by animateFloatAsState(
+        targetValue = if (isFavoriteAction) 1f else 0f,
+        animationSpec = if (reducedMotion) snap() else tween(durationMillis = 280, easing = FastOutSlowInEasing),
+        label = "detailActionActiveGlow",
+    )
+    val cornerRadius = 18.dp
+    val shape = RoundedCornerShape(cornerRadius)
+
+    Box(
+        modifier = modifier
+            .height(72.dp)
+            .scale(scale)
+            .clip(shape)
+            .drawWithContent {
+                val radius = cornerRadius.toPx()
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.17f + 0.03f * pressDepth),
+                            VantafynColors.SurfaceHigh.copy(alpha = 0.56f + 0.05f * pressDepth),
+                            VantafynColors.Graphite.copy(alpha = 0.74f + 0.04f * pressDepth),
+                        ),
+                    ),
+                    cornerRadius = CornerRadius(radius, radius),
+                )
+                drawRoundRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            VantafynColors.Primary.copy(alpha = 0.16f + 0.06f * activeGlow + 0.04f * pressDepth),
+                            Color.Transparent,
+                        ),
+                        center = Offset(size.width * 0.5f, -size.height * 0.1f),
+                        radius = size.width * 0.8f,
+                    ),
+                    cornerRadius = CornerRadius(radius, radius),
+                )
+                if (activeGlow > 0f) {
+                    drawRoundRect(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFFFF2F64).copy(alpha = 0.16f * activeGlow),
+                                Color.Transparent,
+                            ),
+                            center = Offset(size.width * 0.5f, size.height * 0.34f),
+                            radius = size.width * 0.46f,
+                        ),
+                        cornerRadius = CornerRadius(radius, radius),
+                    )
+                }
+                drawRoundRect(
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.18f + 0.05f * pressDepth),
+                            Color.Transparent,
+                        ),
+                        endY = size.height * 0.34f,
+                    ),
+                    cornerRadius = CornerRadius(radius, radius),
+                )
+                drawRoundRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.22f + 0.07f * pressDepth),
+                            VantafynColors.Secondary.copy(alpha = 0.11f + 0.04f * pressDepth),
+                            VantafynColors.Primary.copy(alpha = 0.13f + 0.06f * activeGlow + 0.04f * pressDepth),
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(size.width, size.height),
+                    ),
+                    cornerRadius = CornerRadius(radius, radius),
+                    style = Stroke(width = 1.15.dp.toPx()),
+                )
+                drawContent()
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(vertical = VantafynSpacing.xs, horizontal = VantafynSpacing.xs),
     ) {
         Column(
             modifier = Modifier.fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+            verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
         ) {
-            Text(icon, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, maxLines = 1)
-            Text(label, color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                icon,
+                color = if (isFavoriteAction) Color(0xFFFF3D67) else VantafynColors.Ink.copy(alpha = 0.96f),
+                style = MaterialTheme.typography.titleLarge.copy(fontSize = if (isFavoriteAction) 21.sp else 23.sp),
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                modifier = Modifier.graphicsLayer {
+                    shadowElevation = if (isFavoriteAction) 7f else 0f
+                    ambientShadowColor = Color(0xFFFF2F64)
+                    spotShadowColor = Color(0xFFFF2F64)
+                },
+            )
+            Text(
+                label,
+                color = if (isFavoriteAction) VantafynColors.Ink.copy(alpha = 0.88f) else VantafynColors.Muted.copy(alpha = 0.82f),
+                style = MaterialTheme.typography.bodyLarge.copy(fontSize = 15.sp),
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

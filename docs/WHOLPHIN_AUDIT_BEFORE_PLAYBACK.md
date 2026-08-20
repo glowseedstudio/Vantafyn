@@ -28,7 +28,7 @@ Wholphin uses `LiveTvApi.getLiveTvChannels` and guide/program APIs, plus user pr
 
 ## Playback Preparation
 
-Wholphin’s playback layer is built around Jellyfin playback info/media sources, stream choice, track selection, and playback lifecycle reporting. Vantafyn has not implemented playback yet. The next milestone should add a dedicated core playback-info repository before any player UI.
+Wholphin’s playback layer is built around Jellyfin playback info/media sources, stream choice, track selection, and playback lifecycle reporting. This audit was written before Vantafyn's playback milestone. Vantafyn now has a dedicated Jellyfin playback repository and mobile Media3 player; current playback details live in `docs/PLAYBACK_IMPLEMENTATION.md`.
 
 ## User Settings
 
@@ -37,4 +37,3 @@ Wholphin uses Jellyfin `UserConfiguration` for playback preferences and app-loca
 ## Admin/User Management
 
 Wholphin does not appear to be an admin-first client. Vantafyn implements admin user policy updates directly through Jellyfin `UserPolicy`, using fetch-modify-save and preserving unrelated fields.
-

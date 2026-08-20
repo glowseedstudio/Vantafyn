@@ -41,6 +41,7 @@ Message types confirmed in the SDK:
 - `JellyfinWebSocketEvent`
 - `SdkJellyfinRealtimeClient`
 - event mapping for socket state, sessions, SyncPlay commands, SyncPlay group updates, playstate commands, and general commands
+- SyncPlay group update metadata extraction for queued item, position, and playing state where Jellyfin supplies it
 
 `feature-home` now:
 
@@ -48,8 +49,19 @@ Message types confirmed in the SDK:
 - stops realtime collection when the party is left or the profile logs out
 - stores realtime connection state
 - stores active session/member state from real `SessionsMessage` data
+- maps incoming SyncPlay/playstate websocket events into `VantafynSyncPlaybackCommand`
+- starts the synced queue item through the existing playback target path when another group member changes the queue
 - shows an honest Watch Party player pill
 - shows Vantafyn lobby readiness separately from Jellyfin sync readiness
+
+`feature-player` now:
+
+- receives the current `VantafynSyncPlaybackCommand`
+- applies pause, resume, seek, stop, and queue position updates to the existing Media3 player
+- routes the same commands through the existing Cast coordinator when the item is cast
+- publishes local pause, resume, and seek controls back through Jellyfin SyncPlay while a Watch Party is active
+- ignores commands for unrelated item ids
+- consumes each command key once to prevent duplicate application during recomposition
 
 ## Honest State Boundaries
 
@@ -96,9 +108,16 @@ No aggressive background polling was added.
 
 ## Remaining Work
 
-- parse and display Vantafyn invite receipt from an active websocket message path if Jellyfin delivers message commands to Vantafyn as a structured websocket event
 - accept/decline feedback transport
 - member ready/buffer reconciliation if Jellyfin emits reliable state
 - host-owned group Up Next
 - player member/status sheet
 - TV UI reuse
+
+## Validation
+
+The Android app and TV app compile with:
+
+`JAVA_HOME=/usr/lib/jvm/temurin-17-jdk ./gradlew --console=plain :app-mobile:assembleDebug :app-tv:assembleDebug`
+
+Multi-device runtime validation is still required on a real Jellyfin server to verify host/guest timing, mid-playback joins, reconnect behaviour, and next-episode group behaviour across separate devices.
