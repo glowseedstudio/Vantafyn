@@ -3722,6 +3722,30 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun saveHomeLayoutDraft(layout: List<HomeSectionPreference>, smartRows: List<String>) {
+        val profileId = _state.value.session?.profileId
+        val fixed = layout.firstOrNull { it.type == HomeSectionType.MediaBar }
+            ?: defaultHomeLayout().first { it.type == HomeSectionType.MediaBar }
+        val editable = layout
+            .filter { it.type != HomeSectionType.MediaBar }
+            .distinctBy { it.type }
+            .sortedBy { it.order }
+        val missing = defaultHomeLayout()
+            .filter { it.type != HomeSectionType.MediaBar }
+            .filter { default -> editable.none { it.type == default.type } }
+        val normalized = listOf(fixed.copy(visible = true, order = 0)) +
+            (editable + missing).mapIndexed { index, preference -> preference.copy(order = index + 1) }
+        val normalizedSmartRows = smartRows.filter { it in supportedSmartRows }.distinct()
+        persistHomeLayout(profileId, normalized)
+        persistSmartRows(profileId, normalizedSmartRows)
+        _state.update { state ->
+            state.copy(
+                homeLayout = normalized,
+                configuredSmartRows = normalizedSmartRows,
+            )
+        }
+    }
+
     fun addSmartRow(title: String) {
         _state.update { state ->
             if (title !in supportedSmartRows || title in state.configuredSmartRows) return@update state
@@ -5060,7 +5084,7 @@ private fun String?.normalizedLibraryAlphabetKey(): String? {
 }
 
 private fun JellyfinLibraryItemFilter.supportsAlphabetRail(): Boolean =
-    this != JellyfinLibraryItemFilter.RecentlyAdded
+    this != JellyfinLibraryItemFilter.All && this != JellyfinLibraryItemFilter.RecentlyAdded
 
 private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
 private const val KEY_SETUP_COMPLETED = "setup_completed"

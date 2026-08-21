@@ -37,6 +37,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
@@ -82,6 +84,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyRow
@@ -117,6 +120,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
+import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Groups
@@ -197,6 +201,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.asImageBitmap
@@ -222,6 +227,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -333,6 +339,7 @@ import dev.vantafyn.feature.home.auth.VantafynVideoPlayerPreference
 import dev.vantafyn.feature.requests.RequestsScreen
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
+import dev.vantafyn.feature.home.auth.defaultHomeLayout
 import dev.vantafyn.feature.home.auth.supportedSmartRows
 import dev.vantafyn.feature.music.MusicScreen
 import dev.vantafyn.feature.music.MusicViewModel
@@ -555,6 +562,7 @@ fun VantafynAppContent(
                 onToggleHomeSection = viewModel::toggleHomeSection,
                 onMoveHomeSection = viewModel::moveHomeSection,
                 onResetHomeLayout = viewModel::resetHomeLayout,
+                onSaveHomeLayoutDraft = viewModel::saveHomeLayoutDraft,
                 onAddSmartRow = viewModel::addSmartRow,
                 onRemoveSmartRow = viewModel::removeSmartRow,
                 onCycleArtwork = viewModel::cycleSectionArtwork,
@@ -2610,6 +2618,7 @@ private fun HomeScreen(
     onToggleHomeSection: (HomeSectionType) -> Unit,
     onMoveHomeSection: (HomeSectionType, Int) -> Unit,
     onResetHomeLayout: () -> Unit,
+    onSaveHomeLayoutDraft: (List<HomeSectionPreference>, List<String>) -> Unit,
     onAddSmartRow: (String) -> Unit,
     onRemoveSmartRow: (String) -> Unit,
     onCycleArtwork: (HomeSectionType) -> Unit,
@@ -2742,6 +2751,7 @@ private fun HomeScreen(
             onToggleHomeSection = onToggleHomeSection,
             onMoveHomeSection = onMoveHomeSection,
             onResetHomeLayout = onResetHomeLayout,
+            onSaveHomeLayoutDraft = onSaveHomeLayoutDraft,
             onAddSmartRow = onAddSmartRow,
             onRemoveSmartRow = onRemoveSmartRow,
             onCycleArtwork = onCycleArtwork,
@@ -2916,6 +2926,7 @@ private fun MobileShellScreen(
     onToggleHomeSection: (HomeSectionType) -> Unit,
     onMoveHomeSection: (HomeSectionType, Int) -> Unit,
     onResetHomeLayout: () -> Unit,
+    onSaveHomeLayoutDraft: (List<HomeSectionPreference>, List<String>) -> Unit,
     onAddSmartRow: (String) -> Unit,
     onRemoveSmartRow: (String) -> Unit,
     onCycleArtwork: (HomeSectionType) -> Unit,
@@ -3016,15 +3027,57 @@ private fun MobileShellScreen(
 ) {
     var mediaActionTarget by remember { mutableStateOf<MediaActionTarget?>(null) }
     var showMusicQuickPlayer by remember { mutableStateOf(false) }
+    var homeEditorOpen by remember { mutableStateOf(false) }
+    var homeEditorTarget by remember { mutableStateOf<HomeLayoutEditorTarget?>(null) }
+    var homeEditorAddRowsOpen by remember { mutableStateOf(false) }
+    var homeEditorPendingCloseDiscard by remember { mutableStateOf<Boolean?>(null) }
+    var selectedHomeSectionName by rememberSaveable { mutableStateOf<String?>(null) }
+    var draftHomeLayout by remember { mutableStateOf<List<HomeSectionPreference>?>(null) }
+    var draftSmartRows by remember { mutableStateOf<List<String>?>(null) }
     val context = LocalContext.current
     val musicController = remember(context) { MusicPlaybackController.get(context) }
     val musicPlayback by musicController.state.collectAsStateWithLifecycle()
+    fun closeHomeEditor(discard: Boolean) {
+        homeEditorTarget = null
+        homeEditorAddRowsOpen = false
+        selectedHomeSectionName = null
+        homeEditorOpen = false
+        homeEditorPendingCloseDiscard = discard
+    }
+    fun openHomeEditor() {
+        homeEditorPendingCloseDiscard = null
+        draftHomeLayout = state.homeLayout
+        draftSmartRows = state.configuredSmartRows
+        selectedHomeSectionName = state.homeLayout
+            .sortedBy { it.order }
+            .firstOrNull { it.type != HomeSectionType.MediaBar }
+            ?.type
+            ?.name
+        homeEditorTarget = null
+        homeEditorAddRowsOpen = false
+        homeEditorOpen = true
+    }
+    LaunchedEffect(homeEditorOpen, homeEditorPendingCloseDiscard) {
+        val pendingDiscard = homeEditorPendingCloseDiscard ?: return@LaunchedEffect
+        if (!homeEditorOpen) {
+            delay(580L)
+            if (!homeEditorOpen && homeEditorPendingCloseDiscard == pendingDiscard) {
+                draftHomeLayout = null
+                draftSmartRows = null
+                homeEditorPendingCloseDiscard = null
+            }
+        }
+    }
     val handlesSystemBack = state.mobileDestination != MobileDestination.Home ||
         state.confirmLogout ||
         state.mobileMessage != null ||
-        showMusicQuickPlayer
+        showMusicQuickPlayer ||
+        homeEditorOpen
     BackHandler(enabled = handlesSystemBack) {
         when {
+            homeEditorTarget != null -> homeEditorTarget = null
+            homeEditorAddRowsOpen -> homeEditorAddRowsOpen = false
+            homeEditorOpen -> closeHomeEditor(discard = true)
             showMusicQuickPlayer -> showMusicQuickPlayer = false
             state.confirmLogout -> onCancelLogout()
             state.mobileMessage != null -> onClearMessage()
@@ -3040,14 +3093,34 @@ private fun MobileShellScreen(
             when (state.mobileDestination) {
                 MobileDestination.Home -> MobileHomeContent(
                     state = state,
+                    homeLayoutOverride = draftHomeLayout,
+                    configuredSmartRowsOverride = draftSmartRows,
+                    highlightedHomeSection = selectedHomeSectionName?.let { name ->
+                        runCatching { HomeSectionType.valueOf(name) }.getOrNull()
+                    },
                     onRetry = onRetryHome,
                     onSearch = { onNavigate(MobileDestination.Search) },
                     onProfile = { onNavigate(MobileDestination.Profile) },
-                    onOpenLibrary = onOpenLibrary,
-                    onOpenMedia = onOpenMedia,
-                    onMediaLongPress = { mediaActionTarget = it },
-                    onStartLiveTvPlayback = onStartLiveTvPlayback,
-                    onPlaybackComingSoon = onPlaybackComingSoon,
+                    onOpenLibrary = { library ->
+                        if (!homeEditorOpen) onOpenLibrary(library)
+                    },
+                    onOpenMedia = { mediaId ->
+                        if (!homeEditorOpen) onOpenMedia(mediaId)
+                    },
+                    onMediaLongPress = { target ->
+                        if (!homeEditorOpen) mediaActionTarget = target
+                    },
+                    onHeroLongPress = { item ->
+                        if (!homeEditorOpen) {
+                            mediaActionTarget = item.toMediaActionTarget(allowHomeCustomize = true)
+                        }
+                    },
+                    onStartLiveTvPlayback = { channelId, channelName, programName ->
+                        if (!homeEditorOpen) onStartLiveTvPlayback(channelId, channelName, programName)
+                    },
+                    onPlaybackComingSoon = {
+                        if (!homeEditorOpen) onPlaybackComingSoon()
+                    },
                 )
                 MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
                 MobileDestination.Downloads -> DownloadsScreen(
@@ -3263,13 +3336,149 @@ private fun MobileShellScreen(
                     }
                 }
             }
+            val currentDraftLayout = draftHomeLayout
+            val currentDraftSmartRows = draftSmartRows
+            val reducedHomeEditorMotion = rememberReducedMotionPreference()
+            val homeEditorEnterEasing = remember { CubicBezierEasing(0.16f, 1f, 0.3f, 1f) }
+            val homeEditorExitEasing = remember { CubicBezierEasing(0.32f, 0f, 0.2f, 1f) }
+            AnimatedVisibility(
+                visible = homeEditorOpen && state.mobileDestination == MobileDestination.Home && currentDraftLayout != null && currentDraftSmartRows != null,
+                modifier = Modifier.align(Alignment.TopCenter),
+                enter = if (reducedHomeEditorMotion) {
+                    fadeIn(animationSpec = tween(durationMillis = 220, easing = homeEditorEnterEasing))
+                } else {
+                    slideInVertically(
+                        initialOffsetY = { -it / 3 },
+                        animationSpec = tween(durationMillis = 760, easing = homeEditorEnterEasing),
+                    ) + fadeIn(
+                        animationSpec = tween(durationMillis = 420, delayMillis = 70, easing = homeEditorEnterEasing),
+                    ) + scaleIn(
+                        initialScale = 0.985f,
+                        animationSpec = tween(durationMillis = 760, easing = homeEditorEnterEasing),
+                    )
+                },
+                exit = if (reducedHomeEditorMotion) {
+                    fadeOut(animationSpec = tween(durationMillis = 180, easing = homeEditorExitEasing))
+                } else {
+                    slideOutVertically(
+                        targetOffsetY = { -it / 4 },
+                        animationSpec = tween(durationMillis = 520, easing = homeEditorExitEasing),
+                    ) + fadeOut(
+                        animationSpec = tween(durationMillis = 260, easing = homeEditorExitEasing),
+                    ) + scaleOut(
+                        targetScale = 0.99f,
+                        animationSpec = tween(durationMillis = 520, easing = homeEditorExitEasing),
+                    )
+                },
+            ) {
+                if (currentDraftLayout != null && currentDraftSmartRows != null) {
+                    HomeCustomizeEditorPanel(
+                        state = state,
+                        draftLayout = currentDraftLayout,
+                        draftSmartRows = currentDraftSmartRows,
+                        selectedType = selectedHomeSectionName?.let { name -> runCatching { HomeSectionType.valueOf(name) }.getOrNull() },
+                        onSelectType = { selectedHomeSectionName = it.name },
+                        onLayoutChanged = { draftHomeLayout = normalizeHomeLayoutDraft(it) },
+                        onEditOption = { homeEditorTarget = it },
+                        onAddRow = { homeEditorAddRowsOpen = true },
+                        onCancel = { closeHomeEditor(discard = true) },
+                        onDone = {
+                            val layout = draftHomeLayout ?: state.homeLayout
+                            val smartRows = draftSmartRows ?: state.configuredSmartRows
+                            onSaveHomeLayoutDraft(normalizeHomeLayoutDraft(layout), smartRows)
+                            closeHomeEditor(discard = false)
+                        },
+                        onResetDraft = {
+                            draftHomeLayout = defaultHomeLayout()
+                            draftSmartRows = emptyList()
+                            selectedHomeSectionName = defaultHomeLayout()
+                                .firstOrNull { it.type != HomeSectionType.MediaBar }
+                                ?.type
+                                ?.name
+                        },
+                    )
+                }
+            }
+            val currentEditorTarget = homeEditorTarget
+            val currentEditorLayout = draftHomeLayout
+            val currentEditorPreference = if (currentEditorTarget != null && currentEditorLayout != null) {
+                currentEditorLayout.firstOrNull { it.type == currentEditorTarget.type }
+            } else {
+                null
+            }
+            if (homeEditorOpen && currentEditorTarget != null && currentEditorPreference != null) {
+                HomeLayoutOptionDialog(
+                    preference = currentEditorPreference,
+                    target = currentEditorTarget,
+                    onDismiss = { homeEditorTarget = null },
+                    onSelectArtwork = { option ->
+                        draftHomeLayout = updateHomeDraftSection(currentEditorLayout.orEmpty(), currentEditorPreference.type) {
+                            it.copy(artworkType = option)
+                        }
+                    },
+                    onSelectShape = { option ->
+                        draftHomeLayout = updateHomeDraftSection(currentEditorLayout.orEmpty(), currentEditorPreference.type) {
+                            it.copy(cardShape = option)
+                        }
+                    },
+                    onSelectSize = { option ->
+                        draftHomeLayout = updateHomeDraftSection(currentEditorLayout.orEmpty(), currentEditorPreference.type) {
+                            it.copy(cardSize = option)
+                        }
+                    },
+                    onSelectSpacing = { option ->
+                        draftHomeLayout = updateHomeDraftSection(currentEditorLayout.orEmpty(), currentEditorPreference.type) {
+                            it.copy(spacing = option)
+                        }
+                    },
+                )
+            }
+            if (homeEditorOpen && homeEditorAddRowsOpen && currentDraftSmartRows != null) {
+                HomeAddRowsDialog(
+                    state = state,
+                    selectedRows = currentDraftSmartRows,
+                    onDismiss = { homeEditorAddRowsOpen = false },
+                    onApply = { rows ->
+                        val normalizedRows = rows.filter { row -> row in supportedSmartRows }.distinct()
+                        draftSmartRows = normalizedRows
+                        draftHomeLayout = updateHomeDraftSection(draftHomeLayout ?: state.homeLayout, HomeSectionType.SmartRows) {
+                            it.copy(visible = normalizedRows.isNotEmpty())
+                        }
+                        selectedHomeSectionName = HomeSectionType.SmartRows.name
+                        homeEditorAddRowsOpen = false
+                    },
+                )
+            }
             if (state.mobileDestination != MobileDestination.Player) {
+                AnimatedVisibility(
+                    visible = homeEditorOpen && state.mobileDestination == MobileDestination.Home,
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                    enter = fadeIn(animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)),
+                    exit = fadeOut(animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(178.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        Color.Transparent,
+                                        Color.Black.copy(alpha = 0.42f),
+                                    ),
+                                ),
+                            ),
+                    )
+                }
                 MobileBottomNav(
                     selected = state.mobileDestination.bottomNavRoot(state.previousMobileDestination),
                     onSelected = { destination ->
                         if (destination == MobileDestination.Music && showMusicQuickPlayer) {
                             showMusicQuickPlayer = false
                         } else {
+                            if (homeEditorOpen) {
+                                closeHomeEditor(discard = true)
+                            }
                             showMusicQuickPlayer = false
                             onNavigate(destination)
                         }
@@ -3392,6 +3601,14 @@ private fun MobileShellScreen(
                 mediaActionTarget = null
                 onQueueMediaDownload(target.id)
             },
+            onCustomizeHome = if (target.allowHomeCustomize) {
+                {
+                    mediaActionTarget = null
+                    openHomeEditor()
+                }
+            } else {
+                null
+            },
         )
     }
 }
@@ -3440,12 +3657,16 @@ private fun ExternalVideoPlayerLauncher(
 @Composable
 private fun MobileHomeContent(
     state: VantafynHomeUiState,
+    homeLayoutOverride: List<HomeSectionPreference>? = null,
+    configuredSmartRowsOverride: List<String>? = null,
+    highlightedHomeSection: HomeSectionType? = null,
     onRetry: () -> Unit,
     onSearch: () -> Unit,
     onProfile: () -> Unit,
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onMediaLongPress: (MediaActionTarget) -> Unit,
+    onHeroLongPress: (JellyfinHeroMediaItem) -> Unit = {},
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onPlaybackComingSoon: () -> Unit,
 ) {
@@ -3473,42 +3694,40 @@ private fun MobileHomeContent(
         }
     }
     val homeListState = rememberLazyListState()
+    val effectiveHomeLayout = homeLayoutOverride ?: state.homeLayout
+    val effectiveSmartRows = configuredSmartRowsOverride ?: state.configuredSmartRows
+    val homeEditorPreviewActive = highlightedHomeSection != null
+    val density = LocalDensity.current
     LaunchedEffect(state.isHomeLoading, homeRevealKey) {
         if (!state.isHomeLoading) {
             homeListState.scrollToItem(0)
         }
     }
-    val density = LocalDensity.current
-    val statusBarHeight = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
-    val statusBarPx = WindowInsets.statusBars.getTop(density).toFloat()
-    val homeScrimFadeStartPx = statusBarPx + with(density) { 132.dp.toPx() }
-    val homeScrimFadeEndPx = statusBarPx + with(density) { 28.dp.toPx() }
-    val homeStatusScrimTargetAlpha by remember(homeListState, density) {
-        derivedStateOf {
-            val headerKeys = setOf("home-hero", "home-hero-skeleton", "home-empty")
-            val layoutInfo = homeListState.layoutInfo
-            val headerInfo = layoutInfo.visibleItemsInfo.firstOrNull { it.key in headerKeys }
-            when {
-                headerInfo != null -> {
-                    val headerBottom = headerInfo.offset + headerInfo.size
-                    ((homeScrimFadeStartPx - headerBottom) / (homeScrimFadeStartPx - homeScrimFadeEndPx)).coerceIn(0f, 1f)
-                }
-                layoutInfo.visibleItemsInfo.any { it.key.toString().startsWith("home-section-") || it.key == "home-smart-rows" || it.key == "home-more-libraries" || it.key == "home-my-list" } ||
-                    homeListState.firstVisibleItemIndex > 0 -> 1f
-                else -> 0f
-            }
+    LaunchedEffect(highlightedHomeSection, effectiveHomeLayout, effectiveSmartRows, state.home, state.libraries, state.favorites) {
+        val selected = highlightedHomeSection ?: return@LaunchedEffect
+        val targetIndex = homePreviewListIndexFor(
+            selectedType = selected,
+            state = state,
+            layout = effectiveHomeLayout,
+            configuredSmartRows = effectiveSmartRows,
+            hasHeader = hero.isNotEmpty() || state.isHomeLoading || showEmptyHome,
+        ) ?: return@LaunchedEffect
+        val viewportHeight = homeListState.layoutInfo.viewportSize.height
+        val editorRevealOffset = if (viewportHeight > 0) {
+            -(viewportHeight * 0.40f).toInt()
+        } else {
+            -with(density) { 300.dp.toPx().toInt() }
         }
+        homeListState.animateScrollToItem(targetIndex.coerceAtLeast(0), scrollOffset = editorRevealOffset)
     }
-    val homeStatusScrimAlpha by animateFloatAsState(
-        targetValue = homeStatusScrimTargetAlpha,
-        animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing),
-        label = "homeStatusScrimAlpha",
-    )
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
             state = homeListState,
             modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 2.dp, bottom = 118.dp),
+            contentPadding = PaddingValues(
+                top = if (homeEditorPreviewActive) 180.dp else 2.dp,
+                bottom = 118.dp,
+            ),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
             var revealIndex = 0
@@ -3517,7 +3736,11 @@ private fun MobileHomeContent(
                     val index = revealIndex++
                     item(key = "home-hero") {
                         HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                            HeroCarousel(items = hero, onOpen = { onOpenMedia(it.id) })
+                            HeroCarousel(
+                                items = hero,
+                                onOpen = { onOpenMedia(it.id) },
+                                onLongPress = onHeroLongPress,
+                            )
                         }
                     }
                 }
@@ -3538,7 +3761,7 @@ private fun MobileHomeContent(
                     }
                 }
             }
-            state.homeLayout
+            effectiveHomeLayout
                 .sortedBy { it.order }
                 .filter { it.visible && it.type != HomeSectionType.MediaBar }
                 .forEach { preference ->
@@ -3550,7 +3773,7 @@ private fun MobileHomeContent(
                             val index = revealIndex++
                             item(key = "home-my-media") {
                                 HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                    HomeRowInset {
+                                    HomeRowInset(highlighted = highlightedHomeSection == preference.type) {
                                         LibraryShowcaseRow(
                                             title = "My Media",
                                             libraries = libraries,
@@ -3567,7 +3790,7 @@ private fun MobileHomeContent(
                             val index = revealIndex++
                             item(key = "home-section-${section.title}") {
                             HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                HomeRowInset {
+                                HomeRowInset(highlighted = highlightedHomeSection == preference.type) {
                                     HomeMediaSection(
                                         section = section,
                                         preference = preference,
@@ -3586,7 +3809,7 @@ private fun MobileHomeContent(
                             val index = revealIndex++
                             item(key = "home-section-${section.title}") {
                             HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                HomeRowInset {
+                                HomeRowInset(highlighted = highlightedHomeSection == preference.type) {
                                     HomeMediaSection(
                                         section = section,
                                         preference = preference,
@@ -3605,7 +3828,7 @@ private fun MobileHomeContent(
                             val index = revealIndex++
                             item(key = "home-section-${section.title}") {
                             HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                HomeRowInset {
+                                HomeRowInset(highlighted = highlightedHomeSection == preference.type) {
                                     HomeMediaSection(
                                         section = section,
                                         preference = preference,
@@ -3624,7 +3847,7 @@ private fun MobileHomeContent(
                             val index = revealIndex++
                             item(key = "home-section-${section.title}") {
                             HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                HomeRowInset {
+                                HomeRowInset(highlighted = highlightedHomeSection == preference.type) {
                                     HomeMediaSection(
                                         section = section,
                                         preference = preference,
@@ -3649,12 +3872,12 @@ private fun MobileHomeContent(
                         }
                     }
                     HomeSectionType.SmartRows -> {
-                        val smartSections = smartRowsFor(state)
+                        val smartSections = smartRowsFor(state, effectiveSmartRows)
                         if (smartSections.isNotEmpty()) {
                             val index = revealIndex++
                             item(key = "home-smart-rows") {
                                 HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                    HomeRowInset {
+                                    HomeRowInset(highlighted = highlightedHomeSection == preference.type) {
                                         SmartRowsSection(
                                             sections = smartSections,
                                             preference = preference,
@@ -3673,7 +3896,7 @@ private fun MobileHomeContent(
                             val index = revealIndex++
                             item(key = "home-more-libraries") {
                                 HomeContentReveal(index = index, animate = homeInitialRevealActive) {
-                                    HomeRowInset { LibraryShowcaseRow("More Libraries", other, onOpenLibrary) }
+                                HomeRowInset(highlighted = highlightedHomeSection == preference.type) { LibraryShowcaseRow("More Libraries", other, onOpenLibrary) }
                                 }
                             }
                         }
@@ -3703,9 +3926,8 @@ private fun MobileHomeContent(
                 }
             }
         }
-        HomeStatusBarScrim(
-            alpha = homeStatusScrimAlpha,
-            statusBarHeight = statusBarHeight,
+        HomeScrollStatusBarScrim(
+            listState = homeListState,
             modifier = Modifier.align(Alignment.TopCenter),
         )
         Box(
@@ -3721,6 +3943,46 @@ private fun MobileHomeContent(
             )
         }
     }
+}
+
+@Composable
+private fun HomeScrollStatusBarScrim(
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val statusBarHeight = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+    val statusBarPx = WindowInsets.statusBars.getTop(density).toFloat()
+    val fadeStartPx = statusBarPx + with(density) { 132.dp.toPx() }
+    val fadeEndPx = statusBarPx + with(density) { 28.dp.toPx() }
+    val targetAlpha by remember(listState, density) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val headerInfo = layoutInfo.visibleItemsInfo.firstOrNull {
+                it.key == "home-hero" || it.key == "home-hero-skeleton" || it.key == "home-empty"
+            }
+            when {
+                headerInfo != null -> {
+                    val headerBottom = headerInfo.offset + headerInfo.size
+                    ((fadeStartPx - headerBottom) / (fadeStartPx - fadeEndPx)).coerceIn(0f, 1f)
+                }
+                layoutInfo.visibleItemsInfo.any {
+                    val key = it.key.toString()
+                    key.startsWith("home-section-") ||
+                        key == "home-smart-rows" ||
+                        key == "home-more-libraries" ||
+                        key == "home-my-list"
+                } || listState.firstVisibleItemIndex > 0 -> 1f
+                else -> 0f
+            }
+        }
+    }
+    val alpha by animateFloatAsState(
+        targetValue = targetAlpha,
+        animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+        label = "homeStatusScrimAlpha",
+    )
+    HomeStatusBarScrim(alpha = alpha, statusBarHeight = statusBarHeight, modifier = modifier)
 }
 
 @Composable
@@ -3760,8 +4022,30 @@ private fun MyListHomeRow(
 }
 
 @Composable
-private fun HomeRowInset(content: @Composable () -> Unit) {
-    Box(Modifier.padding(horizontal = 8.dp)) {
+private fun HomeRowInset(
+    highlighted: Boolean = false,
+    content: @Composable () -> Unit,
+) {
+    val highlightAlpha by animateFloatAsState(
+        targetValue = if (highlighted) 1f else 0f,
+        animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing),
+        label = "homeRowHighlight",
+    )
+    val shape = RoundedCornerShape(24.dp)
+    Box(
+        Modifier
+            .padding(horizontal = if (highlightAlpha > 0.001f) 18.dp else 8.dp)
+            .then(
+                if (highlightAlpha > 0.001f) {
+                    Modifier
+                        .clip(shape)
+                        .background(VantafynColors.SurfaceHigh.copy(alpha = 0.045f * highlightAlpha))
+                        .border(1.dp, VantafynColors.Secondary.copy(alpha = 0.28f * highlightAlpha), shape)
+                } else {
+                    Modifier
+                },
+            ),
+    ) {
         content()
     }
 }
@@ -3852,6 +4136,7 @@ private fun VantafynToast(
 private fun HeroCarousel(
     items: List<JellyfinHeroMediaItem>,
     onOpen: (JellyfinHeroMediaItem) -> Unit,
+    onLongPress: (JellyfinHeroMediaItem) -> Unit = {},
 ) {
     val carouselItems = remember(items) {
         items.distinctBy { it.heroCarouselKey() }
@@ -3882,6 +4167,7 @@ private fun HeroCarousel(
                 CinematicHero(
                     item = item,
                     onOpen = { onOpen(item) },
+                    onLongPress = { onLongPress(item) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
@@ -3916,12 +4202,13 @@ private fun JellyfinHeroMediaItem.heroCarouselKey(): String =
 private fun CinematicHero(
     item: JellyfinHeroMediaItem,
     onOpen: () -> Unit,
+    onLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
             .height(292.dp)
-            .clickable(onClick = onOpen),
+            .combinedClickable(onClick = onOpen, onLongClick = onLongPress),
     ) {
         Box(
             modifier = Modifier
@@ -3979,8 +4266,8 @@ private fun CinematicHero(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .fillMaxWidth(0.82f)
-                .padding(start = VantafynSpacing.xl, end = 96.dp, bottom = 34.dp),
+                .fillMaxWidth(0.92f)
+                .padding(start = VantafynSpacing.xl, end = 54.dp, bottom = 34.dp),
             verticalArrangement = Arrangement.spacedBy(7.dp),
         ) {
             if (item.logoUrl != null) {
@@ -3993,12 +4280,24 @@ private fun CinematicHero(
                     contentScale = ContentScale.Fit,
                 )
             } else {
+                val titleLength = item.title.length
                 Text(
                     item.title,
                     color = VantafynColors.Ink,
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontSize = when {
+                            titleLength > 54 -> 27.sp
+                            titleLength > 36 -> 30.sp
+                            else -> MaterialTheme.typography.headlineMedium.fontSize
+                        },
+                        lineHeight = when {
+                            titleLength > 54 -> 31.sp
+                            titleLength > 36 -> 34.sp
+                            else -> MaterialTheme.typography.headlineMedium.lineHeight
+                        },
+                    ),
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
@@ -4461,7 +4760,11 @@ private fun otherLibraries(libraries: List<JellyfinLibrary>): List<JellyfinLibra
     return libraries.filterNot { it.id in mainIds }
 }
 
-private fun previewImagesFor(state: VantafynHomeUiState, type: HomeSectionType): List<String> =
+private fun previewImagesFor(
+    state: VantafynHomeUiState,
+    type: HomeSectionType,
+    configuredSmartRows: List<String> = state.configuredSmartRows,
+): List<String> =
     when (type) {
         HomeSectionType.MediaBar -> state.home?.heroItems.orEmpty().mapNotNull { it.backdropUrl ?: it.posterUrl }
         HomeSectionType.MyMedia -> mainLibraries(state.libraries).mapNotNull { it.imageUrl }
@@ -4470,16 +4773,47 @@ private fun previewImagesFor(state: VantafynHomeUiState, type: HomeSectionType):
         HomeSectionType.RecentlyAddedTv -> homeSection(state, "TV")?.items.orEmpty().mapNotNull { it.backdropUrl ?: it.imageUrl }
         HomeSectionType.LiveTvChannels -> homeSection(state, "Live TV")?.items.orEmpty().mapNotNull { it.imageUrl ?: it.backdropUrl }
         HomeSectionType.SmartRows -> state.home?.sections.orEmpty()
-            .filter { it.title in state.configuredSmartRows }
+            .filter { it.title in configuredSmartRows }
             .flatMap { it.items }
             .mapNotNull { it.backdropUrl ?: it.imageUrl }
         HomeSectionType.OtherLibraries -> otherLibraries(state.libraries).mapNotNull { it.imageUrl }
     }
 
-private fun smartRowsFor(state: VantafynHomeUiState): List<JellyfinHomeSection> =
+private fun smartRowsFor(
+    state: VantafynHomeUiState,
+    configuredSmartRows: List<String> = state.configuredSmartRows,
+): List<JellyfinHomeSection> =
     state.home?.sections.orEmpty().filter {
-        it.title in state.configuredSmartRows && it.items.isNotEmpty()
+        it.title in configuredSmartRows && it.items.isNotEmpty()
     }
+
+private fun homePreviewListIndexFor(
+    selectedType: HomeSectionType,
+    state: VantafynHomeUiState,
+    layout: List<HomeSectionPreference>,
+    configuredSmartRows: List<String>,
+    hasHeader: Boolean,
+): Int? {
+    if (selectedType == HomeSectionType.MediaBar) return 0.takeIf { hasHeader }
+    var index = if (hasHeader) 1 else 0
+    normalizeHomeLayoutDraft(layout)
+        .filter { it.visible && it.type != HomeSectionType.MediaBar }
+        .forEach { preference ->
+            val isRendered = when (preference.type) {
+                HomeSectionType.MediaBar -> false
+                HomeSectionType.MyMedia -> mainLibraries(state.libraries).isNotEmpty()
+                HomeSectionType.ContinueWatching -> homeSection(state, "Continue")?.items?.isNotEmpty() == true
+                HomeSectionType.RecentlyAddedMovies -> homeSection(state, "Movies")?.items?.isNotEmpty() == true
+                HomeSectionType.RecentlyAddedTv -> homeSection(state, "TV")?.items?.isNotEmpty() == true
+                HomeSectionType.LiveTvChannels -> homeSection(state, "Live TV")?.items?.isNotEmpty() == true
+                HomeSectionType.SmartRows -> smartRowsFor(state, configuredSmartRows).isNotEmpty()
+                HomeSectionType.OtherLibraries -> otherLibraries(state.libraries).isNotEmpty()
+            }
+            if (preference.type == selectedType) return if (isRendered) index else null
+            if (isRendered) index += 1
+        }
+    return null
+}
 
 @Composable
 private fun SmartRowsSection(
@@ -5638,7 +5972,7 @@ private val JellyfinLibraryItemFilter.label: String
     }
 
 private fun JellyfinLibraryItemFilter.supportsLibraryAlphabetRail(): Boolean =
-    this != JellyfinLibraryItemFilter.RecentlyAdded
+    this != JellyfinLibraryItemFilter.All && this != JellyfinLibraryItemFilter.RecentlyAdded
 
 private fun String?.isLiveTvCollection(): Boolean =
     this?.lowercase()?.replace(" ", "") in setOf("livetv", "livetvchannels")
@@ -10111,7 +10445,6 @@ private fun ProfileSettingsScreen(
                         SettingsRow("Integrations & Requests", "", onRequests, compact = true, icon = Icons.Rounded.Apps)
                     }
                     SettingsRow("Downloads", "", onDownloads, compact = true, icon = Icons.Rounded.Download)
-                    SettingsRow("Home Sections", "", onHomeLayout, compact = true, icon = Icons.Rounded.ViewAgenda)
                     SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
                     SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
                     SettingsRow("App version $VANTAFYN_APP_VERSION", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
@@ -13244,38 +13577,37 @@ private fun HomeSectionEditorCard(
         contentPadding = PaddingValues(12.dp),
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.07f))
-                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(orderLabel, color = VantafynColors.Ink, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    orderLabel,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.width(30.dp),
+                    textAlign = TextAlign.Center,
+                )
                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                     Text(preference.type.label, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(if (preference.visible) "Visible" else "Hidden", color = if (preference.visible) VantafynColors.Ink.copy(alpha = 0.72f) else VantafynColors.Muted.copy(alpha = 0.72f), style = MaterialTheme.typography.bodySmall)
+                    Text(if (preference.visible) "Visible" else "Hidden", color = if (preference.visible) VantafynColors.Ink.copy(alpha = 0.72f) else VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
                 }
-                TinyAction(
-                    if (preference.visible) "Hide" else "Show",
-                    gradientBorder = !preference.visible,
-                ) { onToggle(preference.type) }
-                Row(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically) {
-                    HomeSectionMoveButton(
-                        icon = Icons.Rounded.KeyboardArrowUp,
-                        contentDescription = "Move ${preference.type.label} up",
-                        enabled = canMoveUp,
-                        onClick = { onMove(preference.type, -1) },
-                    )
-                    HomeSectionMoveButton(
-                        icon = Icons.Rounded.KeyboardArrowDown,
-                        contentDescription = "Move ${preference.type.label} down",
-                        enabled = canMoveDown,
-                        onClick = { onMove(preference.type, 1) },
-                    )
+                HomeSectionMoveButton(
+                    icon = Icons.Rounded.KeyboardArrowUp,
+                    contentDescription = "Move ${preference.type.label} up",
+                    enabled = canMoveUp,
+                    onClick = { onMove(preference.type, -1) },
+                )
+                HomeSectionMoveButton(
+                    icon = Icons.Rounded.KeyboardArrowDown,
+                    contentDescription = "Move ${preference.type.label} down",
+                    enabled = canMoveDown,
+                    onClick = { onMove(preference.type, 1) },
+                )
+                TinyAction(if (preference.visible) "Hide" else "Show", gradientBorder = !preference.visible) {
+                    onToggle(preference.type)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -13299,12 +13631,541 @@ private fun HomeSectionEditorCard(
 }
 
 @Composable
+private fun HomeCustomizeEditorPanel(
+    state: VantafynHomeUiState,
+    draftLayout: List<HomeSectionPreference>,
+    draftSmartRows: List<String>,
+    selectedType: HomeSectionType?,
+    onSelectType: (HomeSectionType) -> Unit,
+    onLayoutChanged: (List<HomeSectionPreference>) -> Unit,
+    onEditOption: (HomeLayoutEditorTarget) -> Unit,
+    onAddRow: () -> Unit,
+    onCancel: () -> Unit,
+    onDone: () -> Unit,
+    onResetDraft: () -> Unit,
+) {
+    val reducedMotion = rememberReducedMotionPreference()
+    val haptics = LocalHapticFeedback.current
+    val editableSections = remember(draftLayout) {
+        draftLayout.sortedBy { it.order }.filter { it.type != HomeSectionType.MediaBar }
+    }
+    val selectedPreference = editableSections.firstOrNull { it.type == selectedType } ?: editableSections.firstOrNull()
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color.Black.copy(alpha = 0.50f),
+                        0.68f to Color.Black.copy(alpha = 0.34f),
+                        1.00f to Color.Transparent,
+                    ),
+                ),
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        val panelMaxHeight = maxHeight * 0.60f
+        val listMaxHeight = maxHeight * 0.22f
+        VantafynGlassSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(max = panelMaxHeight)
+                .shadow(28.dp, RoundedCornerShape(30.dp), clip = false)
+                .then(
+                    if (reducedMotion) {
+                        Modifier.border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(30.dp))
+                    } else {
+                        Modifier.vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.25.dp, durationMillis = 5600)
+                    },
+                ),
+            variant = VantafynGlassVariant.Modal,
+            cornerRadius = 30.dp,
+            contentPadding = PaddingValues(0.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color(0xFF172136).copy(alpha = 0.97f),
+                                0.58f to Color(0xFF090D18).copy(alpha = 0.95f),
+                                1.00f to Color(0xFF04060E).copy(alpha = 0.98f),
+                            ),
+                        ),
+                    ),
+            )
+            Column(
+                modifier = Modifier.padding(13.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                HomeDesignerHeader(
+                    onCancel = onCancel,
+                    onDone = onDone,
+                    onReset = onResetDraft,
+                    onAddRow = onAddRow,
+                )
+                CompactLockedHeroRow()
+                selectedPreference?.let { preference ->
+                    SelectedHomeRowInspector(
+                        preference = preference,
+                        draftSmartRows = draftSmartRows,
+                        onEditOption = { kind -> onEditOption(HomeLayoutEditorTarget(preference.type, kind)) },
+                    )
+                } ?: AddRowCompactAction(onClick = onAddRow)
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = listMaxHeight),
+                    verticalArrangement = Arrangement.spacedBy(7.dp),
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+                ) {
+                    itemsIndexed(editableSections, key = { _, item -> item.type.name }) { index, preference ->
+                        CompactHomeEditorRow(
+                            state = state,
+                            preference = preference,
+                            orderLabel = "${index + 1}".padStart(2, '0'),
+                            configuredSmartRows = draftSmartRows,
+                            selected = selectedType == preference.type,
+                            onToggle = { type ->
+                                onSelectType(type)
+                                onLayoutChanged(updateHomeDraftSection(draftLayout, type) { it.copy(visible = !it.visible) })
+                            },
+                            onSelect = onSelectType,
+                            onDragMove = { direction ->
+                                onSelectType(preference.type)
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLayoutChanged(moveHomeDraftSection(draftLayout, preference.type, direction))
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeDesignerHeader(
+    onCancel: () -> Unit,
+    onDone: () -> Unit,
+    onReset: () -> Unit,
+    onAddRow: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(
+                    "Customize Home",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "Changes preview instantly",
+                    color = VantafynColors.Muted.copy(alpha = 0.82f),
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TinyAction("Done", gradientBorder = true, compact = false) { onDone() }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AddRowCompactAction(onClick = onAddRow)
+            Spacer(Modifier.weight(1f))
+            TinyAction("Reset") { onReset() }
+            TinyAction("Cancel") { onCancel() }
+        }
+    }
+}
+
+@Composable
+private fun CompactLockedHeroRow() {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.055f))
+            .border(1.dp, Color.White.copy(alpha = 0.09f), shape)
+            .padding(horizontal = 11.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("00", color = VantafynColors.Muted, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        Icon(Icons.Rounded.Lock, contentDescription = null, tint = VantafynColors.Ink.copy(alpha = 0.62f), modifier = Modifier.size(18.dp))
+        Text("Hero", color = VantafynColors.Ink, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text("Locked", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun CompactHomeEditorRow(
+    state: VantafynHomeUiState,
+    preference: HomeSectionPreference,
+    orderLabel: String,
+    configuredSmartRows: List<String> = state.configuredSmartRows,
+    selected: Boolean = false,
+    onToggle: (HomeSectionType) -> Unit,
+    onSelect: (HomeSectionType) -> Unit = {},
+    onDragMove: ((Int) -> Unit)? = null,
+) {
+    val reducedMotion = rememberReducedMotionPreference()
+    val density = LocalDensity.current
+    val slotHeightPx = with(density) { 58.dp.toPx() }
+    var dragY by remember(preference.type) { mutableFloatStateOf(0f) }
+    val lift by animateFloatAsState(
+        targetValue = if (selected && !reducedMotion) 1.008f else 1f,
+        animationSpec = if (reducedMotion) snap() else spring(stiffness = 520f, dampingRatio = 0.82f),
+        label = "homeEditorLift",
+    )
+    val shape = RoundedCornerShape(18.dp)
+    val cardModifier = Modifier
+        .fillMaxWidth()
+        .animateContentSize(animationSpec = if (reducedMotion) snap() else tween(260, easing = FastOutSlowInEasing))
+        .graphicsLayer {
+            scaleX = 1f
+            scaleY = lift
+            translationY = if (reducedMotion) 0f else dragY.coerceIn(-12f, 12f)
+            shadowElevation = if (selected) 8f else 0f
+        }
+        .then(
+            if (selected) {
+                if (reducedMotion) {
+                    Modifier.border(1.dp, VantafynColors.Secondary.copy(alpha = 0.40f), shape)
+                } else {
+                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.05.dp, durationMillis = 5200)
+                }
+            } else {
+                Modifier.border(1.dp, Color.White.copy(alpha = 0.09f), shape)
+            },
+        )
+    Row(
+        modifier = cardModifier
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = if (selected) 0.105f else 0.055f),
+                        Color(0xFF0B1020).copy(alpha = if (selected) 0.74f else 0.62f),
+                    ),
+                ),
+            )
+            .clickable { onSelect(preference.type) }
+            .padding(horizontal = 9.dp, vertical = 7.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            orderLabel,
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.width(24.dp),
+            textAlign = TextAlign.Center,
+        )
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .pointerInput(preference.type, onDragMove) {
+                    if (onDragMove == null) return@pointerInput
+                    detectDragGestures(
+                        onDragEnd = { dragY = 0f },
+                        onDragCancel = { dragY = 0f },
+                    ) { change, dragAmount ->
+                        change.consume()
+                        dragY += dragAmount.y
+                        val direction = when {
+                            dragY > slotHeightPx * 0.58f -> 1
+                            dragY < -slotHeightPx * 0.58f -> -1
+                            else -> 0
+                        }
+                        if (direction != 0) {
+                            onDragMove(direction)
+                            dragY = 0f
+                        }
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Rounded.DragIndicator, contentDescription = "Drag ${preference.type.label}", tint = VantafynColors.Ink.copy(alpha = 0.70f), modifier = Modifier.size(20.dp))
+        }
+        HomeSectionTinyPreview(
+            state = state,
+            preference = preference,
+            configuredSmartRows = configuredSmartRows,
+        )
+        Text(
+            preference.type.label,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Text(
+            if (preference.visible) "Visible" else "Hidden",
+            color = if (preference.visible) VantafynColors.Secondary.copy(alpha = 0.95f) else VantafynColors.Muted,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = if (preference.visible) 0.080f else 0.045f))
+                .clickable { onToggle(preference.type) }
+                .padding(horizontal = 9.dp, vertical = 5.dp)
+                .widthIn(min = 42.dp),
+            textAlign = TextAlign.Center,
+        )
+        Icon(
+            imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.Tune,
+            contentDescription = "Customize ${preference.type.label}",
+            tint = if (selected) VantafynColors.Secondary.copy(alpha = 0.95f) else VantafynColors.Ink.copy(alpha = 0.66f),
+            modifier = Modifier.size(22.dp),
+        )
+    }
+}
+
+@Composable
+private fun HomeSectionTinyPreview(
+    state: VantafynHomeUiState,
+    preference: HomeSectionPreference,
+    configuredSmartRows: List<String>,
+) {
+    val images = previewImagesFor(state, preference.type, configuredSmartRows)
+    Box(
+        modifier = Modifier
+            .width(44.dp)
+            .height(30.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color.White.copy(alpha = 0.06f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp)),
+    ) {
+        images.take(2).forEachIndexed { index, imageUrl ->
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationX = index * 14f
+                        alpha = 1f - index * 0.34f
+                        scaleX = 1f - index * 0.08f
+                        scaleY = 1f - index * 0.08f
+                    },
+                contentScale = ContentScale.Crop,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SelectedHomeRowInspector(
+    preference: HomeSectionPreference,
+    draftSmartRows: List<String>,
+    onEditOption: (HomeLayoutOptionKind) -> Unit,
+) {
+    val shape = RoundedCornerShape(20.dp)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color.Black.copy(alpha = 0.24f))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text("Card layout", color = VantafynColors.Ink, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(preference.type.label, color = VantafynColors.Muted.copy(alpha = 0.78f), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            if (preference.type == HomeSectionType.SmartRows) {
+                Text("${draftSmartRows.size} rows", color = VantafynColors.Ink, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            FocusedHomeStyleButton("Art", preference.artworkType.shortLabel(), Modifier.weight(1f)) { onEditOption(HomeLayoutOptionKind.Artwork) }
+            FocusedHomeStyleButton("Shape", preference.cardShape.shortLabel(), Modifier.weight(1f)) { onEditOption(HomeLayoutOptionKind.Shape) }
+            FocusedHomeStyleButton("Size", preference.cardSize.shortLabel(), Modifier.weight(1f)) { onEditOption(HomeLayoutOptionKind.Size) }
+            FocusedHomeStyleButton("Spacing", preference.spacing.shortLabel(), Modifier.weight(1f)) { onEditOption(HomeLayoutOptionKind.Spacing) }
+        }
+    }
+}
+
+@Composable
+private fun AddRowCompactAction(onClick: () -> Unit) {
+    val shape = RoundedCornerShape(999.dp)
+    Text(
+        "+ Add Row",
+        color = VantafynColors.Ink,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        modifier = Modifier
+            .vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.05.dp, durationMillis = 5200)
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.075f))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 7.dp),
+    )
+}
+
+@Composable
+private fun FocusedHomeStyleButton(label: String, value: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(15.dp)
+    Column(
+        modifier = modifier
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.060f))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), shape)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 7.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        Text(label, color = VantafynColors.Muted.copy(alpha = 0.78f), style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(value, color = VantafynColors.Ink, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+@Composable
+private fun HomeAddRowsDialog(
+    state: VantafynHomeUiState,
+    selectedRows: List<String>,
+    onDismiss: () -> Unit,
+    onApply: (List<String>) -> Unit,
+) {
+    var draftSelection by remember(selectedRows) { mutableStateOf(selectedRows) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(30.dp),
+        modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.2.dp, durationMillis = 5600),
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Add Rows", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                Text("Choose smart shelves for Home.", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                supportedSmartRows.forEach { row ->
+                    val selected = row in draftSelection
+                    HomeSmartRowChoiceTile(
+                        title = row,
+                        description = smartRowDescription(row),
+                        previewUrls = state.home?.sections.orEmpty()
+                            .firstOrNull { it.title == row }
+                            ?.items
+                            .orEmpty()
+                            .mapNotNull { it.backdropUrl ?: it.imageUrl }
+                            .take(2),
+                        selected = selected,
+                        onClick = {
+                            draftSelection = if (selected) {
+                                draftSelection - row
+                            } else {
+                                (draftSelection + row).filter { it in supportedSmartRows }.distinct()
+                            }
+                        },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TinyAction("Add ${draftSelection.size} Rows", gradientBorder = true, compact = false) {
+                onApply(draftSelection)
+            }
+        },
+        dismissButton = {
+            TinyAction("Cancel", compact = false) { onDismiss() }
+        },
+    )
+}
+
+@Composable
+private fun HomeSmartRowChoiceTile(
+    title: String,
+    description: String,
+    previewUrls: List<String>,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (selected) {
+                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.05.dp, durationMillis = 5200)
+                } else {
+                    Modifier.border(1.dp, Color.White.copy(alpha = 0.08f), shape)
+                }
+            )
+            .clip(shape)
+            .background(Color.White.copy(alpha = if (selected) 0.09f else 0.045f))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .width(48.dp)
+                .height(34.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.055f)),
+        ) {
+            if (previewUrls.isEmpty()) {
+                Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = VantafynColors.Ink.copy(alpha = 0.62f), modifier = Modifier.align(Alignment.Center).size(18.dp))
+            } else {
+                previewUrls.forEachIndexed { index, url ->
+                    AsyncImage(
+                        model = url,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                translationX = index * 14f
+                                alpha = 1f - index * 0.28f
+                            },
+                        contentScale = ContentScale.Crop,
+                    )
+                }
+            }
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(description, color = VantafynColors.Muted.copy(alpha = 0.82f), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (selected) {
+            Icon(Icons.Rounded.Check, contentDescription = null, tint = VantafynColors.Ink, modifier = Modifier.size(20.dp))
+        }
+    }
+}
+
+@Composable
 private fun HomeSectionPreview(
     state: VantafynHomeUiState,
     preference: HomeSectionPreference,
+    configuredSmartRows: List<String> = state.configuredSmartRows,
     modifier: Modifier = Modifier,
 ) {
-    val images = previewImagesFor(state, preference.type)
+    val images = previewImagesFor(state, preference.type, configuredSmartRows)
     val isPoster = preference.artworkType == VantafynArtworkType.PrimaryPoster ||
         preference.type == HomeSectionType.RecentlyAddedMovies
     val corner = preference.cardCorner()
@@ -13461,6 +14322,57 @@ private enum class HomeLayoutOptionKind(val title: String) {
 private fun cycleDistance(currentOrdinal: Int, targetOrdinal: Int, count: Int): Int =
     (targetOrdinal - currentOrdinal + count) % count
 
+private fun normalizeHomeLayoutDraft(layout: List<HomeSectionPreference>): List<HomeSectionPreference> {
+    val fixed = layout.firstOrNull { it.type == HomeSectionType.MediaBar }
+        ?: defaultHomeLayout().first { it.type == HomeSectionType.MediaBar }
+    val editable = layout
+        .filter { it.type != HomeSectionType.MediaBar }
+        .distinctBy { it.type }
+        .sortedBy { it.order }
+    val missing = defaultHomeLayout()
+        .filter { it.type != HomeSectionType.MediaBar }
+        .filter { default -> editable.none { it.type == default.type } }
+    return listOf(fixed.copy(visible = true, order = 0)) +
+        (editable + missing).mapIndexed { index, preference -> preference.copy(order = index + 1) }
+}
+
+private fun updateHomeDraftSection(
+    layout: List<HomeSectionPreference>,
+    type: HomeSectionType,
+    transform: (HomeSectionPreference) -> HomeSectionPreference,
+): List<HomeSectionPreference> =
+    normalizeHomeLayoutDraft(layout.map { preference ->
+        if (preference.type == type && type != HomeSectionType.MediaBar) transform(preference) else preference
+    })
+
+private fun moveHomeDraftSection(
+    layout: List<HomeSectionPreference>,
+    type: HomeSectionType,
+    direction: Int,
+): List<HomeSectionPreference> {
+    if (type == HomeSectionType.MediaBar || direction == 0) return normalizeHomeLayoutDraft(layout)
+    val normalized = normalizeHomeLayoutDraft(layout)
+    val fixed = normalized.first { it.type == HomeSectionType.MediaBar }
+    val editable = normalized.filter { it.type != HomeSectionType.MediaBar }.sortedBy { it.order }.toMutableList()
+    val index = editable.indexOfFirst { it.type == type }
+    val target = (index + direction).coerceIn(0, editable.lastIndex)
+    if (index < 0 || index == target) return normalized
+    val item = editable.removeAt(index)
+    editable.add(target, item)
+    return listOf(fixed.copy(visible = true, order = 0)) +
+        editable.mapIndexed { order, preference -> preference.copy(order = order + 1) }
+}
+
+private fun smartRowDescription(row: String): String =
+    when {
+        row.contains("Continue", ignoreCase = true) -> "Continue unfinished movies and episodes."
+        row.contains("Next", ignoreCase = true) -> "Episodes ready for the next watch."
+        row.contains("Recently", ignoreCase = true) -> "Fresh titles from your Jellyfin server."
+        row.contains("Movie", ignoreCase = true) -> "A movie-focused Home shelf."
+        row.contains("TV", ignoreCase = true) || row.contains("Series", ignoreCase = true) -> "A series-focused Home shelf."
+        else -> "A smart shelf powered by Jellyfin."
+    }
+
 private fun previewPosterWidth(size: VantafynCardSize) =
     when (size) {
         VantafynCardSize.Small -> 44.dp
@@ -13485,7 +14397,7 @@ private fun TinyAction(
     Text(
         text,
         color = VantafynColors.Ink,
-        style = MaterialTheme.typography.bodyLarge,
+        style = if (compact) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleSmall,
         fontWeight = FontWeight.SemiBold,
         textAlign = TextAlign.Center,
         maxLines = 1,
@@ -13494,7 +14406,7 @@ private fun TinyAction(
             .clip(shape)
             .background(Color.White.copy(alpha = 0.065f))
             .clickable(onClick = onClick)
-            .padding(horizontal = if (compact) 10.dp else 12.dp, vertical = if (compact) 7.dp else 9.dp),
+            .padding(horizontal = if (compact) 10.dp else 14.dp, vertical = if (compact) 6.dp else 8.dp),
     )
 }
 
@@ -16427,6 +17339,8 @@ private data class MediaActionTarget(
     val subtitle: String?,
     val itemType: String?,
     val inMyList: Boolean = false,
+    val allowHomeCustomize: Boolean = false,
+    val allowDownload: Boolean = true,
 )
 
 @Composable
@@ -16439,6 +17353,7 @@ private fun MediaContextMenu(
     onMarkWatched: () -> Unit,
     onMarkUnwatched: () -> Unit,
     onDownload: () -> Unit,
+    onCustomizeHome: (() -> Unit)? = null,
 ) {
     val supportsMyList = target.itemType.supportsMyListAction()
     AlertDialog(
@@ -16455,6 +17370,9 @@ private fun MediaContextMenu(
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                onCustomizeHome?.let { action ->
+                    ContextAction("✦", "Customize Home", action)
+                }
                 ContextAction("ⓘ", "View details", onViewDetails)
                 if (supportsMyList) {
                     if (target.inMyList) {
@@ -16467,7 +17385,9 @@ private fun MediaContextMenu(
                     ContextAction("✓", "Mark watched", onMarkWatched)
                     ContextAction("↺", "Mark unwatched", onMarkUnwatched)
                 }
-                ContextAction("↓", "Save offline", onDownload)
+                if (target.allowDownload) {
+                    ContextAction("↓", "Save offline", onDownload)
+                }
             }
         },
     )
@@ -16502,6 +17422,16 @@ private fun JellyfinMediaItem.toMediaActionTarget(inMyList: Boolean = false): Me
 
 private fun JellyfinSearchResult.toMediaActionTarget(): MediaActionTarget =
     MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite)
+
+private fun JellyfinHeroMediaItem.toMediaActionTarget(allowHomeCustomize: Boolean = false): MediaActionTarget =
+    MediaActionTarget(
+        id = id,
+        title = title,
+        subtitle = subtitle ?: year?.toString(),
+        itemType = "Media",
+        allowHomeCustomize = allowHomeCustomize,
+        allowDownload = false,
+    )
 
 private fun MobileDestination.bottomNavRoot(previous: MobileDestination): MobileDestination =
     when (this) {

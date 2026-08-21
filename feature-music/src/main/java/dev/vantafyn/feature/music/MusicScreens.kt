@@ -90,6 +90,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -825,6 +826,18 @@ private fun MusicTrackList(
     onChoosePlaylist: (JellyfinMusicTrack) -> Unit = {},
     onLongPress: (JellyfinMusicTrack) -> Unit = {},
 ) {
+    val trackRevealKey = "${page?.startIndex ?: 0}:${page?.totalItems ?: tracks.size}:${tracks.size}:${tracks.firstOrNull()?.id}:${tracks.lastOrNull()?.id}"
+    var revealTrackRows by remember(trackRevealKey) { mutableStateOf(tracks.isNotEmpty()) }
+    LaunchedEffect(trackRevealKey) {
+        if (tracks.isEmpty()) {
+            revealTrackRows = false
+            return@LaunchedEffect
+        }
+        revealTrackRows = true
+        delay(1_550L)
+        revealTrackRows = false
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (title.isNotBlank()) Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         if (page != null && page.totalItems > page.pageSize) {
@@ -835,40 +848,44 @@ private fun MusicTrackList(
                 onNext = onNextPage,
             )
         }
-        tracks.forEach { track ->
-            VantafynGlassCard(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .combinedClickable(onClick = { onTrack(track) }, onLongClick = { onLongPress(track) }),
-                cornerRadius = 18.dp,
-                contentPadding = PaddingValues(10.dp),
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    MusicArt(track.artworkUrl, Modifier.size(52.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(track.title, color = VantafynColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
-                    if (pendingTrackId == track.id) {
-                        VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
-                    }
-                    if (playlists.isNotEmpty()) {
-                        Box(
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .clickable { onChoosePlaylist(track) },
-                            contentAlignment = Alignment.Center,
+        tracks.forEachIndexed { index, track ->
+            key(track.id) {
+                MusicContentReveal(index = index, animate = revealTrackRows, revealKey = trackRevealKey) {
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(onClick = { onTrack(track) }, onLongClick = { onLongPress(track) }),
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(10.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Text(
-                                "+",
-                                color = VantafynColors.Ink,
-                                fontWeight = FontWeight.Bold,
-                            )
+                            MusicArt(track.artworkUrl, Modifier.size(52.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(track.title, color = VantafynColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
+                            Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
+                            if (pendingTrackId == track.id) {
+                                VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+                            }
+                            if (playlists.isNotEmpty()) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .clickable { onChoosePlaylist(track) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "+",
+                                        color = VantafynColors.Ink,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
                         }
                     }
                 }
