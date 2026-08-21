@@ -46,6 +46,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val playbackController = MusicPlaybackController.get(application)
     private var session: JellyfinSession? = null
     private var lyricsJob: Job? = null
+    private var downloadStatusJob: Job? = null
     private val playbackInfoByTrack = mutableMapOf<UUID, JellyfinPlaybackInfo>()
     private var reportedTrackId: UUID? = null
     private var lastProgressReportMs: Long = 0L
@@ -203,7 +204,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             isMusicPageLoading = false,
                         )
                     }
-                    checkPlaylistDownloadStatus(activeSession, album.id.toString(), result.value.totalItems)
+                    observeAlbumDownloadStatus(activeSession, album.id, result.value.totalItems)
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(isMusicPageLoading = false, errorMessage = result.message)
@@ -231,7 +232,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             isMusicPageLoading = false,
                         )
                     }
-                    checkPlaylistDownloadStatus(activeSession, playlist.id.toString(), result.value.totalItems)
+                    observePlaylistDownloadStatus(activeSession, playlist.id, result.value.totalItems)
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(isMusicPageLoading = false, errorMessage = result.message)
@@ -240,14 +241,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun checkPlaylistDownloadStatus(
-        session: dev.vantafyn.core.jellyfin.JellyfinSession,
-        playlistId: String,
+    private fun observePlaylistDownloadStatus(
+        session: JellyfinSession,
+        playlistId: UUID,
         trackCount: Int,
     ) {
-        val uuid = runCatching { UUID.fromString(playlistId) }.getOrNull() ?: return
-        val downloaded = offlineDownloadManager.isPlaylistFullyDownloaded(session, uuid, trackCount)
-        _state.update { it.copy(isPlaylistDownloaded = downloaded) }
+        downloadStatusJob?.cancel()
+        downloadStatusJob = viewModelScope.launch {
+            _state.update {
+                it.copy(isPlaylistDownloaded = offlineDownloadManager.isPlaylistFullyDownloaded(session, playlistId, trackCount))
+            }
+            offlineDownloadManager.observePlaylistFullyDownloaded(session, playlistId, trackCount)
+                .collect { downloaded ->
+                    _state.update { it.copy(isPlaylistDownloaded = downloaded) }
+                }
+        }
+    }
+
+    private fun observeAlbumDownloadStatus(
+        session: JellyfinSession,
+        albumId: UUID,
+        trackCount: Int,
+    ) {
+        downloadStatusJob?.cancel()
+        downloadStatusJob = viewModelScope.launch {
+            _state.update {
+                it.copy(isPlaylistDownloaded = offlineDownloadManager.isAlbumFullyDownloaded(session, albumId, trackCount))
+            }
+            offlineDownloadManager.observeAlbumFullyDownloaded(session, albumId, trackCount)
+                .collect { downloaded ->
+                    _state.update { it.copy(isPlaylistDownloaded = downloaded) }
+                }
+        }
     }
 
     fun openArtist(artist: JellyfinMusicArtist) {
@@ -378,6 +403,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     fun previous() = playbackController.previous()
     fun playQueueIndex(index: Int) = playbackController.playQueueIndex(index)
     fun seekTo(positionMs: Long) = playbackController.seekTo(positionMs)
+    fun currentPlaybackPositionMs(): Long = playbackController.currentPositionMs()
     fun toggleShuffle() = playbackController.toggleShuffle()
     fun cycleRepeat() = playbackController.cycleRepeatMode()
     fun playNext(track: JellyfinMusicTrack) {
@@ -405,8 +431,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val activeSession = session ?: return
         viewModelScope.launch {
             _state.update { it.copy(errorMessage = null, message = null) }
-            when (val result = offlineDownloadManager.queueMusicAlbum(activeSession, album, tracks, requireWifi = readDownloadWifiOnlyDefault())) {
-                is JellyfinResult.Success -> _state.update { it.copy(message = "${result.value} tracks queued") }
+            val downloadTracks = when (val result = musicRepository.getAlbumTracks(activeSession, album.id)) {
+                is JellyfinResult.Success -> result.value.ifEmpty { tracks }
+                is JellyfinResult.Failure -> tracks
+            }
+            when (val result = offlineDownloadManager.queueMusicAlbum(activeSession, album, downloadTracks, requireWifi = readDownloadWifiOnlyDefault())) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(message = "${result.value} tracks queued") }
+                    observeAlbumDownloadStatus(activeSession, album.id, downloadTracks.size)
+                }
                 is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
             }
         }
@@ -420,16 +453,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             _state.update { it.copy(errorMessage = null, message = null) }
+            val downloadTracks = when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
+                is JellyfinResult.Success -> result.value.ifEmpty { tracks }
+                is JellyfinResult.Failure -> tracks
+            }
             when (
                 val result = offlineDownloadManager.queueMusicPlaylist(
                     session = activeSession,
                     playlist = playlist,
-                    tracks = tracks,
+                    tracks = downloadTracks,
                     requireWifi = readDownloadWifiOnlyDefault(),
                 )
             ) {
                 is JellyfinResult.Success -> _state.update {
                     it.copy(message = "${result.value} tracks queued as ${playlist.name}", errorMessage = null)
+                }.also {
+                    observePlaylistDownloadStatus(activeSession, playlist.id, downloadTracks.size)
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(message = null, errorMessage = result.message)
@@ -685,7 +724,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             is VantafynMusicPlaybackEvent.TrackChanged -> {
                 event.previousTrack?.let { reportStopped(it, event.previousPositionMs, event.reason) }
                 val currentTrack = event.currentTrack
-                if (_state.value.showLyricsScreen && currentTrack != null) {
+                if ((_state.value.showLyricsScreen || popupLyricsActive) && currentTrack != null) {
                     loadLyrics(currentTrack.id)
                 } else {
                     _state.update { it.copy(lyricsTrackId = null, lyrics = null, isLyricsLoading = false) }

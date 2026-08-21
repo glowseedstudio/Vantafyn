@@ -92,6 +92,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -165,6 +166,7 @@ private val VantafynModalContainerColor: Color
     get() = VantafynColors.Graphite.copy(alpha = 0.96f)
 
 private val MusicBottomSheetRailClearance = 112.dp
+private const val SyncedLyricsTickerIntervalMs = 250L
 
 private fun MusicScreenState.scrollResetKey(): String =
     when (this) {
@@ -2100,6 +2102,8 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
                 LyricsBody(
                     renderState = renderState,
                     playbackMs = state.playback.positionMs,
+                    isPlaying = state.playback.isPlaying,
+                    currentPositionMs = viewModel::currentPlaybackPositionMs,
                     onSeek = viewModel::seekTo,
                 )
             }
@@ -2118,6 +2122,8 @@ private data class LyricsRenderState(
 private fun LyricsBody(
     renderState: LyricsRenderState,
     playbackMs: Long,
+    isPlaying: Boolean,
+    currentPositionMs: () -> Long,
     onSeek: (Long) -> Unit,
 ) {
     when {
@@ -2131,8 +2137,11 @@ private fun LyricsBody(
         }
         renderState.lyrics.isSynced -> {
             SyncedLyricsView(
+                trackId = renderState.trackId,
                 lines = renderState.lyrics.syncedLines,
                 playbackMs = playbackMs,
+                isPlaying = isPlaying,
+                currentPositionMs = currentPositionMs,
                 onSeek = onSeek,
                 modifier = Modifier.fillMaxSize(),
             )
@@ -2148,27 +2157,69 @@ private fun LyricsBody(
 
 @Composable
 private fun SyncedLyricsView(
+    trackId: java.util.UUID,
     lines: List<JellyfinLyricLine>,
     playbackMs: Long,
+    isPlaying: Boolean,
+    currentPositionMs: () -> Long,
+    onSeek: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    key(trackId, lines) {
+        SyncedLyricsList(
+            lines = lines,
+            playbackMs = playbackMs,
+            isPlaying = isPlaying,
+            currentPositionMs = currentPositionMs,
+            onSeek = onSeek,
+            modifier = modifier,
+        )
+    }
+}
+
+@Composable
+private fun SyncedLyricsList(
+    lines: List<JellyfinLyricLine>,
+    playbackMs: Long,
+    isPlaying: Boolean,
+    currentPositionMs: () -> Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val activeLineLeadMs = 120L
-    val activeIndex = remember(lines, playbackMs) { lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0) }
+    var livePlaybackMs by remember(lines) { mutableLongStateOf(playbackMs) }
+    val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0) }
     var suppressAutoFollowUntil by remember(lines) { mutableStateOf(0L) }
     var programmaticScroll by remember(lines) { mutableStateOf(false) }
     var lastPlaybackMs by remember(lines) { mutableStateOf(-1L) }
     var pendingRewindTicks by remember(lines) { mutableStateOf(0) }
 
+    LaunchedEffect(playbackMs, isPlaying, lines) {
+        if (!isPlaying || abs(playbackMs - livePlaybackMs) > 1_200L) {
+            livePlaybackMs = playbackMs
+        }
+    }
+
+    LaunchedEffect(lines, isPlaying, lifecycleOwner) {
+        if (lines.isEmpty() || !isPlaying) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                livePlaybackMs = currentPositionMs()
+                delay(SyncedLyricsTickerIntervalMs)
+            }
+        }
+    }
+
     LaunchedEffect(lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        delay(80L)
-        val targetIndex = lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0)
+        livePlaybackMs = currentPositionMs()
+        val targetIndex = lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0)
         programmaticScroll = true
         listState.scrollToItem(targetIndex.coerceAtMost(lines.lastIndex))
         programmaticScroll = false
-        lastPlaybackMs = playbackMs
+        lastPlaybackMs = livePlaybackMs
     }
 
     LaunchedEffect(listState, lines) {
@@ -2179,10 +2230,10 @@ private fun SyncedLyricsView(
         }
     }
 
-    LaunchedEffect(activeIndex, playbackMs, lines) {
+    LaunchedEffect(activeIndex, livePlaybackMs, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - playbackMs else 0L
-        val rewindCandidate = lastPlaybackMs >= 0L && playbackMs + 350L < lastPlaybackMs
+        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - livePlaybackMs else 0L
+        val rewindCandidate = lastPlaybackMs >= 0L && livePlaybackMs + 350L < lastPlaybackMs
         val rewound = when {
             !rewindCandidate -> {
                 pendingRewindTicks = 0
@@ -2202,13 +2253,19 @@ private fun SyncedLyricsView(
                 }
             }
         }
-        lastPlaybackMs = playbackMs
+        val largePositionJump = lastPlaybackMs >= 0L && kotlin.math.abs(livePlaybackMs - lastPlaybackMs) >= 5_000L
+        lastPlaybackMs = livePlaybackMs
         val suppressAutoFollow = System.currentTimeMillis() < suppressAutoFollowUntil
         if (rewound && !suppressAutoFollow) suppressAutoFollowUntil = 0L
         if (!suppressAutoFollow) {
             programmaticScroll = true
             try {
-                listState.animateScrollToItem(activeIndex.coerceAtMost(lines.lastIndex))
+                val target = activeIndex.coerceAtMost(lines.lastIndex)
+                if (largePositionJump || rewound) {
+                    listState.scrollToItem(target)
+                } else {
+                    listState.animateScrollToItem(target)
+                }
             } finally {
                 programmaticScroll = false
             }

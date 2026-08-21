@@ -94,6 +94,8 @@ import dev.vantafyn.core.media.VantafynSyncPlaybackCommand
 import dev.vantafyn.core.media.VantafynMusicTrack
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynSubtitleTrack
+import dev.vantafyn.core.ui.VantafynThemeController
+import dev.vantafyn.core.ui.VantafynThemePreset
 import dev.vantafyn.core.integrations.IntegrationResult
 import dev.vantafyn.core.ombi.OmbiRepository
 import java.io.File
@@ -163,6 +165,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(null),
             downloadWifiOnlyDefault = appPreferences.getBoolean(KEY_DOWNLOAD_WIFI_ONLY_DEFAULT, true),
             adminSpeedLimitMbps = appPreferences.getInt(KEY_ADMIN_SPEED_LIMIT_MBPS, 0).takeIf { it > 0 },
+            selectedTheme = VantafynThemeController.readTheme(application),
         ),
     )
     val state: StateFlow<VantafynHomeUiState> = _state.asStateFlow()
@@ -3838,6 +3841,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun selectTheme(theme: VantafynThemePreset) {
+        VantafynThemeController.selectTheme(getApplication(), theme)
+        _state.update { state -> state.copy(selectedTheme = theme) }
+    }
+
     fun selectVideoPlayerPreference(preference: VantafynVideoPlayerPreference) {
         _state.update { state ->
             val editor = appPreferences.edit().putString(KEY_VIDEO_PLAYER_PREFERENCE, preference.name)
@@ -4351,6 +4359,7 @@ data class VantafynHomeUiState(
     val themeMusicVolume: ThemeMusicVolume = ThemeMusicVolume.Soft,
     val bottomRailAccent: BottomRailAccent = BottomRailAccent.Off,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
+    val selectedTheme: VantafynThemePreset = VantafynThemePreset.Default,
     val videoPlayerPreference: VantafynVideoPlayerPreference = VantafynVideoPlayerPreference.Vantafyn,
     val mediaSegmentBehaviors: Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior> = defaultMediaSegmentBehaviors(),
     val maxStreamingBitrateMbps: Int? = null,

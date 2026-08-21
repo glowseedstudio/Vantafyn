@@ -1,11 +1,13 @@
 package dev.vantafyn.core.downloads
 
 import android.content.Context
+import androidx.lifecycle.Observer
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
@@ -17,6 +19,11 @@ import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.util.UUID
 
 class OfflineDownloadManager(
@@ -316,6 +323,11 @@ class OfflineDownloadManager(
         val request = OneTimeWorkRequestBuilder<OfflineDownloadWorker>()
             .setInputData(Data.Builder().putString(OfflineDownloadWorker.KEY_RECORD_ID, record.id).build())
             .setConstraints(constraints)
+            .addTag(recordDownloadTag(record.id))
+            .apply {
+                record.parentId?.takeIf { it.isNotBlank() }?.let { addTag(parentDownloadTag(it)) }
+                record.albumId?.takeIf { it.isNotBlank() }?.let { addTag(albumDownloadTag(it)) }
+            }
             .build()
         workManager.enqueueUniqueWork(workName(record.id), ExistingWorkPolicy.REPLACE, request)
     }
@@ -424,7 +436,56 @@ class OfflineDownloadManager(
         }
         return completedCount >= expectedTrackCount
     }
+
+    suspend fun isAlbumFullyDownloaded(
+        session: JellyfinSession,
+        albumId: UUID,
+        expectedTrackCount: Int,
+    ): Boolean {
+        if (expectedTrackCount <= 0) return false
+        val all = repository.listForUser(
+            serverId = session.server.localId,
+            userId = session.user.id.toString(),
+        )
+        val completedCount = all.count { record ->
+            record.albumId == albumId.toString() && record.state == DownloadState.Completed
+        }
+        return completedCount >= expectedTrackCount
+    }
+
+    fun observePlaylistFullyDownloaded(
+        session: JellyfinSession,
+        playlistId: UUID,
+        expectedTrackCount: Int,
+    ): Flow<Boolean> =
+        workManager.workInfosByTagFlow(parentDownloadTag(playlistId.toString()))
+            .map { isPlaylistFullyDownloaded(session, playlistId, expectedTrackCount) }
+            .distinctUntilChanged()
+
+    fun observeAlbumFullyDownloaded(
+        session: JellyfinSession,
+        albumId: UUID,
+        expectedTrackCount: Int,
+    ): Flow<Boolean> =
+        workManager.workInfosByTagFlow(albumDownloadTag(albumId.toString()))
+            .map { isAlbumFullyDownloaded(session, albumId, expectedTrackCount) }
+            .distinctUntilChanged()
 }
+
+private fun WorkManager.workInfosByTagFlow(tag: String): Flow<List<WorkInfo>> = callbackFlow {
+    val liveData = getWorkInfosByTagLiveData(tag)
+    val observer = Observer<List<WorkInfo>> { workInfos ->
+        trySend(workInfos.orEmpty())
+    }
+    liveData.observeForever(observer)
+    awaitClose { liveData.removeObserver(observer) }
+}
+
+private fun recordDownloadTag(recordId: String): String = "vantafyn-download-record-$recordId"
+
+private fun parentDownloadTag(parentId: String): String = "vantafyn-download-parent-$parentId"
+
+private fun albumDownloadTag(albumId: String): String = "vantafyn-download-album-$albumId"
 
 private fun JellyfinMediaDetail.downloadMediaType(): DownloadMediaType? =
     when (itemType?.lowercase()) {

@@ -113,12 +113,8 @@ enum class VantafynPermissionStatus {
 }
 
 object VantafynGradients {
-    val AccentColors = listOf(
-        Color(0xFF31D7FF),
-        Color(0xFF5B8CFF),
-        Color(0xFF8B5CFF),
-        Color(0xFFC05CFF),
-    )
+    val AccentColors: List<Color>
+        get() = VantafynThemeController.tokens.accentColors
 
     fun accentHorizontal(): Brush = Brush.horizontalGradient(AccentColors)
 
@@ -137,36 +133,21 @@ object VantafynGradients {
 fun VantafynNavDockBrush(enabled: Boolean = true): Brush {
     val alpha = if (enabled) 1f else 0.54f
     return Brush.linearGradient(
-        listOf(
-            Color(0xFF101525).copy(alpha = 0.91f * alpha),
-            Color(0xFF141A2B).copy(alpha = 0.88f * alpha),
-            Color(0xFF0B1020).copy(alpha = 0.93f * alpha),
-        ),
+        VantafynThemeController.tokens.navDockColors.map { it.copy(alpha = it.alpha * alpha) },
     )
 }
 
 fun VantafynNavDockBorder(enabled: Boolean = true): Brush {
     val alpha = if (enabled) 1f else 0.54f
     return Brush.linearGradient(
-        listOf(
-            Color.White.copy(alpha = 0.16f * alpha),
-            Color(0xFF5B8CFF).copy(alpha = 0.12f * alpha),
-            Color(0xFF8B5CFF).copy(alpha = 0.10f * alpha),
-            Color.White.copy(alpha = 0.08f * alpha),
-        ),
+        VantafynThemeController.tokens.navDockBorderColors.map { it.copy(alpha = it.alpha * alpha) },
     )
 }
 
 fun VantafynNavSelectedBrush(): Brush = VantafynGradients.accentHorizontal()
 
 fun VantafynBottomScrim(): Brush =
-    Brush.verticalGradient(
-        listOf(
-            Color.Transparent,
-            Color(0xFF050812).copy(alpha = 0.28f),
-            Color(0xFF050812).copy(alpha = 0.56f),
-        ),
-    )
+    Brush.verticalGradient(VantafynThemeController.tokens.bottomScrimColors)
 
 data class VantafynPermissionUiState(
     val status: VantafynPermissionStatus = VantafynPermissionStatus.Unsupported,
@@ -186,14 +167,14 @@ data class VantafynPermissionUiState(
 }
 
 object VantafynGlassPalette {
-    val NavyCore = Color(0xFF10182A)
-    val NavyLift = Color(0xFF17233B)
-    val IndigoLift = Color(0xFF252A4F)
-    val VioletLift = Color(0xFF332456)
-    val CyanSpecular = Color(0xFF67DCFF)
-    val BlueSpecular = Color(0xFF5B8CFF)
-    val VioletSpecular = Color(0xFF9B62FF)
-    val EdgeWhite = Color(0xFFF3F8FF)
+    val NavyCore: Color get() = VantafynThemeController.tokens.glassNavyCore
+    val NavyLift: Color get() = VantafynThemeController.tokens.glassNavyLift
+    val IndigoLift: Color get() = VantafynThemeController.tokens.glassIndigoLift
+    val VioletLift: Color get() = VantafynThemeController.tokens.glassVioletLift
+    val CyanSpecular: Color get() = VantafynThemeController.tokens.glassCyanSpecular
+    val BlueSpecular: Color get() = VantafynThemeController.tokens.glassBlueSpecular
+    val VioletSpecular: Color get() = VantafynThemeController.tokens.glassVioletSpecular
+    val EdgeWhite: Color get() = VantafynThemeController.tokens.glassEdgeWhite
 }
 
 object VantafynGlassElevation {
@@ -414,9 +395,9 @@ fun VantafynGlassSurface(
                     .background(
                         Brush.linearGradient(
                             listOf(
-                                Color(0xFF31D7FF).copy(alpha = 0.035f),
+                                VantafynGradients.AccentColors.first().copy(alpha = 0.035f),
                                 Color.Transparent,
-                                Color(0xFF8B5CFF).copy(alpha = 0.040f),
+                                VantafynGradients.AccentColors.last().copy(alpha = 0.040f),
                             ),
                         ),
                     ),

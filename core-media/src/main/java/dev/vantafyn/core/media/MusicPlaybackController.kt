@@ -334,6 +334,8 @@ class MusicPlaybackController private constructor(context: Context) {
         _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, sessionPlayer.currentPosition.coerceAtLeast(0L))) }
     }
 
+    fun currentPositionMs(): Long = sessionPlayer.currentPosition.coerceAtLeast(0L)
+
     fun refreshPositionFromPlayer() {
         forcePlaybackSnapshot()
     }

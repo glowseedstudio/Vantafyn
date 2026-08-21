@@ -49,6 +49,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -171,6 +172,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -222,6 +224,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
@@ -319,6 +322,8 @@ import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import dev.vantafyn.core.ui.VantafynSkeletonBrush
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.core.ui.VantafynThemePreset
+import dev.vantafyn.core.ui.tokensFor
 import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import dev.vantafyn.core.ui.R as CoreUiR
@@ -574,6 +579,7 @@ fun VantafynAppContent(
                 onSetBottomRailAccent = viewModel::setBottomRailAccent,
                 onToggleAutoLoginLastProfile = viewModel::toggleAutoLoginLastProfile,
                 onSelectBackground = viewModel::selectBackground,
+                onSelectTheme = viewModel::selectTheme,
             onToggleMediaFavorite = viewModel::toggleMediaFavorite,
             onToggleMediaPlayed = viewModel::toggleMediaPlayed,
             onSetMediaFavorite = viewModel::setMediaFavorite,
@@ -2630,6 +2636,7 @@ private fun HomeScreen(
     onSetBottomRailAccent: (BottomRailAccent) -> Unit,
     onToggleAutoLoginLastProfile: () -> Unit,
     onSelectBackground: (VantafynAppBackground) -> Unit,
+    onSelectTheme: (VantafynThemePreset) -> Unit,
     onToggleMediaFavorite: () -> Unit,
     onToggleMediaPlayed: () -> Unit,
     onSetMediaFavorite: (java.util.UUID, Boolean) -> Unit,
@@ -2763,6 +2770,7 @@ private fun HomeScreen(
             onSetBottomRailAccent = onSetBottomRailAccent,
             onToggleAutoLoginLastProfile = onToggleAutoLoginLastProfile,
             onSelectBackground = onSelectBackground,
+            onSelectTheme = onSelectTheme,
             onToggleMediaFavorite = onToggleMediaFavorite,
             onToggleMediaPlayed = onToggleMediaPlayed,
             onSetMediaFavorite = onSetMediaFavorite,
@@ -2938,6 +2946,7 @@ private fun MobileShellScreen(
     onSetBottomRailAccent: (BottomRailAccent) -> Unit,
     onToggleAutoLoginLastProfile: () -> Unit,
     onSelectBackground: (VantafynAppBackground) -> Unit,
+    onSelectTheme: (VantafynThemePreset) -> Unit,
     onToggleMediaFavorite: () -> Unit,
     onToggleMediaPlayed: () -> Unit,
     onSetMediaFavorite: (java.util.UUID, Boolean) -> Unit,
@@ -3277,6 +3286,7 @@ private fun MobileShellScreen(
                             onQuickConnect = onQuickConnect,
                             onLogout = onConfirmLogout,
                             onSelectBackground = onSelectBackground,
+                            onSelectTheme = onSelectTheme,
                             onChangePassword = onChangePassword,
                             onUploadProfileImage = onUploadCurrentProfileImage,
                             onDeleteProfileImage = onDeleteCurrentProfileImage,
@@ -8341,103 +8351,124 @@ private fun AdminSessionMessageComposer(
         animationSpec = tween(520, easing = FastOutSlowInEasing),
         label = "adminMessageAlpha",
     )
-    AlertDialog(
-        modifier = Modifier
-            .imePadding()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-                translationY = lift
-                this.alpha = alpha
-            }
-            .vantafynAnimatedModalBorder(),
+    Dialog(
         onDismissRequest = {
             if (!isSending && !dispatched) {
                 onClearError()
                 onDismiss()
             }
         },
-        containerColor = VantafynModalContainerColor,
-        shape = RoundedCornerShape(28.dp),
-        icon = {
-            Box(
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val composerMaxHeight = maxHeight * 0.92f
+            Column(
                 modifier = Modifier
-                    .size(50.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(VantafynGradients.accentHorizontal()),
-                contentAlignment = Alignment.Center,
+                    .fillMaxWidth()
+                    .widthIn(max = 440.dp)
+                    .heightIn(max = composerMaxHeight)
+                    .graphicsLayer {
+                        scaleX = scale
+                        scaleY = scale
+                        translationY = lift
+                        this.alpha = alpha
+                    }
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(VantafynModalContainerColor)
+                    .vantafynAnimatedModalBorder(cornerRadius = 28.dp)
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Icon(Icons.Rounded.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(25.dp))
-            }
-        },
-        title = {
-            Text(
-                if (dispatched) sentSummary ?: "Sent" else target.title,
-                color = VantafynColors.Ink,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(50.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(25.dp))
+                }
                 Text(
-                    target.recipientSummary,
-                    color = VantafynColors.Muted,
-                    style = MaterialTheme.typography.bodyMedium,
+                    if (dispatched) sentSummary ?: "Sent" else target.title,
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                VantafynTextField(
-                    value = header,
-                    onValueChange = { header = it.take(48) },
-                    label = "Title (optional)",
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                )
-                VantafynTextField(
-                    value = message,
-                    onValueChange = { message = it.take(240) },
-                    label = "Message",
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(5_000L to "5s", 8_000L to "8s", 15_000L to "15s").forEach { (value, label) ->
-                        VantafynGlassChip(
-                            selected = durationMs == value,
-                            onClick = { durationMs = value },
-                        ) {
-                            Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                Column(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(
+                        target.recipientSummary,
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    VantafynTextField(
+                        value = header,
+                        onValueChange = { header = it.take(48) },
+                        label = "Title (optional)",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    VantafynTextField(
+                        value = message,
+                        onValueChange = { message = it.take(240) },
+                        label = "Message",
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(5_000L to "5s", 8_000L to "8s", 15_000L to "15s").forEach { (value, label) ->
+                            VantafynGlassChip(
+                                selected = durationMs == value,
+                                onClick = { durationMs = value },
+                            ) {
+                                Text(label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
+                    errorMessage?.let {
+                        Text(
+                            it,
+                            color = Color(0xFFFFB4B4),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
                 }
-                errorMessage?.let {
-                    Text(
-                        it,
-                        color = Color(0xFFFFB4B4),
-                        style = MaterialTheme.typography.bodyMedium,
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AdminMessageSecondaryButton(
+                        text = "Cancel",
+                        enabled = !isSending && !dispatched,
+                        onClick = {
+                            onClearError()
+                            onDismiss()
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                    VantafynButton(
+                        text = if (isSending) "Sending" else "Send",
+                        onClick = { onSend(header, message, durationMs) },
+                        enabled = message.isNotBlank() && !isSending && !dispatched,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
-        },
-        confirmButton = {
-            VantafynButton(
-                text = if (isSending) "Sending" else "Send",
-                onClick = { onSend(header, message, durationMs) },
-                enabled = message.isNotBlank() && !isSending && !dispatched,
-            )
-        },
-        dismissButton = {
-            AdminMessageSecondaryButton(
-                text = "Cancel",
-                enabled = !isSending && !dispatched,
-                onClick = {
-                    onClearError()
-                    onDismiss()
-                },
-            )
-        },
-    )
+        }
+    }
 }
 
 @Composable
@@ -10323,6 +10354,7 @@ private fun ProfileSettingsScreen(
     onQuickConnect: () -> Unit,
     onLogout: () -> Unit,
     onSelectBackground: (VantafynAppBackground) -> Unit,
+    onSelectTheme: (VantafynThemePreset) -> Unit,
     onChangePassword: (String, String) -> Unit,
     onUploadProfileImage: (ByteArray, String) -> Unit,
     onDeleteProfileImage: () -> Unit,
@@ -10379,6 +10411,7 @@ private fun ProfileSettingsScreen(
             HomeContentReveal(index = 3, animate = revealActive) {
                 GlassPanel {
                     Text("Appearance", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    ThemeSelector(selected = state.selectedTheme, onSelect = onSelectTheme)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         SettingsRowIcon(Icons.Rounded.Wallpaper)
                         Text("Background", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
@@ -11192,6 +11225,326 @@ private fun MiniStat(label: String, value: String, modifier: Modifier = Modifier
         }
     }
 }
+
+@Composable
+private fun ThemeSelector(
+    selected: VantafynThemePreset,
+    onSelect: (VantafynThemePreset) -> Unit,
+) {
+    val reducedMotion = rememberReducedMotionPreference()
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val cardWidth = 150.dp
+    val cardSpacing = 10.dp
+    val selectedIndex = VantafynThemePreset.entries.indexOf(selected).coerceAtLeast(0)
+
+    LaunchedEffect(selectedIndex, reducedMotion) {
+        if (!listState.isScrollInProgress) {
+            listState.centerThemeCard(index = selectedIndex, density = density, cardWidth = cardWidth, animated = !reducedMotion)
+        }
+    }
+    LaunchedEffect(listState, selected) {
+        snapshotFlow { listState.isScrollInProgress }
+            .collect { scrolling ->
+                if (!scrolling) {
+                    val nearest = listState.nearestThemePresetIndex()
+                    val preset = VantafynThemePreset.entries.getOrNull(nearest)
+                    if (preset != null && preset != selected) {
+                        onSelect(preset)
+                    }
+                }
+            }
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            SettingsRowIcon(Icons.Rounded.AutoAwesome)
+            Column(Modifier.weight(1f)) {
+                Text("Theme", color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                Text("Colour system", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(VantafynColors.Surface.copy(alpha = 0.58f))
+                    .border(
+                        BorderStroke(1.dp, Brush.horizontalGradient(VantafynGradients.AccentColors.map { it.copy(alpha = 0.46f) })),
+                        RoundedCornerShape(999.dp),
+                    )
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(
+                    selected.label,
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+        }
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            val sidePadding = ((maxWidth - cardWidth) / 2f).coerceAtLeast(0.dp)
+            val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                    .drawWithContent {
+                        drawContent()
+                        drawRect(
+                            brush = Brush.horizontalGradient(
+                                0f to Color.Transparent,
+                                0.08f to Color.Black,
+                                0.92f to Color.Black,
+                                1f to Color.Transparent,
+                            ),
+                            blendMode = BlendMode.DstIn,
+                        )
+                    },
+            ) {
+                LazyRow(
+                    state = listState,
+                    flingBehavior = flingBehavior,
+                    horizontalArrangement = Arrangement.spacedBy(cardSpacing),
+                    contentPadding = PaddingValues(horizontal = sidePadding),
+                ) {
+                    itemsIndexed(VantafynThemePreset.entries, key = { _, preset -> preset.id }) { index, preset ->
+                        val emphasis by remember(listState, index) {
+                            derivedStateOf {
+                                if (reducedMotion) {
+                                    if (preset == selected) 1f else 0f
+                                } else {
+                                    listState.themeCardEmphasis(index)
+                                }
+                            }
+                        }
+                        ThemePreviewCard(
+                            preset = preset,
+                            selected = preset == selected,
+                            emphasis = emphasis,
+                            onClick = {
+                                onSelect(preset)
+                                coroutineScope.launch {
+                                    listState.centerThemeCard(
+                                        index = index,
+                                        density = density,
+                                        cardWidth = cardWidth,
+                                        animated = !reducedMotion,
+                                    )
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private suspend fun LazyListState.centerThemeCard(
+    index: Int,
+    density: androidx.compose.ui.unit.Density,
+    cardWidth: Dp,
+    animated: Boolean,
+) {
+    val viewportWidth = layoutInfo.viewportSize.width
+    val offset = if (viewportWidth > 0) {
+        -((viewportWidth - with(density) { cardWidth.roundToPx() }) / 2)
+    } else {
+        0
+    }
+    if (animated) {
+        animateScrollToItem(index = index, scrollOffset = offset)
+    } else {
+        scrollToItem(index = index, scrollOffset = offset)
+    }
+}
+
+private fun LazyListState.nearestThemePresetIndex(): Int {
+    val layout = layoutInfo
+    if (layout.visibleItemsInfo.isEmpty()) return firstVisibleItemIndex
+    val viewportCenter = layout.viewportStartOffset + ((layout.viewportEndOffset - layout.viewportStartOffset) / 2f)
+    return layout.visibleItemsInfo
+        .minByOrNull { item -> abs((item.offset + item.size / 2f) - viewportCenter) }
+        ?.index
+        ?: firstVisibleItemIndex
+}
+
+private fun LazyListState.themeCardEmphasis(index: Int): Float {
+    val layout = layoutInfo
+    val item = layout.visibleItemsInfo.firstOrNull { it.index == index } ?: return 0f
+    val viewportCenter = layout.viewportStartOffset + ((layout.viewportEndOffset - layout.viewportStartOffset) / 2f)
+    val itemCenter = item.offset + item.size / 2f
+    val distance = abs(itemCenter - viewportCenter)
+    val falloff = item.size.coerceAtLeast(1).toFloat()
+    return (1f - (distance / falloff)).coerceIn(0f, 1f)
+}
+
+@Composable
+private fun ThemePreviewCard(
+    preset: VantafynThemePreset,
+    selected: Boolean,
+    emphasis: Float,
+    onClick: () -> Unit,
+) {
+    val tokens = remember(preset) { tokensFor(preset) }
+    val shape = RoundedCornerShape(18.dp)
+    val targetScale = if (selected) 1.01f + (emphasis * 0.015f) else 0.982f + (emphasis * 0.018f)
+    val scale by animateFloatAsState(
+        targetValue = targetScale,
+        animationSpec = spring(stiffness = 420f, dampingRatio = 0.86f),
+        label = "themePreviewScale",
+    )
+    val depthAlpha by animateFloatAsState(
+        targetValue = if (selected) 0.18f + (emphasis * 0.10f) else 0.06f + (emphasis * 0.06f),
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "themePreviewDepth",
+    )
+    Box(
+        modifier = Modifier
+            .width(150.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                shadowElevation = if (selected) 8f + (emphasis * 4f) else emphasis * 3f
+            },
+    ) {
+        VantafynGlassSurface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (selected) {
+                        Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.25.dp, durationMillis = 5400)
+                    } else {
+                        Modifier.clip(shape)
+                    },
+                )
+                .clickable(onClick = onClick),
+            variant = VantafynGlassVariant.Card,
+            selected = selected,
+            cornerRadius = 18.dp,
+            contentPadding = PaddingValues(10.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(66.dp)
+                        .clip(RoundedCornerShape(15.dp))
+                        .background(Brush.linearGradient(tokens.backgroundGradient))
+                        .border(
+                            BorderStroke(
+                                1.dp,
+                                Brush.linearGradient(tokens.accentColors.map { it.copy(alpha = depthAlpha) }),
+                            ),
+                            RoundedCornerShape(15.dp),
+                        ),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        tokens.glassEdgeWhite.copy(alpha = 0.08f),
+                                        Color.Transparent,
+                                        tokens.graphite.copy(alpha = 0.62f),
+                                    ),
+                                ),
+                            ),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .offset(y = (-5).dp)
+                            .padding(start = 12.dp)
+                            .width(62.dp)
+                            .height(32.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        tokens.glassEdgeWhite.copy(alpha = 0.14f),
+                                        tokens.glassNavyLift.copy(alpha = 0.80f),
+                                        tokens.glassVioletLift.copy(alpha = 0.42f),
+                                    ),
+                                ),
+                            )
+                            .border(
+                                BorderStroke(1.dp, Brush.linearGradient(tokens.accentColors.map { it.copy(alpha = 0.68f) })),
+                                RoundedCornerShape(12.dp),
+                            ),
+                    )
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(9.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        tokens.accentColors.take(3).forEach { color ->
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(color.copy(alpha = 0.82f)),
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .width(30.dp)
+                                .height(7.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Brush.horizontalGradient(tokens.accentColors)),
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        preset.label,
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (selected) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = VantafynColors.Secondary,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                Text(
+                    if (selected) "Active now" else preset.themeMoodLabel(),
+                    color = if (selected) VantafynColors.Secondary else VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+private fun VantafynThemePreset.themeMoodLabel(): String =
+    when (this) {
+        VantafynThemePreset.Nebula -> "Cinematic blue"
+        VantafynThemePreset.Midnight -> "Cool graphite"
+        VantafynThemePreset.Aurora -> "Teal aurora"
+        VantafynThemePreset.Amethyst -> "Violet glass"
+        VantafynThemePreset.Ember -> "Warm ember"
+        VantafynThemePreset.Oled -> "True black"
+    }
 
 @Composable
 private fun BackgroundSelector(selected: VantafynAppBackground, onSelect: (VantafynAppBackground) -> Unit) {
@@ -16437,6 +16790,8 @@ private fun MusicQuickPlayerSheet(
                             PopupLyricsBody(
                                 renderState = lyricsRenderState,
                                 playbackMs = currentPlayback.positionMs,
+                                isPlaying = currentPlayback.isPlaying,
+                                currentPositionMs = controller::currentPositionMs,
                                 onSeek = controller::seekTo,
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -16648,6 +17003,8 @@ private data class PopupLyricsRenderState(
 private fun PopupLyricsBody(
     renderState: PopupLyricsRenderState,
     playbackMs: Long,
+    isPlaying: Boolean,
+    currentPositionMs: () -> Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -16665,10 +17022,13 @@ private fun PopupLyricsBody(
             )
         }
         renderState.lyrics.isSynced -> {
-            key(renderState.trackId) {
+            key(renderState.trackId, renderState.lyrics.syncedLines) {
                 PopupSyncedLyricsView(
+                    trackId = renderState.trackId,
                     lines = renderState.lyrics.syncedLines,
                     playbackMs = playbackMs,
+                    isPlaying = isPlaying,
+                    currentPositionMs = currentPositionMs,
                     onSeek = onSeek,
                     modifier = modifier,
                 )
@@ -16685,27 +17045,48 @@ private fun PopupLyricsBody(
 
 @Composable
 private fun PopupSyncedLyricsView(
+    trackId: UUID?,
     lines: List<JellyfinLyricLine>,
     playbackMs: Long,
+    isPlaying: Boolean,
+    currentPositionMs: () -> Long,
     onSeek: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
+    val lifecycleOwner = LocalLifecycleOwner.current
     val activeLineLeadMs = 120L
-    val activeIndex = remember(lines, playbackMs) { lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0) }
+    var livePlaybackMs by remember(trackId, lines) { mutableLongStateOf(playbackMs) }
+    val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0) }
     var suppressAutoFollowUntil by remember(lines) { mutableStateOf(0L) }
     var programmaticScroll by remember(lines) { mutableStateOf(false) }
     var lastPlaybackMs by remember(lines) { mutableStateOf(-1L) }
     var pendingRewindTicks by remember(lines) { mutableStateOf(0) }
 
-    LaunchedEffect(lines) {
+    LaunchedEffect(playbackMs, isPlaying, lines) {
+        if (!isPlaying || abs(playbackMs - livePlaybackMs) > 1_200L) {
+            livePlaybackMs = playbackMs
+        }
+    }
+
+    LaunchedEffect(trackId, lines, isPlaying, lifecycleOwner) {
+        if (lines.isEmpty() || !isPlaying) return@LaunchedEffect
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                livePlaybackMs = currentPositionMs()
+                delay(PopupSyncedLyricsTickerIntervalMs)
+            }
+        }
+    }
+
+    LaunchedEffect(trackId, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        delay(80L)
-        val targetIndex = lines.activeIndex(playbackMs + activeLineLeadMs).coerceAtLeast(0)
+        livePlaybackMs = currentPositionMs()
+        val targetIndex = lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0)
         programmaticScroll = true
         listState.scrollToItem(targetIndex.coerceAtMost(lines.lastIndex))
         programmaticScroll = false
-        lastPlaybackMs = playbackMs
+        lastPlaybackMs = livePlaybackMs
     }
 
     LaunchedEffect(listState, lines) {
@@ -16716,10 +17097,10 @@ private fun PopupSyncedLyricsView(
         }
     }
 
-    LaunchedEffect(activeIndex, playbackMs, lines) {
+    LaunchedEffect(activeIndex, livePlaybackMs, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - playbackMs else 0L
-        val rewindCandidate = lastPlaybackMs >= 0L && playbackMs + 350L < lastPlaybackMs
+        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - livePlaybackMs else 0L
+        val rewindCandidate = lastPlaybackMs >= 0L && livePlaybackMs + 350L < lastPlaybackMs
         val rewound = when {
             !rewindCandidate -> {
                 pendingRewindTicks = 0
@@ -16739,13 +17120,19 @@ private fun PopupSyncedLyricsView(
                 }
             }
         }
-        lastPlaybackMs = playbackMs
+        val largePositionJump = lastPlaybackMs >= 0L && abs(livePlaybackMs - lastPlaybackMs) >= 5_000L
+        lastPlaybackMs = livePlaybackMs
         val suppressAutoFollow = System.currentTimeMillis() < suppressAutoFollowUntil
         if (rewound && !suppressAutoFollow) suppressAutoFollowUntil = 0L
         if (!suppressAutoFollow) {
             programmaticScroll = true
             try {
-                listState.animateScrollToItem(activeIndex.coerceAtMost(lines.lastIndex))
+                val target = activeIndex.coerceAtMost(lines.lastIndex)
+                if (largePositionJump || rewound) {
+                    listState.scrollToItem(target)
+                } else {
+                    listState.animateScrollToItem(target)
+                }
             } finally {
                 programmaticScroll = false
             }
@@ -17570,3 +17957,4 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
 }
 
 private const val VANTAFYN_APP_VERSION = "0.8.0"
+private const val PopupSyncedLyricsTickerIntervalMs = 250L
