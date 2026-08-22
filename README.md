@@ -119,7 +119,7 @@ I review all code that goes into the project, understand how it works, debug iss
     <td align="center" width="25%">
       <img src="assets/screenshots/07_server_stats.png" alt="Server Analytics" /><br>
       <strong>Analytics & Trends</strong><br>
-      <em>Interactive content breakdown charts and 30-day viewing trend graphs.</em>
+      <em>Content breakdown charts and viewing trends (requires Playback Reporting plugin).</em>
     </td>
     <td align="center" width="25%">
       <img src="assets/screenshots/08_appearance.png" alt="Appearance Settings" /><br>
@@ -141,7 +141,7 @@ I review all code that goes into the project, understand how it works, debug iss
 - 📚 **Audiobooks & E-Books (On Roadmap)**: Media library foundations and browsing are in place; dedicated audiobook playback (chapters, sleep timers, speed controls) and e-book reader modules are on the roadmap and coming soon!
 - 📦 **Offline Downloads Engine**: WorkManager-orchestrated background downloads with local database caching, full offline playback, and automatic playback-state reconciliation once reconnected.
 - 📥 **Media Requests (Ombi & Seerr)**: Native requests workflow supporting shared API keys and per-user token linking. While Ombi is currently undergoing testing alongside the companion plugin, support for *Seerr* services (Jellyseerr / Overseerr) is on the roadmap so you can use either backend.
-- 🛡️ **Built-in Server Admin Suite**: View active server sessions, inspect live stream bitrates, manage server profiles, trigger library scans, inspect tasks, and visualize Playback Reporting statistics.
+- 🛡️ **Built-in Server Admin & Analytics**: View active server sessions, inspect live stream bitrates, manage user accounts, trigger library scans, inspect tasks, and visualize detailed playback metrics & viewing trends (*Note: The **Playback Reporting** plugin must be installed on your Jellyfin server for the Statistics dashboard to populate data*).
 - 🎨 **Deep Customization & Theming**: Live customizable home screen rows, glassmorphic surface materials, dynamic space backgrounds, theme music, and interactive glow feedback.
 - 🍿 **Social & Discovery**: Group Watch Party / SyncPlay foundations, app-wide invitations, and Swipe to Match movie decision picker.
 
@@ -154,6 +154,7 @@ I review all code that goes into the project, understand how it works, debug iss
 | **Android Phone App** | 🟢 **~92% Complete** | Core UI, video playback (Movies, TV, Live TV + Cast), offline downloads, music player, and server admin tools are fully functional and daily-driver ready. |
 | **Media Types** | 🟢 **Movies, TV, Music, Live TV**<br>🟡 **Audiobooks & E-Books (Planned)** | Movies, TV Shows, Music, and Live TV are fully supported with Google Cast. Dedicated audiobook listening and e-book reader interfaces are coming next. |
 | **Android TV App** | 🟡 **In Development** | TV architecture and module build correctly. Dedicated 10-foot TV UI is being built using the proven mobile architecture foundations. |
+| **Server Statistics** | 🟢 **Functional** | Rich viewing analytics and graphs. Requires the standard **Playback Reporting** plugin installed on your Jellyfin server. |
 | **Companion Server Plugin** | 🟡 **In Development** | The `companion-plugin` for Jellyfin is currently being built to provide enhanced multi-user sync and deeper Ombi integration. |
 | **Requests (Ombi & Seerr)** | 🟢 **Testing / Planned** | Ombi is implemented and actively being tested in tandem with the companion plugin. Support for Seerr services (Jellyseerr / Overseerr) is on the roadmap so either service can be used. |
 
