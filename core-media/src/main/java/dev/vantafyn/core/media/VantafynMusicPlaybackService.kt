@@ -527,7 +527,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         private const val NOTIFICATION_ID = 4207
         private const val MUSIC_SERVICE_TASK_ID = "music.playbackService"
         private const val MAX_ARTWORK_CACHE_SIZE = 8
-        private const val NOTIFICATION_ARTWORK_MAX_SIZE = 512
+        private const val NOTIFICATION_ARTWORK_MAX_SIZE = 1024
         private const val WIDGET_FOREGROUND_REFRESH_MS = 30_000L
         private const val WIDGET_BACKGROUND_REFRESH_MS = 5 * 60_000L
         const val ACTION_TOGGLE_PLAYBACK = "dev.vantafyn.music.action.TOGGLE_PLAYBACK"

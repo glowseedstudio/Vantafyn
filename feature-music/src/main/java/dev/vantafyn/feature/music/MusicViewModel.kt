@@ -15,6 +15,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMusicTrackPage
 import dev.vantafyn.core.jellyfin.JellyfinMusicRepository
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
+import dev.vantafyn.core.jellyfin.MusicSongsFilter
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackMethod
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
@@ -287,11 +288,15 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun showSongs() {
+        _state.update { it.copy(songsFilter = MusicSongsFilter.All, songsAlphabetKey = null, songsSearchQuery = "") }
         loadSongsPage(startIndex = 0)
     }
 
     private fun loadSongsPage(startIndex: Int) {
         val activeSession = session ?: return
+        val current = _state.value
+        val filter = current.songsFilter
+        val alphabetKey = current.songsAlphabetKey.takeIf { filter.supportsAlphabetRail() }?.normalizedSongsAlphabetKey()
         musicPageJob?.cancel()
         musicPageJob = viewModelScope.launch {
             _state.update {
@@ -301,7 +306,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     errorMessage = null,
                 )
             }
-            when (val result = musicRepository.getSongsPage(activeSession, startIndex)) {
+            when (val result = musicRepository.getSongsPage(activeSession, startIndex, filter = filter, alphabetKey = alphabetKey)) {
                 is JellyfinResult.Success -> _state.update {
                     it.copy(screen = MusicScreenState.Songs(result.value), isMusicPageLoading = false)
                 }
@@ -310,6 +315,20 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    fun setSongsFilter(filter: MusicSongsFilter) {
+        _state.update { it.copy(songsFilter = filter, songsAlphabetKey = null) }
+        loadSongsPage(startIndex = 0)
+    }
+
+    fun setSongsAlphabetKey(key: String?) {
+        _state.update { it.copy(songsAlphabetKey = key) }
+        loadSongsPage(startIndex = 0)
+    }
+
+    fun filterSongsLocally(query: String) {
+        _state.update { it.copy(songsSearchQuery = query) }
     }
 
     fun previousMusicPage() {
@@ -841,6 +860,9 @@ data class MusicUiState(
     val searchQuery: String = "",
     val searchResults: List<JellyfinMusicTrack> = emptyList(),
     val screen: MusicScreenState = MusicScreenState.Home,
+    val songsSearchQuery: String = "",
+    val songsFilter: MusicSongsFilter = MusicSongsFilter.All,
+    val songsAlphabetKey: String? = null,
 )
 
 private data class LyricsCacheKey(
@@ -870,6 +892,18 @@ sealed interface MusicScreenState {
     data class Songs(val page: JellyfinMusicTrackPage) : MusicScreenState {
         val tracks: List<JellyfinMusicTrack>
             get() = page.tracks
+    }
+}
+
+private fun MusicSongsFilter.supportsAlphabetRail(): Boolean =
+    this == MusicSongsFilter.AZ || this == MusicSongsFilter.Favorites
+
+private fun String?.normalizedSongsAlphabetKey(): String? {
+    val value = this?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } ?: return null
+    return when {
+        value == "#" -> value
+        value.length == 1 && value[0] in 'A'..'Z' -> value
+        else -> null
     }
 }
 

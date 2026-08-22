@@ -1642,18 +1642,47 @@ class SdkJellyfinMusicRepository(
             }
         }
 
-    override suspend fun getSongsPage(session: JellyfinSession, startIndex: Int, limit: Int): JellyfinResult<JellyfinMusicTrackPage> =
+    override suspend fun getSongsPage(
+        session: JellyfinSession,
+        startIndex: Int,
+        limit: Int,
+        filter: MusicSongsFilter,
+        alphabetKey: String?,
+    ): JellyfinResult<JellyfinMusicTrackPage> =
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val sortBy = when (filter) {
+                    MusicSongsFilter.RecentlyAdded -> listOf(ItemSortBy.DATE_CREATED)
+                    MusicSongsFilter.All,
+                    MusicSongsFilter.AZ,
+                    MusicSongsFilter.Favorites -> listOf(ItemSortBy.SORT_NAME)
+                }
+                val sortOrder = when (filter) {
+                    MusicSongsFilter.RecentlyAdded -> listOf(SortOrder.DESCENDING)
+                    MusicSongsFilter.All,
+                    MusicSongsFilter.AZ,
+                    MusicSongsFilter.Favorites -> listOf(SortOrder.ASCENDING)
+                }
+                val normalizedKey = alphabetKey?.let {
+                    val value = it.trim().uppercase()
+                    when {
+                        value == "#" -> value
+                        value.length == 1 && value[0] in 'A'..'Z' -> value
+                        else -> null
+                    }
+                }
                 JellyfinResult.Success(
                     getMusicTracksPage(
                         api = api,
                         session = session,
                         startIndex = startIndex,
                         limit = limit,
-                        sortBy = listOf(ItemSortBy.SORT_NAME),
-                        sortOrder = listOf(SortOrder.ASCENDING),
+                        sortBy = sortBy,
+                        sortOrder = sortOrder,
+                        isFavorite = filter == MusicSongsFilter.Favorites,
+                        nameStartsWith = normalizedKey?.takeIf { it != "#" },
+                        nameLessThan = "A".takeIf { normalizedKey == "#" },
                     ),
                 )
             } catch (throwable: Throwable) {
@@ -1789,6 +1818,9 @@ class SdkJellyfinMusicRepository(
         searchTerm: String? = null,
         sortBy: List<ItemSortBy>,
         sortOrder: List<SortOrder>,
+        isFavorite: Boolean = false,
+        nameStartsWith: String? = null,
+        nameLessThan: String? = null,
     ): JellyfinMusicTrackPage {
         val safeStart = startIndex.coerceAtLeast(0)
         val response by api.itemsApi.getItems(
@@ -1804,6 +1836,9 @@ class SdkJellyfinMusicRepository(
                 fields = musicItemFields,
                 includeItemTypes = listOf(BaseItemKind.AUDIO),
                 mediaTypes = listOf(MediaType.AUDIO),
+                isFavorite = true.takeIf { isFavorite },
+                nameStartsWith = nameStartsWith,
+                nameLessThan = nameLessThan,
                 enableUserData = true,
                 imageTypeLimit = 2,
                 enableImageTypes = listOf(ImageType.PRIMARY),
@@ -2336,6 +2371,7 @@ class SdkJellyfinAdminRepository(
                 pathAndQuery = "user_usage_stats/user_activity?days=$days&endDate=$endDate&timezoneOffset=$timezoneOffset",
             )
             val usersStats = parsePlaybackReportingUsers(userActivity, userImages)
+            val enrichedUsersStats = enrichUserContentBreakdown(session, usersStats, days, endDate, timezoneOffset)
             val trend = loadPlaybackReportingTrend(session, days, endDate, timezoneOffset)
             val media = loadPlaybackReportingMediaBreakdown(api, session, days, endDate, timezoneOffset)
             val totalWatchTimeSeconds = usersStats.sumOf { it.totalWatchTimeSeconds }
@@ -2346,9 +2382,9 @@ class SdkJellyfinAdminRepository(
                 rangeLabel = "$days days",
                 totalWatchTimeSeconds = totalWatchTimeSeconds,
                 totalPlayCount = totalPlayCount,
-                mostActiveUser = usersStats.maxByOrNull { it.totalWatchTimeSeconds },
+                mostActiveUser = enrichedUsersStats.maxByOrNull { it.totalWatchTimeSeconds },
                 mostWatchedTitle = media.maxWithOrNull(compareBy<JellyfinMediaWatchStats> { it.totalWatchTimeSeconds }.thenBy { it.playCount }),
-                users = usersStats,
+                users = enrichedUsersStats,
                 media = media,
                 trend = trend,
                 recentActivity = recentActivity,
@@ -2365,7 +2401,15 @@ class SdkJellyfinAdminRepository(
             .mapNotNull { index -> array.optJSONObject(index) }
             .map { row ->
                 val userIdText = row.optString("user_id").takeIf { it.isNotBlank() }
-                val userId = userIdText?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
+                val userId = userIdText?.let { raw ->
+                    runCatching { java.util.UUID.fromString(raw) }.getOrNull()
+                        ?: runCatching {
+                            val d = raw.lowercase(Locale.US)
+                            java.util.UUID.fromString(
+                                "${d.substring(0,8)}-${d.substring(8,12)}-${d.substring(12,16)}-${d.substring(16,20)}-${d.substring(20)}"
+                            )
+                        }.getOrNull()
+                }
                 val seconds = row.optLong("total_time", -1L).takeIf { it >= 0L }
                     ?: parsePlaybackReportingDuration(row.optString("total_play_time"))
                 JellyfinUserWatchStats(
@@ -2383,6 +2427,60 @@ class SdkJellyfinAdminRepository(
             }
             .sortedWith(compareByDescending<JellyfinUserWatchStats> { it.totalWatchTimeSeconds }.thenByDescending { it.playCount })
             .mapIndexed { index, stat -> stat.copy(rank = index + 1) }
+
+    private fun enrichUserContentBreakdown(
+        session: JellyfinSession,
+        users: List<JellyfinUserWatchStats>,
+        days: Int,
+        endDate: String,
+        timezoneOffset: String,
+    ): List<JellyfinUserWatchStats> {
+        if (users.isEmpty()) return users
+        val typeFilters = listOf("Movie" to "moviesCount", "Episode" to "episodesCount", "Audio" to "audioCount")
+        val countsByUserAndType = mutableMapOf<String, MutableMap<String, Int>>()
+        for ((typeName, _) in typeFilters) {
+            val encodedType = URLEncoder.encode(typeName, Charsets.UTF_8.name())
+            runCatching {
+                val rows = playbackReportingJsonArray(
+                    session = session,
+                    pathAndQuery = "user_usage_stats/PlayActivity?filter=$encodedType&days=$days&endDate=$endDate&dataType=count&timezoneOffset=$timezoneOffset",
+                )
+                for (i in 0 until rows.length()) {
+                    val row = rows.optJSONObject(i) ?: continue
+                    val rawUserId = row.optString("user_id").takeIf { it.isNotBlank() } ?: continue
+                    val normalizedUserId = runCatching { java.util.UUID.fromString(rawUserId) }.getOrNull()?.toString()
+                        ?: runCatching {
+                            val d = rawUserId.lowercase(Locale.US)
+                            java.util.UUID.fromString(
+                                "${d.substring(0,8)}-${d.substring(8,12)}-${d.substring(12,16)}-${d.substring(16,20)}-${d.substring(20)}"
+                            ).toString()
+                        }.getOrNull() ?: rawUserId
+                    val usage = row.optJSONObject("user_usage")
+                    val count = if (usage != null) {
+                        var total = 0
+                        usage.keys().forEach { date -> total += usage.optInt(date, 0) }
+                        total
+                    } else {
+                        row.optInt("total_count", row.optInt("count", 0))
+                    }
+                    if (count > 0) {
+                        countsByUserAndType.getOrPut(normalizedUserId) { mutableMapOf() }[typeName] =
+                            (countsByUserAndType[normalizedUserId]?.get(typeName) ?: 0) + count
+                    }
+                }
+            }
+        }
+        if (countsByUserAndType.isEmpty()) return users
+        return users.map { user ->
+            val key = user.userId?.toString() ?: return@map user
+            val counts = countsByUserAndType[key] ?: return@map user
+            user.copy(
+                moviesCount = counts["Movie"] ?: 0,
+                episodesCount = counts["Episode"] ?: 0,
+                audioCount = counts["Audio"] ?: 0,
+            )
+        }
+    }
 
     private fun loadPlaybackReportingTrend(
         session: JellyfinSession,
@@ -2500,39 +2598,78 @@ class SdkJellyfinAdminRepository(
         items: List<JellyfinMediaWatchStats>,
     ): Map<String, Pair<String?, String?>> {
         if (items.isEmpty()) return emptyMap()
-        return items.take(12).mapNotNull { stats ->
+        val albumIdByTitle = mutableMapOf<String, java.util.UUID>()
+        val results = items.take(12).mapNotNull { stats ->
             runCatching {
-                val query = stats.title.playbackReportingSearchTitle()
-                if (query.isBlank()) return@runCatching null
-                val response by api.searchApi.getSearchHints(
-                    GetSearchHintsRequest(
-                        userId = session.user.id,
-                        searchTerm = query,
-                        includeItemTypes = listOf(
-                            BaseItemKind.MOVIE,
-                            BaseItemKind.SERIES,
-                            BaseItemKind.EPISODE,
-                            BaseItemKind.AUDIO,
-                            BaseItemKind.MUSIC_ALBUM,
-                        ),
-                        limit = 8,
-                        mediaTypes = emptyList(),
-                    ),
-                )
+                val strippedQuery = stats.title.playbackReportingSearchTitle()
+                val fullQuery = stats.title.replace(Regex("""\s+\([^)]*\)\s*$"""), "").trim()
+                val isAudio = stats.type?.lowercase(Locale.US) in setOf("audio", "song", "track", "music")
                 val normalizedTitle = stats.title.normalizedPlaybackReportingTitle()
-                val hint = response.searchHints
-                    .firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
-                    ?: response.searchHints.firstOrNull()
-                    ?: return@runCatching null
-                val itemId = hint.itemId ?: hint.id ?: return@runCatching null
-                val posterUrl: String? = hint.primaryImageTag?.takeIf { it.isNotBlank() }?.let {
-                    itemImageUrl(api, itemId, ImageType.PRIMARY, it, maxWidth = 260)
-                } ?: hint.backdropImageTag?.takeIf { it.isNotBlank() }?.let {
-                    itemImageUrl(api, itemId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+
+                var foundHint = false
+                var hintName: String? = null
+                var hintItemId: java.util.UUID? = null
+                var hintPrimaryTag: String? = null
+                var hintThumbTag: String? = null
+                var hintBackdropTag: String? = null
+                var hintAlbumId: java.util.UUID? = null
+
+                for (query in listOfNotNull(strippedQuery.takeIf { it.isNotBlank() }, fullQuery.takeIf { it.isNotBlank() && it != strippedQuery })) {
+                    if (foundHint) break
+                    val response by api.searchApi.getSearchHints(
+                        GetSearchHintsRequest(
+                            userId = session.user.id,
+                            searchTerm = query,
+                            includeItemTypes = listOf(
+                                BaseItemKind.MOVIE,
+                                BaseItemKind.SERIES,
+                                BaseItemKind.EPISODE,
+                                BaseItemKind.AUDIO,
+                                BaseItemKind.MUSIC_ALBUM,
+                            ),
+                            limit = 8,
+                            mediaTypes = emptyList(),
+                        ),
+                    )
+                    val matched = response.searchHints
+                        .firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
+                        ?: if (isAudio) response.searchHints.firstOrNull { it.albumId != null && it.primaryImageTag != null }
+                        else response.searchHints.firstOrNull()
+                    if (matched != null) {
+                        foundHint = true
+                        hintName = matched.name
+                        hintItemId = matched.itemId ?: matched.id
+                        hintPrimaryTag = matched.primaryImageTag
+                        hintThumbTag = matched.thumbImageTag
+                        hintBackdropTag = matched.backdropImageTag
+                        hintAlbumId = matched.albumId
+                    }
+                }
+                if (!foundHint || hintItemId == null) return@runCatching null
+
+                val posterUrl: String? = hintPrimaryTag?.takeIf { it.isNotBlank() }?.let {
+                    itemImageUrl(api, hintItemId, ImageType.PRIMARY, it, maxWidth = 260)
+                } ?: hintThumbTag?.takeIf { it.isNotBlank() }?.let {
+                    itemImageUrl(api, hintItemId, ImageType.THUMB, it, maxWidth = 360)
+                } ?: hintBackdropTag?.takeIf { it.isNotBlank() }?.let {
+                    itemImageUrl(api, hintItemId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+                }
+                if (posterUrl == null && hintAlbumId != null) {
+                    albumIdByTitle[normalizedTitle] = hintAlbumId
                 }
                 normalizedTitle to (posterUrl to null as String?)
             }.getOrNull()
         }.toMap()
+        if (albumIdByTitle.isNotEmpty()) {
+            val albumArt = loadPlaybackReportingArtwork(api, session, albumIdByTitle.values.distinct().take(24))
+            return results.mapValues { (title, pair) ->
+                if (pair.first != null) return@mapValues pair
+                val albumId = albumIdByTitle[title]
+                val artFromAlbum = albumId?.let { albumArt[it]?.first }
+                pair.copy(first = artFromAlbum ?: pair.first)
+            }
+        }
+        return results
     }
 
     private fun playbackReportingJsonArray(session: JellyfinSession, pathAndQuery: String): JSONArray {
@@ -4198,8 +4335,8 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
             TranscodingProfile(
                 container = "ts",
                 type = DlnaProfileType.VIDEO,
-                videoCodec = "h264",
-                audioCodec = "aac,mp3,ac3",
+                videoCodec = "h264,hevc",
+                audioCodec = "aac,mp3,ac3,eac3",
                 protocol = org.jellyfin.sdk.model.api.MediaStreamProtocol.HLS,
                 estimateContentLength = false,
                 enableMpegtsM2TsMode = false,
@@ -4208,6 +4345,25 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
                 context = EncodingContext.STREAMING,
                 enableSubtitlesInManifest = true,
                 maxAudioChannels = "6",
+                minSegments = 1,
+                segmentLength = 6,
+                breakOnNonKeyFrames = true,
+                conditions = emptyList(),
+                enableAudioVbrEncoding = true,
+            ),
+            TranscodingProfile(
+                container = "ts",
+                type = DlnaProfileType.AUDIO,
+                videoCodec = "",
+                audioCodec = "aac,mp3,ac3,eac3",
+                protocol = MediaStreamProtocol.HLS,
+                estimateContentLength = false,
+                enableMpegtsM2TsMode = false,
+                transcodeSeekInfo = TranscodeSeekInfo.AUTO,
+                copyTimestamps = false,
+                context = EncodingContext.STREAMING,
+                enableSubtitlesInManifest = false,
+                maxAudioChannels = "8",
                 minSegments = 1,
                 segmentLength = 6,
                 breakOnNonKeyFrames = true,

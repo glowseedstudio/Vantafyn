@@ -118,6 +118,4 @@ Current admin data includes:
 
 If a server/plugin does not expose a metric, the UI should show a premium unavailable/empty state rather than fake numbers.
 
-## Reference Boundary
 
-Wholphin, Findroid, Jellyfin Android TV, Finamp and similar projects are research references only unless explicitly stated otherwise. The Vantafyn Gradle settings do not include reference clones, and reference source must not be copied into Vantafyn without deliberate licence review.

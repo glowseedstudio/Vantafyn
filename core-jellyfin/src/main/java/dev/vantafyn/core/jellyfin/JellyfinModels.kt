@@ -211,6 +211,13 @@ enum class JellyfinLibraryItemFilter {
     Unwatched,
 }
 
+enum class MusicSongsFilter(val label: String) {
+    All("All"),
+    RecentlyAdded("Recently Added"),
+    AZ("A-Z"),
+    Favorites("Favorites"),
+}
+
 data class JellyfinLiveTvChannel(
     val id: UUID,
     val name: String,
@@ -798,7 +805,14 @@ data class JellyfinUserWatchStats(
     val lastWatchedTitle: String?,
     val lastClient: String?,
     val rank: Int,
-)
+    val moviesCount: Int = 0,
+    val episodesCount: Int = 0,
+    val audioCount: Int = 0,
+    val otherCount: Int = 0,
+) {
+    val hasContentBreakdown: Boolean
+        get() = moviesCount + episodesCount + audioCount + otherCount > 0
+}
 
 data class JellyfinMediaWatchStats(
     val itemId: UUID?,
@@ -1136,7 +1150,7 @@ interface JellyfinMusicRepository {
     suspend fun getArtistAlbums(session: JellyfinSession, artistId: UUID): JellyfinResult<List<JellyfinMusicAlbum>>
     suspend fun getPlaylistItems(session: JellyfinSession, playlistId: UUID): JellyfinResult<List<JellyfinMusicTrack>>
     suspend fun getPlaylistItemsPage(session: JellyfinSession, playlistId: UUID, startIndex: Int, limit: Int = 60): JellyfinResult<JellyfinMusicTrackPage>
-    suspend fun getSongsPage(session: JellyfinSession, startIndex: Int, limit: Int = 60): JellyfinResult<JellyfinMusicTrackPage>
+    suspend fun getSongsPage(session: JellyfinSession, startIndex: Int, limit: Int = 60, filter: MusicSongsFilter = MusicSongsFilter.All, alphabetKey: String? = null): JellyfinResult<JellyfinMusicTrackPage>
     suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int = 50): JellyfinResult<List<JellyfinMusicTrack>>
     suspend fun getLyrics(session: JellyfinSession, trackId: UUID): JellyfinResult<JellyfinLyrics?>
     suspend fun createPlaylist(session: JellyfinSession, name: String, itemIds: List<UUID>): JellyfinResult<UUID>

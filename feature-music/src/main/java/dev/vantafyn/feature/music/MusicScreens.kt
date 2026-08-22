@@ -12,6 +12,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,6 +25,8 @@ import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -43,7 +46,9 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.lazy.LazyColumn
@@ -95,16 +100,21 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -113,6 +123,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -134,6 +145,7 @@ import dev.vantafyn.core.jellyfin.JellyfinLyricLine
 import dev.vantafyn.core.jellyfin.JellyfinMusicPlaylist
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinMusicTrackPage
+import dev.vantafyn.core.jellyfin.MusicSongsFilter
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.media.VantafynMusicRepeatMode
 import dev.vantafyn.core.media.VantafynMusicTrack
@@ -157,6 +169,7 @@ import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.max
@@ -199,6 +212,8 @@ fun MusicScreen(
     val musicListState = rememberLazyListState()
     val screenScrollKey = state.screen.scrollResetKey()
     val homeRevealKey = "${session?.profileId}-${state.home != null}-${state.searchResults.isNotEmpty()}"
+    val density = LocalDensity.current
+    val statusBarHeight = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
     var homeRevealActive by remember(homeRevealKey) { mutableStateOf(true) }
     LaunchedEffect(homeRevealKey) {
         homeRevealActive = true
@@ -300,6 +315,7 @@ fun MusicScreen(
                                     onTrack = { track -> startMusic { viewModel.playTrack(track, state.searchResults) } },
                                     onChoosePlaylist = { playlistPickerTrack = it },
                                     onLongPress = { actionTrack = it },
+                                    animateReveal = false,
                                 )
                             }
                         }
@@ -337,6 +353,7 @@ fun MusicScreen(
                                         onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
                                         onChoosePlaylist = { playlistPickerTrack = it },
                                         onLongPress = { actionTrack = it },
+                                        animateReveal = false,
                                     )
                                 }
                             }
@@ -372,6 +389,7 @@ fun MusicScreen(
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                                 onChoosePlaylist = { playlistPickerTrack = it },
                                 onLongPress = { actionTrack = it },
+                                animateReveal = false,
                             )
                         }
                     }
@@ -442,16 +460,51 @@ fun MusicScreen(
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                                 onChoosePlaylist = { playlistPickerTrack = it },
                                 onLongPress = { actionTrack = it },
+                                animateReveal = false,
                             )
                         }
                     }
                 }
                 is MusicScreenState.Songs -> {
+                    val songsQuery = state.songsSearchQuery.trim().lowercase()
+                    val filteredTracks = if (songsQuery.isEmpty()) screen.tracks
+                    else screen.tracks.filter {
+                        it.title.lowercase().contains(songsQuery) || it.artist.lowercase().contains(songsQuery)
+                    }
                     item {
                         MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = screenScrollKey) {
+                            MusicSongsFilterChips(
+                                selected = state.songsFilter,
+                                onSelected = viewModel::setSongsFilter,
+                            )
+                        }
+                    }
+                    if (state.songsFilter.supportsMusicSongsAlphabetRail()) {
+                        item {
+                            MusicContentReveal(index = 1, animate = nestedRevealActive, revealKey = screenScrollKey) {
+                                MusicSongsAlphabetRail(
+                                    selected = state.songsAlphabetKey,
+                                    enabled = !state.isMusicPageLoading,
+                                    onSelected = viewModel::setSongsAlphabetKey,
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        MusicContentReveal(index = 2, animate = nestedRevealActive, revealKey = screenScrollKey) {
+                            VantafynTextField(
+                                value = state.songsSearchQuery,
+                                onValueChange = viewModel::filterSongsLocally,
+                                label = "Search songs",
+                                placeholder = "Filter by title or artist",
+                            )
+                        }
+                    }
+                    item {
+                        MusicContentReveal(index = 3, animate = nestedRevealActive, revealKey = screenScrollKey) {
                             MusicTrackList(
                                 title = "All Songs",
-                                tracks = screen.tracks,
+                                tracks = filteredTracks,
                                 page = screen.page,
                                 isPageLoading = state.isMusicPageLoading,
                                 onPreviousPage = viewModel::previousMusicPage,
@@ -461,12 +514,18 @@ fun MusicScreen(
                                 onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                                 onChoosePlaylist = { playlistPickerTrack = it },
                                 onLongPress = { actionTrack = it },
+                                animateReveal = false,
                             )
                         }
                     }
                 }
             }
         }
+        MusicStatusBarScrim(
+            alpha = 0.92f,
+            statusBarHeight = statusBarHeight,
+            modifier = Modifier.align(Alignment.TopCenter),
+        )
         AnimatedVisibility(
             visible = state.playback.currentTrack != null,
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -647,6 +706,26 @@ fun MusicScreen(
 }
 
 @Composable
+private fun MusicStatusBarScrim(alpha: Float, statusBarHeight: Dp, modifier: Modifier = Modifier) {
+    if (alpha <= 0.001f) return
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(statusBarHeight + 72.dp)
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color.Black.copy(alpha = 0.74f * alpha),
+                        0.42f to VantafynColors.Graphite.copy(alpha = 0.58f * alpha),
+                        0.72f to VantafynColors.Graphite.copy(alpha = 0.20f * alpha),
+                        1.00f to Color.Transparent,
+                    ),
+                ),
+            ),
+    )
+}
+
+@Composable
 private fun MusicHomeHeader() {
     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         Text(
@@ -814,6 +893,165 @@ private fun MusicPlaylistRow(playlists: List<JellyfinMusicPlaylist>, onPlaylist:
     }
 }
 
+private fun MusicSongsFilter.supportsMusicSongsAlphabetRail(): Boolean =
+    this == MusicSongsFilter.AZ || this == MusicSongsFilter.Favorites
+
+@Composable
+private fun MusicSongsFilterChips(selected: MusicSongsFilter, onSelected: (MusicSongsFilter) -> Unit) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp),
+    ) {
+        items(MusicSongsFilter.entries, key = { it.name }) { mode ->
+            VantafynGlassChip(
+                selected = selected == mode,
+                onClick = { onSelected(mode) },
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 9.dp),
+            ) {
+                Text(
+                    mode.label,
+                    color = if (selected == mode) VantafynColors.Ink else VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicSongsAlphabetRail(
+    selected: String?,
+    enabled: Boolean,
+    onSelected: (String?) -> Unit,
+) {
+    val letters = remember { listOf("#") + ('A'..'Z').map { it.toString() } }
+    val selectedIndex = selected?.let { letters.indexOf(it).takeIf { index -> index >= 0 } } ?: -1
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(selectedIndex) {
+        if (selectedIndex >= 0) {
+            listState.animateScrollToItem((selectedIndex - 3).coerceAtLeast(0))
+        }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .drawWithContent {
+                drawContent()
+                val edge = 28.dp.toPx()
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to VantafynColors.Graphite,
+                        1f to Color.Transparent,
+                        startX = 0f,
+                        endX = edge,
+                    ),
+                    size = Size(edge, size.height),
+                )
+                drawRect(
+                    brush = Brush.horizontalGradient(
+                        0f to Color.Transparent,
+                        1f to VantafynColors.Graphite,
+                        startX = size.width - edge,
+                        endX = size.width,
+                    ),
+                    topLeft = Offset(size.width - edge, 0f),
+                    size = Size(edge, size.height),
+                )
+            },
+    ) {
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            contentPadding = PaddingValues(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            items(letters, key = { it }) { letter ->
+                MusicSongsAlphabetLetter(
+                    label = letter,
+                    selected = selected == letter,
+                    enabled = enabled,
+                    onClick = {
+                        scope.launch {
+                            val index = letters.indexOf(letter).takeIf { it >= 0 } ?: 0
+                            listState.animateScrollToItem((index - 3).coerceAtLeast(0))
+                        }
+                        onSelected(if (selected == letter) null else letter)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicSongsAlphabetLetter(
+    label: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed && enabled) 0.96f else 1f,
+        animationSpec = spring(stiffness = 520f, dampingRatio = 0.82f),
+        label = "musicSongsAlphabetPress",
+    )
+    Box(
+        modifier = Modifier
+            .height(32.dp)
+            .widthIn(min = 32.dp)
+            .scale(scale)
+            .clip(RoundedCornerShape(999.dp))
+            .then(
+                if (selected) {
+                    Modifier
+                        .background(
+                            Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.White.copy(alpha = 0.17f),
+                                    VantafynColors.Surface.copy(alpha = 0.72f),
+                                    VantafynColors.Graphite.copy(alpha = 0.58f),
+                                ),
+                            ),
+                        )
+                        .border(
+                            width = 1.dp,
+                            brush = VantafynGradients.accentHorizontal(),
+                            shape = RoundedCornerShape(999.dp),
+                        )
+                } else {
+                    Modifier
+                },
+            )
+            .clickable(
+                enabled = enabled,
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            label,
+            color = when {
+                !enabled -> VantafynColors.Muted.copy(alpha = 0.38f)
+                selected -> VantafynColors.Ink
+                else -> VantafynColors.Muted.copy(alpha = 0.86f)
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            maxLines = 1,
+        )
+    }
+}
+
 @Composable
 private fun MusicTrackList(
     title: String,
@@ -827,17 +1065,21 @@ private fun MusicTrackList(
     onTrack: (JellyfinMusicTrack) -> Unit,
     onChoosePlaylist: (JellyfinMusicTrack) -> Unit = {},
     onLongPress: (JellyfinMusicTrack) -> Unit = {},
+    animateReveal: Boolean = true,
 ) {
     val trackRevealKey = "${page?.startIndex ?: 0}:${page?.totalItems ?: tracks.size}:${tracks.size}:${tracks.firstOrNull()?.id}:${tracks.lastOrNull()?.id}"
-    var revealTrackRows by remember(trackRevealKey) { mutableStateOf(tracks.isNotEmpty()) }
+    var hasPlayed by rememberSaveable(trackRevealKey) { mutableStateOf(false) }
+    var revealTrackRows by remember(trackRevealKey) { mutableStateOf(animateReveal && tracks.isNotEmpty() && !hasPlayed) }
     LaunchedEffect(trackRevealKey) {
-        if (tracks.isEmpty()) {
+        if (!animateReveal || tracks.isEmpty()) {
             revealTrackRows = false
             return@LaunchedEffect
         }
+        if (hasPlayed) return@LaunchedEffect
         revealTrackRows = true
         delay(1_550L)
         revealTrackRows = false
+        hasPlayed = true
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {

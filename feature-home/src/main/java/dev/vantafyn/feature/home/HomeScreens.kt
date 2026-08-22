@@ -49,7 +49,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -864,7 +863,7 @@ private fun WatchPartyInvite.inviteBody(): String =
     }
 
 @Composable
-private fun rememberReducedMotionPreference(): Boolean {
+internal fun rememberReducedMotionPreference(): Boolean {
     val context = LocalContext.current
     return remember(context) {
         val resolver = context.contentResolver
@@ -1061,14 +1060,14 @@ private fun ServerConfirmScreen(
                 Spacer(Modifier.height(if (tv) VantafynSpacing.xxl else VantafynSpacing.xl))
                 val server = state.server
                 SetupMaterialize(delayMillis = 180, modifier = Modifier.fillMaxWidth()) {
-                    val borderAlpha by animateFloatAsState(
-                        targetValue = 1f,
-                        animationSpec = tween(800, easing = FastOutSlowInEasing),
-                        label = "serverBorderAlpha",
-                    )
+                    var borderAlpha by remember { mutableFloatStateOf(0f) }
                     val serverBorderLifecycleOwner = LocalLifecycleOwner.current
                     var serverBorderLifecycleState by remember { mutableStateOf(serverBorderLifecycleOwner.lifecycle.currentState) }
                     var borderShift by remember { mutableFloatStateOf(0f) }
+                    LaunchedEffect(Unit) {
+                        delay(600)
+                        borderAlpha = 1f
+                    }
                     DisposableEffect(serverBorderLifecycleOwner) {
                         val observer = LifecycleEventObserver { _, _ ->
                             serverBorderLifecycleState = serverBorderLifecycleOwner.lifecycle.currentState
@@ -1088,6 +1087,7 @@ private fun ServerConfirmScreen(
                     }
                     Box(modifier = Modifier.fillMaxWidth().drawWithContent {
                         drawContent()
+                        if (borderAlpha <= 0f) return@drawWithContent
                         val r = 22.dp.toPx()
                         val s = Offset(-size.width * borderShift, -size.height * borderShift)
                         val e = Offset(size.width * (1f - borderShift), size.height * (1f - borderShift))
@@ -1312,31 +1312,27 @@ private fun ConnectionRecoveryScreen(
         SetupBackScaffold(onBack = onBack) {
             CenterPane {
                 SetupMaterialize(delayMillis = 0) {
-                    VantafynLogoHeader(
-                        title = "Server unavailable",
-                        tagline = "We couldn’t reach this saved Jellyfin server.",
-                        tv = tv,
-                    )
+                    ConnectionRecoveryHeader(tv = tv)
                 }
-                Spacer(Modifier.height(if (tv) VantafynSpacing.xl else VantafynSpacing.lg))
+                Spacer(Modifier.height(if (tv) VantafynSpacing.lg else VantafynSpacing.md))
                 SetupMaterialize(delayMillis = 180, modifier = Modifier.fillMaxWidth()) {
                     VantafynGlassPanel(
                         modifier = Modifier
                             .fillMaxWidth(if (tv) 0.58f else 1f)
                             .vantafynAnimatedModalBorder(),
                         cornerRadius = 30.dp,
-                        contentPadding = PaddingValues(if (tv) 24.dp else 18.dp),
+                        contentPadding = PaddingValues(if (tv) 22.dp else 15.dp),
                     ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 ProfileAvatar(
                                     name = profile?.displayName ?: "Saved profile",
                                     imageUrl = profile?.imageUrl,
-                                    modifier = Modifier.size(if (tv) 64.dp else 54.dp),
+                                    modifier = Modifier.size(if (tv) 60.dp else 48.dp),
                                 )
                                 Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                                     Text(
@@ -1364,7 +1360,7 @@ private fun ConnectionRecoveryScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 variant = VantafynGlassVariant.Card,
                                 cornerRadius = 18.dp,
-                                contentPadding = PaddingValues(12.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                             ) {
                                 Text(
                                     currentAddress.ifBlank { "No saved server address" },
@@ -1379,7 +1375,7 @@ private fun ConnectionRecoveryScreen(
                                 Text(
                                     "Local addresses usually only work at home. Use your remote address when you’re away.",
                                     color = VantafynColors.Muted,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodySmall,
                                 )
                             }
 
@@ -1397,7 +1393,7 @@ private fun ConnectionRecoveryScreen(
                                 Text(
                                     it,
                                     color = VantafynColors.Muted,
-                                    style = MaterialTheme.typography.bodyMedium,
+                                    style = MaterialTheme.typography.bodySmall,
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis,
                                 )
@@ -1409,7 +1405,7 @@ private fun ConnectionRecoveryScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                     variant = VantafynGlassVariant.Card,
                                     cornerRadius = 20.dp,
-                                    contentPadding = PaddingValues(14.dp),
+                                    contentPadding = PaddingValues(12.dp),
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -1439,7 +1435,9 @@ private fun ConnectionRecoveryScreen(
                                     "Work offline",
                                     onClick = onWorkOffline,
                                     enabled = !state.isLoading,
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(54.dp),
                                 )
                             }
 
@@ -1447,12 +1445,12 @@ private fun ConnectionRecoveryScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                VantafynButton("Retry", onClick = onRetry, enabled = !state.isLoading, modifier = Modifier.weight(1f))
+                                VantafynButton("Retry", onClick = onRetry, enabled = !state.isLoading, modifier = Modifier.height(52.dp).weight(1f))
                                 VantafynButton(
-                                    "Save address",
+                                    "Save",
                                     onClick = onSaveServerAddress,
                                     enabled = !state.isLoading && state.serverUrl.isNotBlank(),
-                                    modifier = Modifier.weight(1f),
+                                    modifier = Modifier.height(52.dp).weight(1f),
                                 )
                             }
                             Row(
@@ -1463,7 +1461,7 @@ private fun ConnectionRecoveryScreen(
                                     onClick = onSignInAgain,
                                     enabled = !state.isLoading,
                                     modifier = Modifier
-                                        .height(52.dp)
+                                        .height(48.dp)
                                         .weight(1f),
                                 ) {
                                     Text("Sign in again", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1472,7 +1470,7 @@ private fun ConnectionRecoveryScreen(
                                     onClick = onUseAnotherServer,
                                     enabled = !state.isLoading,
                                     modifier = Modifier
-                                        .height(52.dp)
+                                        .height(48.dp)
                                         .weight(1f),
                                 ) {
                                     Text("New server", maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1488,6 +1486,46 @@ private fun ConnectionRecoveryScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ConnectionRecoveryHeader(tv: Boolean) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(if (tv) 10.dp else 8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(if (tv) 68.dp else 56.dp)
+                .clip(RoundedCornerShape(if (tv) 18.dp else 16.dp))
+                .background(Color.Black)
+                .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(if (tv) 18.dp else 16.dp))
+                .padding(if (tv) 10.dp else 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Image(
+                painter = painterResource(id = CoreUiR.drawable.vantafyn_logo),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit,
+            )
+        }
+        Text(
+            "Server unavailable",
+            color = VantafynColors.Ink,
+            style = if (tv) MaterialTheme.typography.displayMedium else MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            "We couldn't reach this saved Jellyfin server.",
+            color = VantafynColors.Muted,
+            style = if (tv) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -2398,6 +2436,12 @@ private data class PreparedProfileImage(
     override fun hashCode(): Int = 31 * bytes.contentHashCode() + mimeType.hashCode()
 }
 
+private data class BundledProfileAvatar(
+    val index: Int,
+    val resId: Int,
+    val thumbResId: Int,
+)
+
 private class ProfileImagePickerState(
     val open: () -> Unit,
     val Content: @Composable () -> Unit,
@@ -2407,6 +2451,9 @@ private class ProfileImagePickerState(
 private fun rememberProfileImagePicker(onUpload: (ByteArray, String) -> Unit): ProfileImagePickerState {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val bundledAvatars = remember { bundledProfileAvatars() }
+    var isOpen by remember { mutableStateOf(false) }
+    var selectedAvatar by remember(bundledAvatars) { mutableStateOf(bundledAvatars.firstOrNull()) }
     var prepared by remember { mutableStateOf<PreparedProfileImage?>(null) }
     var localError by remember { mutableStateOf<String?>(null) }
     var isPreparing by remember { mutableStateOf(false) }
@@ -2416,27 +2463,51 @@ private fun rememberProfileImagePicker(onUpload: (ByteArray, String) -> Unit): P
             isPreparing = true
             localError = null
             prepared = prepareProfileImage(context, uri)
-                .onFailure { localError = "Couldn't read that image." }
+                .onFailure { localError = "Couldn't read that photo." }
                 .getOrNull()
+            if (prepared != null) selectedAvatar = null
             isPreparing = false
         }
     }
     return ProfileImagePickerState(
         open = {
-            launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            localError = null
+            prepared = null
+            selectedAvatar = bundledAvatars.firstOrNull()
+            isOpen = true
         },
         Content = {
             when {
                 isPreparing -> ProfileImageStatusCard(isSaving = true, error = null)
                 localError != null -> ProfileImageStatusCard(isSaving = false, error = localError)
             }
-            prepared?.let { image ->
-                ProfileImagePreviewDialog(
-                    image = image,
-                    onDismiss = { prepared = null },
-                    onUse = {
+            if (isOpen) {
+                ProfileImagePickerDialog(
+                    avatars = bundledAvatars,
+                    selectedAvatar = selectedAvatar,
+                    customImage = prepared,
+                    isPreparing = isPreparing,
+                    error = localError,
+                    onSelectAvatar = {
+                        selectedAvatar = it
                         prepared = null
-                        onUpload(image.bytes, image.mimeType)
+                        localError = null
+                    },
+                    onPickCustom = {
+                        launcher.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    },
+                    onDismiss = { isOpen = false },
+                    onConfirm = {
+                        val upload = prepared ?: selectedAvatar?.let { avatar ->
+                            readBundledProfileAvatar(context, avatar.resId)
+                                .onFailure { localError = "Couldn't prepare that avatar." }
+                                .getOrNull()
+                        }
+                        if (upload != null) {
+                            isOpen = false
+                            prepared = null
+                            onUpload(upload.bytes, upload.mimeType)
+                        }
                     },
                 )
             }
@@ -2445,12 +2516,21 @@ private fun rememberProfileImagePicker(onUpload: (ByteArray, String) -> Unit): P
 }
 
 @Composable
-private fun ProfileImagePreviewDialog(
-    image: PreparedProfileImage,
+private fun ProfileImagePickerDialog(
+    avatars: List<BundledProfileAvatar>,
+    selectedAvatar: BundledProfileAvatar?,
+    customImage: PreparedProfileImage?,
+    isPreparing: Boolean,
+    error: String?,
     onDismiss: () -> Unit,
-    onUse: () -> Unit,
+    onSelectAvatar: (BundledProfileAvatar) -> Unit,
+    onPickCustom: () -> Unit,
+    onConfirm: () -> Unit,
 ) {
-    val bitmap = remember(image) { BitmapFactory.decodeByteArray(image.bytes, 0, image.bytes.size) }
+    val customBitmap = remember(customImage) {
+        customImage?.let { BitmapFactory.decodeByteArray(it.bytes, 0, it.bytes.size) }
+    }
+    val canConfirm = selectedAvatar != null || customImage != null
     AlertDialog(
         modifier = Modifier
             .imePadding()
@@ -2459,30 +2539,184 @@ private fun ProfileImagePreviewDialog(
         containerColor = VantafynModalContainerColor,
         titleContentColor = VantafynColors.Ink,
         textContentColor = VantafynColors.Muted,
-        title = { Text("Profile picture") },
+        title = { Text("Choose Profile Picture") },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 520.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
             ) {
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "Profile picture preview",
-                        modifier = Modifier
-                            .size(164.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(999.dp)),
-                        contentScale = ContentScale.Crop,
-                    )
+                Text(
+                    "Choose a Vantafyn avatar or use your own.",
+                    color = VantafynColors.Muted,
+                    textAlign = TextAlign.Center,
+                )
+                ProfileImageLivePreview(
+                    avatar = selectedAvatar,
+                    customBitmap = customBitmap,
+                )
+                if (error != null) {
+                    Text(error, color = Color(0xFFFFC2C2), textAlign = TextAlign.Center)
                 }
-                Text("Vantafyn will upload a square image to Jellyfin.", textAlign = TextAlign.Center)
+                BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+                    val columns = if (maxWidth >= 420.dp) 4 else 3
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(columns),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 280.dp),
+                        contentPadding = PaddingValues(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        gridItems(avatars, key = { it.index }) { avatar ->
+                            BundledProfileAvatarTile(
+                                avatar = avatar,
+                                selected = selectedAvatar?.resId == avatar.resId && customImage == null,
+                                onClick = { onSelectAvatar(avatar) },
+                            )
+                        }
+                        item(key = "custom-photo") {
+                            CustomProfilePhotoTile(
+                                selected = customImage != null,
+                                isPreparing = isPreparing,
+                                onClick = onPickCustom,
+                            )
+                        }
+                    }
+                }
             }
         },
-        confirmButton = { VantafynButton("Use Photo", onClick = onUse) },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AdminMessageSecondaryButton(
+                    text = "Cancel",
+                    enabled = !isPreparing,
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                )
+                VantafynButton(
+                    text = "Use Picture",
+                    onClick = onConfirm,
+                    enabled = canConfirm && !isPreparing,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        },
+        dismissButton = {},
     )
+}
+
+@Composable
+private fun ProfileImageLivePreview(
+    avatar: BundledProfileAvatar?,
+    customBitmap: Bitmap?,
+) {
+    Box(
+        modifier = Modifier
+            .size(136.dp)
+            .background(VantafynColors.Surface.copy(alpha = 0.46f), RoundedCornerShape(999.dp))
+            .border(1.dp, VantafynColors.Primary.copy(alpha = 0.46f), RoundedCornerShape(999.dp))
+            .padding(6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        when {
+            customBitmap != null -> Image(
+                bitmap = customBitmap.asImageBitmap(),
+                contentDescription = "Selected custom profile picture",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(999.dp)),
+                contentScale = ContentScale.Crop,
+            )
+            avatar != null -> Image(
+                painter = painterResource(avatar.thumbResId),
+                contentDescription = "Selected profile picture ${avatar.index}",
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(999.dp)),
+                contentScale = ContentScale.Crop,
+            )
+            else -> Icon(Icons.Rounded.Person, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(48.dp))
+        }
+    }
+}
+
+@Composable
+private fun BundledProfileAvatarTile(
+    avatar: BundledProfileAvatar,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val scale by animateFloatAsState(
+        targetValue = if (selected) 1.025f else 1f,
+        animationSpec = spring(stiffness = 520f, dampingRatio = 0.8f),
+        label = "profileAvatarScale",
+    )
+    val ringAlpha by animateFloatAsState(
+        targetValue = if (selected) 0.9f else 0.18f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "profileAvatarRing",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .scale(scale)
+            .clip(RoundedCornerShape(999.dp))
+            .background(VantafynColors.Surface.copy(alpha = if (selected) 0.46f else 0.26f))
+            .border(2.dp, VantafynColors.Primary.copy(alpha = ringAlpha), RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick)
+            .padding(5.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Image(
+            painter = painterResource(avatar.thumbResId),
+            contentDescription = if (selected) "Profile picture ${avatar.index}, selected" else "Profile picture ${avatar.index}",
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(RoundedCornerShape(999.dp)),
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
+@Composable
+private fun CustomProfilePhotoTile(
+    selected: Boolean,
+    isPreparing: Boolean,
+    onClick: () -> Unit,
+) {
+    val ringAlpha by animateFloatAsState(
+        targetValue = if (selected) 0.9f else 0.2f,
+        animationSpec = tween(180, easing = FastOutSlowInEasing),
+        label = "customAvatarRing",
+    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .aspectRatio(1f)
+            .clip(RoundedCornerShape(999.dp))
+            .background(VantafynColors.Surface.copy(alpha = 0.34f))
+            .border(2.dp, VantafynColors.Primary.copy(alpha = ringAlpha), RoundedCornerShape(999.dp))
+            .clickable(enabled = !isPreparing, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isPreparing) {
+            VantafynGradientSpinner(modifier = Modifier.size(28.dp), strokeWidth = 2.dp)
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("+", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Your photo", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            }
+        }
+    }
 }
 
 @Composable
@@ -2529,6 +2763,29 @@ private suspend fun prepareProfileImage(context: Context, uri: Uri): Result<Prep
             PreparedProfileImage(bytes = output.toByteArray(), mimeType = "image/jpeg")
     }
 }
+
+private fun bundledProfileAvatars(): List<BundledProfileAvatar> =
+    R.drawable::class.java.fields
+        .mapNotNull { field ->
+            val name = field.name
+            val index = name.removePrefix("pp").toIntOrNull()
+            if (index != null && name == "pp$index") {
+                val thumbResId = runCatching {
+                    R.drawable::class.java.getField("pp${index}_thumb").getInt(null)
+                }.getOrDefault(field.getInt(null))
+                BundledProfileAvatar(index = index, resId = field.getInt(null), thumbResId = thumbResId)
+            } else {
+                null
+            }
+        }
+        .sortedBy { it.index }
+
+private fun readBundledProfileAvatar(context: Context, resId: Int): Result<PreparedProfileImage> =
+    runCatching {
+        context.resources.openRawResource(resId).use { input ->
+            PreparedProfileImage(bytes = input.readBytes(), mimeType = "image/png")
+        }
+    }
 
 @Composable
 private fun BottomRailAccentSettings(
@@ -3295,6 +3552,7 @@ private fun MobileShellScreen(
                             onOpenMedia = onOpenMedia,
                             onMarkWhatsNewSeen = onMarkWhatsNewSeen,
                             onToggleWhatsNew = onToggleWhatsNew,
+                            onDiscoverVantafyn = { onNavigate(MobileDestination.DiscoverVantafyn) },
                         )
                         MobileDestination.DeviceQuickConnect -> DeviceQuickConnectScreen(
                             state = state,
@@ -3341,6 +3599,20 @@ private fun MobileShellScreen(
                             onMediaLongPress = { mediaActionTarget = it },
                             onStartLiveTvPlayback = onStartLiveTvPlayback,
                             onPlaybackComingSoon = onPlaybackComingSoon,
+                        )
+                        MobileDestination.DiscoverVantafyn -> DiscoverVantafynScreen(
+                            isAdmin = state.session?.user?.isAdministrator == true,
+                            onBack = onNavigateBack,
+                            onDeepLink = { action ->
+                                when (action) {
+                                    "open_settings" -> onNavigate(MobileDestination.Profile)
+                                    "open_playback_preferences" -> onNavigate(MobileDestination.PlaybackPreferences)
+                                    "open_home_layout" -> onNavigate(MobileDestination.HomeLayout)
+                                    "open_watch_party" -> onNavigate(MobileDestination.WatchParty)
+                                    "open_admin" -> onNavigate(MobileDestination.Admin)
+                                    else -> Unit
+                                }
+                            },
                         )
                         else -> Unit
                     }
@@ -4637,7 +4909,7 @@ private fun HomeSkeletonRow(index: Int) {
 }
 
 @Composable
-private fun HomeContentReveal(
+internal fun HomeContentReveal(
     index: Int,
     animate: Boolean,
     revealKey: Any? = index,
@@ -6979,84 +7251,86 @@ private fun AdminScreen(
             }
         }
     }
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 116.dp),
-        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
-    ) {
-        item { HomeContentReveal(index = 0, animate = revealActive, revealKey = adminRevealKey) { ScreenTitle("Admin", overview?.serverName ?: state.server?.name ?: "Jellyfin Server") } }
-        if (state.isAdminLoading && overview == null) item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminDashboardSkeleton() } }
-        state.adminError?.let { item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { VantafynErrorCard(it) } } }
-        if (overview != null) {
-            item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminHeroCard(state = state, overview = overview, adminImageUrl = adminUser?.imageUrl, onAvatarClick = onOpenSettings) } }
-            item {
-                HomeContentReveal(index = 2, animate = revealActive, revealKey = adminRevealKey) {
-                    AdminLibraryScanCard(
-                        scanTask = overview.tasks.firstOrNull { it.isLibraryScanTask() },
-                        isActionRunning = state.isAdminActionRunning,
-                        isScanTracking = state.isLibraryScanTracking,
-                        onScanLibrary = onScanLibrary,
-                    )
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .padding(horizontal = 8.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 116.dp),
+            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+        ) {
+            item { HomeContentReveal(index = 0, animate = revealActive, revealKey = adminRevealKey) { ScreenTitle("Admin", overview?.serverName ?: state.server?.name ?: "Jellyfin Server") } }
+            if (state.isAdminLoading && overview == null) item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminDashboardSkeleton() } }
+            state.adminError?.let { item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { VantafynErrorCard(it) } } }
+            if (overview != null) {
+                item { HomeContentReveal(index = 1, animate = revealActive, revealKey = adminRevealKey) { AdminHeroCard(state = state, overview = overview, adminImageUrl = adminUser?.imageUrl, onAvatarClick = onOpenSettings) } }
+                item {
+                    HomeContentReveal(index = 2, animate = revealActive, revealKey = adminRevealKey) {
+                        AdminLibraryScanCard(
+                            scanTask = overview.tasks.firstOrNull { it.isLibraryScanTask() },
+                            isActionRunning = state.isAdminActionRunning,
+                            isScanTracking = state.isLibraryScanTracking,
+                            onScanLibrary = onScanLibrary,
+                        )
+                    }
                 }
-            }
-            item {
-                HomeContentReveal(index = 3, animate = revealActive, revealKey = adminRevealKey) {
-                    AdminMediaStatsPanel(
-                        overview = overview,
-                        expanded = mediaStatsExpanded,
-                        onToggle = { mediaStatsExpanded = !mediaStatsExpanded },
-                    )
+                item {
+                    HomeContentReveal(index = 3, animate = revealActive, revealKey = adminRevealKey) {
+                        AdminMediaStatsPanel(
+                            overview = overview,
+                            expanded = mediaStatsExpanded,
+                            onToggle = { mediaStatsExpanded = !mediaStatsExpanded },
+                        )
+                    }
                 }
-            }
-            item {
-                HomeContentReveal(index = 4, animate = revealActive, revealKey = adminRevealKey) {
-                    AdminUsersManagementPanel(
-                        users = overview.users,
-                        usersExpanded = usersExpanded,
-                        addUserExpanded = addUserExpanded,
-                        isSaving = state.isAdminUserSaving,
-                        errorMessage = state.adminUserError,
-                        username = newUsername,
-                        password = newPassword,
-                        onToggleUsers = { usersExpanded = !usersExpanded },
-                        onToggleAddUser = {
-                            if (!state.isAdminUserSaving) {
-                                addUserExpanded = !addUserExpanded
-                                newUsername = ""
-                                newPassword = ""
-                            }
-                        },
-                        onUsername = { newUsername = it },
-                        onPassword = { newPassword = it },
-                        onCreate = {
-                            onCreateUser(newUsername, newPassword)
-                        },
-                        onOpenUser = onOpenUser,
-                    )
+                item {
+                    HomeContentReveal(index = 4, animate = revealActive, revealKey = adminRevealKey) {
+                        AdminUsersManagementPanel(
+                            users = overview.users,
+                            usersExpanded = usersExpanded,
+                            addUserExpanded = addUserExpanded,
+                            isSaving = state.isAdminUserSaving,
+                            errorMessage = state.adminUserError,
+                            username = newUsername,
+                            password = newPassword,
+                            onToggleUsers = { usersExpanded = !usersExpanded },
+                            onToggleAddUser = {
+                                if (!state.isAdminUserSaving) {
+                                    addUserExpanded = !addUserExpanded
+                                    newUsername = ""
+                                    newPassword = ""
+                                }
+                            },
+                            onUsername = { newUsername = it },
+                            onPassword = { newPassword = it },
+                            onCreate = {
+                                onCreateUser(newUsername, newPassword)
+                            },
+                            onOpenUser = onOpenUser,
+                        )
+                    }
                 }
-            }
-            item { HomeContentReveal(index = 5, animate = revealActive, revealKey = adminRevealKey) {
-                AdminSessionsSection(
-                    sessions = overview.activeSessions,
-                    speedLimitMbps = state.adminSpeedLimitMbps,
-                    onTapSpeedLimit = { showSpeedLimitDialog = true },
-                    onBroadcast = { messageTarget = AdminMessageTarget.Broadcast(overview.activeSessions) },
-                    onMessage = { messageTarget = AdminMessageTarget.Session(it) },
-                )
-            } }
-            item { HomeContentReveal(index = 6, animate = revealActive, revealKey = adminRevealKey) { AdminStatisticsPanel(overview, expanded = statisticsExpanded, onToggle = { statisticsExpanded = !statisticsExpanded }) } }
-            item { HomeContentReveal(index = 7, animate = revealActive, revealKey = adminRevealKey) { AdminPluginsPanel(overview.plugins) } }
-            item {
-                HomeContentReveal(index = 8, animate = revealActive, revealKey = adminRevealKey) {
-                    AdminTasksPanel(
-                        tasks = overview.tasks,
-                        isActionRunning = state.isAdminActionRunning,
-                        onRunTask = onRunTask,
-                        onStopTask = onStopTask,
+                item { HomeContentReveal(index = 5, animate = revealActive, revealKey = adminRevealKey) {
+                    AdminSessionsSection(
+                        sessions = overview.activeSessions,
+                        speedLimitMbps = state.adminSpeedLimitMbps,
+                        onTapSpeedLimit = { showSpeedLimitDialog = true },
+                        onBroadcast = { messageTarget = AdminMessageTarget.Broadcast(overview.activeSessions) },
+                        onMessage = { messageTarget = AdminMessageTarget.Session(it) },
                     )
+                } }
+                item { HomeContentReveal(index = 6, animate = revealActive, revealKey = adminRevealKey) { AdminStatisticsPanel(overview, expanded = statisticsExpanded, onToggle = { statisticsExpanded = !statisticsExpanded }) } }
+                item { HomeContentReveal(index = 7, animate = revealActive, revealKey = adminRevealKey) { AdminPluginsPanel(overview.plugins) } }
+                item {
+                    HomeContentReveal(index = 8, animate = revealActive, revealKey = adminRevealKey) {
+                        AdminTasksPanel(
+                            tasks = overview.tasks,
+                            isActionRunning = state.isAdminActionRunning,
+                            onRunTask = onRunTask,
+                            onStopTask = onStopTask,
+                        )
+                    }
                 }
             }
         }
@@ -7680,9 +7954,9 @@ private fun AdminUserWatchLeaderboard(users: List<dev.vantafyn.core.jellyfin.Jel
     VantafynGlassCard(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 24.dp,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(18.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Groups, contentDescription = null, tint = Color(0xFF58D7FF), modifier = Modifier.size(24.dp))
                 Text("Top viewers", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -7693,12 +7967,12 @@ private fun AdminUserWatchLeaderboard(users: List<dev.vantafyn.core.jellyfin.Jel
                     modifier = Modifier.fillMaxWidth(),
                     variant = VantafynGlassVariant.Card,
                     cornerRadius = 20.dp,
-                    contentPadding = PaddingValues(12.dp),
+                    contentPadding = PaddingValues(14.dp),
                 ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(11.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
@@ -7706,12 +7980,12 @@ private fun AdminUserWatchLeaderboard(users: List<dev.vantafyn.core.jellyfin.Jel
                                 color = if (user.rank == 1) Color(0xFFFFD85D) else VantafynColors.Muted,
                                 fontWeight = FontWeight.Bold,
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.width(26.dp),
+                                modifier = Modifier.width(28.dp),
                             )
-                            ProfileAvatar(user.displayName, user.avatarUrl, Modifier.size(46.dp))
+                            ProfileAvatar(user.displayName, user.avatarUrl, Modifier.size(48.dp))
                             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Text(user.displayName, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(user.totalWatchTimeSeconds.watchTimeLabel(), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(user.displayName, color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(user.totalWatchTimeSeconds.watchTimeLabel(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                             SoftBadge(user.playCount.groupedCountLabel())
                         }
@@ -7729,10 +8003,23 @@ private fun AdminUserWatchLeaderboard(users: List<dev.vantafyn.core.jellyfin.Jel
                                     .background(VantafynGradients.accentHorizontal()),
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                             AdminTinyUserMetric("Watch time", user.totalWatchTimeSeconds.watchTimeLabel(), Modifier.weight(1f))
                             AdminTinyUserMetric("Plays", user.playCount.groupedCountLabel(), Modifier.weight(1f))
-                            AdminTinyUserMetric("Last app", user.lastClient ?: "Unknown", Modifier.weight(1f))
+                        }
+                        if (user.hasContentBreakdown) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .height(1.dp)
+                                    .background(Color.White.copy(alpha = 0.08f)),
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                if (user.moviesCount > 0) AdminTinyUserMetric("Movies", user.moviesCount.toString(), Modifier.weight(1f))
+                                if (user.episodesCount > 0) AdminTinyUserMetric("Episodes", user.episodesCount.toString(), Modifier.weight(1f))
+                                if (user.audioCount > 0) AdminTinyUserMetric("Songs", user.audioCount.toString(), Modifier.weight(1f))
+                            }
                         }
                     }
                 }
@@ -7743,9 +8030,9 @@ private fun AdminUserWatchLeaderboard(users: List<dev.vantafyn.core.jellyfin.Jel
 
 @Composable
 private fun AdminTinyUserMetric(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
-        Text(label, color = VantafynColors.Muted, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(3.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
+        Text(label, color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center)
     }
 }
 
@@ -10363,6 +10650,7 @@ private fun ProfileSettingsScreen(
     onOpenMedia: (java.util.UUID) -> Unit,
     onMarkWhatsNewSeen: () -> Unit,
     onToggleWhatsNew: () -> Unit,
+    onDiscoverVantafyn: () -> Unit,
 ) {
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
@@ -10375,112 +10663,115 @@ private fun ProfileSettingsScreen(
         revealActive = false
     }
     val avatarPicker = rememberProfileImagePicker(onUploadProfileImage)
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .imePadding()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
-        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
-    ) {
-        item {
-            HomeContentReveal(index = 0, animate = revealActive) {
-                Text("Settings", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-            }
-        }
-        item {
-            HomeContentReveal(index = 1, animate = revealActive) {
-                ProfileDashboardCard(
-                    state = state,
-                    onChangePhoto = { avatarPicker.open() },
-                    onRemovePhoto = onDeleteProfileImage,
-                )
-            }
-        }
-        if (state.isProfileImageSaving || state.profileImageError != null) {
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .padding(horizontal = 8.dp),
+            contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+        ) {
             item {
-                HomeContentReveal(index = 2, animate = revealActive) {
-                    ProfileImageStatusCard(
-                        isSaving = state.isProfileImageSaving,
-                        error = state.profileImageError,
+                HomeContentReveal(index = 0, animate = revealActive) {
+                    Text("Settings", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            item {
+                HomeContentReveal(index = 1, animate = revealActive) {
+                    ProfileDashboardCard(
+                        state = state,
+                        onChangePhoto = { avatarPicker.open() },
+                        onRemovePhoto = onDeleteProfileImage,
                     )
                 }
             }
-        }
-        item {
-            HomeContentReveal(index = 3, animate = revealActive) {
-                GlassPanel {
-                    Text("Appearance", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    ThemeSelector(selected = state.selectedTheme, onSelect = onSelectTheme)
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                        SettingsRowIcon(Icons.Rounded.Wallpaper)
-                        Text("Background", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
+            if (state.isProfileImageSaving || state.profileImageError != null) {
+                item {
+                    HomeContentReveal(index = 2, animate = revealActive) {
+                        ProfileImageStatusCard(
+                            isSaving = state.isProfileImageSaving,
+                            error = state.profileImageError,
+                        )
                     }
-                    BackgroundSelector(selected = state.selectedBackground, onSelect = onSelectBackground)
-                    ThemeMusicSettings(
-                        checked = state.themeMusicEnabled,
-                        selected = state.themeMusicVolume,
-                        onToggle = onToggleThemeMusic,
-                        onSelect = onSelectThemeMusicVolume,
-                    )
-                    BottomRailAccentSettings(
-                        selected = state.bottomRailAccent,
-                        onSelect = onSetBottomRailAccent,
-                    )
                 }
             }
-        }
-        item {
-            HomeContentReveal(index = 4, animate = revealActive) {
-                GlassPanel {
-                    Text("Profile", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    SettingsRow("Switch User", "", onSwitchUser, compact = true, icon = Icons.Rounded.SwitchAccount)
-                    PremiumToggleRow(
-                        title = "Use last profile on launch",
-                        subtitle = "",
-                        checked = state.autoLoginLastProfile,
-                        onClick = onToggleAutoLoginLastProfile,
-                        icon = Icons.Rounded.Person,
-                    )
-                    SettingsRow("Add Profile", "", onAddProfile, compact = true, icon = Icons.Rounded.PersonAdd)
-                    SettingsRow("Quick Connect", "", onQuickConnect, compact = true, icon = Icons.Rounded.Link)
-                    SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
-                    SettingsRow("Log Out", "", onLogout, compact = true, destructive = true, icon = Icons.Rounded.Logout)
-                }
-            }
-        }
-        item {
-            HomeContentReveal(index = 5, animate = revealActive) {
-                GlassPanel {
-                    Text("Permissions", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    PermissionStatusGrid(
-                        notificationPermissionState = notificationPermissionState,
-                        onShowPermission = { permissionDetail = it },
-                    )
-                }
-            }
-        }
-        item {
-            HomeContentReveal(index = 6, animate = revealActive) {
-                GlassPanel {
-                    Text("Vantafyn", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    WhatsNewSettingsRow(
-                        enabled = state.whatsNewEnabled,
-                        hasUnseen = state.hasUnseenWhatsNew,
-                        itemCount = remember(state.whatsNewItems) { groupWhatsNewItems(state.whatsNewItems).size },
-                        onToggle = onToggleWhatsNew,
-                        onClick = { showWhatsNew = true },
-                    )
-                    if (state.session?.user?.isAdministrator == true) {
-                        SettingsRow("Admin", "", onAdmin, compact = true, icon = Icons.Rounded.AdminPanelSettings)
+            item {
+                HomeContentReveal(index = 3, animate = revealActive) {
+                    GlassPanel {
+                        Text("Appearance", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        ThemeSelector(selected = state.selectedTheme, onSelect = onSelectTheme)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SettingsRowIcon(Icons.Rounded.Wallpaper)
+                            Text("Background", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
+                        }
+                        BackgroundSelector(selected = state.selectedBackground, onSelect = onSelectBackground)
+                        ThemeMusicSettings(
+                            checked = state.themeMusicEnabled,
+                            selected = state.themeMusicVolume,
+                            onToggle = onToggleThemeMusic,
+                            onSelect = onSelectThemeMusicVolume,
+                        )
+                        BottomRailAccentSettings(
+                            selected = state.bottomRailAccent,
+                            onSelect = onSetBottomRailAccent,
+                        )
                     }
-                    if (state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers) {
-                        SettingsRow("Integrations & Requests", "", onRequests, compact = true, icon = Icons.Rounded.Apps)
+                }
+            }
+            item {
+                HomeContentReveal(index = 4, animate = revealActive) {
+                    GlassPanel {
+                        Text("Profile", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        SettingsRow("Switch User", "", onSwitchUser, compact = true, icon = Icons.Rounded.SwitchAccount)
+                        PremiumToggleRow(
+                            title = "Use last profile on launch",
+                            subtitle = "",
+                            checked = state.autoLoginLastProfile,
+                            onClick = onToggleAutoLoginLastProfile,
+                            icon = Icons.Rounded.Person,
+                        )
+                        SettingsRow("Add Profile", "", onAddProfile, compact = true, icon = Icons.Rounded.PersonAdd)
+                        SettingsRow("Quick Connect", "", onQuickConnect, compact = true, icon = Icons.Rounded.Link)
+                        SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
+                        SettingsRow("Log Out", "", onLogout, compact = true, destructive = true, icon = Icons.Rounded.Logout)
                     }
-                    SettingsRow("Downloads", "", onDownloads, compact = true, icon = Icons.Rounded.Download)
-                    SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
-                    SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
-                    SettingsRow("App version $VANTAFYN_APP_VERSION", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
+                }
+            }
+            item {
+                HomeContentReveal(index = 5, animate = revealActive) {
+                    GlassPanel {
+                        Text("Permissions", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        PermissionStatusGrid(
+                            notificationPermissionState = notificationPermissionState,
+                            onShowPermission = { permissionDetail = it },
+                        )
+                    }
+                }
+            }
+            item {
+                HomeContentReveal(index = 6, animate = revealActive) {
+                    GlassPanel {
+                        Text("Vantafyn", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        WhatsNewSettingsRow(
+                            enabled = state.whatsNewEnabled,
+                            hasUnseen = state.hasUnseenWhatsNew,
+                            itemCount = remember(state.whatsNewItems) { groupWhatsNewItems(state.whatsNewItems).size },
+                            onToggle = onToggleWhatsNew,
+                            onClick = { showWhatsNew = true },
+                        )
+                        if (state.session?.user?.isAdministrator == true) {
+                            SettingsRow("Admin", "", onAdmin, compact = true, icon = Icons.Rounded.AdminPanelSettings)
+                        }
+                        if (state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers) {
+                            SettingsRow("Integrations & Requests", "", onRequests, compact = true, icon = Icons.Rounded.Apps)
+                        }
+                        SettingsRow("Downloads", "", onDownloads, compact = true, icon = Icons.Rounded.Download)
+                        SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
+                        SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
+                        SettingsRow("Discover Vantafyn", "Explore every feature", onDiscoverVantafyn, compact = true, icon = Icons.Rounded.AutoAwesome)
+                        SettingsRow("App version $VANTAFYN_APP_VERSION", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
+                    }
                 }
             }
         }
@@ -11232,30 +11523,10 @@ private fun ThemeSelector(
     onSelect: (VantafynThemePreset) -> Unit,
 ) {
     val reducedMotion = rememberReducedMotionPreference()
-    val listState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
-    val density = LocalDensity.current
-    val cardWidth = 150.dp
-    val cardSpacing = 10.dp
     val selectedIndex = VantafynThemePreset.entries.indexOf(selected).coerceAtLeast(0)
-
-    LaunchedEffect(selectedIndex, reducedMotion) {
-        if (!listState.isScrollInProgress) {
-            listState.centerThemeCard(index = selectedIndex, density = density, cardWidth = cardWidth, animated = !reducedMotion)
-        }
-    }
-    LaunchedEffect(listState, selected) {
-        snapshotFlow { listState.isScrollInProgress }
-            .collect { scrolling ->
-                if (!scrolling) {
-                    val nearest = listState.nearestThemePresetIndex()
-                    val preset = VantafynThemePreset.entries.getOrNull(nearest)
-                    if (preset != null && preset != selected) {
-                        onSelect(preset)
-                    }
-                }
-            }
-    }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = selectedIndex)
+    val coroutineScope = rememberCoroutineScope()
+    val cardSpacing = 10.dp
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -11283,11 +11554,9 @@ private fun ThemeSelector(
                 )
             }
         }
-        BoxWithConstraints(
+        Box(
             modifier = Modifier.fillMaxWidth(),
         ) {
-            val sidePadding = ((maxWidth - cardWidth) / 2f).coerceAtLeast(0.dp)
-            val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -11307,20 +11576,11 @@ private fun ThemeSelector(
             ) {
                 LazyRow(
                     state = listState,
-                    flingBehavior = flingBehavior,
                     horizontalArrangement = Arrangement.spacedBy(cardSpacing),
-                    contentPadding = PaddingValues(horizontal = sidePadding),
+                    contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
                 ) {
                     itemsIndexed(VantafynThemePreset.entries, key = { _, preset -> preset.id }) { index, preset ->
-                        val emphasis by remember(listState, index) {
-                            derivedStateOf {
-                                if (reducedMotion) {
-                                    if (preset == selected) 1f else 0f
-                                } else {
-                                    listState.themeCardEmphasis(index)
-                                }
-                            }
-                        }
+                        val emphasis = if (preset == selected) 1f else 0f
                         ThemePreviewCard(
                             preset = preset,
                             selected = preset == selected,
@@ -11328,12 +11588,11 @@ private fun ThemeSelector(
                             onClick = {
                                 onSelect(preset)
                                 coroutineScope.launch {
-                                    listState.centerThemeCard(
-                                        index = index,
-                                        density = density,
-                                        cardWidth = cardWidth,
-                                        animated = !reducedMotion,
-                                    )
+                                    if (!reducedMotion) {
+                                        listState.animateScrollToItem(index)
+                                    } else {
+                                        listState.scrollToItem(index)
+                                    }
                                 }
                             },
                         )
@@ -11342,45 +11601,6 @@ private fun ThemeSelector(
             }
         }
     }
-}
-
-private suspend fun LazyListState.centerThemeCard(
-    index: Int,
-    density: androidx.compose.ui.unit.Density,
-    cardWidth: Dp,
-    animated: Boolean,
-) {
-    val viewportWidth = layoutInfo.viewportSize.width
-    val offset = if (viewportWidth > 0) {
-        -((viewportWidth - with(density) { cardWidth.roundToPx() }) / 2)
-    } else {
-        0
-    }
-    if (animated) {
-        animateScrollToItem(index = index, scrollOffset = offset)
-    } else {
-        scrollToItem(index = index, scrollOffset = offset)
-    }
-}
-
-private fun LazyListState.nearestThemePresetIndex(): Int {
-    val layout = layoutInfo
-    if (layout.visibleItemsInfo.isEmpty()) return firstVisibleItemIndex
-    val viewportCenter = layout.viewportStartOffset + ((layout.viewportEndOffset - layout.viewportStartOffset) / 2f)
-    return layout.visibleItemsInfo
-        .minByOrNull { item -> abs((item.offset + item.size / 2f) - viewportCenter) }
-        ?.index
-        ?: firstVisibleItemIndex
-}
-
-private fun LazyListState.themeCardEmphasis(index: Int): Float {
-    val layout = layoutInfo
-    val item = layout.visibleItemsInfo.firstOrNull { it.index == index } ?: return 0f
-    val viewportCenter = layout.viewportStartOffset + ((layout.viewportEndOffset - layout.viewportStartOffset) / 2f)
-    val itemCenter = item.offset + item.size / 2f
-    val distance = abs(itemCenter - viewportCenter)
-    val falloff = item.size.coerceAtLeast(1).toFloat()
-    return (1f - (distance / falloff)).coerceIn(0f, 1f)
 }
 
 @Composable
@@ -12029,7 +12249,7 @@ private fun AppVersionDialog(onDismiss: () -> Unit) {
                     Text("Version $VANTAFYN_APP_VERSION", color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
                 Text(
-                    "Built with love for homes that want Jellyfin to feel calm, beautiful, and easy to use.",
+                    "Built with love for people who want more from Jellyfin — one beautiful, unified experience for all their media.",
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
@@ -16057,7 +16277,7 @@ private fun DetailFlatIconButton(label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun CompactBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun CompactBackButton(onClick: () -> Unit, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .size(40.dp)
@@ -17828,6 +18048,7 @@ private fun MobileDestination.bottomNavRoot(previous: MobileDestination): Mobile
         MobileDestination.AdminUserSettings -> MobileDestination.Admin
         MobileDestination.HomeLayout,
         MobileDestination.PlaybackPreferences,
+        MobileDestination.DiscoverVantafyn,
         MobileDestination.DeviceQuickConnect -> MobileDestination.Profile
         else -> this
     }

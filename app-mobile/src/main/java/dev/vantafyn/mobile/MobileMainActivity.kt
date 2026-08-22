@@ -1,6 +1,10 @@
 package dev.vantafyn.mobile
 
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
+import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -12,9 +16,16 @@ import dev.vantafyn.core.ui.VantafynSurface
 import dev.vantafyn.core.ui.VantafynTheme
 import dev.vantafyn.core.ui.VantafynPermissionSheet
 import dev.vantafyn.feature.home.VantafynAppContent
+import dev.vantafyn.feature.player.VantafynPipState
 import androidx.fragment.app.FragmentActivity
 
 class MobileMainActivity : FragmentActivity() {
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        VantafynPipState.update(isInPictureInPictureMode)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(

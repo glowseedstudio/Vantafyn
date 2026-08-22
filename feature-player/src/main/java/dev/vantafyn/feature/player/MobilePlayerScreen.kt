@@ -1,7 +1,11 @@
 package dev.vantafyn.feature.player
 
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.res.Configuration
+import android.os.Build
+import android.util.Rational
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -45,6 +49,7 @@ import androidx.compose.material.icons.rounded.ClosedCaption
 import androidx.compose.material.icons.rounded.Forward10
 import androidx.compose.material.icons.rounded.MoreHoriz
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PictureInPicture
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Replay10
 import androidx.compose.material.icons.rounded.RestartAlt
@@ -255,6 +260,7 @@ private fun PlayerSurface(
     var resizeMode by remember(item.streamUrl) { mutableStateOf(PlayerResizeMode.Fit) }
     var selectedAudioIndex by remember(item.streamUrl) { mutableStateOf(item.selectedAudioStreamIndex) }
     var selectedSubtitleIndex by remember(item.streamUrl) { mutableStateOf(item.selectedSubtitleStreamIndex) }
+    val isInPiP = VantafynPipState.isActive
     var upNextState by remember(item.itemId) { mutableStateOf<UpNextState>(UpNextState.Hidden) }
     var upNextCancelled by remember(item.itemId) { mutableStateOf(false) }
     var nextStarted by remember(item.itemId) { mutableStateOf(false) }
@@ -284,6 +290,12 @@ private fun PlayerSurface(
     val activeSegmentBehavior = activeSegment?.let { segment ->
         item.mediaSegmentBehaviors[segment.type] ?: JellyfinMediaSegmentBehavior.DoNothing
     } ?: JellyfinMediaSegmentBehavior.DoNothing
+    val enterPiP: () -> Unit = {
+        val activity = context.findActivity()
+        if (activity != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            activity.enterPictureInPictureMode(PictureInPictureParams.Builder().build())
+        }
+    }
     val trackSelector = remember(item.streamUrl) { DefaultTrackSelector(context) }
     val player = remember(item.streamUrl) {
         VantafynExoPlayerFactory.builder(context, trackSelector)
@@ -394,8 +406,10 @@ private fun PlayerSurface(
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
-                    player.pause()
-                    onProgress(player.currentPosition, true)
+                    if (!VantafynPipState.isActive) {
+                        player.pause()
+                        onProgress(player.currentPosition, true)
+                    }
                 }
                 Lifecycle.Event.ON_START -> Unit
                 else -> Unit
@@ -679,7 +693,7 @@ private fun PlayerSurface(
             )
         }
         AnimatedVisibility(
-            visible = controlsVisible && !isCastingThisItem,
+            visible = controlsVisible && !isCastingThisItem && !isInPiP,
             modifier = Modifier.fillMaxSize(),
             enter = fadeIn(tween(220)),
             exit = fadeOut(tween(320)),
@@ -732,6 +746,7 @@ private fun PlayerSurface(
                         onPlayNext(candidate, player.currentPosition)
                     }
                 },
+                onEnterPiP = enterPiP,
             )
         }
         AnimatedVisibility(
@@ -853,6 +868,7 @@ private fun PlayerSurface(
                 onBack()
             },
             onOpen = { sheet = it },
+            onEnterPiP = enterPiP,
         )
     }
 }
@@ -910,6 +926,7 @@ private fun PlayerControls(
     onMore: () -> Unit,
     onPlayPrevious: () -> Unit,
     onPlayNext: () -> Unit,
+    onEnterPiP: () -> Unit,
 ) {
     Box(
         modifier = Modifier
@@ -1539,6 +1556,7 @@ private fun PlayerOptionsSheet(
     onWatchFromBeginning: () -> Unit,
     onStop: () -> Unit,
     onOpen: (PlayerSheet) -> Unit,
+    onEnterPiP: () -> Unit,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1621,6 +1639,12 @@ private fun PlayerOptionsSheet(
                             }
                             OptionRow(Icons.Rounded.Speed, "Playback speed", "${playbackSpeed.cleanSpeed()}x") { onOpen(PlayerSheet.Speed) }
                             OptionRow(Icons.Rounded.Settings, "Screen fit", resizeMode.label) { onOpen(PlayerSheet.Resize) }
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                OptionRow(Icons.Rounded.PictureInPicture, "Picture-in-Picture", "Minimize to a floating window") {
+                                    onDismiss()
+                                    onEnterPiP()
+                                }
+                            }
                             if (item.fallbackStreamUrl != null || canTryTranscode) {
                                 OptionRow(Icons.Rounded.RestartAlt, "Try transcoding", "Preserves your current position where possible", onTryTranscode)
                             }

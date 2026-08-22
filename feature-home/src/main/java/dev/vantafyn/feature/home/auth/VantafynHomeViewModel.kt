@@ -1269,6 +1269,27 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.value.selectedMediaId?.let(::openMedia)
     }
 
+    private fun refreshMediaDetail(session: JellyfinSession, itemId: UUID) {
+        viewModelScope.launch {
+            when (val result = mediaRepository.getMediaDetail(session, itemId)) {
+                is JellyfinResult.Success -> {
+                    val selectedSeasonId = result.value.defaultSeasonId()
+                    _state.update {
+                        it.copy(
+                            isMediaDetailLoading = false,
+                            mediaDetail = result.value,
+                            selectedSeasonId = selectedSeasonId,
+                            selectedSeasonEpisodes = result.value.episodes,
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { it.copy(isMediaDetailLoading = false, mediaDetailError = result.message) }
+                }
+            }
+        }
+    }
+
     fun loadPersonFilmography(personId: UUID) {
         val session = _state.value.session ?: return
         viewModelScope.launch {
@@ -1339,7 +1360,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.WatchParty -> navigateMobile(MobileDestination.Profile)
             MobileDestination.Downloads -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
-            MobileDestination.PlaybackPreferences -> navigateMobile(MobileDestination.Profile)
+            MobileDestination.PlaybackPreferences,
+            MobileDestination.DiscoverVantafyn -> navigateMobile(MobileDestination.Profile)
             MobileDestination.DeviceQuickConnect -> closeDeviceQuickConnect()
             MobileDestination.AdminUserSettings -> closeAdminUser()
             MobileDestination.Libraries,
@@ -3568,7 +3590,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (session != null && info != null) {
             viewModelScope.launch {
                 playbackRepository.reportStopped(session, info, positionMs.toTicks())
-                snapshot.selectedMediaId?.let { openMedia(it) }
+                val currentDest = _state.value.mobileDestination
+                if (currentDest == MobileDestination.MediaDetail) {
+                    snapshot.selectedMediaId?.let { refreshMediaDetail(session, it) }
+                } else {
+                    snapshot.selectedMediaId?.let { openMedia(it) }
+                }
                 loadLibraries(session)
             }
         }
@@ -4638,6 +4665,7 @@ enum class MobileDestination {
     LibraryDetail,
     MediaDetail,
     Player,
+    DiscoverVantafyn,
 }
 
 private fun MobileDestination.isRootDestination(): Boolean =
@@ -4658,7 +4686,8 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.DeviceQuickConnect,
         MobileDestination.LibraryDetail,
         MobileDestination.MediaDetail,
-        MobileDestination.Player -> false
+        MobileDestination.Player,
+        MobileDestination.DiscoverVantafyn -> false
     }
 
 private fun MobileDestination.rootDestination(): MobileDestination =
