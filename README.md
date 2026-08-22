@@ -11,12 +11,13 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
+  <img src="https://img.shields.io/badge/Version-0.9.0-blueviolet.svg" alt="Version 0.9.0" />
   <a href="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml"><img src="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml/badge.svg" alt="Build & Verify" /></a>
   <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-2.0+-7F52FF.svg?logo=kotlin&logoColor=white" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=android&logoColor=white" alt="Jetpack Compose" /></a>
   <a href="https://developer.android.com/guide/topics/media/media3"><img src="https://img.shields.io/badge/Media3-ExoPlayer-3DDC84.svg?logo=android&logoColor=white" alt="Media3" /></a>
   <a href="https://jellyfin.org/"><img src="https://img.shields.io/badge/Jellyfin-Compatible-00A4DC.svg?logo=jellyfin&logoColor=white" alt="Jellyfin" /></a>
-  <img src="https://img.shields.io/badge/Mobile_Status-~92%25_Complete-success" alt="Mobile Status" />
+  <img src="https://img.shields.io/badge/Mobile_Status-~95%25_Complete-success" alt="Mobile Status" />
 </p>
 
 ---
@@ -35,7 +36,7 @@
 
 ## 📖 About The Project
 
-**Vantafyn** was born out of a desire to make a personal Jellyfin server feel indistinguishable from a top-tier streaming platform: calm visual design, rich backdrop artwork, ultra-smooth motion, real-time server synchronisation, rock-solid video/audio playback, true offline downloads, and advanced administration tools.
+**Vantafyn** was born out of a desire to make a personal Jellyfin server feel indistinguishable from a top-tier streaming platform: calm visual design, rich backdrop artwork, ultra-smooth motion, real-time server synchronisation, rock-solid video/audio playback, true offline downloads, gamified achievement progression, native social messaging, and advanced administration tools.
 
 I am a solo developer working on Vantafyn in my spare time as a passion project. What began strictly as a personal media client has matured into an expansive, modular suite that is now proud to be open-sourced to the Jellyfin and Android communities.
 
@@ -136,14 +137,35 @@ I review all code that goes into the project, understand how it works, debug iss
 
 ## ✨ Key Capabilities
 
-- 🎬 **Movies, TV Shows & Live TV**: High-performance Media3 ExoPlayer engine with Jellyfin playback reporting, resume points, multi-track audio and subtitle selection, zoom/stretch aspect ratios, Up Next countdowns, skip intro/segments, and Google Cast support.
-- 🎵 **Dedicated Music Player & Service**: Media3-backed foreground audio playback with lock screen controls, notification actions, Android Auto library browsing, playlists, queues, synchronized lyrics, and offline music caching.
-- 📚 **Audiobooks & E-Books (On Roadmap)**: Media library foundations and browsing are in place; dedicated audiobook playback (chapters, sleep timers, speed controls) and e-book reader modules are on the roadmap and coming soon!
+- 🎬 **Movies, TV Shows & Live TV**: High-performance Media3 ExoPlayer engine with Jellyfin playback reporting, resume points, multi-track audio and subtitle selection, zoom/stretch aspect ratios, Up Next countdowns, skip intro/credits, and Google Cast support.
+- 🎵 **Dedicated Music Player & Android Auto**: Media3-backed foreground audio playback with lockscreen controls, notification actions, Android Auto vehicle dashboard integration, playlists, queues, synchronized lyrics, and offline music caching.
+- 🏆 **Achievement Badges & Gamification**: Native achievements hub featuring unlocked badge showcases, rank tier progression (Bronze through Mythic), category filters, milestone score summaries, and celebration unlock overlays *(powered by the optional Achievement Badges server plugin)*.
+- 💬 **Native Social & 1-to-1 Messaging**: Built-in direct chat messaging, friends management, friend requests, online activity presence, and discoverable active users. Includes a compact, flingable **Floating Social Bubble** with kinetic wall-bouncing physics, magnetic drag-to-dismiss, and dedicated Settings controls.
 - 📦 **Offline Downloads Engine**: WorkManager-orchestrated background downloads with local database caching, full offline playback, and automatic playback-state reconciliation once reconnected.
 - 📥 **Media Requests (Ombi & Seerr)**: Native requests workflow supporting shared API keys and per-user token linking. While Ombi is currently undergoing testing alongside the companion plugin, support for *Seerr* services (Jellyseerr / Overseerr) is on the roadmap so you can use either backend.
-- 🛡️ **Built-in Server Admin & Analytics**: View active server sessions, inspect live stream bitrates, manage user accounts, trigger library scans, inspect tasks, and visualize detailed playback metrics & viewing trends (*Note: The **Playback Reporting** plugin must be installed on your Jellyfin server for the Statistics dashboard to populate data*).
+- 🛡️ **Built-in Server Admin & Analytics**: View active server sessions, inspect live stream bitrates, manage user accounts, trigger library scans, inspect tasks, and visualize detailed playback metrics & viewing trends *(powered by the Playback Reporting plugin)*.
 - 🎨 **Deep Customization & Theming**: Live customizable home screen rows, glassmorphic surface materials, dynamic space backgrounds, theme music, and interactive glow feedback.
-- 🍿 **Social & Discovery**: Group Watch Party / SyncPlay foundations, app-wide invitations, and Swipe to Match movie decision picker.
+- 🍿 **Group Watch Party & Swipe Match**: Group SyncPlay foundations, app-wide invitations, and Swipe to Match movie decision picker.
+- 📚 **Audiobooks & E-Books (On Roadmap)**: Media library foundations and browsing are in place; dedicated audiobook playback (chapters, sleep timers, speed controls) and e-book reader modules are on the roadmap and coming soon!
+
+---
+
+## 🔌 Recommended Server Plugins
+
+While Vantafyn functions seamlessly out-of-the-box with any standard Jellyfin server, installing the following optional server plugins unlocks rich extra capabilities:
+
+| Plugin | Repository & Download | What It Unlocks |
+| :--- | :--- | :--- |
+| **Achievement Badges** | [GitHub Repository](https://github.com/knackebrot/jellyfin-plugin-achievements)<br>`https://github.com/knackebrot/jellyfin-plugin-achievements` | **Achievements & Native Social**: Powers user milestone badges, points, rank tiers, friends lists, and 1-to-1 messaging. |
+| **Playback Reporting** | [GitHub Repository](https://github.com/jellyfin/jellyfin-plugin-playbackreporting)<br>`https://github.com/jellyfin/jellyfin-plugin-playbackreporting` | **Server Statistics & Analytics**: Powers the viewing trends chart, watch time breakdowns, and Most Watched media metrics in the Admin tab. |
+| **Intro Skipper** | [GitHub Repository](https://github.com/Intro-Skipper/intro-skipper)<br>`https://github.com/Intro-Skipper/intro-skipper` | **Skip Intro / Credits**: Automatically analyzes media audio fingerprints to show seamless skip buttons during playback. |
+
+### How to Install Plugins in Jellyfin
+
+1. In your Jellyfin web interface, open the **Dashboard** and navigate to **Plugins** > **Repositories**.
+2. Click **Add Repository (+)** and provide the plugin's manifest URL (available on the plugin's GitHub page, e.g. `https://raw.githubusercontent.com/knackebrot/jellyfin-plugin-achievements/master/manifest.json` or `https://raw.githubusercontent.com/jellyfin/jellyfin-plugin-playbackreporting/master/manifest.json`).
+3. Navigate to **Plugins** > **Catalog**, find the plugin under its category, and click **Install**.
+4. Restart your Jellyfin server to activate the plugin. Vantafyn will automatically detect and light up the corresponding features!
 
 ---
 
@@ -151,10 +173,12 @@ I review all code that goes into the project, understand how it works, debug iss
 
 | Platform / Module | Status | Description |
 | :--- | :---: | :--- |
-| **Android Phone App** | 🟢 **~92% Complete** | Core UI, video playback (Movies, TV, Live TV + Cast), offline downloads, music player, and server admin tools are fully functional and daily-driver ready. |
+| **Android Phone App** | 🟢 **~95% Complete** | Core UI, video playback (Movies, TV, Live TV + Cast), offline downloads, music player, social hub, achievements, and server admin tools are fully functional and daily-driver ready. |
 | **Media Types** | 🟢 **Movies, TV, Music, Live TV**<br>🟡 **Audiobooks & E-Books (Planned)** | Movies, TV Shows, Music, and Live TV are fully supported with Google Cast. Dedicated audiobook listening and e-book reader interfaces are coming next. |
+| **Native Social & Messaging** | 🟢 **Complete (v0.9.0)** | Real-time 1-to-1 chat, online user discovery, friend requests, and kinetic wall-bouncing floating social dock with drag-to-dismiss. |
+| **Achievements & Badges** | 🟢 **Complete (v0.9.0)** | Gamified achievements, rank tier progression (Bronze to Mythic), animated modal gradient borders, and unlock celebrations. |
+| **Server Statistics** | 🟢 **Complete** | Rich viewing analytics, trend graphs, and Most Watched media breakdown with full-bleed background artwork. Requires **Playback Reporting**. |
 | **Android TV App** | 🟡 **In Development** | TV architecture and module build correctly. Dedicated 10-foot TV UI is being built using the proven mobile architecture foundations. |
-| **Server Statistics** | 🟢 **Functional** | Rich viewing analytics and graphs. Requires the standard **Playback Reporting** plugin installed on your Jellyfin server. |
 | **Companion Server Plugin** | 🟡 **In Development** | The `companion-plugin` for Jellyfin is currently being built to provide enhanced multi-user sync and deeper Ombi integration. |
 | **Requests (Ombi & Seerr)** | 🟢 **Testing / Planned** | Ombi is implemented and actively being tested in tandem with the companion plugin. Support for Seerr services (Jellyseerr / Overseerr) is on the roadmap so either service can be used. |
 
@@ -172,7 +196,7 @@ I review all code that goes into the project, understand how it works, debug iss
 ├── core-media/          # Media3 playback service, audio session & Android Auto
 ├── core-ombi/           # Ombi API client & request handling
 ├── core-ui/             # Vantafyn glass design system, animations & UI primitives
-├── feature-home/        # Home screen, discovery, details, search & admin tools
+├── feature-home/        # Home screen, discovery, details, social, achievements & admin tools
 ├── feature-music/       # Dedicated music player, lyrics viewer & queue management
 ├── feature-player/      # Video player UI, gestures & track controls
 ├── feature-requests/    # Ombi Requests discovery & submission flows
@@ -211,6 +235,7 @@ adb install -r app-tv/build/outputs/apk/debug/app-tv-debug.apk
 ## 📄 Documentation
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
+- [Integrations Architecture & Social](docs/INTEGRATIONS_ARCHITECTURE.md)
 - [Design System & Materials](docs/DESIGN_SYSTEM.md)
 - [Video Playback Implementation](docs/PLAYBACK_IMPLEMENTATION.md)
 - [Music Stack Implementation](docs/MUSIC_IMPLEMENTATION.md)
@@ -224,4 +249,5 @@ adb install -r app-tv/build/outputs/apk/debug/app-tv-debug.apk
 ## ⚖️ License
 
 This project is open-source software licensed under the [GNU General Public License v3.0](LICENSE).
+
 
