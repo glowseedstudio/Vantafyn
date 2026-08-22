@@ -102,7 +102,7 @@ I review all code that goes into the project, understand how it works, debug iss
     <td align="center" width="25%">
       <img src="assets/screenshots/09_music_playlist.png" alt="Music Playlists" /><br>
       <strong>Playlists & Queues</strong><br>
-      <em>Artwork collage, track listings, durations, and quick add-to-queue.</em>
+      <em>Artwork collage, track listings, durations, and quick add-to-playlist.</em>
     </td>
     <td align="center" width="25%">
       <img src="assets/screenshots/11_synced_lyrics.png" alt="Synced Lyrics" /><br>
