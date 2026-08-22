@@ -73,27 +73,44 @@ I review all code that goes into the project, understand how it works, debug iss
       <em>Hero backdrop carousel, Continue Watching, and glass bottom navigation.</em>
     </td>
     <td align="center" width="25%">
-      <img src="assets/screenshots/02_mini_player.png" alt="Music Mini Player" /><br>
-      <strong>Persistent Music Player</strong><br>
-      <em>Seamless floating mini-player with Media3 foreground service controls.</em>
+      <img src="assets/screenshots/04_home_customizer.png" alt="Home Customizer" /><br>
+      <strong>Live Home Customizer</strong><br>
+      <em>Reorder rows, toggle visibility, and tweak card sizing with live previews.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/05_details.png" alt="Media Details" /><br>
+      <strong>Media Details</strong><br>
+      <em>4K/HDR stream badges, audio/subtitle selectors, and quick resume.</em>
     </td>
     <td align="center" width="25%">
       <img src="assets/screenshots/03_libraries.png" alt="Library Browser" /><br>
       <strong>Media Libraries</strong><br>
       <em>Grid and list views for Movies, TV, Live TV, Music, Audiobooks & E-Books.</em>
     </td>
-    <td align="center" width="25%">
-      <img src="assets/screenshots/04_home_customizer.png" alt="Home Customizer" /><br>
-      <strong>Live Home Customizer</strong><br>
-      <em>Reorder rows, toggle visibility, and tweak card sizing with live previews.</em>
-    </td>
   </tr>
   <tr>
     <td align="center" width="25%">
-      <img src="assets/screenshots/05_details.png" alt="Media Details" /><br>
-      <strong>Media Details</strong><br>
-      <em>4K/HDR stream badges, audio/subtitle selectors, and quick resume.</em>
+      <img src="assets/screenshots/10_now_playing.png" alt="Now Playing Music Player" /><br>
+      <strong>Full Music Player</strong><br>
+      <em>High-res album art, ambient lighting glow, and Cast streaming.</em>
     </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/02_mini_player.png" alt="Music Mini Player" /><br>
+      <strong>Persistent Mini Player</strong><br>
+      <em>Seamless floating mini-player with Media3 foreground controls.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/09_music_playlist.png" alt="Music Playlists" /><br>
+      <strong>Playlists & Queues</strong><br>
+      <em>Artwork collage, track listings, durations, and quick add-to-queue.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/11_synced_lyrics.png" alt="Synced Lyrics" /><br>
+      <strong>Synchronized Lyrics</strong><br>
+      <em>Real-time scrolling karaoke-style lyrics tracking the active song.</em>
+    </td>
+  </tr>
+  <tr>
     <td align="center" width="25%">
       <img src="assets/screenshots/06_admin_dashboard.png" alt="Admin Dashboard" /><br>
       <strong>Server Administration</strong><br>
@@ -107,7 +124,10 @@ I review all code that goes into the project, understand how it works, debug iss
     <td align="center" width="25%">
       <img src="assets/screenshots/08_appearance.png" alt="Appearance Settings" /><br>
       <strong>Themes & Accents</strong><br>
-      <em>Nebula/Midnight color systems, dynamic wallpapers, and breathing rail glows.</em>
+      <em>Nebula/Midnight color systems, wallpapers, and breathing rail glows.</em>
+    </td>
+    <td align="center" width="25%">
+      <!-- Empty space for 4-column alignment -->
     </td>
   </tr>
 </table>
