@@ -769,15 +769,17 @@ private fun DisplayMessageOverlay(
                     Box(
                         modifier = Modifier
                             .size(if (compact) 36.dp else 42.dp)
-                            .clip(RoundedCornerShape(15.dp))
-                            .background(VantafynGradients.accentHorizontal()),
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black)
+                            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(12.dp))
+                            .padding(if (compact) 6.dp else 7.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Send,
+                        Image(
+                            painter = painterResource(id = CoreUiR.drawable.vantafyn_logo),
                             contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(if (compact) 18.dp else 21.dp),
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit,
                         )
                     }
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -9090,11 +9092,18 @@ private fun AdminSessionMessageComposer(
                 Box(
                     modifier = Modifier
                         .size(50.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(VantafynGradients.accentHorizontal()),
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.Black)
+                        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(16.dp))
+                        .padding(8.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Rounded.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(25.dp))
+                    Image(
+                        painter = painterResource(id = CoreUiR.drawable.vantafyn_logo),
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
                 }
                 Text(
                     if (dispatched) sentSummary ?: "Sent" else target.title,
@@ -18623,7 +18632,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.0"
+private const val VANTAFYN_APP_VERSION = "0.9.1"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

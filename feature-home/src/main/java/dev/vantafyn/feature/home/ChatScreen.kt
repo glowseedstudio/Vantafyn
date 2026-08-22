@@ -6,7 +6,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,12 +34,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -71,6 +70,9 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
+private const val MAX_MESSAGE_LENGTH = 500
+private const val CHAR_COUNTER_THRESHOLD = 400
+
 @Composable
 fun ChatScreen(
     peer: JellyfinFriend,
@@ -85,21 +87,25 @@ fun ChatScreen(
     BackHandler(onBack = onBack)
 
     var textInput by remember { mutableStateOf("") }
+    // reverseLayout = true means index 0 is at the bottom; we pass items in natural order
+    // and LazyColumn shows newest (last) first visually at the bottom — no manual scroll needed.
     val listState = rememberLazyListState()
 
+    // Scroll to top of reversed list (= newest message) when a new message arrives
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
+            listState.animateScrollToItem(0)
         }
     }
 
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(VantafynColors.Surface)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .imePadding(),
     ) {
-        // Chat Header
+        // ── Header ───────────────────────────────────────────────────────────
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -113,7 +119,7 @@ fun ChatScreen(
             ) {
                 CompactBackButton(onClick = onBack)
 
-                // Peer Avatar with status
+                // Peer avatar with online dot
                 Box(
                     modifier = Modifier.size(42.dp),
                     contentAlignment = Alignment.BottomEnd,
@@ -153,7 +159,7 @@ fun ChatScreen(
                     }
                 }
 
-                // Peer Name & Status
+                // Peer name & status
                 Column {
                     Row(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -167,10 +173,12 @@ fun ChatScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        peer.rankName?.let { rank ->
-                            Surface(
-                                shape = RoundedCornerShape(999.dp),
-                                color = Color.White.copy(alpha = 0.08f),
+                        peer.rankName?.let {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .padding(horizontal = 6.dp, vertical = 1.dp),
                             ) {
                                 Text(
                                     text = "Lvl ${peer.rankTier}",
@@ -178,7 +186,6 @@ fun ChatScreen(
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = VantafynColors.Primary,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                 )
                             }
                         }
@@ -207,7 +214,9 @@ fun ChatScreen(
             }
         }
 
-        // Messages List
+        HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 1.dp)
+
+        // ── Messages list ────────────────────────────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -243,20 +252,24 @@ fun ChatScreen(
                     }
                 }
             } else {
+                // reverseLayout=true: index 0 is visually at the bottom.
+                // We pass messages in reverse so newest (last) appears at bottom.
+                val reversed = remember(messages) { messages.asReversed() }
                 LazyColumn(
                     state = listState,
+                    reverseLayout = true,
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(vertical = 12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(messages, key = { it.messageId }) { msg ->
+                    items(reversed, key = { it.messageId }) { msg ->
                         ChatMessageBubble(message = msg)
                     }
                 }
             }
         }
 
-        // Error message banner if any
+        // ── Error banner ─────────────────────────────────────────────────────
         AnimatedVisibility(
             visible = !errorMessage.isNullOrBlank(),
             enter = fadeIn(),
@@ -278,12 +291,26 @@ fun ChatScreen(
             }
         }
 
-        // Bottom Message Composer
-        Box(
+        // ── Composer ─────────────────────────────────────────────────────────
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = VantafynSpacing.md, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
+            // Character counter (shown when approaching limit)
+            AnimatedVisibility(visible = textInput.length > CHAR_COUNTER_THRESHOLD) {
+                Text(
+                    text = "${textInput.length}/$MAX_MESSAGE_LENGTH",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (textInput.length >= MAX_MESSAGE_LENGTH) Color(0xFFFF6688) else VantafynColors.Muted,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 4.dp),
+                    textAlign = TextAlign.End,
+                )
+            }
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -295,7 +322,7 @@ fun ChatScreen(
             ) {
                 OutlinedTextField(
                     value = textInput,
-                    onValueChange = { textInput = it },
+                    onValueChange = { if (it.length <= MAX_MESSAGE_LENGTH) textInput = it },
                     placeholder = { Text("Write a message...", color = VantafynColors.Muted) },
                     modifier = Modifier
                         .weight(1f)
@@ -315,6 +342,9 @@ fun ChatScreen(
                         unfocusedContainerColor = Color.Transparent,
                         focusedTextColor = VantafynColors.Ink,
                         unfocusedTextColor = VantafynColors.Ink,
+                        focusedPlaceholderColor = VantafynColors.Muted,
+                        unfocusedPlaceholderColor = VantafynColors.Muted,
+                        cursorColor = VantafynColors.Primary,
                     ),
                 )
 

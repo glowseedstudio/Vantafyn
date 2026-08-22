@@ -84,6 +84,11 @@ import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
+import java.text.DateFormat
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
+import java.util.TimeZone
 
 enum class SocialTab(val label: String, val icon: ImageVector) {
     Messages("Messages", Icons.Rounded.ChatBubbleOutline),
@@ -474,7 +479,7 @@ private fun ConversationCard(
                     )
                     conversation.lastMessageTimestamp?.let { ts ->
                         Text(
-                            text = ts.take(10),
+                            text = formatConversationDate(ts),
                             style = MaterialTheme.typography.labelSmall,
                             color = VantafynColors.Muted,
                         )
@@ -789,7 +794,8 @@ private fun SocialEmptyView(
                     modifier = Modifier
                         .size(64.dp)
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.08f)),
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.3.dp, durationMillis = 4000),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -900,5 +906,44 @@ private fun DiscoverUserCard(
                 }
             }
         }
+    }
+}
+
+private fun formatConversationDate(isoString: String?): String {
+    if (isoString.isNullOrBlank()) return ""
+    return try {
+        val trimmed = isoString.trim()
+        val parsedDate = if (trimmed.contains("T")) {
+            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }
+            format.parse(trimmed.substringBefore(".").substringBefore("Z"))
+        } else {
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(trimmed)
+        }
+        if (parsedDate != null) {
+            val nowCal = Calendar.getInstance()
+            val msgCal = Calendar.getInstance().apply { time = parsedDate }
+            when {
+                nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) &&
+                    nowCal.get(Calendar.DAY_OF_YEAR) == msgCal.get(Calendar.DAY_OF_YEAR) -> {
+                    DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault()).format(parsedDate)
+                }
+                nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) &&
+                    nowCal.get(Calendar.DAY_OF_YEAR) - msgCal.get(Calendar.DAY_OF_YEAR) == 1 -> {
+                    "Yesterday"
+                }
+                nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) -> {
+                    SimpleDateFormat("MMM d", Locale.getDefault()).format(parsedDate)
+                }
+                else -> {
+                    SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(parsedDate)
+                }
+            }
+        } else {
+            trimmed.take(10)
+        }
+    } catch (_: Exception) {
+        isoString.take(10)
     }
 }
