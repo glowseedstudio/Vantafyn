@@ -123,8 +123,9 @@ I also understand that some people prefer not to use software developed with AI 
 
 ## ✨ Key Capabilities
 
-- 🎬 **High-Performance Video Playback**: Media3 ExoPlayer engine with Jellyfin playback reporting, resume points, multi-track audio and subtitle selection, zoom/stretch aspect ratios, Up Next countdowns, skip intro/segments, and Google Cast support.
-- 🎵 **Dedicated Foreground Music Service**: Media3-backed background playback with lock screen controls, notification actions, Android Auto library browsing, playlists, queues, synchronized lyrics, and offline music caching.
+- 🎬 **Movies, TV Shows & Live TV**: High-performance Media3 ExoPlayer engine with Jellyfin playback reporting, resume points, multi-track audio and subtitle selection, zoom/stretch aspect ratios, Up Next countdowns, skip intro/segments, and Google Cast support.
+- 🎵 **Dedicated Music Player & Service**: Media3-backed foreground audio playback with lock screen controls, notification actions, Android Auto library browsing, playlists, queues, synchronized lyrics, and offline music caching.
+- 📚 **Audiobooks & E-Books (On Roadmap)**: Media library foundations and browsing are in place; dedicated audiobook playback (chapters, sleep timers, speed controls) and e-book reader modules are on the roadmap and coming soon!
 - 📦 **Offline Downloads Engine**: WorkManager-orchestrated background downloads with local database caching, full offline playback, and automatic playback-state reconciliation once reconnected.
 - 📥 **Media Requests (Ombi & Seerr)**: Native requests workflow supporting shared API keys and per-user token linking. While Ombi is currently undergoing testing alongside the companion plugin, support for *Seerr* services (Jellyseerr / Overseerr) is on the roadmap so you can use either backend.
 - 🛡️ **Built-in Server Admin Suite**: View active server sessions, inspect live stream bitrates, manage server profiles, trigger library scans, inspect tasks, and visualize Playback Reporting statistics.
@@ -137,7 +138,8 @@ I also understand that some people prefer not to use software developed with AI 
 
 | Platform / Module | Status | Description |
 | :--- | :---: | :--- |
-| **Android Phone App** | 🟢 **~92% Complete** | Core UI, playback, offline downloads, music player, and server features are fully functional and daily-driver ready. |
+| **Android Phone App** | 🟢 **~92% Complete** | Core UI, video playback (Movies, TV, Live TV + Cast), offline downloads, music player, and server admin tools are fully functional and daily-driver ready. |
+| **Media Types** | 🟢 **Movies, TV, Music, Live TV**<br>🟡 **Audiobooks & E-Books (Planned)** | Movies, TV Shows, Music, and Live TV are fully supported with Google Cast. Dedicated audiobook listening and e-book reader interfaces are coming next. |
 | **Android TV App** | 🟡 **In Development** | TV architecture and module build correctly. Dedicated 10-foot TV UI is being built using the proven mobile architecture foundations. |
 | **Companion Server Plugin** | 🟡 **In Development** | The `companion-plugin` for Jellyfin is currently being built to provide enhanced multi-user sync and deeper Ombi integration. |
 | **Requests (Ombi & Seerr)** | 🟢 **Testing / Planned** | Ombi is implemented and actively being tested in tandem with the companion plugin. Support for Seerr services (Jellyseerr / Overseerr) is on the roadmap so either service can be used. |
