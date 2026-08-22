@@ -20,12 +20,15 @@
 
 ---
 
-## 🎬 Preview in Action
+## 🎬 Live Demo & Motion
 
-<div align="center">
-  <video src="https://github.com/glowseedstudio/Vantafyn/raw/main/assets/vantafyn_demo.mp4" width="100%" controls autoplay loop muted></video>
-  <p><em>(If the video does not play in your browser, <a href="assets/vantafyn_demo.mp4">click here to download or view the demo video</a>.)</em></p>
-</div>
+<p align="center">
+  <a href="assets/vantafyn_demo.mp4">
+    <img src="assets/preview.gif" width="100%" alt="Vantafyn Live Demo Preview" style="border-radius: 12px;" />
+  </a>
+  <br>
+  <em>(Click above or <a href="assets/vantafyn_demo.mp4">click here to watch / download the full 1080p demo video</a>)</em>
+</p>
 
 ---
 
