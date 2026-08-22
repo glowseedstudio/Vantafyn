@@ -1,57 +1,102 @@
 # Permissions
 
-Vantafyn treats permissions as part of the user experience. Runtime permissions must be explained before the Android system dialog appears, must be optional unless the feature cannot work without them, and must have a clear denied state.
+Vantafyn treats permissions as an integral part of the user experience. All runtime permissions must be explained clearly before the Android system prompt appears, must be strictly optional unless a feature cannot function without them, and must maintain a graceful denied state.
 
-## Notifications
+---
 
-- Android permission: `android.permission.POST_NOTIFICATIONS`
-- Android versions: runtime permission on Android 13+; not requested on Android 12 and below
-- Optional: yes
-- Why Vantafyn asks: to show music playback controls in notifications and on the lock screen
-- When Vantafyn asks: when the user first starts or resumes mobile music playback, or when the user opens Settings > Permissions and chooses the music controls row
-- User-facing explanation: “Vantafyn uses notifications to keep music playing when your phone is locked and to show play, pause, next, and previous controls.”
-- Privacy wording: “Vantafyn only uses this notification permission for media playback controls. It does not use notifications for ads or tracking.”
+## Declared Permissions Overview
 
-If granted:
+| Permission | Scope | Type | Required For |
+| :--- | :--- | :--- | :--- |
+| `android.permission.INTERNET` | All modules | Normal / Install-time | Jellyfin API, streaming media, artwork, WebSockets, Ombi, Achievement Badges |
+| `android.permission.ACCESS_NETWORK_STATE` | All modules | Normal / Install-time | Connectivity monitoring, offline mode switching, network meter detection |
+| `android.permission.POST_NOTIFICATIONS` | Mobile | Runtime (Android 13+ / API 33+) | Media playback controls, offline download progress, Watch Party / Social notifications |
+| `android.permission.FOREGROUND_SERVICE` | Mobile | Normal / Install-time (Android 9+ / API 28+) | Background playback service and background data synchronization |
+| `android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK` | Mobile | Normal / Install-time (Android 14+ / API 34+) | Media3 music/video foreground playback service |
+| `android.permission.FOREGROUND_SERVICE_DATA_SYNC` | Mobile | Normal / Install-time (Android 14+ / API 34+) | Offline media file downloads and media sync tasks |
+| `android.permission.WAKE_LOCK` | Core Media | Normal / Install-time | Preventing CPU sleep during audio playback and background download transfers |
 
-- Music can continue in the background.
-- The system media notification can appear.
-- Lock-screen controls can appear when supported by the OS/device.
+---
 
-If denied or dismissed:
+## 1. Notifications
 
-- Music can still play in the app.
-- Notification and lock-screen controls may not appear.
-- Vantafyn shows a clean explanation instead of silently pretending controls are available.
-- The app does not repeatedly prompt after the user chooses `Not now`.
+- **Android Permission**: `android.permission.POST_NOTIFICATIONS`
+- **Target Android Versions**: Runtime permission on Android 13+ (API 33+); automatically granted on Android 12 and below.
+- **Optional**: Yes.
+- **Why Vantafyn asks**:
+  - To display Media3 notification playback controls (Play, Pause, Skip, Track Artwork, Progress Bar) on the lock screen and notification shade.
+  - To show active background download progress when saving media for offline viewing.
+  - To deliver incoming Watch Party session invites and Social chat notifications.
+- **When Vantafyn asks**: When the user first starts or resumes media playback, starts an offline download, or manually toggles notifications in **Settings > Permissions**.
+- **User-Facing Explanation**: *"Vantafyn uses notifications to keep media playing when your device is locked and to show playback and download progress."*
+- **Privacy Guarantee**: Vantafyn only uses notifications for local device media and interactive session events. It never uses notifications for marketing, advertising, or telemetry.
 
-If permanently denied:
+### If Granted:
+- Media playback continues smoothly in background with lock-screen and notification controls.
+- Active downloads display real-time progress bars in the notification shade.
 
-- Vantafyn shows the permission as `Not allowed`.
-- Settings provides an action that opens Android notification settings for the app.
+### If Denied or Dismissed:
+- Media playback continues inside the app without lock-screen controls.
+- Offline downloads complete silently in the background.
+- Vantafyn does not re-prompt repeatedly after the user selects `Not now`.
 
-## Foreground Media Playback
+---
 
-- Android permissions: `android.permission.FOREGROUND_SERVICE`, `android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK`
-- Optional: no runtime prompt; required by Android for the Media3 music playback service on modern target SDKs
-- Why Vantafyn declares them: to run the foreground media playback service used by background/lock-screen music controls
-- When Vantafyn uses them: only while music playback is active through the Media3 music service
-- If unavailable: Android may prevent background media playback service behavior
+## 2. Foreground Services & Background Execution
 
-The music playback notification channel is:
+### Media Playback
+- **Android Permissions**: `android.permission.FOREGROUND_SERVICE`, `android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK`
+- **Type**: Install-time permission (required by Android 14+ API 34+ for Media3 background audio services).
+- **Service**: `VantafynMusicPlaybackService`
+- **Notification Channel**:
+  - Name: `Music playback`
+  - Importance: `IMPORTANCE_LOW` (non-intrusive, silent)
 
-- name: `Music playback`
-- description: `Playback controls for music playing in Vantafyn`
-- importance: low
-- sound/vibration: disabled
+### Data Synchronization & Offline Downloads
+- **Android Permissions**: `android.permission.FOREGROUND_SERVICE`, `android.permission.FOREGROUND_SERVICE_DATA_SYNC`
+- **Type**: Install-time permission (required by Android 14+ API 34+ for background file transfer services).
+- **Service**: `VantafynDownloadService` / `OfflineSyncService`
+- **Notification Channel**:
+  - Name: `Media downloads`
+  - Importance: `IMPORTANCE_LOW`
 
-## Network
+---
 
-- Android permissions: `android.permission.INTERNET`, `android.permission.ACCESS_NETWORK_STATE`
-- Optional: no runtime prompt
-- Why Vantafyn uses them: Jellyfin login, library browsing, artwork loading, playback streams, and connection status
-- Denied state: Android does not expose these as runtime user prompts. If network access is unavailable, Vantafyn shows connection or playback errors in the relevant screen.
+## 3. Network Access & Connectivity
 
-## Not Requested
+- **Android Permissions**: `android.permission.INTERNET`, `android.permission.ACCESS_NETWORK_STATE`
+- **Type**: Install-time permissions.
+- **Why Vantafyn uses them**:
+  - Communicating with authenticated Jellyfin servers over HTTPS / WebSockets.
+  - Fetching library items, artist artwork, episode summaries, and subtitle tracks.
+  - Dynamic bandwidth throttling based on cellular vs. Wi-Fi network state.
+- **Offline Mode**: When network connectivity is lost, Vantafyn automatically adapts to offline storage without crashing or blocking the UI.
 
-Vantafyn does not request camera, microphone, location, contacts, or storage permissions. Local network access is not an Android runtime permission, so Vantafyn does not show a fake permission for it.
+---
+
+## 4. Power & CPU Wake Lock
+
+- **Android Permission**: `android.permission.WAKE_LOCK`
+- **Type**: Install-time permission.
+- **Why Vantafyn uses it**:
+  - Held strictly while active media playback or offline file transfer is in progress to prevent the OS CPU from sleeping during screen-off operation.
+  - Automatically released when playback pauses or stops.
+
+---
+
+## 5. Hardware Features & Android TV Compatibility
+
+Vantafyn declares all non-essential hardware features as `required="false"` to guarantee full compatibility across Android phones, tablets, foldables, and Android TV / Google TV devices:
+
+- `android.software.leanback` (Required: `false`): Enables Android TV launcher integration while maintaining single-APK compatibility for mobile devices.
+- `android.hardware.touchscreen` (Required: `false`): Ensures full D-Pad navigation support on TV boxes, remotes, and car head units.
+
+---
+
+## 6. Permissions Not Requested
+
+Vantafyn is built with privacy-first principles:
+- **No Location**: Does not ask for fine or coarse location.
+- **No Camera / Microphone**: Does not request camera or audio recording permissions.
+- **No Contacts / Phone State**: Does not access address books, device identifiers, or telephony state.
+- **No External Storage**: Media is securely stored in app-specific scoped storage (`context.getExternalFilesDir()` / internal sandbox).

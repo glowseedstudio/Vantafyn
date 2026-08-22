@@ -3,6 +3,7 @@ package dev.vantafyn.core.media
 import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
@@ -12,6 +13,26 @@ object VantafynExoPlayerFactory {
     fun renderersFactory(context: Context): DefaultRenderersFactory =
         DefaultRenderersFactory(context.applicationContext)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setEnableAudioTrackPlaybackParams(true)
+
+    @OptIn(UnstableApi::class)
+    fun musicLoadControl(): DefaultLoadControl =
+        DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 60_000,
+                /* maxBufferMs = */ 300_000,
+                /* bufferForPlaybackMs = */ 1_000,
+                /* bufferForPlaybackAfterRebufferMs = */ 2_000,
+            )
+            .setBackBuffer(
+                /* backBufferDurationMs = */ 30_000,
+                /* retainBackBufferFromKeyframe = */ false,
+            )
+            .build()
+
+    fun musicBuilder(context: Context): ExoPlayer.Builder =
+        ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+            .setLoadControl(musicLoadControl())
 
     fun builder(context: Context): ExoPlayer.Builder =
         ExoPlayer.Builder(context.applicationContext, renderersFactory(context))

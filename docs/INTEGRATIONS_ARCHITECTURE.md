@@ -51,9 +51,11 @@ Route-level safety is enforced in feature ViewModels. Hiding a button is not eno
 
 ## Current Providers
 
-Ombi is the first provider. It is optional and can be removed without changing Jellyfin playback, browsing, profile, or session behavior.
+- **Ombi**: Media request provider. Optional, admin-configured, with shared API key and per-user token authentication modes.
+- **Achievement Badges & Native Social**: Server plugin integration for user achievements, rank progression, friends directory, friend requests, and real-time 1-to-1 messaging. Opt-in per user profile, with zero cross-profile state leakage and non-intrusive floating dock entry points.
 
 Jellyfin profile picture editing is not an integration. It lives in `core-jellyfin` and uses Jellyfin user image APIs directly; see `docs/JELLYFIN_PROFILE_IMAGES.md`.
+
 ## Ombi Setup Ownership
 
 Ombi setup is admin-owned. App UI calls feature view models; app screens do not call Ombi HTTP APIs directly.
@@ -68,3 +70,11 @@ Ombi setup is admin-owned. App UI calls feature view models; app screens do not 
 - access-request de-duplication
 
 Normal-user routing is derived from setup state, request mode, local linked session, and access-request state.
+
+## Native Social & 1-to-1 Messaging Architecture
+
+Native Social connects to the Jellyfin Achievement Badges companion plugin:
+- `core-jellyfin` provides `JellyfinSocialRepository` and associated data models (`JellyfinFriend`, `JellyfinFriendRequest`, `JellyfinSocialConversation`, `JellyfinSocialMessage`).
+- `feature-home` manages `SocialScreen` (tabbed hub), `ChatScreen` (1-to-1 conversation), `FloatingSocialDock` (floating entry bubble with unread counter), `FloatingSocialPanel` (quick-access popup sheet), and `SocialIslandBanner` (in-app message toast).
+- Polling lifecycle is safe and foreground-only: 30s ambient polling for unread messages when foregrounded, 4s active polling while chatting.
+- Strict per-profile isolation via SharedPreferences key `social_enabled_$profileId` (defaults to `false`). Switching profiles completely resets social state and polling jobs.

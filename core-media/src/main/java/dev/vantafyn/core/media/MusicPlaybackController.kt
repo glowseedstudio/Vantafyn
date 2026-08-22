@@ -96,7 +96,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private var lastRegistryTickMs: Long = 0L
     private val tracksByMediaId = mutableMapOf<String, VantafynMusicTrack>()
 
-    internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.builder(context.applicationContext).build().apply {
+    internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.musicBuilder(context.applicationContext).build().apply {
         setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -200,6 +200,21 @@ class MusicPlaybackController private constructor(context: Context) {
     val state: StateFlow<VantafynMusicPlaybackState> = _state.asStateFlow()
     private val _events = MutableSharedFlow<VantafynMusicPlaybackEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<VantafynMusicPlaybackEvent> = _events.asSharedFlow()
+
+    init {
+        scope.launch {
+            AppForegroundStateRepository.isForeground.collect { isForeground ->
+                if (isForeground) {
+                    forcePlaybackSnapshot()
+                    if (sessionPlayer.isPlaying) {
+                        tickerJob?.cancel()
+                        tickerJob = null
+                        syncTicker()
+                    }
+                }
+            }
+        }
+    }
 
     fun playQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0) {
         if (queue.isEmpty()) return

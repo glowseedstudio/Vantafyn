@@ -19,12 +19,18 @@ import dev.vantafyn.core.downloads.OfflineSyncScheduler
 import dev.vantafyn.core.downloads.PendingUserDataMutation
 import dev.vantafyn.core.downloads.SqliteDownloadRepository
 import dev.vantafyn.core.downloads.parseDownloadOfflineManifest
+import dev.vantafyn.core.jellyfin.JellyfinAchievement
+import dev.vantafyn.core.jellyfin.JellyfinAchievementRepository
+import dev.vantafyn.core.jellyfin.JellyfinAchievementSummary
+import dev.vantafyn.core.jellyfin.JellyfinAchievementUnlock
 import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
 import dev.vantafyn.core.jellyfin.JellyfinAdminOverview
 import dev.vantafyn.core.jellyfin.JellyfinAdminRepository
 import dev.vantafyn.core.jellyfin.JellyfinAdminTask
 import dev.vantafyn.core.jellyfin.JellyfinDisplayMessage
 import dev.vantafyn.core.jellyfin.JellyfinFavoritesRepository
+import dev.vantafyn.core.jellyfin.JellyfinFriend
+import dev.vantafyn.core.jellyfin.JellyfinFriendRequest
 import dev.vantafyn.core.jellyfin.JellyfinHome
 import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
@@ -54,6 +60,10 @@ import dev.vantafyn.core.jellyfin.JellyfinRestoreFailureReason
 import dev.vantafyn.core.jellyfin.JellyfinSearchRepository
 import dev.vantafyn.core.jellyfin.JellyfinSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinServerConfig
+import dev.vantafyn.core.jellyfin.JellyfinSocialConversation
+import dev.vantafyn.core.jellyfin.JellyfinSocialMessage
+import dev.vantafyn.core.jellyfin.JellyfinSocialRepository
+import dev.vantafyn.core.jellyfin.JellyfinSocialSummary
 import dev.vantafyn.core.jellyfin.JellyfinSessionRestoreFailure
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinUpNextCandidate
@@ -99,6 +109,10 @@ import dev.vantafyn.core.ui.VantafynThemePreset
 import dev.vantafyn.core.integrations.IntegrationResult
 import dev.vantafyn.core.ombi.OmbiRepository
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -132,6 +146,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val watchPartyRepository: JellyfinWatchPartyRepository = repositories.watchPartyRepository
     private val realtimeClient = repositories.realtimeClient
     private val ombiRepository = OmbiRepository(application)
+    private val achievementRepository: JellyfinAchievementRepository = repositories.achievementRepository
+    private val socialRepository: JellyfinSocialRepository = repositories.socialRepository
+    private val achievementPrefs = application.getSharedPreferences("vantafyn_achievements", Context.MODE_PRIVATE)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
     private val hasCompletedSetup: Boolean
@@ -142,9 +159,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var watchPartyInviteExpiryJob: Job? = null
     private var displayMessageDismissJob: Job? = null
     private var libraryItemsJob: Job? = null
+    private var socialPollingJob: Job? = null
     private var isAppForeground = false
     private var lastCompanionAvailabilityProfileId: String? = null
     private var lastCompanionAvailabilityCheckAt: Long = 0L
+    private var lastAchievementAvailabilityProfileId: String? = null
+    private var lastAchievementAvailabilityCheckAt: Long = 0L
+    private var lastSocialAvailabilityProfileId: String? = null
+    private var lastSocialAvailabilityCheckAt: Long = 0L
+    private val seenMessageKeys = mutableSetOf<String>()
 
     private val _state = MutableStateFlow(
         VantafynHomeUiState(
@@ -173,10 +196,18 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     init {
         loadSavedProfiles()
         refreshOmbiRequestsAvailability()
+        refreshAchievementsAvailability()
+        refreshSocialAvailability()
         val appLifecycleObserver = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> _state.update { it.copy(isAppForeground = true) }
-                Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_PAUSE -> _state.update { it.copy(isAppForeground = false) }
+                Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
+                    _state.update { it.copy(isAppForeground = true) }
+                    startSocialPolling()
+                }
+                Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_PAUSE -> {
+                    _state.update { it.copy(isAppForeground = false) }
+                    stopSocialPolling()
+                }
                 else -> {}
             }
         }
@@ -185,6 +216,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     override fun onCleared() {
         stopWatchPartyRealtime()
+        stopSocialPolling()
         watchPartyInviteExpiryJob?.cancel()
         super.onCleared()
     }
@@ -484,6 +516,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             whatsNewEnabled = readWhatsNewEnabled(result.value.profileId),
+                            achievementsEnabled = readAchievementsEnabled(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             bottomRailAccent = readBottomRailAccent(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
@@ -494,14 +527,40 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             upNextDisplayMode = readUpNextDisplayMode(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
                             passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
+                            achievements = emptyList(),
+                            achievementSummary = null,
+                            isAchievementsAvailable = false,
+                            hasUnseenAchievements = false,
+                            activeAchievementUnlock = null,
+                            socialEnabled = readSocialEnabled(result.value.profileId),
+                            socialDockEnabled = readSocialDockEnabled(result.value.profileId),
+                            isSocialAvailable = false,
+                            isSocialLoading = false,
+                            socialFriends = emptyList(),
+                            socialRequests = emptyList(),
+                            socialConversations = emptyList(),
+                            socialUnreadCount = 0,
+                            isSocialPanelOpen = false,
+                            activeSocialIslandPreview = null,
+                            activeChatPeer = null,
+                            activeChatMessages = emptyList(),
+                            isSendingChatMessage = false,
+                            chatErrorMessage = null,
                         )
                     }
+                    lastAchievementAvailabilityProfileId = null
+                    lastAchievementAvailabilityCheckAt = 0L
+                    lastSocialAvailabilityProfileId = null
+                    lastSocialAvailabilityCheckAt = 0L
+                    seenMessageKeys.clear()
                     refreshSavedProfiles()
                     startWatchPartyRealtime(result.value)
                     offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                     refreshOmbiRequestsAvailability(forceCompanionCheck = true)
+                    refreshAchievementsAvailability(force = true)
+                    refreshSocialAvailability(force = true)
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isLoading = false, errorMessage = result.message) }
@@ -672,6 +731,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 appPreferences.edit().putBoolean(KEY_SETUP_COMPLETED, false).apply()
             }
             delay(LOGOUT_TRANSITION_DELAY_MS)
+            lastAchievementAvailabilityProfileId = null
+            lastAchievementAvailabilityCheckAt = 0L
             _state.value = VantafynHomeUiState(
                 step = if (profiles.isEmpty()) VantafynSetupStep.Welcome else VantafynSetupStep.ProfilePicker,
                 isStartupResolved = true,
@@ -716,6 +777,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             whatsNewEnabled = readWhatsNewEnabled(result.value.profileId),
+                            achievementsEnabled = readAchievementsEnabled(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             bottomRailAccent = readBottomRailAccent(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
@@ -726,14 +788,40 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             upNextDisplayMode = readUpNextDisplayMode(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
                             passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
+                            achievements = emptyList(),
+                            achievementSummary = null,
+                            isAchievementsAvailable = false,
+                            hasUnseenAchievements = false,
+                            activeAchievementUnlock = null,
+                            socialEnabled = readSocialEnabled(result.value.profileId),
+                            socialDockEnabled = readSocialDockEnabled(result.value.profileId),
+                            isSocialAvailable = false,
+                            isSocialLoading = false,
+                            socialFriends = emptyList(),
+                            socialRequests = emptyList(),
+                            socialConversations = emptyList(),
+                            socialUnreadCount = 0,
+                            isSocialPanelOpen = false,
+                            activeSocialIslandPreview = null,
+                            activeChatPeer = null,
+                            activeChatMessages = emptyList(),
+                            isSendingChatMessage = false,
+                            chatErrorMessage = null,
                         )
                     }
+                    lastAchievementAvailabilityProfileId = null
+                    lastAchievementAvailabilityCheckAt = 0L
+                    lastSocialAvailabilityProfileId = null
+                    lastSocialAvailabilityCheckAt = 0L
+                    seenMessageKeys.clear()
                     refreshSavedProfiles()
                     startWatchPartyRealtime(result.value)
                     offlineSyncScheduler.schedule()
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                     refreshOmbiRequestsAvailability(forceCompanionCheck = true)
+                    refreshAchievementsAvailability(force = true)
+                    refreshSocialAvailability(force = true)
                 }
                 is JellyfinResult.Failure -> {
                     handleRestoreFailure(profile, result)
@@ -788,6 +876,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
                             themeMusicVolume = readThemeMusicVolume(result.value.profileId),
                             whatsNewEnabled = readWhatsNewEnabled(result.value.profileId),
+                            achievementsEnabled = readAchievementsEnabled(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             bottomRailAccent = readBottomRailAccent(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
@@ -798,6 +887,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             upNextDisplayMode = readUpNextDisplayMode(result.value.profileId),
                             passoutProtectionEnabled = readPassoutProtectionEnabled(result.value.profileId),
                             passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(result.value.profileId),
+                            socialEnabled = readSocialEnabled(result.value.profileId),
+                            socialDockEnabled = readSocialDockEnabled(result.value.profileId),
                         )
                     }
                     refreshSavedProfiles()
@@ -806,6 +897,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadLibraries(result.value)
                     loadFavorites(result.value)
                     refreshOmbiRequestsAvailability(forceCompanionCheck = true)
+                    refreshAchievementsAvailability(force = true)
                 }
                 is JellyfinResult.Failure -> {
                     val reason = (result.cause as? JellyfinSessionRestoreFailure)?.reason
@@ -1079,6 +1171,446 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 )
             }
         }
+    }
+
+    fun toggleAchievementsEnabled() {
+        val profileId = _state.value.session?.profileId ?: return
+        val enabled = !_state.value.achievementsEnabled
+        homeLayoutStorage.edit().putBoolean("achievements_enabled_$profileId", enabled).apply()
+        _state.update {
+            it.copy(
+                achievementsEnabled = enabled,
+                isAchievementsAvailable = if (enabled) it.isAchievementsAvailable else false,
+                hasUnseenAchievements = if (enabled) it.hasUnseenAchievements else false,
+                activeAchievementUnlock = if (enabled) it.activeAchievementUnlock else null,
+            )
+        }
+        if (enabled) {
+            refreshAchievementsAvailability(force = true)
+        }
+    }
+
+    fun refreshAchievementsAvailability(force: Boolean = false) {
+        if (!_state.value.achievementsEnabled) {
+            _state.update { it.copy(isAchievementsAvailable = false, hasUnseenAchievements = false) }
+            return
+        }
+        val session = _state.value.session ?: return
+        val now = System.currentTimeMillis()
+        if (!force &&
+            lastAchievementAvailabilityProfileId == session.profileId &&
+            now - lastAchievementAvailabilityCheckAt < 120_000L
+        ) {
+            return
+        }
+        lastAchievementAvailabilityProfileId = session.profileId
+        lastAchievementAvailabilityCheckAt = now
+        viewModelScope.launch {
+            val available = achievementRepository.checkAvailability(session)
+            _state.update { it.copy(isAchievementsAvailable = available) }
+            if (available) {
+                pollAchievementUnlocks()
+            }
+        }
+    }
+
+    fun openAchievements() {
+        navigateMobile(MobileDestination.Achievements)
+        _state.update { it.copy(hasUnseenAchievements = false) }
+        loadAchievements()
+    }
+
+    fun loadAchievements(force: Boolean = false) {
+        val session = _state.value.session ?: return
+        if (!force && _state.value.achievements.isNotEmpty() && _state.value.achievementSummary != null) return
+        viewModelScope.launch {
+            _state.update { it.copy(isAchievementsLoading = true, achievementError = null) }
+            val summaryDeferred = async { achievementRepository.getSummary(session) }
+            val achievementsDeferred = async { achievementRepository.getAchievements(session) }
+            val summaryResult = summaryDeferred.await()
+            val achievementsResult = achievementsDeferred.await()
+            _state.update { state ->
+                state.copy(
+                    isAchievementsLoading = false,
+                    achievementSummary = (summaryResult as? JellyfinResult.Success)?.value ?: state.achievementSummary,
+                    achievements = (achievementsResult as? JellyfinResult.Success)?.value ?: state.achievements,
+                    achievementError = (achievementsResult as? JellyfinResult.Failure)?.message
+                        ?: (summaryResult as? JellyfinResult.Failure)?.message,
+                )
+            }
+        }
+    }
+
+    fun pollAchievementUnlocks() {
+        if (!_state.value.achievementsEnabled) return
+        val session = _state.value.session ?: return
+        if (!_state.value.isAchievementsAvailable) return
+        val deviceId = resolveDeviceId()
+        val checkpointKey = "last_checkpoint_${session.server.url.trimEnd('/')}_${session.user.id}_$deviceId"
+        val seenKey = "seen_unlocks_${session.server.url.trimEnd('/')}_${session.user.id}"
+        val lastCheckpoint = achievementPrefs.getString(checkpointKey, null)
+        viewModelScope.launch {
+            when (val result = achievementRepository.getUnlocksSince(session, lastCheckpoint, deviceId)) {
+                is JellyfinResult.Success -> {
+                    val seenSet = achievementPrefs.getStringSet(seenKey, emptySet()) ?: emptySet()
+                    val newUnlocks = result.value.filter { it.id !in seenSet }
+                    if (newUnlocks.isNotEmpty()) {
+                        val latest = newUnlocks.first()
+                        val updatedSeen = seenSet + newUnlocks.map { it.id }
+                        achievementPrefs.edit().putStringSet(seenKey, updatedSeen).apply()
+                        _state.update {
+                            it.copy(
+                                hasUnseenAchievements = true,
+                                activeAchievementUnlock = latest,
+                            )
+                        }
+                    }
+                    val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                        timeZone = TimeZone.getTimeZone("UTC")
+                    }.format(Date())
+                    achievementPrefs.edit().putString(checkpointKey, nowIso).apply()
+                }
+                is JellyfinResult.Failure -> {
+                    // Do not advance checkpoint on failure
+                }
+            }
+        }
+    }
+
+    fun dismissAchievementUnlock() {
+        _state.update { it.copy(activeAchievementUnlock = null) }
+    }
+
+    private fun resolveDeviceId(): String =
+        android.provider.Settings.Secure.getString(
+            getApplication<Application>().contentResolver,
+            android.provider.Settings.Secure.ANDROID_ID,
+        )?.takeIf { it.isNotBlank() } ?: "vantafyn-android"
+
+    fun readSocialEnabled(profileId: String?): Boolean {
+        if (profileId.isNullOrBlank()) return false
+        return homeLayoutStorage.getBoolean("social_enabled_$profileId", false)
+    }
+
+    fun readSocialDockEnabled(profileId: String?): Boolean {
+        if (profileId.isNullOrBlank()) return true
+        return homeLayoutStorage.getBoolean("social_dock_enabled_$profileId", true)
+    }
+
+    fun toggleSocialEnabled() {
+        val profileId = _state.value.session?.profileId ?: return
+        val current = _state.value.socialEnabled
+        val target = !current
+        homeLayoutStorage.edit().putBoolean("social_enabled_$profileId", target).apply()
+        _state.update {
+            it.copy(
+                socialEnabled = target,
+                isSocialAvailable = target && it.isAchievementsAvailable,
+                isSocialPanelOpen = false,
+                activeSocialIslandPreview = null,
+                socialUnreadCount = if (target) it.socialUnreadCount else 0,
+            )
+        }
+        if (target) {
+            refreshSocialAvailability(force = true)
+            loadSocialData(force = true)
+            startSocialPolling()
+        } else {
+            stopSocialPolling()
+        }
+    }
+
+    fun toggleSocialDockEnabled() {
+        val profileId = _state.value.session?.profileId ?: return
+        val target = !_state.value.socialDockEnabled
+        homeLayoutStorage.edit().putBoolean("social_dock_enabled_$profileId", target).apply()
+        _state.update {
+            it.copy(socialDockEnabled = target)
+        }
+    }
+
+    fun dismissSocialDock() {
+        val profileId = _state.value.session?.profileId ?: return
+        homeLayoutStorage.edit().putBoolean("social_dock_enabled_$profileId", false).apply()
+        _state.update {
+            it.copy(
+                socialDockEnabled = false,
+                mobileMessage = "Social bubble hidden. You can re-enable it in Settings.",
+            )
+        }
+    }
+
+    fun refreshSocialAvailability(force: Boolean = false) {
+        if (!_state.value.socialEnabled) {
+            _state.update { it.copy(isSocialAvailable = false) }
+            return
+        }
+        val session = _state.value.session ?: return
+        val now = System.currentTimeMillis()
+        if (!force &&
+            lastSocialAvailabilityProfileId == session.profileId &&
+            now - lastSocialAvailabilityCheckAt < 120_000L
+        ) {
+            return
+        }
+        lastSocialAvailabilityProfileId = session.profileId
+        lastSocialAvailabilityCheckAt = now
+        viewModelScope.launch {
+            val available = socialRepository.checkSocialAvailability(session) || _state.value.isAchievementsAvailable
+            _state.update { it.copy(isSocialAvailable = available) }
+            if (available) {
+                loadSocialData()
+                startSocialPolling()
+            }
+        }
+    }
+
+    fun loadSocialData(force: Boolean = false) {
+        if (!_state.value.socialEnabled) return
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isSocialLoading = true) }
+            val friendsDeferred = async { socialRepository.getFriends(session) }
+            val requestsDeferred = async { socialRepository.getFriendRequests(session) }
+            val convosDeferred = async { socialRepository.getConversations(session) }
+            val summaryDeferred = async { socialRepository.getUnreadSummary(session) }
+            val discoverableDeferred = async { socialRepository.getDiscoverableUsers(session) }
+
+            val friendsRes = friendsDeferred.await()
+            val requestsRes = requestsDeferred.await()
+            val convosRes = convosDeferred.await()
+            val summaryRes = summaryDeferred.await()
+            val discoverableRes = discoverableDeferred.await()
+
+            _state.update { state ->
+                val convos = (convosRes as? JellyfinResult.Success)?.value ?: state.socialConversations
+                val unread = (summaryRes as? JellyfinResult.Success)?.value?.unreadMessageCount ?: convos.sumOf { it.unreadCount }
+                state.copy(
+                    isSocialLoading = false,
+                    socialFriends = (friendsRes as? JellyfinResult.Success)?.value ?: state.socialFriends,
+                    socialRequests = (requestsRes as? JellyfinResult.Success)?.value ?: state.socialRequests,
+                    socialConversations = convos,
+                    socialUnreadCount = unread,
+                    socialDiscoverableUsers = (discoverableRes as? JellyfinResult.Success)?.value ?: state.socialDiscoverableUsers,
+                )
+            }
+        }
+    }
+
+    fun startSocialPolling() {
+        if (!_state.value.socialEnabled) return
+        socialPollingJob?.cancel()
+        socialPollingJob = viewModelScope.launch {
+            while (isActive) {
+                val isChatting = _state.value.mobileDestination == MobileDestination.Chat
+                val interval = if (isChatting) 4_000L else 30_000L
+                delay(interval)
+
+                val session = _state.value.session
+                if (session == null || !_state.value.isAppForeground || !_state.value.socialEnabled) {
+                    break
+                }
+
+                if (isChatting) {
+                    val activePeer = _state.value.activeChatPeer
+                    if (activePeer != null) {
+                        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
+                        when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
+                            is JellyfinResult.Success -> {
+                                _state.update { it.copy(activeChatMessages = msgRes.value) }
+                                socialRepository.markConversationRead(session, convId)
+                            }
+                            else -> Unit
+                        }
+                    }
+                } else {
+                    // Check unread summary and conversations
+                    when (val convRes = socialRepository.getConversations(session)) {
+                        is JellyfinResult.Success -> {
+                            val newConvos = convRes.value
+                            val totalUnread = newConvos.sumOf { it.unreadCount }
+
+                            val latestUnreadConvo = newConvos.firstOrNull { it.unreadCount > 0 && it.lastSenderId != session.user.id }
+                            val msgText = latestUnreadConvo?.lastMessageText
+                            if (latestUnreadConvo != null && !msgText.isNullOrBlank()) {
+                                val messageKey = "${latestUnreadConvo.conversationId}_${latestUnreadConvo.lastMessageTimestamp}_$msgText"
+                                if (messageKey !in seenMessageKeys) {
+                                    seenMessageKeys += messageKey
+                                    val previewMsg = JellyfinSocialMessage(
+                                        messageId = messageKey,
+                                        conversationId = latestUnreadConvo.conversationId,
+                                        senderId = latestUnreadConvo.peerUserId,
+                                        senderName = latestUnreadConvo.peerName,
+                                        senderAvatarTag = latestUnreadConvo.peerAvatarTag,
+                                        senderAvatarUrl = latestUnreadConvo.peerAvatarUrl,
+                                        recipientId = session.user.id,
+                                        content = msgText,
+                                        timestamp = latestUnreadConvo.lastMessageTimestamp,
+                                        isRead = false,
+                                        isFromSelf = false,
+                                    )
+                                    _state.update {
+                                        it.copy(
+                                            activeSocialIslandPreview = previewMsg,
+                                            socialConversations = newConvos,
+                                            socialUnreadCount = totalUnread,
+                                        )
+                                    }
+                                } else {
+                                    _state.update {
+                                        it.copy(
+                                            socialConversations = newConvos,
+                                            socialUnreadCount = totalUnread,
+                                        )
+                                    }
+                                }
+                            } else {
+                                _state.update {
+                                    it.copy(
+                                        socialConversations = newConvos,
+                                        socialUnreadCount = totalUnread,
+                                    )
+                                }
+                            }
+                        }
+                        else -> Unit
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopSocialPolling() {
+        socialPollingJob?.cancel()
+        socialPollingJob = null
+    }
+
+    fun openSocialPanel() {
+        _state.update { it.copy(isSocialPanelOpen = true, activeSocialIslandPreview = null) }
+        loadSocialData()
+    }
+
+    fun closeSocialPanel() {
+        _state.update { it.copy(isSocialPanelOpen = false) }
+    }
+
+    fun openSocialScreen() {
+        _state.update { it.copy(isSocialPanelOpen = false, activeSocialIslandPreview = null) }
+        navigateMobile(MobileDestination.Social)
+        loadSocialData(force = true)
+    }
+
+    fun openChatWithFriend(friend: JellyfinFriend) {
+        val session = _state.value.session ?: return
+        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == friend.userId }?.conversationId ?: friend.userId.toString()
+        _state.update {
+            it.copy(
+                activeChatPeer = friend,
+                activeChatMessages = emptyList(),
+                chatErrorMessage = null,
+                isSocialPanelOpen = false,
+                activeSocialIslandPreview = null,
+            )
+        }
+        navigateMobile(MobileDestination.Chat)
+        viewModelScope.launch {
+            when (val res = socialRepository.getMessages(session, convId, friend.userId)) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(activeChatMessages = res.value) }
+                    socialRepository.markConversationRead(session, convId)
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { it.copy(chatErrorMessage = res.message) }
+                }
+            }
+        }
+    }
+
+    fun openChatFromConversation(conv: JellyfinSocialConversation) {
+        val friend = _state.value.socialFriends.firstOrNull { it.userId == conv.peerUserId }
+            ?: JellyfinFriend(
+                userId = conv.peerUserId,
+                username = conv.peerName,
+                displayName = conv.peerName,
+                avatarTag = conv.peerAvatarTag,
+                avatarUrl = conv.peerAvatarUrl,
+                rankTier = conv.peerRankTier,
+                isOnline = conv.peerIsOnline,
+            )
+        openChatWithFriend(friend)
+    }
+
+    fun sendChatMessage(text: String) {
+        if (text.isBlank()) return
+        val session = _state.value.session ?: return
+        val peer = _state.value.activeChatPeer ?: return
+        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == peer.userId }?.conversationId ?: peer.userId.toString()
+        viewModelScope.launch {
+            _state.update { it.copy(isSendingChatMessage = true, chatErrorMessage = null) }
+            when (val res = socialRepository.sendMessage(session, peer.userId, convId, text)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            isSendingChatMessage = false,
+                            activeChatMessages = it.activeChatMessages + res.value,
+                        )
+                    }
+                    loadSocialData()
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            isSendingChatMessage = false,
+                            chatErrorMessage = res.message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun acceptFriendRequest(requestId: String) {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            when (socialRepository.acceptFriendRequest(session, requestId)) {
+                is JellyfinResult.Success -> {
+                    loadSocialData(force = true)
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    fun declineOrRemoveFriend(targetId: String) {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            when (socialRepository.declineOrRemoveFriend(session, targetId)) {
+                is JellyfinResult.Success -> {
+                    loadSocialData(force = true)
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    fun sendFriendRequest(target: String) {
+        if (target.isBlank()) return
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            when (val res = socialRepository.sendFriendRequest(session, target)) {
+                is JellyfinResult.Success -> {
+                    _state.update { it.copy(mobileMessage = "Friend request sent to $target") }
+                    loadSocialData(force = true)
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { it.copy(mobileMessage = res.message) }
+                }
+            }
+        }
+    }
+
+    fun dismissSocialIslandPreview() {
+        _state.update { it.copy(activeSocialIslandPreview = null) }
     }
 
     fun openLibrary(library: JellyfinLibrary) {
@@ -1364,12 +1896,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.DiscoverVantafyn -> navigateMobile(MobileDestination.Profile)
             MobileDestination.DeviceQuickConnect -> closeDeviceQuickConnect()
             MobileDestination.AdminUserSettings -> closeAdminUser()
+            MobileDestination.Chat -> navigateMobile(MobileDestination.Social)
+            MobileDestination.Social -> navigateMobile(snapshot.previousMobileDestination)
             MobileDestination.Libraries,
             MobileDestination.Search,
             MobileDestination.Music,
             MobileDestination.Favorites,
             MobileDestination.Requests,
             MobileDestination.Admin,
+            MobileDestination.Achievements,
             MobileDestination.Profile -> navigateMobile(MobileDestination.Home)
             else -> Unit
         }
@@ -2157,6 +2692,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     themeMusicEnabled = readThemeMusicEnabled(profile.id),
                     themeMusicVolume = readThemeMusicVolume(profile.id),
                     whatsNewEnabled = readWhatsNewEnabled(profile.id),
+                    achievementsEnabled = readAchievementsEnabled(profile.id),
                     selectedBackground = readSelectedBackground(profile.id),
                     bottomRailAccent = readBottomRailAccent(profile.id),
                     videoPlayerPreference = readVideoPlayerPreference(profile.id),
@@ -2190,15 +2726,6 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 return
             }
             MusicPlaybackController.get(getApplication()).playQueue(queue, startIndex)
-            _state.update {
-                it.copy(
-                    mobileMessage = if (queue.size > 1) {
-                        "Playing ${queue.size} downloaded tracks"
-                    } else {
-                        "Playing offline"
-                    },
-                )
-            }
             return
         }
         val target = PlaybackTarget(
@@ -2884,6 +3411,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         isAppForeground = true
         if (_state.value.session != null) {
             offlineSyncScheduler.schedule()
+            refreshAchievementsAvailability()
+            if (_state.value.isAchievementsAvailable) {
+                pollAchievementUnlocks()
+            }
+        }
+        if (_state.value.adminOverview != null && _state.value.session?.user?.isAdministrator == true) {
+            pollAdminOverview()
         }
         _state.value.session
             ?.takeIf { shouldUseWatchPartyRealtime(_state.value) }
@@ -4084,6 +4618,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private fun readWhatsNewEnabled(profileId: String?): Boolean =
         profileId?.let { homeLayoutStorage.getBoolean("whats_new_enabled_$it", true) } ?: true
 
+    private fun readAchievementsEnabled(profileId: String?): Boolean =
+        profileId?.let { homeLayoutStorage.getBoolean("achievements_enabled_$it", false) } ?: false
+
     private fun readThemeMusicVolume(profileId: String?): ThemeMusicVolume {
         val key = profileId?.let { homeLayoutStorage.getString("theme_music_volume_$it", null) }
         return key?.let { runCatching { ThemeMusicVolume.valueOf(it) }.getOrNull() }
@@ -4253,6 +4790,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     themeMusicEnabled = readThemeMusicEnabled(jellyfinSession.profileId),
                                     themeMusicVolume = readThemeMusicVolume(jellyfinSession.profileId),
                                     whatsNewEnabled = readWhatsNewEnabled(jellyfinSession.profileId),
+                                    achievementsEnabled = readAchievementsEnabled(jellyfinSession.profileId),
                                     selectedBackground = readSelectedBackground(jellyfinSession.profileId),
                                     bottomRailAccent = readBottomRailAccent(jellyfinSession.profileId),
                                     videoPlayerPreference = readVideoPlayerPreference(jellyfinSession.profileId),
@@ -4263,6 +4801,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     upNextDisplayMode = readUpNextDisplayMode(jellyfinSession.profileId),
                                     passoutProtectionEnabled = readPassoutProtectionEnabled(jellyfinSession.profileId),
                                     passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(jellyfinSession.profileId),
+                                    socialEnabled = readSocialEnabled(jellyfinSession.profileId),
+                                    socialDockEnabled = readSocialDockEnabled(jellyfinSession.profileId),
                                 )
                             }
                             refreshSavedProfiles()
@@ -4450,6 +4990,29 @@ data class VantafynHomeUiState(
     val hasUnseenWhatsNew: Boolean = false,
     val whatsNewSeenIds: Set<String> = emptySet(),
     val whatsNewEnabled: Boolean = true,
+    val achievementsEnabled: Boolean = false,
+    val isAchievementsAvailable: Boolean = false,
+    val hasUnseenAchievements: Boolean = false,
+    val isAchievementsLoading: Boolean = false,
+    val achievementSummary: JellyfinAchievementSummary? = null,
+    val achievements: List<JellyfinAchievement> = emptyList(),
+    val achievementError: String? = null,
+    val activeAchievementUnlock: JellyfinAchievementUnlock? = null,
+    val socialEnabled: Boolean = false,
+    val socialDockEnabled: Boolean = true,
+    val isSocialAvailable: Boolean = false,
+    val isSocialLoading: Boolean = false,
+    val socialFriends: List<JellyfinFriend> = emptyList(),
+    val socialRequests: List<JellyfinFriendRequest> = emptyList(),
+    val socialConversations: List<JellyfinSocialConversation> = emptyList(),
+    val socialUnreadCount: Int = 0,
+    val isSocialPanelOpen: Boolean = false,
+    val activeSocialIslandPreview: JellyfinSocialMessage? = null,
+    val activeChatPeer: JellyfinFriend? = null,
+    val activeChatMessages: List<JellyfinSocialMessage> = emptyList(),
+    val isSendingChatMessage: Boolean = false,
+    val chatErrorMessage: String? = null,
+    val socialDiscoverableUsers: List<JellyfinFriend> = emptyList(),
 ) {
     val currentWatchPartyCandidate: WatchPartyCandidate?
         get() = watchPartyCandidates.getOrNull(watchPartyCurrentIndex)
@@ -4666,6 +5229,9 @@ enum class MobileDestination {
     MediaDetail,
     Player,
     DiscoverVantafyn,
+    Achievements,
+    Social,
+    Chat,
 }
 
 private fun MobileDestination.isRootDestination(): Boolean =
@@ -4687,7 +5253,10 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.LibraryDetail,
         MobileDestination.MediaDetail,
         MobileDestination.Player,
-        MobileDestination.DiscoverVantafyn -> false
+        MobileDestination.DiscoverVantafyn,
+        MobileDestination.Achievements,
+        MobileDestination.Social,
+        MobileDestination.Chat -> false
     }
 
 private fun MobileDestination.rootDestination(): MobileDestination =

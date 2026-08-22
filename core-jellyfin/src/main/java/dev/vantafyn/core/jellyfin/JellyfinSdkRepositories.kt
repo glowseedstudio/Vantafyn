@@ -119,7 +119,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.8.0",
+            version = "0.9.0",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -170,6 +170,12 @@ class JellyfinRepositoryProvider(
 
     val realtimeClient: JellyfinRealtimeClient =
         SdkJellyfinRealtimeClient(jellyfin, ioDispatcher)
+
+    val achievementRepository: JellyfinAchievementRepository =
+        SdkJellyfinAchievementRepository(ioDispatcher)
+
+    val socialRepository: JellyfinSocialRepository =
+        SdkJellyfinSocialRepository(ioDispatcher)
 
     private fun resolveDeviceId(context: Context): String =
         Settings.Secure.getString(context.contentResolver, Settings.Secure.ANDROID_ID)
@@ -2568,7 +2574,7 @@ class SdkJellyfinAdminRepository(
         session: JellyfinSession,
         itemIds: List<java.util.UUID>,
     ): Map<java.util.UUID, Pair<String?, String?>> {
-        val ids = itemIds.distinct().take(24)
+        val ids = itemIds.distinct().take(36)
         if (ids.isEmpty()) return emptyMap()
         return runCatching {
             val result by api.itemsApi.getItems(
@@ -2577,16 +2583,49 @@ class SdkJellyfinAdminRepository(
                     ids = ids,
                     fields = itemFields,
                     imageTypeLimit = 2,
-                    enableImageTypes = listOf(ImageType.PRIMARY, ImageType.LOGO),
+                    enableImageTypes = itemImageTypes,
                     enableImages = true,
                     enableUserData = false,
                     enableTotalRecordCount = false,
                 ),
             )
-            result.items.associate { item ->
+            val items = result.items
+            val missingAlbumIds = items
+                .filter { it.primaryImageUrl(api, 260) == null }
+                .mapNotNull { it.albumId ?: it.parentId }
+                .distinct()
+
+            val albumArtById = if (missingAlbumIds.isNotEmpty()) {
+                runCatching {
+                    val albumResult by api.itemsApi.getItems(
+                        GetItemsRequest(
+                            userId = session.user.id,
+                            ids = missingAlbumIds,
+                            fields = listOf(ItemFields.PRIMARY_IMAGE_ASPECT_RATIO),
+                            imageTypeLimit = 1,
+                            enableImageTypes = listOf(ImageType.PRIMARY, ImageType.THUMB),
+                            enableImages = true,
+                            enableUserData = false,
+                            enableTotalRecordCount = false,
+                        ),
+                    )
+                    albumResult.items.associate { albumItem ->
+                        albumItem.id to (albumItem.primaryImageUrl(api, 260) ?: albumItem.thumbImageUrl(api, 360))
+                    }
+                }.getOrDefault(emptyMap())
+            } else {
+                emptyMap()
+            }
+
+            items.associate { item ->
                 val logoTag = item.imageTags?.get(ImageType.LOGO)?.takeIf { it.isNotBlank() }
                 val logoUrl = logoTag?.let { itemImageUrl(api, item.id, ImageType.LOGO, it, maxWidth = 420) }
-                val posterUrl: String? = item.primaryImageUrl(api, 260) ?: item.thumbImageUrl(api, 360) ?: item.backdropImageUrl(api, 360)
+                val directPosterUrl: String? = item.primaryImageUrl(api, 260) ?: item.thumbImageUrl(api, 360) ?: item.backdropImageUrl(api, 360)
+                val fallbackAlbumPosterUrl: String? = if (directPosterUrl == null) {
+                    val aId = item.albumId ?: item.parentId
+                    aId?.let { albumArtById[it] }
+                } else null
+                val posterUrl = directPosterUrl ?: fallbackAlbumPosterUrl
                 item.id to (posterUrl to logoUrl)
             }
         }.getOrDefault(emptyMap())
@@ -2599,69 +2638,118 @@ class SdkJellyfinAdminRepository(
     ): Map<String, Pair<String?, String?>> {
         if (items.isEmpty()) return emptyMap()
         val albumIdByTitle = mutableMapOf<String, java.util.UUID>()
-        val results = items.take(12).mapNotNull { stats ->
+        val results = items.take(16).mapNotNull { stats ->
             runCatching {
-                val strippedQuery = stats.title.playbackReportingSearchTitle()
-                val fullQuery = stats.title.replace(Regex("""\s+\([^)]*\)\s*$"""), "").trim()
+                val candidates = stats.title.playbackReportingSearchCandidates()
                 val isAudio = stats.type?.lowercase(Locale.US) in setOf("audio", "song", "track", "music")
                 val normalizedTitle = stats.title.normalizedPlaybackReportingTitle()
 
-                var foundHint = false
-                var hintName: String? = null
-                var hintItemId: java.util.UUID? = null
-                var hintPrimaryTag: String? = null
-                var hintThumbTag: String? = null
-                var hintBackdropTag: String? = null
-                var hintAlbumId: java.util.UUID? = null
+                var foundPosterUrl: String? = null
+                var foundLogoUrl: String? = null
+                var candidateAlbumId: java.util.UUID? = null
 
-                for (query in listOfNotNull(strippedQuery.takeIf { it.isNotBlank() }, fullQuery.takeIf { it.isNotBlank() && it != strippedQuery })) {
-                    if (foundHint) break
-                    val response by api.searchApi.getSearchHints(
-                        GetSearchHintsRequest(
-                            userId = session.user.id,
-                            searchTerm = query,
-                            includeItemTypes = listOf(
-                                BaseItemKind.MOVIE,
-                                BaseItemKind.SERIES,
-                                BaseItemKind.EPISODE,
-                                BaseItemKind.AUDIO,
-                                BaseItemKind.MUSIC_ALBUM,
+                for (query in candidates) {
+                    if (foundPosterUrl != null) break
+
+                    val itemsResponse = runCatching {
+                        val response by api.itemsApi.getItems(
+                            GetItemsRequest(
+                                userId = session.user.id,
+                                searchTerm = query,
+                                includeItemTypes = listOf(
+                                    BaseItemKind.AUDIO,
+                                    BaseItemKind.MUSIC_ALBUM,
+                                    BaseItemKind.MOVIE,
+                                    BaseItemKind.SERIES,
+                                    BaseItemKind.EPISODE,
+                                ),
+                                recursive = true,
+                                limit = 8,
+                                fields = itemFields,
+                                enableImageTypes = itemImageTypes,
+                                enableImages = true,
+                                enableUserData = false,
+                                enableTotalRecordCount = false,
                             ),
-                            limit = 8,
-                            mediaTypes = emptyList(),
-                        ),
-                    )
-                    val matched = response.searchHints
-                        .firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
-                        ?: if (isAudio) response.searchHints.firstOrNull { it.albumId != null && it.primaryImageTag != null }
-                        else response.searchHints.firstOrNull()
-                    if (matched != null) {
-                        foundHint = true
-                        hintName = matched.name
-                        hintItemId = matched.itemId ?: matched.id
-                        hintPrimaryTag = matched.primaryImageTag
-                        hintThumbTag = matched.thumbImageTag
-                        hintBackdropTag = matched.backdropImageTag
-                        hintAlbumId = matched.albumId
+                        )
+                        response.items
+                    }.getOrDefault(emptyList())
+
+                    val matchedItem = itemsResponse.firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
+                        ?: if (isAudio) itemsResponse.firstOrNull { it.type == BaseItemKind.AUDIO || it.type == BaseItemKind.MUSIC_ALBUM }
+                        else itemsResponse.firstOrNull()
+
+                    if (matchedItem != null) {
+                        foundLogoUrl = matchedItem.logoImageUrl(api, 420)
+                        val directArt = matchedItem.primaryImageUrl(api, 260) ?: matchedItem.thumbImageUrl(api, 360) ?: matchedItem.backdropImageUrl(api, 360)
+                        if (directArt != null) {
+                            foundPosterUrl = directArt
+                            break
+                        }
+                        if (matchedItem.albumId != null) {
+                            candidateAlbumId = matchedItem.albumId
+                        }
+                    }
+
+                    if (foundPosterUrl == null) {
+                        val hintsResponse = runCatching {
+                            val response by api.searchApi.getSearchHints(
+                                GetSearchHintsRequest(
+                                    userId = session.user.id,
+                                    searchTerm = query,
+                                    includeItemTypes = listOf(
+                                        BaseItemKind.MOVIE,
+                                        BaseItemKind.SERIES,
+                                        BaseItemKind.EPISODE,
+                                        BaseItemKind.AUDIO,
+                                        BaseItemKind.MUSIC_ALBUM,
+                                    ),
+                                    limit = 8,
+                                    mediaTypes = emptyList(),
+                                ),
+                            )
+                            response.searchHints
+                        }.getOrDefault(emptyList())
+
+                        val matchedHint = hintsResponse.firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
+                            ?: if (isAudio) hintsResponse.firstOrNull { it.albumId != null || it.primaryImageTag != null }
+                            else hintsResponse.firstOrNull()
+
+                        if (matchedHint != null) {
+                            val hintItemId = matchedHint.itemId ?: matchedHint.id
+                            val hintPrimaryTag = matchedHint.primaryImageTag
+                            val hintThumbTag = matchedHint.thumbImageTag
+                            val hintBackdropTag = matchedHint.backdropImageTag
+
+                            val hintPoster: String? = hintItemId?.let { hId ->
+                                hintPrimaryTag?.takeIf { it.isNotBlank() }?.let {
+                                    itemImageUrl(api, hId, ImageType.PRIMARY, it, maxWidth = 260)
+                                } ?: hintThumbTag?.takeIf { it.isNotBlank() }?.let {
+                                    itemImageUrl(api, hId, ImageType.THUMB, it, maxWidth = 360)
+                                } ?: hintBackdropTag?.takeIf { it.isNotBlank() }?.let {
+                                    itemImageUrl(api, hId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+                                }
+                            }
+                            if (hintPoster != null) {
+                                foundPosterUrl = hintPoster
+                                break
+                            }
+                            if (matchedHint.albumId != null) {
+                                candidateAlbumId = matchedHint.albumId
+                            }
+                        }
                     }
                 }
-                if (!foundHint || hintItemId == null) return@runCatching null
 
-                val posterUrl: String? = hintPrimaryTag?.takeIf { it.isNotBlank() }?.let {
-                    itemImageUrl(api, hintItemId, ImageType.PRIMARY, it, maxWidth = 260)
-                } ?: hintThumbTag?.takeIf { it.isNotBlank() }?.let {
-                    itemImageUrl(api, hintItemId, ImageType.THUMB, it, maxWidth = 360)
-                } ?: hintBackdropTag?.takeIf { it.isNotBlank() }?.let {
-                    itemImageUrl(api, hintItemId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+                if (foundPosterUrl == null && candidateAlbumId != null) {
+                    albumIdByTitle[normalizedTitle] = candidateAlbumId
                 }
-                if (posterUrl == null && hintAlbumId != null) {
-                    albumIdByTitle[normalizedTitle] = hintAlbumId
-                }
-                normalizedTitle to (posterUrl to null as String?)
+                normalizedTitle to (foundPosterUrl to foundLogoUrl)
             }.getOrNull()
         }.toMap()
+
         if (albumIdByTitle.isNotEmpty()) {
-            val albumArt = loadPlaybackReportingArtwork(api, session, albumIdByTitle.values.distinct().take(24))
+            val albumArt = loadPlaybackReportingArtwork(api, session, albumIdByTitle.values.distinct().take(36))
             return results.mapValues { (title, pair) ->
                 if (pair.first != null) return@mapValues pair
                 val albumId = albumIdByTitle[title]
@@ -3668,6 +3756,21 @@ private fun JSONObject.firstLong(vararg names: String): Long =
         }
     } ?: 0L
 
+private fun String.playbackReportingSearchCandidates(): List<String> = buildList {
+    val raw = trim()
+    if (raw.isNotBlank()) add(raw)
+    val noParentheses = raw.replace(Regex("""\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*"""), " ").trim()
+    if (noParentheses.isNotBlank() && noParentheses != raw) add(noParentheses)
+    val noTrackNumber = noParentheses.replace(Regex("""^\d+[\.\-\s_]+"""), "").trim()
+    if (noTrackNumber.isNotBlank() && noTrackNumber !in this) add(noTrackNumber)
+    if (raw.contains(" - ")) {
+        val afterDash = raw.substringAfter(" - ").trim().replace(Regex("""\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*"""), " ").trim()
+        if (afterDash.isNotBlank() && afterDash !in this) add(afterDash)
+        val beforeDash = raw.substringBefore(" - ").trim().replace(Regex("""\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*"""), " ").trim()
+        if (beforeDash.isNotBlank() && beforeDash !in this) add(beforeDash)
+    }
+}
+
 private fun String.playbackReportingSearchTitle(): String =
     replace(Regex("""\s+\([^)]*\)\s*$"""), "")
         .substringBefore(" - ")
@@ -4255,6 +4358,9 @@ private fun BaseItemDto.primaryImageUrl(api: ApiClient, maxWidth: Int): String? 
     val parentId = parentPrimaryImageItemId?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
     val parentTag = parentPrimaryImageTag
     if (parentId != null && !parentTag.isNullOrBlank()) return itemImageUrl(api, parentId, ImageType.PRIMARY, parentTag, maxWidth)
+    val albumPrimaryTag = albumPrimaryImageTag
+    val albumItemId = albumId
+    if (albumItemId != null && !albumPrimaryTag.isNullOrBlank()) return itemImageUrl(api, albumItemId, ImageType.PRIMARY, albumPrimaryTag, maxWidth)
     return null
 }
 

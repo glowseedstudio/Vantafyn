@@ -23,12 +23,14 @@ import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -44,12 +46,21 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -94,6 +105,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
@@ -110,6 +122,8 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Article
+import androidx.compose.material.icons.rounded.EmojiEvents
+import dev.vantafyn.core.jellyfin.JellyfinAchievementUnlock
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Close
@@ -137,8 +151,11 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NewReleases
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PeopleOutline
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonAdd
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
+import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.QueuePlayNext
@@ -220,9 +237,11 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
+import kotlin.math.roundToInt
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.Popup
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -661,6 +680,30 @@ fun VantafynAppContent(
                 onSendAdminBroadcastMessage = viewModel::sendAdminBroadcastMessage,
                 onClearAdminSessionMessageError = viewModel::clearAdminSessionMessageError,
                 onNavigateBack = viewModel::navigateMobileBack,
+                onOpenAchievements = viewModel::openAchievements,
+                onRetryAchievements = { viewModel.loadAchievements(force = true) },
+                onDismissAchievementUnlock = viewModel::dismissAchievementUnlock,
+                onToggleAchievementsEnabled = viewModel::toggleAchievementsEnabled,
+                onToggleSocialEnabled = viewModel::toggleSocialEnabled,
+                onToggleSocialDockEnabled = viewModel::toggleSocialDockEnabled,
+                onDismissSocialDock = viewModel::dismissSocialDock,
+                onOpenSocial = viewModel::openSocialScreen,
+                onOpenSocialPanel = viewModel::openSocialPanel,
+                onCloseSocialPanel = viewModel::closeSocialPanel,
+                onOpenChatWithFriend = viewModel::openChatWithFriend,
+                onOpenChatFromConversation = viewModel::openChatFromConversation,
+                onSendChatMessage = viewModel::sendChatMessage,
+                onAcceptFriendRequest = viewModel::acceptFriendRequest,
+                onDeclineFriendRequest = viewModel::declineOrRemoveFriend,
+                onSendFriendRequest = viewModel::sendFriendRequest,
+                onDismissSocialIslandPreview = viewModel::dismissSocialIslandPreview,
+                onRefreshSocial = { viewModel.loadSocialData(force = true) },
+                onRefreshChatMessages = {
+                    val activePeer = viewModel.state.value.activeChatPeer
+                    if (activePeer != null) {
+                        viewModel.openChatWithFriend(activePeer)
+                    }
+                },
                 notificationPermissionState = notificationPermissionState,
                 onRequestMusicControlsPermission = onRequestMusicControlsPermission,
                 onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
@@ -1060,46 +1103,49 @@ private fun ServerConfirmScreen(
                 Spacer(Modifier.height(if (tv) VantafynSpacing.xxl else VantafynSpacing.xl))
                 val server = state.server
                 SetupMaterialize(delayMillis = 180, modifier = Modifier.fillMaxWidth()) {
-                    var borderAlpha by remember { mutableFloatStateOf(0f) }
-                    val serverBorderLifecycleOwner = LocalLifecycleOwner.current
-                    var serverBorderLifecycleState by remember { mutableStateOf(serverBorderLifecycleOwner.lifecycle.currentState) }
-                    var borderShift by remember { mutableFloatStateOf(0f) }
+                    val borderAlpha = remember { Animatable(0f) }
+                    val infiniteTransition = rememberInfiniteTransition(label = "serverBorderSweep")
+                    val borderShift by infiniteTransition.animateFloat(
+                        initialValue = 0f,
+                        targetValue = 1f,
+                        animationSpec = infiniteRepeatable(
+                            animation = tween(durationMillis = 5_200, easing = LinearEasing),
+                            repeatMode = RepeatMode.Restart,
+                        ),
+                        label = "serverBorderShift",
+                    )
+
                     LaunchedEffect(Unit) {
-                        delay(600)
-                        borderAlpha = 1f
-                    }
-                    DisposableEffect(serverBorderLifecycleOwner) {
-                        val observer = LifecycleEventObserver { _, _ ->
-                            serverBorderLifecycleState = serverBorderLifecycleOwner.lifecycle.currentState
-                        }
-                        serverBorderLifecycleOwner.lifecycle.addObserver(observer)
-                        onDispose { serverBorderLifecycleOwner.lifecycle.removeObserver(observer) }
-                    }
-                    val serverBorderResumed = serverBorderLifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-                    LaunchedEffect(serverBorderResumed) {
-                        if (serverBorderResumed) {
-                            while (isActive) {
-                                withFrameNanos { frameTimeNanos ->
-                                    borderShift = ((frameTimeNanos / 1_000_000L) % 5_200L) / 5_200f
-                                }
-                            }
-                        }
-                    }
-                    Box(modifier = Modifier.fillMaxWidth().drawWithContent {
-                        drawContent()
-                        if (borderAlpha <= 0f) return@drawWithContent
-                        val r = 22.dp.toPx()
-                        val s = Offset(-size.width * borderShift, -size.height * borderShift)
-                        val e = Offset(size.width * (1f - borderShift), size.height * (1f - borderShift))
-                        drawRoundRect(
-                            brush = Brush.linearGradient(
-                                colors = (VantafynGradients.AccentColors + VantafynGradients.AccentColors.first()).map { it.copy(alpha = it.alpha * borderAlpha) },
-                                start = s, end = e, tileMode = TileMode.Repeated,
-                            ),
-                            cornerRadius = CornerRadius(r, r),
-                            style = Stroke(width = 1.5.dp.toPx()),
+                        borderAlpha.animateTo(
+                            targetValue = 1f,
+                            animationSpec = tween(durationMillis = 800, delayMillis = 400, easing = FastOutSlowInEasing),
                         )
-                    }) {
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .drawWithContent {
+                                drawContent()
+                                val alpha = borderAlpha.value
+                                if (alpha > 0f) {
+                                    val r = 22.dp.toPx()
+                                    val s = Offset(-size.width * borderShift, -size.height * borderShift)
+                                    val e = Offset(size.width * (1f - borderShift), size.height * (1f - borderShift))
+                                    drawRoundRect(
+                                        brush = Brush.linearGradient(
+                                            colors = (VantafynGradients.AccentColors + VantafynGradients.AccentColors.first())
+                                                .map { it.copy(alpha = it.alpha * alpha) },
+                                            start = s,
+                                            end = e,
+                                            tileMode = TileMode.Repeated,
+                                        ),
+                                        cornerRadius = CornerRadius(r, r),
+                                        style = Stroke(width = 1.5.dp.toPx()),
+                                    )
+                                }
+                            },
+                    ) {
                         VantafynServerCard(
                             name = server?.name ?: "Jellyfin Server",
                             url = server?.url ?: state.serverUrl,
@@ -2621,8 +2667,14 @@ private fun ProfileImageLivePreview(
     Box(
         modifier = Modifier
             .size(136.dp)
-            .background(VantafynColors.Surface.copy(alpha = 0.46f), RoundedCornerShape(999.dp))
-            .border(1.dp, VantafynColors.Primary.copy(alpha = 0.46f), RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
+            .border(
+                border = BorderStroke(
+                    width = 2.dp,
+                    brush = VantafynGradients.accentHorizontal(),
+                ),
+                shape = RoundedCornerShape(999.dp),
+            )
             .padding(6.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -2659,21 +2711,31 @@ private fun BundledProfileAvatarTile(
         animationSpec = spring(stiffness = 520f, dampingRatio = 0.8f),
         label = "profileAvatarScale",
     )
-    val ringAlpha by animateFloatAsState(
-        targetValue = if (selected) 0.9f else 0.18f,
-        animationSpec = tween(180, easing = FastOutSlowInEasing),
-        label = "profileAvatarRing",
-    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .scale(scale)
             .clip(RoundedCornerShape(999.dp))
-            .background(VantafynColors.Surface.copy(alpha = if (selected) 0.46f else 0.26f))
-            .border(2.dp, VantafynColors.Primary.copy(alpha = ringAlpha), RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick)
-            .padding(5.dp),
+            .background(if (selected) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.08f))
+            .border(
+                border = BorderStroke(
+                    width = if (selected) 2.dp else 1.dp,
+                    brush = if (selected) {
+                        VantafynGradients.accentHorizontal()
+                    } else {
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.14f),
+                                Color.White.copy(alpha = 0.14f),
+                            ),
+                        )
+                    },
+                ),
+                shape = RoundedCornerShape(999.dp),
+            )
+            .padding(4.dp)
+            .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Image(
@@ -2693,18 +2755,29 @@ private fun CustomProfilePhotoTile(
     isPreparing: Boolean,
     onClick: () -> Unit,
 ) {
-    val ringAlpha by animateFloatAsState(
-        targetValue = if (selected) 0.9f else 0.2f,
-        animationSpec = tween(180, easing = FastOutSlowInEasing),
-        label = "customAvatarRing",
-    )
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .aspectRatio(1f)
             .clip(RoundedCornerShape(999.dp))
-            .background(VantafynColors.Surface.copy(alpha = 0.34f))
-            .border(2.dp, VantafynColors.Primary.copy(alpha = ringAlpha), RoundedCornerShape(999.dp))
+            .background(if (selected) Color.White.copy(alpha = 0.10f) else Color.White.copy(alpha = 0.08f))
+            .border(
+                border = BorderStroke(
+                    width = if (selected) 2.dp else 1.dp,
+                    brush = if (selected) {
+                        VantafynGradients.accentHorizontal()
+                    } else {
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.14f),
+                                Color.White.copy(alpha = 0.14f),
+                            ),
+                        )
+                    },
+                ),
+                shape = RoundedCornerShape(999.dp),
+            )
+            .padding(4.dp)
             .clickable(enabled = !isPreparing, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
@@ -2976,6 +3049,25 @@ private fun HomeScreen(
     onSendAdminBroadcastMessage: (String?, String, Long) -> Unit,
     onClearAdminSessionMessageError: () -> Unit,
     onNavigateBack: () -> Unit,
+    onOpenAchievements: () -> Unit = {},
+    onRetryAchievements: () -> Unit = {},
+    onDismissAchievementUnlock: () -> Unit = {},
+    onToggleAchievementsEnabled: () -> Unit = {},
+    onToggleSocialEnabled: () -> Unit = {},
+    onToggleSocialDockEnabled: () -> Unit = {},
+    onDismissSocialDock: () -> Unit = {},
+    onOpenSocial: () -> Unit = {},
+    onOpenSocialPanel: () -> Unit = {},
+    onCloseSocialPanel: () -> Unit = {},
+    onOpenChatWithFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
+    onOpenChatFromConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit = {},
+    onSendChatMessage: (String) -> Unit = {},
+    onAcceptFriendRequest: (String) -> Unit = {},
+    onDeclineFriendRequest: (String) -> Unit = {},
+    onSendFriendRequest: (String) -> Unit = {},
+    onDismissSocialIslandPreview: () -> Unit = {},
+    onRefreshSocial: () -> Unit = {},
+    onRefreshChatMessages: () -> Unit = {},
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
     onNotificationPermissionSettingsAction: () -> Unit = {},
@@ -2994,6 +3086,25 @@ private fun HomeScreen(
             onCancelLogout = onCancelLogout,
             onLogoutCurrentProfile = onLogoutCurrentProfile,
             onNavigate = onNavigateMobile,
+            onOpenAchievements = onOpenAchievements,
+            onRetryAchievements = onRetryAchievements,
+            onDismissAchievementUnlock = onDismissAchievementUnlock,
+            onToggleAchievementsEnabled = onToggleAchievementsEnabled,
+            onToggleSocialEnabled = onToggleSocialEnabled,
+            onToggleSocialDockEnabled = onToggleSocialDockEnabled,
+            onDismissSocialDock = onDismissSocialDock,
+            onOpenSocial = onOpenSocial,
+            onOpenSocialPanel = onOpenSocialPanel,
+            onCloseSocialPanel = onCloseSocialPanel,
+            onOpenChatWithFriend = onOpenChatWithFriend,
+            onOpenChatFromConversation = onOpenChatFromConversation,
+            onSendChatMessage = onSendChatMessage,
+            onAcceptFriendRequest = onAcceptFriendRequest,
+            onDeclineFriendRequest = onDeclineFriendRequest,
+            onSendFriendRequest = onSendFriendRequest,
+            onDismissSocialIslandPreview = onDismissSocialIslandPreview,
+            onRefreshSocial = onRefreshSocial,
+            onRefreshChatMessages = onRefreshChatMessages,
             onOpenLibrary = onOpenLibrary,
             onReorderLibraries = onReorderLibraries,
             onSetLibrariesViewMode = onSetLibrariesViewMode,
@@ -3170,6 +3281,25 @@ private fun MobileShellScreen(
     onCancelLogout: () -> Unit,
     onLogoutCurrentProfile: () -> Unit,
     onNavigate: (MobileDestination) -> Unit,
+    onOpenAchievements: () -> Unit = {},
+    onRetryAchievements: () -> Unit = {},
+    onDismissAchievementUnlock: () -> Unit = {},
+    onToggleAchievementsEnabled: () -> Unit = {},
+    onToggleSocialEnabled: () -> Unit = {},
+    onToggleSocialDockEnabled: () -> Unit = {},
+    onDismissSocialDock: () -> Unit = {},
+    onOpenSocial: () -> Unit = {},
+    onOpenSocialPanel: () -> Unit = {},
+    onCloseSocialPanel: () -> Unit = {},
+    onOpenChatWithFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
+    onOpenChatFromConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit = {},
+    onSendChatMessage: (String) -> Unit = {},
+    onAcceptFriendRequest: (String) -> Unit = {},
+    onDeclineFriendRequest: (String) -> Unit = {},
+    onSendFriendRequest: (String) -> Unit = {},
+    onDismissSocialIslandPreview: () -> Unit = {},
+    onRefreshSocial: () -> Unit = {},
+    onRefreshChatMessages: () -> Unit = {},
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onReorderLibraries: (List<UUID>) -> Unit,
     onSetLibrariesViewMode: (LibrariesViewMode) -> Unit,
@@ -3301,6 +3431,7 @@ private fun MobileShellScreen(
     var draftHomeLayout by remember { mutableStateOf<List<HomeSectionPreference>?>(null) }
     var draftSmartRows by remember { mutableStateOf<List<String>?>(null) }
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val musicController = remember(context) { MusicPlaybackController.get(context) }
     val musicPlayback by musicController.state.collectAsStateWithLifecycle()
     fun closeHomeEditor(discard: Boolean) {
@@ -3367,6 +3498,7 @@ private fun MobileShellScreen(
                     onRetry = onRetryHome,
                     onSearch = { onNavigate(MobileDestination.Search) },
                     onProfile = { onNavigate(MobileDestination.Profile) },
+                    onOpenAchievements = onOpenAchievements,
                     onOpenLibrary = { library ->
                         if (!homeEditorOpen) onOpenLibrary(library)
                     },
@@ -3552,6 +3684,9 @@ private fun MobileShellScreen(
                             onOpenMedia = onOpenMedia,
                             onMarkWhatsNewSeen = onMarkWhatsNewSeen,
                             onToggleWhatsNew = onToggleWhatsNew,
+                            onToggleAchievementsEnabled = onToggleAchievementsEnabled,
+                            onToggleSocialEnabled = onToggleSocialEnabled,
+                            onToggleSocialDockEnabled = onToggleSocialDockEnabled,
                             onDiscoverVantafyn = { onNavigate(MobileDestination.DiscoverVantafyn) },
                         )
                         MobileDestination.DeviceQuickConnect -> DeviceQuickConnectScreen(
@@ -3614,6 +3749,43 @@ private fun MobileShellScreen(
                                 }
                             },
                         )
+                        MobileDestination.Achievements -> AchievementsScreen(
+                            userName = state.session?.user?.name.orEmpty(),
+                            userImageUrl = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }?.imageUrl,
+                            summary = state.achievementSummary,
+                            achievements = state.achievements,
+                            isLoading = state.isAchievementsLoading,
+                            error = state.achievementError,
+                            onBack = onNavigateBack,
+                            onRetry = onRetryAchievements,
+                        )
+                        MobileDestination.Social -> SocialScreen(
+                            friends = state.socialFriends,
+                            requests = state.socialRequests,
+                            conversations = state.socialConversations,
+                            discoverableUsers = state.socialDiscoverableUsers,
+                            isLoading = state.isSocialLoading,
+                            onBack = onNavigateBack,
+                            onRefresh = onRefreshSocial,
+                            onOpenChat = onOpenChatWithFriend,
+                            onOpenConversation = onOpenChatFromConversation,
+                            onAcceptRequest = onAcceptFriendRequest,
+                            onDeclineRequest = onDeclineFriendRequest,
+                            onSendRequest = onSendFriendRequest,
+                        )
+                        MobileDestination.Chat -> {
+                            state.activeChatPeer?.let { peer ->
+                                ChatScreen(
+                                    peer = peer,
+                                    messages = state.activeChatMessages,
+                                    isSending = state.isSendingChatMessage,
+                                    errorMessage = state.chatErrorMessage,
+                                    onBack = onNavigateBack,
+                                    onSendMessage = onSendChatMessage,
+                                    onRefresh = onRefreshChatMessages,
+                                )
+                            }
+                        }
                         else -> Unit
                     }
                 }
@@ -3766,7 +3938,10 @@ private fun MobileShellScreen(
                         }
                     },
                     onMusicLongPress = if (state.mobileDestination != MobileDestination.Music) {
-                        { showMusicQuickPlayer = !showMusicQuickPlayer }
+                        {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showMusicQuickPlayer = !showMusicQuickPlayer
+                        }
                     } else {
                         null
                     },
@@ -3776,7 +3951,22 @@ private fun MobileShellScreen(
                     accentMode = state.bottomRailAccent,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
-            }
+            val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
+            val socialDockBottomPadding by animateDpAsState(
+                targetValue = if (isMusicMiniPlayerVisible) 200.dp else 86.dp,
+                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+                label = "socialDockBottomPadding",
+            )
+            val socialIslandBottomPadding by animateDpAsState(
+                targetValue = when {
+                    showMusicQuickPlayer && state.mobileDestination != MobileDestination.Music -> 340.dp
+                    isMusicMiniPlayerVisible -> 200.dp
+                    else -> 86.dp
+                },
+                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+                label = "socialIslandBottomPadding",
+            )
+
             AnimatedVisibility(
                 visible = showMusicQuickPlayer && state.mobileDestination != MobileDestination.Music,
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -3801,43 +3991,130 @@ private fun MobileShellScreen(
                     modifier = Modifier,
                 )
             }
+
+            var isDockDragging by remember { mutableStateOf(false) }
+            var isDockDismissHovered by remember { mutableStateOf(false) }
+
+            AnimatedVisibility(
+                visible = isDockDragging,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = 30.dp),
+                enter = fadeIn(animationSpec = tween(220, easing = FastOutSlowInEasing)) + scaleIn(initialScale = 0.6f),
+                exit = fadeOut(animationSpec = tween(180, easing = FastOutSlowInEasing)) + scaleOut(targetScale = 0.6f),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(if (isDockDismissHovered) 58.dp else 48.dp)
+                        .clip(CircleShape)
+                        .background(if (isDockDismissHovered) Color(0xFFFF3366).copy(alpha = 0.92f) else Color.Black.copy(alpha = 0.68f))
+                        .border(
+                            width = if (isDockDismissHovered) 2.dp else 1.2.dp,
+                            color = if (isDockDismissHovered) Color(0xFFFF6688) else Color.White.copy(alpha = 0.25f),
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Remove chat bubble",
+                        tint = Color.White,
+                        modifier = Modifier.size(if (isDockDismissHovered) 24.dp else 18.dp),
+                    )
+                }
+            }
+
+            AnimatedVisibility(
+                visible = state.socialEnabled &&
+                    state.socialDockEnabled &&
+                    state.isAchievementsAvailable &&
+                    state.mobileDestination != MobileDestination.Player &&
+                    state.mobileDestination != MobileDestination.Social &&
+                    state.mobileDestination != MobileDestination.Chat &&
+                    !homeEditorOpen &&
+                    !showMusicQuickPlayer,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
+                    .padding(bottom = socialDockBottomPadding, end = 18.dp),
+                enter = scaleIn(initialScale = 0.8f, animationSpec = tween(260, easing = FastOutSlowInEasing)) + fadeIn(animationSpec = tween(220)),
+                exit = scaleOut(targetScale = 0.8f, animationSpec = tween(200, easing = FastOutSlowInEasing)) + fadeOut(animationSpec = tween(180)),
+            ) {
+                FloatingSocialDock(
+                    unreadCount = state.socialUnreadCount,
+                    incomingRequestCount = state.socialRequests.count { it.isIncoming },
+                    onClick = onOpenSocialPanel,
+                    onDismiss = onDismissSocialDock,
+                    onDragStateChanged = { dragging, hovering ->
+                        isDockDragging = dragging
+                        isDockDismissHovered = hovering
+                    },
+                )
+            }
         }
     }
+}
     state.mobileMessage?.let { message ->
-        val isMyListError = (
-            message.contains("My List", ignoreCase = true) ||
-                message.contains("Couldn't reach Jellyfin", ignoreCase = true) ||
-                message.contains("Session expired", ignoreCase = true)
-            ) && (
-            message.contains("couldn't", ignoreCase = true) ||
-                message.contains("session expired", ignoreCase = true) ||
-                message.contains("not allowed", ignoreCase = true)
-            )
-        if (isMyListError) {
-            VantafynToast(
-                message = message,
-                onDismiss = onClearMessage,
-            )
-        } else {
-            AlertDialog(
-                modifier = Modifier.vantafynAnimatedModalBorder(),
-                onDismissRequest = onClearMessage,
-                containerColor = VantafynModalContainerColor,
-                shape = RoundedCornerShape(28.dp),
-                confirmButton = {
-                    TextButton(onClick = onClearMessage) { Text("OK") }
-                },
-                title = { Text(message) },
-                text = {
-                    Text(
-                        when {
-                            message.contains("My List", ignoreCase = true) -> "Your Jellyfin favorite status has been updated for this profile."
-                            else -> "The action has been completed."
-                        },
-                    )
+        VantafynToast(
+            message = message,
+            onDismiss = onClearMessage,
+        )
+    }
+    state.activeAchievementUnlock?.let { unlock ->
+        AchievementUnlockToast(
+            unlock = unlock,
+            onDismiss = onDismissAchievementUnlock,
+            onClick = onOpenAchievements,
+        )
+    }
+    state.activeSocialIslandPreview?.let { preview ->
+        val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
+        val socialIslandBottomPadding by animateDpAsState(
+            targetValue = when {
+                showMusicQuickPlayer && state.mobileDestination != MobileDestination.Music -> 320.dp
+                isMusicMiniPlayerVisible -> 176.dp
+                else -> 86.dp
+            },
+            animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+            label = "socialIslandToastBottomPadding",
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(bottom = socialIslandBottomPadding),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            SocialIslandBanner(
+                message = preview,
+                onDismiss = onDismissSocialIslandPreview,
+                onClick = {
+                    onDismissSocialIslandPreview()
+                    val friend = state.socialFriends.firstOrNull { it.userId == preview.senderId }
+                        ?: dev.vantafyn.core.jellyfin.JellyfinFriend(
+                            userId = preview.senderId,
+                            username = preview.senderName,
+                            displayName = preview.senderName,
+                            avatarTag = preview.senderAvatarTag,
+                            avatarUrl = preview.senderAvatarUrl,
+                        )
+                    onOpenChatWithFriend(friend)
                 },
             )
         }
+    }
+    if (state.isSocialPanelOpen) {
+        FloatingSocialPanel(
+            friends = state.socialFriends,
+            requests = state.socialRequests,
+            conversations = state.socialConversations,
+            onDismiss = onCloseSocialPanel,
+            onOpenFullSocial = onOpenSocial,
+            onOpenChatWithFriend = onOpenChatWithFriend,
+            onOpenChatFromConversation = onOpenChatFromConversation,
+            onAcceptRequest = onAcceptFriendRequest,
+        )
     }
     if (state.confirmLogout) {
         AlertDialog(
@@ -3945,6 +4222,7 @@ private fun MobileHomeContent(
     onRetry: () -> Unit,
     onSearch: () -> Unit,
     onProfile: () -> Unit,
+    onOpenAchievements: () -> Unit = {},
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onMediaLongPress: (MediaActionTarget) -> Unit,
@@ -4212,12 +4490,20 @@ private fun MobileHomeContent(
             listState = homeListState,
             modifier = Modifier.align(Alignment.TopCenter),
         )
-        Box(
+        Row(
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(top = 2.dp, end = VantafynSpacing.xl),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (state.isAchievementsAvailable) {
+                MobileHomeTrophyButton(
+                    hasUnseenUnlocks = state.hasUnseenAchievements,
+                    onClick = onOpenAchievements,
+                )
+            }
             MobileHomeProfileAvatar(
                 state = state,
                 onProfile = onProfile,
@@ -4366,6 +4652,41 @@ private fun MobileHomeProfileAvatar(state: VantafynHomeUiState, onProfile: () ->
 }
 
 @Composable
+private fun MobileHomeTrophyButton(
+    hasUnseenUnlocks: Boolean = false,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .vantafynAnimatedModalBorder(cornerRadius = 15.dp, strokeWidth = 1.5.dp)
+                .background(VantafynColors.SurfaceHigh.copy(alpha = 0.76f))
+                .clickable(onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.EmojiEvents,
+                contentDescription = "Achievements",
+                tint = if (hasUnseenUnlocks) Color(0xFFFFD700) else VantafynColors.Ink,
+                modifier = Modifier.size(22.dp),
+            )
+        }
+        if (hasUnseenUnlocks) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(3.dp)
+                    .size(9.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFFD700)),
+            )
+        }
+    }
+}
+
+@Composable
 private fun GlassAction(
     text: String,
     onClick: () -> Unit = {},
@@ -4409,6 +4730,111 @@ private fun VantafynToast(
                 style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center,
             )
+        }
+    }
+}
+
+@Composable
+private fun AchievementUnlockToast(
+    unlock: JellyfinAchievementUnlock,
+    onDismiss: () -> Unit,
+    onClick: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    LaunchedEffect(unlock.id) {
+        delay(5_000)
+        onDismiss()
+    }
+    Popup(alignment = Alignment.TopCenter) {
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(horizontal = VantafynSpacing.lg, vertical = VantafynSpacing.md)
+                .clip(RoundedCornerShape(20.dp))
+                .background(VantafynColors.SurfaceHigh.copy(alpha = 0.94f))
+                .vantafynAnimatedModalBorder(cornerRadius = 20.dp, strokeWidth = 1.4.dp)
+                .clickable {
+                    onClick()
+                    onDismiss()
+                }
+                .padding(VantafynSpacing.md),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFFFFD700).copy(alpha = 0.18f))
+                        .border(1.dp, Color(0xFFFFD700).copy(alpha = 0.45f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (unlock.iconUrl != null) {
+                        AsyncImage(
+                            model = unlock.iconUrl,
+                            contentDescription = unlock.name,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit,
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.EmojiEvents,
+                            contentDescription = null,
+                            tint = Color(0xFFFFD700),
+                            modifier = Modifier.size(26.dp),
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = "ACHIEVEMENT UNLOCKED",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp,
+                            color = Color(0xFFFFD700),
+                        )
+                        if (unlock.score > 0) {
+                            Text(
+                                text = "+${unlock.score} PTS",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = VantafynColors.Ink.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
+                    Text(
+                        text = unlock.name,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (unlock.description.isNotBlank()) {
+                        Text(
+                            text = unlock.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = VantafynColors.Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -7241,6 +7667,7 @@ private fun AdminScreen(
                 state = "visible",
             )
             try {
+                onRefresh()
                 while (isActive) {
                     delay(8_000L)
                     LongRunningTaskRegistry.tick("admin.refresh", "refreshing")
@@ -7875,7 +8302,7 @@ private fun WatchTimeTrendCard(buckets: List<dev.vantafyn.core.jellyfin.Jellyfin
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.PlayArrow, contentDescription = null, tint = Color(0xFF58D7FF), modifier = Modifier.size(24.dp))
                 Text("Viewing trend", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                Text(buckets.sumOf { it.watchTimeSeconds }.watchTimeLabel(), color = Color(0xFFB9C6FF), fontWeight = FontWeight.SemiBold)
+                Text(buckets.sumOf { it.watchTimeSeconds }.watchTimeLabel(), color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
             }
             val maxValue = buckets.maxOfOrNull { it.watchTimeSeconds }?.coerceAtLeast(1L) ?: 1L
             Canvas(modifier = Modifier.fillMaxWidth().height(190.dp)) {
@@ -8114,18 +8541,6 @@ private fun AdminMostWatchedMediaCard(
                             ),
                         ),
                 )
-                item.logoUrl?.let { logo ->
-                    AsyncImage(
-                        model = logo,
-                        contentDescription = "${item.title} logo",
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .fillMaxWidth()
-                            .height(56.dp)
-                            .padding(horizontal = 20.dp),
-                        contentScale = ContentScale.Fit,
-                    )
-                }
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopStart)
@@ -8165,7 +8580,7 @@ private fun AdminMostWatchedMediaCard(
                         )
                     }
                     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(item.totalWatchTimeSeconds.watchTimeLabel(), color = Color(0xFFB9C6FF), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                        Text(item.totalWatchTimeSeconds.watchTimeLabel(), color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
                         Text("${item.playCount.groupedCountLabel()} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelLarge, maxLines = 1)
                     }
                 }
@@ -9037,19 +9452,57 @@ private fun AdminTasksPanel(
                 )
             }
             AdminCollapsibleBody(visible = expanded) {
-                Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
                     if (tasks.isEmpty()) {
                         Text("No scheduled tasks returned", color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
                     } else {
-                        tasks.forEach { task ->
-                            val isRunning = task.state.equals("Running", ignoreCase = true) || task.state.equals("RUNNING", ignoreCase = true)
-                            AdminScheduledTaskCard(
-                                task = task,
-                                isRunning = isRunning,
-                                actionsEnabled = !isActionRunning && task.id.isNotBlank(),
-                                onRun = { onRunTask(task.id) },
-                                onStop = { onStopTask(task.id) },
-                            )
+                        val groupedTasks = remember(tasks) {
+                            tasks.groupBy { task ->
+                                task.category?.takeIf { it.isNotBlank() } ?: "General"
+                            }
+                        }
+                        groupedTasks.forEach { (categoryName, categoryTasks) ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = categoryName.uppercase(),
+                                        color = VantafynColors.Ink.copy(alpha = 0.7f),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.sp,
+                                    )
+                                    val runningInCategory = categoryTasks.count {
+                                        it.state.equals("Running", ignoreCase = true) || it.state.equals("RUNNING", ignoreCase = true)
+                                    }
+                                    if (runningInCategory > 0) {
+                                        Text(
+                                            text = "$runningInCategory running",
+                                            color = VantafynColors.Primary,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
+                                categoryTasks.forEach { task ->
+                                    val isRunning = task.state.equals("Running", ignoreCase = true) || task.state.equals("RUNNING", ignoreCase = true)
+                                    AdminScheduledTaskCard(
+                                        task = task,
+                                        isRunning = isRunning,
+                                        actionsEnabled = !isActionRunning && task.id.isNotBlank(),
+                                        onRun = { onRunTask(task.id) },
+                                        onStop = { onStopTask(task.id) },
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -10650,6 +11103,9 @@ private fun ProfileSettingsScreen(
     onOpenMedia: (java.util.UUID) -> Unit,
     onMarkWhatsNewSeen: () -> Unit,
     onToggleWhatsNew: () -> Unit,
+    onToggleAchievementsEnabled: () -> Unit = {},
+    onToggleSocialEnabled: () -> Unit = {},
+    onToggleSocialDockEnabled: () -> Unit = {},
     onDiscoverVantafyn: () -> Unit,
 ) {
     var showPasswordDialog by remember { mutableStateOf(false) }
@@ -10760,6 +11216,31 @@ private fun ProfileSettingsScreen(
                             onToggle = onToggleWhatsNew,
                             onClick = { showWhatsNew = true },
                         )
+                        PremiumToggleRow(
+                            title = "Achievement Badges",
+                            subtitle = "",
+                            checked = state.achievementsEnabled,
+                            onClick = onToggleAchievementsEnabled,
+                            icon = Icons.Rounded.EmojiEvents,
+                        )
+                        if (state.achievementsEnabled && state.isAchievementsAvailable) {
+                            PremiumToggleRow(
+                                title = "Friends & Messaging",
+                                subtitle = "",
+                                checked = state.socialEnabled,
+                                onClick = onToggleSocialEnabled,
+                                icon = Icons.Rounded.PeopleOutline,
+                            )
+                            if (state.socialEnabled) {
+                                PremiumToggleRow(
+                                    title = "Floating Chat Bubble",
+                                    subtitle = "",
+                                    checked = state.socialDockEnabled,
+                                    onClick = onToggleSocialDockEnabled,
+                                    icon = Icons.Rounded.Forum,
+                                )
+                            }
+                        }
                         if (state.session?.user?.isAdministrator == true) {
                             SettingsRow("Admin", "", onAdmin, compact = true, icon = Icons.Rounded.AdminPanelSettings)
                         }
@@ -10769,7 +11250,7 @@ private fun ProfileSettingsScreen(
                         SettingsRow("Downloads", "", onDownloads, compact = true, icon = Icons.Rounded.Download)
                         SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
                         SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
-                        SettingsRow("Discover Vantafyn", "Explore every feature", onDiscoverVantafyn, compact = true, icon = Icons.Rounded.AutoAwesome)
+                        SettingsRow("Discover Vantafyn", "", onDiscoverVantafyn, compact = true, icon = Icons.Rounded.AutoAwesome)
                         SettingsRow("App version $VANTAFYN_APP_VERSION", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
                     }
                 }
@@ -17278,12 +17759,16 @@ private fun PopupSyncedLyricsView(
     val activeLineLeadMs = 120L
     var livePlaybackMs by remember(trackId, lines) { mutableLongStateOf(playbackMs) }
     val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0) }
-    var suppressAutoFollowUntil by remember(lines) { mutableStateOf(0L) }
-    var programmaticScroll by remember(lines) { mutableStateOf(false) }
-    var lastPlaybackMs by remember(lines) { mutableStateOf(-1L) }
-    var pendingRewindTicks by remember(lines) { mutableStateOf(0) }
+    var suppressAutoFollowUntil by remember(trackId, lines) { mutableLongStateOf(0L) }
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
 
-    LaunchedEffect(playbackMs, isPlaying, lines) {
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            suppressAutoFollowUntil = System.currentTimeMillis() + 5_000L
+        }
+    }
+
+    LaunchedEffect(playbackMs, isPlaying, trackId, lines) {
         if (!isPlaying || abs(playbackMs - livePlaybackMs) > 1_200L) {
             livePlaybackMs = playbackMs
         }
@@ -17301,60 +17786,22 @@ private fun PopupSyncedLyricsView(
 
     LaunchedEffect(trackId, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        livePlaybackMs = currentPositionMs()
-        val targetIndex = lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0)
-        programmaticScroll = true
+        suppressAutoFollowUntil = 0L
+        val initialPos = currentPositionMs()
+        livePlaybackMs = initialPos
+        val targetIndex = lines.activeIndex(initialPos + activeLineLeadMs).coerceAtLeast(0)
         listState.scrollToItem(targetIndex.coerceAtMost(lines.lastIndex))
-        programmaticScroll = false
-        lastPlaybackMs = livePlaybackMs
     }
 
-    LaunchedEffect(listState, lines) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (scrolling && !programmaticScroll) {
-                suppressAutoFollowUntil = System.currentTimeMillis() + 5_000L
-            }
-        }
-    }
-
-    LaunchedEffect(activeIndex, livePlaybackMs, lines) {
+    LaunchedEffect(activeIndex, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - livePlaybackMs else 0L
-        val rewindCandidate = lastPlaybackMs >= 0L && livePlaybackMs + 350L < lastPlaybackMs
-        val rewound = when {
-            !rewindCandidate -> {
-                pendingRewindTicks = 0
-                false
-            }
-            rewindDrop >= 1_400L -> {
-                pendingRewindTicks = 0
-                true
-            }
-            else -> {
-                pendingRewindTicks += 1
-                if (pendingRewindTicks >= 2) {
-                    pendingRewindTicks = 0
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-        val largePositionJump = lastPlaybackMs >= 0L && abs(livePlaybackMs - lastPlaybackMs) >= 5_000L
-        lastPlaybackMs = livePlaybackMs
-        val suppressAutoFollow = System.currentTimeMillis() < suppressAutoFollowUntil
-        if (rewound && !suppressAutoFollow) suppressAutoFollowUntil = 0L
-        if (!suppressAutoFollow) {
-            programmaticScroll = true
-            try {
-                val target = activeIndex.coerceAtMost(lines.lastIndex)
-                if (largePositionJump || rewound) {
-                    listState.scrollToItem(target)
-                } else {
-                    listState.animateScrollToItem(target)
-                }
-            } finally {
-                programmaticScroll = false
+        val isSuppressed = System.currentTimeMillis() < suppressAutoFollowUntil
+        if (!isSuppressed) {
+            val target = activeIndex.coerceIn(0, lines.lastIndex)
+            if (target == 0) {
+                listState.scrollToItem(0)
+            } else {
+                listState.animateScrollToItem(target)
             }
         }
     }
@@ -17377,7 +17824,6 @@ private fun PopupSyncedLyricsView(
                     onClick = {
                         line.startMs?.let {
                             suppressAutoFollowUntil = 0L
-                            lastPlaybackMs = it
                             onSeek(it)
                         }
                     },
@@ -18177,5 +18623,607 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.8.0"
+private const val VANTAFYN_APP_VERSION = "0.9.0"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
+
+@Composable
+private fun FloatingSocialDock(
+    unreadCount: Int,
+    incomingRequestCount: Int,
+    onClick: () -> Unit,
+    onDismiss: () -> Unit = {},
+    onDragStateChanged: (isDragging: Boolean, isHoveringDismiss: Boolean) -> Unit = { _, _ -> },
+    modifier: Modifier = Modifier,
+) {
+    val totalBadge = unreadCount + incomingRequestCount
+    val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val haptic = LocalHapticFeedback.current
+
+    val screenWidthDp = configuration.screenWidthDp.dp
+    val screenHeightDp = configuration.screenHeightDp.dp
+
+    val leftSnapOffsetPx = with(density) { -(screenWidthDp - 44.dp - 36.dp).toPx() }
+    val centerXOffsetPx = leftSnapOffsetPx / 2f
+    val maxUpOffsetPx = with(density) { -(screenHeightDp - 220.dp).toPx() }
+    val maxDownOffsetPx = with(density) { 30.dp.toPx() }
+
+    val offsetX = remember { Animatable(0f) }
+    val offsetY = remember { Animatable(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    var isHoveringDismiss by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .offset { IntOffset(offsetX.value.roundToInt(), offsetY.value.roundToInt()) }
+            .scale(if (isHoveringDismiss) 0.85f else 1f)
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(VantafynColors.SurfaceHigh.copy(alpha = if (isDragging) 0.98f else 0.90f))
+            .vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.3.dp, durationMillis = 3800)
+            .pointerInput(Unit) {
+                val velocityTracker = VelocityTracker()
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    velocityTracker.resetTracking()
+                    velocityTracker.addPointerInputChange(down)
+                    var totalDragDistance = 0f
+                    val pointerId = down.id
+                    isDragging = true
+                    onDragStateChanged(true, false)
+
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                        if (change.changedToUp()) {
+                            change.consume()
+                            break
+                        }
+                        val dragAmount = change.positionChange()
+                        if (dragAmount != Offset.Zero) {
+                            change.consume()
+                            totalDragDistance += dragAmount.getDistance()
+                            velocityTracker.addPointerInputChange(change)
+
+                            val newX = (offsetX.value + dragAmount.x).coerceIn(leftSnapOffsetPx - 30f, 30f)
+                            val newY = (offsetY.value + dragAmount.y).coerceIn(maxUpOffsetPx - 30f, maxDownOffsetPx + 30f)
+
+                            val hovering = kotlin.math.abs(newX - centerXOffsetPx) < 140f && newY > -80f
+                            if (hovering != isHoveringDismiss) {
+                                isHoveringDismiss = hovering
+                                if (hovering) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                                onDragStateChanged(true, hovering)
+                            }
+
+                            coroutineScope.launch {
+                                offsetX.snapTo(newX)
+                                offsetY.snapTo(newY)
+                            }
+                        }
+                    }
+                    val wasHovering = isHoveringDismiss
+                    isDragging = false
+                    isHoveringDismiss = false
+                    onDragStateChanged(false, false)
+
+                    if (totalDragDistance < viewConfiguration.touchSlop) {
+                        onClick()
+                    } else if (wasHovering) {
+                        coroutineScope.launch {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            launch {
+                                offsetX.animateTo(centerXOffsetPx, tween(180, easing = FastOutSlowInEasing))
+                            }
+                            launch {
+                                offsetY.animateTo(maxDownOffsetPx, tween(180, easing = FastOutSlowInEasing))
+                            }
+                            delay(180L)
+                            onDismiss()
+                        }
+                    } else {
+                        val velocity = velocityTracker.calculateVelocity()
+                        coroutineScope.launch {
+                            var currentVx = velocity.x
+                            var currentVy = velocity.y
+                            var currX = offsetX.value
+                            var currY = offsetY.value
+                            val friction = 0.94f
+                            val bounceRestitution = 0.65f
+                            var lastFrameTimeNanos = 0L
+
+                            if (kotlin.math.hypot(currentVx.toDouble(), currentVy.toDouble()) > 400.0) {
+                                var bounces = 0
+                                while (bounces < 5 && kotlin.math.hypot(currentVx.toDouble(), currentVy.toDouble()) > 250.0) {
+                                    withFrameNanos { timeNanos ->
+                                        if (lastFrameTimeNanos > 0L) {
+                                            val dt = ((timeNanos - lastFrameTimeNanos) / 1_000_000_000f).coerceIn(0.001f, 0.033f)
+                                            currX += currentVx * dt
+                                            currY += currentVy * dt
+                                            currentVx *= Math.pow(friction.toDouble(), (dt * 60f).toDouble()).toFloat()
+                                            currentVy *= Math.pow(friction.toDouble(), (dt * 60f).toDouble()).toFloat()
+
+                                            if (currX < leftSnapOffsetPx) {
+                                                currX = leftSnapOffsetPx
+                                                currentVx = -currentVx * bounceRestitution
+                                                bounces++
+                                            }
+                                            if (currX > 0f) {
+                                                currX = 0f
+                                                currentVx = -currentVx * bounceRestitution
+                                                bounces++
+                                            }
+                                            if (currY < maxUpOffsetPx) {
+                                                currY = maxUpOffsetPx
+                                                currentVy = -currentVy * bounceRestitution
+                                                bounces++
+                                            }
+                                            if (currY > maxDownOffsetPx) {
+                                                currY = maxDownOffsetPx
+                                                currentVy = -currentVy * bounceRestitution
+                                                bounces++
+                                            }
+                                        }
+                                        lastFrameTimeNanos = timeNanos
+                                    }
+                                    offsetX.snapTo(currX)
+                                    offsetY.snapTo(currY)
+                                }
+                            }
+
+                            val targetX = if (currX < leftSnapOffsetPx / 2f) leftSnapOffsetPx else 0f
+                            val targetY = currY.coerceIn(maxUpOffsetPx, maxDownOffsetPx)
+                            launch {
+                                offsetX.animateTo(
+                                    targetValue = targetX,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessLow,
+                                    ),
+                                )
+                            }
+                            launch {
+                                offsetY.animateTo(
+                                    targetValue = targetY,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessLow,
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = Icons.Rounded.Forum,
+            contentDescription = "Friends & Messages",
+            tint = Color.White,
+            modifier = Modifier.size(20.dp),
+        )
+        if (totalBadge > 0) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = (-1).dp, y = 1.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFF3366))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (totalBadge > 99) "99+" else totalBadge.toString(),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialIslandBanner(
+    message: dev.vantafyn.core.jellyfin.JellyfinSocialMessage,
+    onDismiss: () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LaunchedEffect(message.messageId) {
+        delay(4_500L)
+        onDismiss()
+    }
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp)
+            .clip(RoundedCornerShape(26.dp))
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.94f))
+            .vantafynAnimatedModalBorder(cornerRadius = 26.dp, strokeWidth = 1.4.dp, durationMillis = 3000)
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!message.senderAvatarUrl.isNullOrBlank()) {
+                    coil3.compose.AsyncImage(
+                        model = message.senderAvatarUrl,
+                        contentDescription = message.senderName,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Text(
+                        text = message.senderName.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                    )
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = message.senderName,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "Now",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VantafynColors.Muted,
+                    )
+                }
+                Text(
+                    text = message.content,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VantafynColors.Ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Dismiss",
+                    tint = VantafynColors.Muted,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingSocialPanel(
+    friends: List<dev.vantafyn.core.jellyfin.JellyfinFriend>,
+    requests: List<dev.vantafyn.core.jellyfin.JellyfinFriendRequest>,
+    conversations: List<dev.vantafyn.core.jellyfin.JellyfinSocialConversation>,
+    onDismiss: () -> Unit,
+    onOpenFullSocial: () -> Unit,
+    onOpenChatWithFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit,
+    onOpenChatFromConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit,
+    onAcceptRequest: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val incomingRequests = remember(requests) { requests.filter { it.isIncoming } }
+
+    AlertDialog(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.3.dp),
+        onDismissRequest = onDismiss,
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Forum,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Text(
+                        text = "Social Hub",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = VantafynColors.Muted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 420.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                if (incomingRequests.isNotEmpty()) {
+                    val firstReq = incomingRequests.first()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFF55F0C0).copy(alpha = 0.12f))
+                            .border(1.dp, Color(0xFF55F0C0).copy(alpha = 0.28f), RoundedCornerShape(16.dp))
+                            .padding(10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Friend Request: ${firstReq.senderName}",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF55F0C0),
+                            )
+                            if (incomingRequests.size > 1) {
+                                Text(
+                                    text = "+${incomingRequests.size - 1} more pending",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Muted,
+                                )
+                            }
+                        }
+                        VantafynButton(
+                            text = "Accept",
+                            onClick = { onAcceptRequest(firstReq.id) },
+                        )
+                    }
+                }
+
+                if (incomingRequests.isEmpty() && conversations.isEmpty() && friends.isEmpty()) {
+                    VantafynGlassCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        cornerRadius = 20.dp,
+                        contentPadding = PaddingValues(20.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .vantafynAnimatedModalBorder(cornerRadius = 52.dp, strokeWidth = 1.2.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PersonAdd,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            }
+                            Text(
+                                text = "Start Connecting",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = VantafynColors.Ink,
+                                textAlign = TextAlign.Center,
+                            )
+                            Text(
+                                text = "Search for friends and start chatting on this server.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = VantafynColors.Muted,
+                                textAlign = TextAlign.Center,
+                            )
+                        }
+                    }
+                } else if (conversations.isNotEmpty()) {
+                    Text(
+                        text = "RECENT CHATS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = VantafynColors.Muted,
+                    )
+                }
+
+                if (conversations.isEmpty() && friends.isNotEmpty()) {
+                    Text(
+                        text = "No active chats yet. Tap any friend below to start messaging!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VantafynColors.Muted,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                } else {
+                    conversations.take(3).forEach { conv ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .clickable {
+                                    onDismiss()
+                                    onOpenChatFromConversation(conv)
+                                }
+                                .padding(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.10f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (!conv.peerAvatarUrl.isNullOrBlank()) {
+                                    coil3.compose.AsyncImage(
+                                        model = conv.peerAvatarUrl,
+                                        contentDescription = conv.peerName,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop,
+                                    )
+                                } else {
+                                    Text(
+                                        text = conv.peerName.take(1).uppercase(),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = VantafynColors.Ink,
+                                    )
+                                }
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = conv.peerName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = VantafynColors.Ink,
+                                )
+                                Text(
+                                    text = conv.lastMessageText ?: "Chat",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = VantafynColors.Muted,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (conv.unreadCount > 0) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFFF3366))
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = conv.unreadCount.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (friends.isNotEmpty()) {
+                    Text(
+                        text = "ONLINE FRIENDS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        color = VantafynColors.Muted,
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        friends.take(6).forEach { friend ->
+                            Column(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable {
+                                        onDismiss()
+                                        onOpenChatWithFriend(friend)
+                                    }
+                                    .padding(4.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.10f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (!friend.avatarUrl.isNullOrBlank()) {
+                                        coil3.compose.AsyncImage(
+                                            model = friend.avatarUrl,
+                                            contentDescription = friend.displayName,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                    } else {
+                                        Text(
+                                            text = friend.displayName.take(1).uppercase(),
+                                            style = MaterialTheme.typography.titleMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = VantafynColors.Ink,
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = friend.displayName.take(8),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 11.sp,
+                                    color = VantafynColors.Ink,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            VantafynButton(
+                text = "Open Full Social Screen",
+                onClick = onOpenFullSocial,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        dismissButton = {},
+    )
+}

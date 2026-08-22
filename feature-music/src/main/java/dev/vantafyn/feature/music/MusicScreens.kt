@@ -12,6 +12,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -26,6 +27,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
@@ -376,22 +378,20 @@ fun MusicScreen(
                         }
                     }
                     item {
-                        MusicContentReveal(index = 1, animate = nestedRevealActive, revealKey = screenScrollKey) {
-                            MusicTrackList(
-                                title = "Tracks",
-                                tracks = screen.tracks,
-                                page = screen.page,
-                                isPageLoading = state.isMusicPageLoading,
-                                onPreviousPage = viewModel::previousMusicPage,
-                                onNextPage = viewModel::nextMusicPage,
-                                playlists = state.home?.playlists.orEmpty(),
-                                pendingTrackId = state.pendingPlayTrackId,
-                                onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                                onChoosePlaylist = { playlistPickerTrack = it },
-                                onLongPress = { actionTrack = it },
-                                animateReveal = false,
-                            )
-                        }
+                        MusicTrackList(
+                            title = "Tracks",
+                            tracks = screen.tracks,
+                            page = screen.page,
+                            isPageLoading = state.isMusicPageLoading,
+                            onPreviousPage = viewModel::previousMusicPage,
+                            onNextPage = viewModel::nextMusicPage,
+                            playlists = state.home?.playlists.orEmpty(),
+                            pendingTrackId = state.pendingPlayTrackId,
+                            onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
+                            onChoosePlaylist = { playlistPickerTrack = it },
+                            onLongPress = { actionTrack = it },
+                            animateReveal = true,
+                        )
                     }
                 }
                 is MusicScreenState.Artist -> {
@@ -447,22 +447,20 @@ fun MusicScreen(
                         }
                     }
                     item {
-                        MusicContentReveal(index = 1, animate = nestedRevealActive, revealKey = screenScrollKey) {
-                            MusicTrackList(
-                                title = "Playlist",
-                                tracks = screen.tracks,
-                                page = screen.page,
-                                isPageLoading = state.isMusicPageLoading,
-                                onPreviousPage = viewModel::previousMusicPage,
-                                onNextPage = viewModel::nextMusicPage,
-                                playlists = state.home?.playlists.orEmpty(),
-                                pendingTrackId = state.pendingPlayTrackId,
-                                onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                                onChoosePlaylist = { playlistPickerTrack = it },
-                                onLongPress = { actionTrack = it },
-                                animateReveal = false,
-                            )
-                        }
+                        MusicTrackList(
+                            title = "Playlist",
+                            tracks = screen.tracks,
+                            page = screen.page,
+                            isPageLoading = state.isMusicPageLoading,
+                            onPreviousPage = viewModel::previousMusicPage,
+                            onNextPage = viewModel::nextMusicPage,
+                            playlists = state.home?.playlists.orEmpty(),
+                            pendingTrackId = state.pendingPlayTrackId,
+                            onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
+                            onChoosePlaylist = { playlistPickerTrack = it },
+                            onLongPress = { actionTrack = it },
+                            animateReveal = true,
+                        )
                     }
                 }
                 is MusicScreenState.Songs -> {
@@ -1068,7 +1066,7 @@ private fun MusicTrackList(
     animateReveal: Boolean = true,
 ) {
     val trackRevealKey = "${page?.startIndex ?: 0}:${page?.totalItems ?: tracks.size}:${tracks.size}:${tracks.firstOrNull()?.id}:${tracks.lastOrNull()?.id}"
-    var hasPlayed by rememberSaveable(trackRevealKey) { mutableStateOf(false) }
+    var hasPlayed by remember(trackRevealKey) { mutableStateOf(false) }
     var revealTrackRows by remember(trackRevealKey) { mutableStateOf(animateReveal && tracks.isNotEmpty() && !hasPlayed) }
     LaunchedEffect(trackRevealKey) {
         if (!animateReveal || tracks.isEmpty()) {
@@ -1491,14 +1489,12 @@ private fun MusicMiniPlayer(
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
-    val dismissThresholdPx = with(density) { 112.dp.toPx() }
-    var dragOffset by remember(track.id) { mutableStateOf(0f) }
-    var isDragging by remember(track.id) { mutableStateOf(false) }
-    val visualOffset by animateFloatAsState(
-        targetValue = if (isDragging) dragOffset else 0f,
-        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
-        label = "musicMiniSwipeOffset",
-    )
+    val scope = rememberCoroutineScope()
+    val dismissThresholdPx = with(density) { 116.dp.toPx() }
+    val maxDragPx = with(density) { 340.dp.toPx() }
+    val offsetX = remember(track.id) { Animatable(0f) }
+    var isDismissing by remember(track.id) { mutableStateOf(false) }
+
     val borderAlpha by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
         animationSpec = tween(durationMillis = if (isPlaying) 900 else 650, easing = FastOutSlowInEasing),
@@ -1508,8 +1504,13 @@ private fun MusicMiniPlayer(
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
-                translationX = visualOffset
-                alpha = 1f - (abs(visualOffset) / (dismissThresholdPx * 2.4f)).coerceIn(0f, 0.28f)
+                translationX = offsetX.value
+                val dragRatio = (abs(offsetX.value) / dismissThresholdPx).coerceIn(0f, 1.5f)
+                alpha = if (isDismissing) {
+                    (1f - (abs(offsetX.value) / (dismissThresholdPx * 1.6f))).coerceIn(0f, 1f)
+                } else {
+                    1f - (dragRatio * 0.22f)
+                }
             }
             .then(
                 if (borderAlpha > 0.01f) {
@@ -1520,27 +1521,53 @@ private fun MusicMiniPlayer(
             )
             .pointerInput(track.id) {
                 detectHorizontalDragGestures(
-                    onDragStart = {
-                        isDragging = true
-                    },
+                    onDragStart = {},
                     onHorizontalDrag = { change, dragAmount ->
                         change.consume()
-                        dragOffset = (dragOffset + dragAmount).coerceIn(
-                            -dismissThresholdPx * 1.35f,
-                            dismissThresholdPx * 1.35f,
-                        )
+                        if (!isDismissing) {
+                            val newOffset = (offsetX.value + dragAmount).coerceIn(-maxDragPx, maxDragPx)
+                            scope.launch { offsetX.snapTo(newOffset) }
+                        }
                     },
                     onDragEnd = {
-                        val shouldStop = abs(dragOffset) >= dismissThresholdPx
-                        isDragging = false
-                        dragOffset = 0f
-                        if (shouldStop) {
-                            onStop()
+                        if (!isDismissing) {
+                            val currentOffset = offsetX.value
+                            val shouldDismiss = abs(currentOffset) >= dismissThresholdPx
+                            if (shouldDismiss) {
+                                isDismissing = true
+                                scope.launch {
+                                    val target = if (currentOffset > 0) maxDragPx * 1.5f else -maxDragPx * 1.5f
+                                    offsetX.animateTo(
+                                        targetValue = target,
+                                        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
+                                    )
+                                    onStop()
+                                }
+                            } else {
+                                scope.launch {
+                                    offsetX.animateTo(
+                                        targetValue = 0f,
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                            stiffness = Spring.StiffnessMediumLow,
+                                        ),
+                                    )
+                                }
+                            }
                         }
                     },
                     onDragCancel = {
-                        isDragging = false
-                        dragOffset = 0f
+                        if (!isDismissing) {
+                            scope.launch {
+                                offsetX.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    ),
+                                )
+                            }
+                        }
                     },
                 )
             }
@@ -2433,10 +2460,14 @@ private fun SyncedLyricsList(
     val activeLineLeadMs = 120L
     var livePlaybackMs by remember(lines) { mutableLongStateOf(playbackMs) }
     val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0) }
-    var suppressAutoFollowUntil by remember(lines) { mutableStateOf(0L) }
-    var programmaticScroll by remember(lines) { mutableStateOf(false) }
-    var lastPlaybackMs by remember(lines) { mutableStateOf(-1L) }
-    var pendingRewindTicks by remember(lines) { mutableStateOf(0) }
+    var suppressAutoFollowUntil by remember(lines) { mutableLongStateOf(0L) }
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            suppressAutoFollowUntil = System.currentTimeMillis() + 5_000L
+        }
+    }
 
     LaunchedEffect(playbackMs, isPlaying, lines) {
         if (!isPlaying || abs(playbackMs - livePlaybackMs) > 1_200L) {
@@ -2456,60 +2487,22 @@ private fun SyncedLyricsList(
 
     LaunchedEffect(lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        livePlaybackMs = currentPositionMs()
-        val targetIndex = lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0)
-        programmaticScroll = true
+        suppressAutoFollowUntil = 0L
+        val initialPos = currentPositionMs()
+        livePlaybackMs = initialPos
+        val targetIndex = lines.activeIndex(initialPos + activeLineLeadMs).coerceAtLeast(0)
         listState.scrollToItem(targetIndex.coerceAtMost(lines.lastIndex))
-        programmaticScroll = false
-        lastPlaybackMs = livePlaybackMs
     }
 
-    LaunchedEffect(listState, lines) {
-        snapshotFlow { listState.isScrollInProgress }.collect { scrolling ->
-            if (scrolling && !programmaticScroll) {
-                suppressAutoFollowUntil = System.currentTimeMillis() + 5_000L
-            }
-        }
-    }
-
-    LaunchedEffect(activeIndex, livePlaybackMs, lines) {
+    LaunchedEffect(activeIndex, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
-        val rewindDrop = if (lastPlaybackMs >= 0L) lastPlaybackMs - livePlaybackMs else 0L
-        val rewindCandidate = lastPlaybackMs >= 0L && livePlaybackMs + 350L < lastPlaybackMs
-        val rewound = when {
-            !rewindCandidate -> {
-                pendingRewindTicks = 0
-                false
-            }
-            rewindDrop >= 1_400L -> {
-                pendingRewindTicks = 0
-                true
-            }
-            else -> {
-                pendingRewindTicks += 1
-                if (pendingRewindTicks >= 2) {
-                    pendingRewindTicks = 0
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-        val largePositionJump = lastPlaybackMs >= 0L && kotlin.math.abs(livePlaybackMs - lastPlaybackMs) >= 5_000L
-        lastPlaybackMs = livePlaybackMs
-        val suppressAutoFollow = System.currentTimeMillis() < suppressAutoFollowUntil
-        if (rewound && !suppressAutoFollow) suppressAutoFollowUntil = 0L
-        if (!suppressAutoFollow) {
-            programmaticScroll = true
-            try {
-                val target = activeIndex.coerceAtMost(lines.lastIndex)
-                if (largePositionJump || rewound) {
-                    listState.scrollToItem(target)
-                } else {
-                    listState.animateScrollToItem(target)
-                }
-            } finally {
-                programmaticScroll = false
+        val isSuppressed = System.currentTimeMillis() < suppressAutoFollowUntil
+        if (!isSuppressed) {
+            val target = activeIndex.coerceIn(0, lines.lastIndex)
+            if (target == 0) {
+                listState.scrollToItem(0)
+            } else {
+                listState.animateScrollToItem(target)
             }
         }
     }
@@ -2532,7 +2525,6 @@ private fun SyncedLyricsList(
                     onClick = {
                         line.startMs?.let {
                             suppressAutoFollowUntil = 0L
-                            lastPlaybackMs = it
                             onSeek(it)
                         }
                     },

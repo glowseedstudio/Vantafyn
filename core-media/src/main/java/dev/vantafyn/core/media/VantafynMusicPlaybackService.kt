@@ -75,23 +75,43 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     setSmallIcon(android.R.drawable.ic_media_play)
                 },
         )
-        try {
-            startForegroundImmediately(playbackController.state.value.currentTrack)
-        } catch (_: ForegroundServiceStartNotAllowedException) {
-            Log.w(TAG, "Cannot start foreground from background — stopping")
-            stopSelf()
-            return
-        }
+
+        // NOTE: We intentionally do NOT call startForeground() here.
+        //
+        // When Android Auto does a cold-start bind (process was not running), the OS binds
+        // the service directly without sending a startForegroundService() intent. Calling
+        // startForeground() at this point on API 31+ throws ForegroundServiceStartNotAllowedException
+        // because there is no foreground token for this process. The old code caught that exception
+        // and called stopSelf() — killing the service before mediaSession was ever built, which
+        // caused onGetSession() to return null and Auto to show "tap to open, fails to connect".
+        //
+        // Instead, we always build the session here so onGetSession() can return it. Foreground
+        // promotion is handled safely by:
+        //  - onStartCommand()       — for the normal phone-side path (startForegroundService intent)
+        //  - onUpdateNotification() — called by Media3 when playback actually starts
+        //
+        // This matches the Media3-idiomatic approach and fixes the Android Auto cold-start issue.
+
+        val bitmapLoader = VantafynBitmapLoader(
+            context = this,
+            cachedBitmapSupplier = { url -> cachedLargeIcon(url) },
+            fallbackBitmapSupplier = { appIconBitmap },
+            scaleBitmapFn = { bitmap -> scaleNotificationArtwork(bitmap) },
+            cachePutFn = { url, bitmap ->
+                synchronized(artworkCache) {
+                    artworkCache[url] = bitmap
+                }
+            },
+        )
+
         mediaSession = MediaLibrarySession.Builder(
             this,
             playbackController.sessionPlayer,
             LibraryCallback(playbackController) { mediaLibraryProvider ?: VantafynMusicMediaLibraryProvider(this).also { mediaLibraryProvider = it } },
         )
+            .setBitmapLoader(bitmapLoader)
             .setSessionActivity(createLaunchPendingIntent())
             .build()
-            .also { session ->
-                startAsForegroundService(session)
-            }
 
         serviceScope.launch {
             playbackController.state.collect { state ->
@@ -425,50 +445,29 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
 
     private fun createFallbackNotificationArtwork(): Bitmap {
         val size = NOTIFICATION_ARTWORK_MAX_SIZE
+        val logoResId = resources.getIdentifier("vantafyn_logo", "drawable", packageName).takeIf { it != 0 }
+            ?: resources.getIdentifier("vantafyn_logo", "drawable", "dev.vantafyn.mobile").takeIf { it != 0 }
+            ?: resources.getIdentifier("vantafyn_logo", "drawable", "dev.vantafyn.core.media").takeIf { it != 0 }
+
+        if (logoResId != null && logoResId != 0) {
+            val options = BitmapFactory.Options().apply {
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inScaled = false
+            }
+            val decoded = BitmapFactory.decodeResource(resources, logoResId, options)
+            if (decoded != null) {
+                return if (decoded.width == size && decoded.height == size) {
+                    decoded
+                } else {
+                    Bitmap.createScaledBitmap(decoded, size, size, true)
+                }
+            }
+        }
+
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        val bounds = RectF(0f, 0f, size.toFloat(), size.toFloat())
-        val corner = size * 0.22f
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        paint.shader = LinearGradient(
-            0f,
-            0f,
-            size.toFloat(),
-            size.toFloat(),
-            intArrayOf(
-                0xFF101827.toInt(),
-                0xFF17233A.toInt(),
-                0xFF1A1732.toInt(),
-                0xFF281544.toInt(),
-            ),
-            null,
-            Shader.TileMode.CLAMP,
-        )
-        canvas.drawRoundRect(bounds, corner, corner, paint)
-
-        paint.shader = LinearGradient(
-            0f,
-            0f,
-            size.toFloat(),
-            size.toFloat(),
-            intArrayOf(0xFF36D8FF.toInt(), 0xFF6C75FF.toInt(), 0xFFB45CFF.toInt()),
-            null,
-            Shader.TileMode.CLAMP,
-        )
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = size * 0.018f
-        val ringInset = paint.strokeWidth / 2f
-        canvas.drawRoundRect(
-            RectF(ringInset, ringInset, size - ringInset, size - ringInset),
-            corner,
-            corner,
-            paint,
-        )
-
         val brandDrawable = loadBestBrandDrawable()
-        val iconInset = (size * 0.18f).toInt()
-        brandDrawable.setBounds(iconInset, iconInset, size - iconInset, size - iconInset)
+        brandDrawable.setBounds(0, 0, size, size)
         brandDrawable.draw(canvas)
         return bitmap
     }
