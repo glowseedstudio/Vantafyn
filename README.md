@@ -1,83 +1,194 @@
-# Vantafyn
+<p align="center">
+  <img src="assets/logo.png" width="160" alt="Vantafyn Logo" />
+</p>
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
-[![Kotlin](https://img.shields.io/badge/Kotlin-2.0+-7F52FF.svg?logo=kotlin&logoColor=white)](https://kotlinlang.org/)
-[![Jetpack Compose](https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=android&logoColor=white)](https://developer.android.com/jetpack/compose)
-[![AndroidX Media3](https://img.shields.io/badge/Media3-ExoPlayer-3DDC84.svg?logo=android&logoColor=white)](https://developer.android.com/guide/topics/media/media3)
-[![Jellyfin](https://img.shields.io/badge/Jellyfin-Compatible-00A4DC.svg?logo=jellyfin&logoColor=white)](https://jellyfin.org/)
+<h1 align="center">Vantafyn</h1>
 
-**Vantafyn** is a modern Android phone and Android TV client for [Jellyfin](https://jellyfin.org).
+<p align="center">
+  <strong>A premium, fluid Android & Android TV client for <a href="https://jellyfin.org">Jellyfin</a>.</strong><br>
+  Built with Jetpack Compose, AndroidX Media3, dynamic glassmorphism, and offline-first capabilities.
+</p>
 
-The project aims to make a private Jellyfin server feel like a polished streaming experience: calm visual design, rich artwork, smooth motion, real server data, reliable playback, offline access, foreground music playback, Ombi requests, admin tools, and TV-ready foundations.
-
----
-
-## Key Features
-
-- **Authentication & Profiles**: Jellyfin server setup, username/password login, Quick Connect authentication, multi-profile restore, and local/remote endpoint failover.
-- **Home & Discovery**: Native Jellyfin home rows, library browsing, fast search, rich detail screens, people view, episodes, favorites/My List, and Live TV.
-- **Video Playback**: Media3 ExoPlayer integration with resume, progress reporting, audio & subtitle track switching, screen zoom/fit modes, Up Next, skip intro/segments, and Google Cast handoff.
-- **Music Player**: Foreground Media3 music service with notification shade and lock-screen controls, Android Auto support, queues, playlists, synchronized lyrics, and downloads.
-- **Offline Mode & Downloads**: WorkManager-backed downloads, local playback, artwork metadata caching, and automatic playback-state reconciliation when returning online.
-- **Ombi Requests**: Full Ombi integration with shared API-key or per-user accounts, search, issue reporting, and request history tracking.
-- **Watch Party / SyncPlay**: Synchronized group playback foundations, app-wide invites, and Swipe to Match movie picker.
-- **Admin Tools**: Session inspection, server dashboard, plugin status, scheduled tasks, and media statistics.
-- **Design System**: Glass material styling, smooth Compose motion, skeleton loaders, and responsive layouts for phones and TVs.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
+  <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-2.0+-7F52FF.svg?logo=kotlin&logoColor=white" alt="Kotlin" /></a>
+  <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=android&logoColor=white" alt="Jetpack Compose" /></a>
+  <a href="https://developer.android.com/guide/topics/media/media3"><img src="https://img.shields.io/badge/Media3-ExoPlayer-3DDC84.svg?logo=android&logoColor=white" alt="Media3" /></a>
+  <a href="https://jellyfin.org/"><img src="https://img.shields.io/badge/Jellyfin-Compatible-00A4DC.svg?logo=jellyfin&logoColor=white" alt="Jellyfin" /></a>
+  <img src="https://img.shields.io/badge/Mobile_Status-~92%25_Complete-success" alt="Mobile Status" />
+</p>
 
 ---
 
-## Project Structure
+## 🎬 Preview in Action
+
+<div align="center">
+  <video src="https://github.com/glowseedstudio/Vantafyn/raw/main/assets/vantafyn_demo.mp4" width="100%" controls autoplay loop muted></video>
+  <p><em>(If the video does not play in your browser, <a href="assets/vantafyn_demo.mp4">click here to download or view the demo video</a>.)</em></p>
+</div>
+
+---
+
+## 📖 About The Project
+
+**Vantafyn** was born out of a desire to make a personal Jellyfin server feel indistinguishable from a top-tier streaming platform: calm visual design, rich backdrop artwork, ultra-smooth motion, real-time server synchronisation, rock-solid video/audio playback, true offline downloads, and advanced administration tools.
+
+I am a solo developer working on Vantafyn in my spare time as a passion project. What began strictly as a personal media client has matured into an expansive, modular suite that is now proud to be open-sourced to the Jellyfin and Android communities.
+
+---
+
+## 🤖 AI Assistance Disclosure
+
+**Vantafyn is an AI-assisted software project.**
+
+I want to be completely transparent about that. I have been developing software for around six years, and rather than building every part of Vantafyn entirely by hand and burning myself out, I use AI coding tools as part of my development workflow.
+
+AI is primarily used to accelerate tasks such as:
+- Initial scaffolding and boilerplate
+- Basic feature implementation
+- Repetitive development work
+- Exploring possible solutions
+
+**This does not mean Vantafyn is blindly generated or "vibe coded."**
+
+I review all code that goes into the project, understand how it works, debug issues myself, manually optimise and refactor where necessary, and make all of the architectural, technical, UI, and product decisions behind the application.
+
+> **AI is an assistant, not the developer.**
+
+Used properly, I believe AI can be an extremely powerful development tool. The important part is having a strong understanding of the system you are building, knowing what you are asking the tool to do, and being capable of reviewing, correcting, and improving what it produces.
+
+Simply accepting generated code without understanding or validating it can lead to poor architecture, bugs, security problems, and difficult-to-maintain software. That is not how Vantafyn is developed.
+
+Ultimately, I am responsible for the code that ships.
+
+I also understand that some people prefer not to use software developed with AI assistance, and that is completely their choice. I would rather be open about my development process than hide it.
+
+*Vantafyn is AI assisted, human directed, human reviewed, and human maintained.*
+
+---
+
+## 📸 Screenshots & UI Showcase
+
+<table align="center">
+  <tr>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/01_home.png" alt="Home Screen" /><br>
+      <strong>Home & Discovery</strong><br>
+      <em>Hero backdrop carousel, Continue Watching, and glass bottom navigation.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/02_mini_player.png" alt="Music Mini Player" /><br>
+      <strong>Persistent Music Player</strong><br>
+      <em>Seamless floating mini-player with Media3 foreground service controls.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/03_libraries.png" alt="Library Browser" /><br>
+      <strong>Media Libraries</strong><br>
+      <em>Grid and list views for Movies, TV, Live TV, Music, Audiobooks & E-Books.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/04_home_customizer.png" alt="Home Customizer" /><br>
+      <strong>Live Home Customizer</strong><br>
+      <em>Reorder rows, toggle visibility, and tweak card sizing with live previews.</em>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/05_details.png" alt="Media Details" /><br>
+      <strong>Media Details</strong><br>
+      <em>4K/HDR stream badges, audio/subtitle selectors, and quick resume.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/06_admin_dashboard.png" alt="Admin Dashboard" /><br>
+      <strong>Server Administration</strong><br>
+      <em>Trigger library scans, manage user accounts, and track live bandwidth.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/07_server_stats.png" alt="Server Analytics" /><br>
+      <strong>Analytics & Trends</strong><br>
+      <em>Interactive content breakdown charts and 30-day viewing trend graphs.</em>
+    </td>
+    <td align="center" width="25%">
+      <img src="assets/screenshots/08_appearance.png" alt="Appearance Settings" /><br>
+      <strong>Themes & Accents</strong><br>
+      <em>Nebula/Midnight color systems, dynamic wallpapers, and breathing rail glows.</em>
+    </td>
+  </tr>
+</table>
+
+---
+
+## ✨ Key Capabilities
+
+- 🎬 **High-Performance Video Playback**: Media3 ExoPlayer engine with Jellyfin playback reporting, resume points, multi-track audio and subtitle selection, zoom/stretch aspect ratios, Up Next countdowns, skip intro/segments, and Google Cast support.
+- 🎵 **Dedicated Foreground Music Service**: Media3-backed background playback with lock screen controls, notification actions, Android Auto library browsing, playlists, queues, synchronized lyrics, and offline music caching.
+- 📦 **Offline Downloads Engine**: WorkManager-orchestrated background downloads with local database caching, full offline playback, and automatic playback-state reconciliation once reconnected.
+- 🛡️ **Built-in Server Admin Suite**: View active server sessions, inspect live stream bitrates, manage server profiles, trigger library scans, inspect tasks, and visualize Playback Reporting statistics.
+- 🎨 **Deep Customization & Theming**: Live customizable home screen rows, glassmorphic surface materials, dynamic space backgrounds, theme music, and interactive glow feedback.
+- 🍿 **Social & Discovery**: Group Watch Party / SyncPlay foundations, app-wide invitations, and Swipe to Match movie decision picker.
+
+---
+
+## 🚦 Current Status & Roadmap
+
+| Platform / Module | Status | Description |
+| :--- | :---: | :--- |
+| **Android Phone App** | 🟢 **~92% Complete** | Core UI, playback, offline downloads, music player, and server features are fully functional and daily-driver ready. |
+| **Android TV App** | 🟡 **In Development** | TV architecture and module build correctly. Dedicated 10-foot TV UI is being built using the proven mobile architecture foundations. |
+| **Companion Server Plugin** | 🟡 **In Development** | The `companion-plugin` for Jellyfin is currently being built to provide enhanced multi-user sync and deeper Ombi integration. |
+| **Ombi Requests** | 🟢 **Functional** | Shared API-key and per-user token linking supported; currently refining deeper server-side availability sync. |
+
+---
+
+## 🛠️ Project Architecture
 
 ```
-├── app-mobile/          # Android phone entry point, manifests, launcher & navigation wiring
-├── app-tv/              # Android TV / Google TV / Fire OS entry point
+├── app-mobile/          # Android phone entry point, manifest, navigation graph & DI wiring
+├── app-tv/              # Android TV entry point (leanback/TV UI foundations)
 ├── core-cast/           # Google Cast sender integration
-├── core-downloads/      # Offline storage, download transfers & sync reconciliation
-├── core-integrations/   # Encrypted credentials & integration storage
-├── core-jellyfin/       # Jellyfin SDK client, repositories, models & auth abstractions
-├── core-media/          # Media3 playback foundations, music service & Android Auto
+├── core-downloads/      # Durable offline downloads & sync reconciliation
+├── core-integrations/   # Encrypted token storage & third-party integrations
+├── core-jellyfin/       # Jellyfin SDK integration, authentication & repositories
+├── core-media/          # Media3 playback service, audio session & Android Auto
 ├── core-ombi/           # Ombi API client & request handling
-├── core-ui/             # Vantafyn shared design system & Compose components
-├── feature-home/        # Home, discovery, details, libraries, admin & settings
-├── feature-music/       # Music hub, player sheet, lyrics & queue management
-├── feature-player/      # Video player UI, gestures, subtitle/audio picker & PiP
-├── feature-requests/    # Ombi Requests UI, discovery & search
-├── companion-plugin/    # Companion Jellyfin plugin
-└── docs/                # Architecture, design system & technical documentation
+├── core-ui/             # Vantafyn glass design system, animations & UI primitives
+├── feature-home/        # Home screen, discovery, details, search & admin tools
+├── feature-music/       # Dedicated music player, lyrics viewer & queue management
+├── feature-player/      # Video player UI, gestures & track controls
+├── feature-requests/    # Ombi Requests discovery & submission flows
+├── companion-plugin/    # C# Jellyfin Server companion plugin
+└── docs/                # Architectural diagrams & specifications
 ```
 
 ---
 
-## Building and Running
+## 🔨 Building and Running
 
-### Prerequisites
-- JDK 17 or newer
-- Android SDK (API 34+)
-- Android Studio Ladybug / Meerkat or command-line Gradle
+### Requirements
+- **JDK 17** or newer
+- **Android SDK** (API 34+)
+- **Android Studio** Ladybug / Meerkat (or CLI Gradle)
 
 ### Build Debug APKs
 
-Build both Phone and TV APKs:
-
 ```bash
+# Build Mobile & TV debug binaries
 ./gradlew :app-mobile:assembleDebug :app-tv:assembleDebug
 ```
 
-### Install to Connected Device
+### Install to Device
 
-Phone:
 ```bash
+# Install to connected phone
 adb install -r app-mobile/build/outputs/apk/debug/app-mobile-debug.apk
-```
 
-Android TV:
-```bash
+# Install to Android TV
 adb install -r app-tv/build/outputs/apk/debug/app-tv-debug.apk
 ```
 
 ---
 
-## Documentation
+## 📄 Documentation
 
 - [Architecture Overview](docs/ARCHITECTURE.md)
 - [Design System & Materials](docs/DESIGN_SYSTEM.md)
@@ -90,6 +201,7 @@ adb install -r app-tv/build/outputs/apk/debug/app-tv-debug.apk
 
 ---
 
-## License
+## ⚖️ License
 
-This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
+This project is open-source software licensed under the [GNU General Public License v3.0](LICENSE).
+
