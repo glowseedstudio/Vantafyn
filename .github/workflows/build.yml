@@ -1,0 +1,50 @@
+name: Build & Verify
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Android APKs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant execute permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Assemble Debug APKs
+        run: ./gradlew :app-mobile:assembleDebug :app-tv:assembleDebug --stacktrace
+
+      - name: Upload Phone APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vantafyn-mobile-debug
+          path: app-mobile/build/outputs/apk/debug/app-mobile-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload TV APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: vantafyn-tv-debug
+          path: app-tv/build/outputs/apk/debug/app-tv-debug.apk
+          if-no-files-found: error
+          retention-days: 14

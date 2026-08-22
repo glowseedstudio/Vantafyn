@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
+  <a href="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml"><img src="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml/badge.svg" alt="Build & Verify" /></a>
   <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-2.0+-7F52FF.svg?logo=kotlin&logoColor=white" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=android&logoColor=white" alt="Jetpack Compose" /></a>
   <a href="https://developer.android.com/guide/topics/media/media3"><img src="https://img.shields.io/badge/Media3-ExoPlayer-3DDC84.svg?logo=android&logoColor=white" alt="Media3" /></a>
@@ -57,14 +58,6 @@ AI is primarily used to accelerate tasks such as:
 I review all code that goes into the project, understand how it works, debug issues myself, manually optimise and refactor where necessary, and make all of the architectural, technical, UI, and product decisions behind the application.
 
 > **AI is an assistant, not the developer.**
-
-Used properly, I believe AI can be an extremely powerful development tool. The important part is having a strong understanding of the system you are building, knowing what you are asking the tool to do, and being capable of reviewing, correcting, and improving what it produces.
-
-Simply accepting generated code without understanding or validating it can lead to poor architecture, bugs, security problems, and difficult-to-maintain software. That is not how Vantafyn is developed.
-
-Ultimately, I am responsible for the code that ships.
-
-I also understand that some people prefer not to use software developed with AI assistance, and that is completely their choice. I would rather be open about my development process than hide it.
 
 *Vantafyn is AI assisted, human directed, human reviewed, and human maintained.*
 
