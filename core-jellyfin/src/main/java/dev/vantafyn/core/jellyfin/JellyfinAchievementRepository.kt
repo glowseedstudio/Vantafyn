@@ -66,6 +66,8 @@ class SdkJellyfinAchievementRepository(
                     return@withContext JellyfinResult.Failure("Achievements unavailable (HTTP $code)")
                 }
 
+                android.util.Log.d("VANTAFYN_ACHIEVEMENTS", "raw JSON: $body")
+
                 val list = parseAchievements(session, body)
                 JellyfinResult.Success(list)
             }.getOrElse { error ->
@@ -175,10 +177,25 @@ class SdkJellyfinAchievementRepository(
             val score = obj.optIntOrNull("Score", "score", "Points", "points", "Value", "value") ?: 0
             val isEquipped = obj.optBooleanOrNull("IsEquipped", "isEquipped", "Equipped", "equipped") ?: false
 
-            val rawCurrent = obj.optDoubleOrNull("CurrentProgress", "currentProgress", "ProgressValue", "progressValue", "Current", "current", "Progress", "progress", "Value", "value")
-            val rawTarget = obj.optDoubleOrNull("TargetProgress", "targetProgress", "Target", "target", "MaxProgress", "maxProgress", "Max", "max", "Required", "required", "Goal", "goal")
+            val rawCurrent = obj.optDoubleOrNull("CurrentValue", "currentValue", "CurrentProgress", "currentProgress", "ProgressValue", "progressValue", "Current", "current", "Progress", "progress", "Value", "value")
+            val rawTarget = obj.optDoubleOrNull("TargetValue", "targetValue", "TargetProgress", "targetProgress", "Target", "target", "MaxProgress", "maxProgress", "Max", "max", "Required", "required", "Goal", "goal")
             val rawRatio = obj.optDoubleOrNull("ProgressRatio", "progressRatio", "ProgressPercentage", "progressPercentage", "CompletionRatio", "completionRatio", "Percentage", "percentage")?.toFloat()
-            val rawUnit = obj.optStringOrNull("Unit", "unit", "ProgressUnit", "progressUnit", "Metric", "metric")
+            var rawUnit = obj.optStringOrNull("Unit", "unit", "ProgressUnit", "progressUnit", "Metric", "metric")
+
+            if (rawUnit.isNullOrBlank()) {
+                val descLower = description.lowercase()
+                rawUnit = when {
+                    descLower.contains("movie") -> if (rawTarget == 1.0) "movie" else "movies"
+                    descLower.contains("episode") -> if (rawTarget == 1.0) "episode" else "episodes"
+                    descLower.contains("item") -> if (rawTarget == 1.0) "item" else "items"
+                    descLower.contains("hour") -> if (rawTarget == 1.0) "hour" else "hours"
+                    descLower.contains("minute") -> if (rawTarget == 1.0) "minute" else "minutes"
+                    descLower.contains("day") -> if (rawTarget == 1.0) "day" else "days"
+                    descLower.contains("song") || descLower.contains("track") -> if (rawTarget == 1.0) "track" else "tracks"
+                    category.equals("Music", ignoreCase = true) -> "tracks"
+                    else -> null
+                }
+            }
 
             val normalizedRatio: Float? = when {
                 isUnlocked -> 1.0f
@@ -203,6 +220,10 @@ class SdkJellyfinAchievementRepository(
                     "${(normalizedRatio * 100).toInt()}%"
                 }
                 else -> null
+            }
+
+            if (!isUnlocked) {
+                android.util.Log.d("VANTAFYN_ACHIEVEMENTS", "Locked badge: $name (id=$id), isUnlocked=$isUnlocked, rawCurrent=$rawCurrent, rawTarget=$rawTarget, ratio=$normalizedRatio, text=$progressText")
             }
 
             JellyfinAchievement(
