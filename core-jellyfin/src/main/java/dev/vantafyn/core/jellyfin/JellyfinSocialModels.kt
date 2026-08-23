@@ -98,3 +98,25 @@ fun formatSocialSnippet(raw: String?): String {
     }
     return raw
 }
+
+fun parseSocialTimestampToMillis(timestampStr: String?): Long {
+    if (timestampStr.isNullOrBlank()) return 0L
+    val clean = timestampStr.trim()
+    return try {
+        java.time.OffsetDateTime.parse(clean).toInstant().toEpochMilli()
+    } catch (e1: Exception) {
+        try {
+            java.time.Instant.parse(clean).toEpochMilli()
+        } catch (e2: Exception) {
+            try {
+                java.time.LocalDateTime.parse(clean).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            } catch (e3: Exception) {
+                try {
+                    clean.toLong()
+                } catch (e4: Exception) {
+                    0L
+                }
+            }
+        }
+    }
+}

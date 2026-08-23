@@ -25,11 +25,36 @@ interface JellyfinSocialRepository {
     suspend fun deleteOrClearConversation(session: JellyfinSession, conversationId: String, peerUserId: UUID? = null): JellyfinResult<Unit>
     suspend fun getUnreadSummary(session: JellyfinSession): JellyfinResult<JellyfinSocialSummary>
     suspend fun getDiscoverableUsers(session: JellyfinSession): JellyfinResult<List<JellyfinFriend>>
+    suspend fun reportPresence(session: JellyfinSession)
 }
 
 class SdkJellyfinSocialRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : JellyfinSocialRepository {
+
+    override suspend fun reportPresence(session: JellyfinSession): Unit =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Sessions/Capabilities/Full", "POST")
+                conn.doOutput = true
+                conn.connectTimeout = 5000
+                conn.readTimeout = 5000
+                val payload = JSONObject().apply {
+                    put("PlayableMediaTypes", JSONArray(listOf("Video", "Audio")))
+                    put("SupportedCommands", JSONArray(listOf("Play", "Pause", "Stop", "Seek", "DisplayMessage")))
+                    put("SupportsMediaControl", true)
+                    put("SupportsPersistentIdentifier", true)
+                }.toString()
+                conn.outputStream.use { os ->
+                    os.write(payload.toByteArray(Charsets.UTF_8))
+                }
+                val code = conn.responseCode
+                conn.disconnect()
+                Log.d("VantafynSocial", "reportPresence [Sessions/Capabilities/Full] -> HTTP $code")
+            }.onFailure {
+                Log.w("VantafynSocial", "reportPresence error: ${it.message}")
+            }
+        }
 
     override suspend fun checkSocialAvailability(session: JellyfinSession): Boolean =
         withContext(ioDispatcher) {
@@ -56,7 +81,7 @@ class SdkJellyfinSocialRepository(
                     conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 }
                 conn.disconnect()
-                Log.d("VantafynSocial", "getFriends [users/{id}/friends] -> HTTP $code (len=${body.length})")
+                Log.d("VantafynSocial", "getFriends [users/{id}/friends] -> HTTP $code: $body")
 
                 if (code !in 200..299) {
                     return@withContext JellyfinResult.Failure("Friends unavailable (HTTP $code)")
@@ -513,28 +538,34 @@ class SdkJellyfinSocialRepository(
                     }
                 }
 
-                // 2. Fetch AchievementBadges leaderboard for ranks & scores
-                runCatching {
-                    val lbConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/leaderboard")
-                    val lbCode = lbConn.responseCode
-                    val lbBody = if (lbCode in 200..299) {
-                        lbConn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    } else ""
-                    lbConn.disconnect()
-                    Log.d("VantafynSocial", "discoverable [leaderboard] -> HTTP $lbCode (len=${lbBody.length})")
+                // 2. Fetch AchievementBadges leaderboard & users for ranks, scores, and real-time online status
+                for (pluginEndpoint in listOf("Plugins/AchievementBadges/leaderboard", "Plugins/AchievementBadges/users")) {
+                    runCatching {
+                        val lbConn = session.openAuthenticatedConnection(pluginEndpoint)
+                        val lbCode = lbConn.responseCode
+                        val lbBody = if (lbCode in 200..299) {
+                            lbConn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        } else ""
+                        lbConn.disconnect()
+                        Log.d("VantafynSocial", "discoverable [$pluginEndpoint] -> HTTP $lbCode (len=${lbBody.length})")
 
-                    if (lbBody.isNotBlank() && lbBody.trim() != "[]") {
-                        parseFriends(session, lbBody).forEach { lbUser ->
-                            if (lbUser.userId != session.user.id) {
-                                val existing = userMap[lbUser.userId]
-                                if (existing != null) {
-                                    userMap[lbUser.userId] = existing.copy(
-                                        rankName = lbUser.rankName,
-                                        rankTier = lbUser.rankTier,
-                                        currentScore = lbUser.currentScore,
-                                    )
-                                } else {
-                                    userMap[lbUser.userId] = lbUser
+                        if (lbBody.isNotBlank() && lbBody.trim() != "[]" && lbBody.trim() != "{}") {
+                            parseFriends(session, lbBody).forEach { lbUser ->
+                                if (lbUser.userId != session.user.id) {
+                                    val existing = userMap[lbUser.userId]
+                                    if (existing != null) {
+                                        userMap[lbUser.userId] = existing.copy(
+                                            rankName = if (lbUser.rankName != "Rookie") lbUser.rankName else existing.rankName,
+                                            rankTier = if (lbUser.rankTier > 1) lbUser.rankTier else existing.rankTier,
+                                            currentScore = if (lbUser.currentScore > 0) lbUser.currentScore else existing.currentScore,
+                                            isOnline = lbUser.isOnline || existing.isOnline,
+                                            currentlyWatching = lbUser.currentlyWatching ?: existing.currentlyWatching,
+                                            lastSeen = lbUser.lastSeen ?: existing.lastSeen,
+                                            avatarUrl = lbUser.avatarUrl.takeIf { !it.isNullOrBlank() } ?: existing.avatarUrl,
+                                        )
+                                    } else {
+                                        userMap[lbUser.userId] = lbUser
+                                    }
                                 }
                             }
                         }
@@ -735,13 +766,58 @@ class SdkJellyfinSocialRepository(
             val rankName = item.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName") ?: "Rookie"
             val rankTier = item.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level") ?: 1
             val currentScore = item.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points", "TotalScore") ?: 0
-            val isOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline") ?: false
-            val lastSeen = item.optStringOrNull("LastSeen", "lastSeen", "LastActivity", "lastActivity")
-            val nowPlayingObj = item.optJSONObject("NowPlaying") ?: item.optJSONObject("nowPlaying")
+            val rawOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline", "IsActive", "isActive", "Active", "active")
+                ?: nestedUser?.optBooleanOrNull("Online", "online", "IsOnline", "isOnline", "IsActive", "isActive", "Active", "active")
+                ?: false
+            val lastSeen = item.optStringOrNull("LastActivityDate", "lastActivityDate", "LastSeenDate", "lastSeenDate", "LastSeen", "lastSeen", "LastActivity", "lastActivity")
+                ?: nestedUser?.optStringOrNull("LastActivityDate", "lastActivityDate", "LastSeenDate", "lastSeenDate", "LastSeen", "lastSeen", "LastActivity", "lastActivity")
+            val lastActivityTime = parseSocialTimestampToMillis(lastSeen).takeIf { it > 0L }
+                ?: parseIsoOrEpochMillis(lastSeen)
+            val isRecentActivity = lastActivityTime > 0L && (System.currentTimeMillis() - lastActivityTime) < 5 * 60 * 1000L
+            val nowPlayingString = item.optStringOrNull(
+                "NowPlaying", "nowPlaying",
+                "CurrentlyWatching", "currentlyWatching",
+                "CurrentlyPlaying", "currentlyPlaying",
+                "Watching", "watching",
+                "MediaTitle", "mediaTitle",
+                "Activity", "activity",
+                "Playing", "playing",
+                "Title", "title",
+                "NowPlayingName", "nowPlayingName",
+                "ItemName", "itemName",
+            ) ?: nestedUser?.optStringOrNull(
+                "NowPlaying", "nowPlaying",
+                "CurrentlyWatching", "currentlyWatching",
+                "CurrentlyPlaying", "currentlyPlaying",
+                "Watching", "watching",
+                "MediaTitle", "mediaTitle",
+                "Activity", "activity",
+                "Playing", "playing",
+                "Title", "title",
+                "NowPlayingName", "nowPlayingName",
+                "ItemName", "itemName",
+            )
+
+            val nowPlayingObj = item.optJSONObject("NowPlayingItem")
+                ?: item.optJSONObject("nowPlayingItem")
+                ?: item.optJSONObject("NowPlaying")
+                ?: item.optJSONObject("nowPlaying")
+                ?: nestedUser?.optJSONObject("NowPlayingItem")
+                ?: nestedUser?.optJSONObject("nowPlayingItem")
+                ?: nestedUser?.optJSONObject("NowPlaying")
+                ?: nestedUser?.optJSONObject("nowPlaying")
+
+            val devName = item.optStringOrNull("DeviceName", "deviceName", "Client", "client")
+                ?: nestedUser?.optStringOrNull("DeviceName", "deviceName", "Client", "client")
             val lastWatchedObj = item.optJSONObject("LastWatched") ?: item.optJSONObject("lastWatched")
-            val currentlyWatching = formatNowPlayingDescription(nowPlayingObj, null)
-                ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching", "Activity", "activity")
-                ?: formatNowPlayingDescription(lastWatchedObj, null)?.let { "Last watched $it" }
+            val mediaDescription = formatNowPlayingDescription(nowPlayingObj, nowPlayingString)
+            val isOnline = rawOnline || nowPlayingObj != null || isRecentActivity || !nowPlayingString.isNullOrBlank()
+            val currentlyWatching = when {
+                !mediaDescription.isNullOrBlank() -> mediaDescription
+                isOnline && !devName.isNullOrBlank() -> "Online on $devName"
+                isOnline -> "Active now"
+                else -> formatNowPlayingDescription(lastWatchedObj, null)?.let { "Last watched $it" }
+            }
             val equippedBadgeName = item.optStringOrNull("EquippedBadgeName", "equippedBadgeName", "ShowcaseBadge", "showcaseBadge")
             val equippedBadgeIcon = item.optStringOrNull("EquippedBadgeIcon", "equippedBadgeIcon", "BadgeIcon", "badgeIcon")
 
@@ -755,7 +831,7 @@ class SdkJellyfinSocialRepository(
                 rankTier = rankTier,
                 currentScore = currentScore,
                 isOnline = isOnline,
-                lastSeen = lastSeen,
+                lastSeen = if (isOnline) "Now" else lastSeen,
                 currentlyWatching = currentlyWatching,
                 equippedBadgeName = equippedBadgeName,
                 equippedBadgeIcon = equippedBadgeIcon,
@@ -1032,18 +1108,35 @@ class SdkJellyfinSocialRepository(
     }
 
     private fun formatNowPlayingDescription(nowPlayingObj: JSONObject?, fallback: String? = null): String? {
-        if (nowPlayingObj == null) return fallback
-        val seriesName = nowPlayingObj.optStringOrNull("SeriesName", "seriesName")
-        val episodeName = nowPlayingObj.optStringOrNull("Name", "name", "EpisodeName", "episodeName")
+        if (nowPlayingObj != null) {
+            val seriesName = nowPlayingObj.optStringOrNull("SeriesName", "seriesName")
+            val episodeName = nowPlayingObj.optStringOrNull("Name", "name", "EpisodeName", "episodeName", "Title", "title")
 
-        return when {
-            !seriesName.isNullOrBlank() && !episodeName.isNullOrBlank() && !seriesName.equals(episodeName, ignoreCase = true) -> {
-                "$seriesName • $episodeName"
+            if (!seriesName.isNullOrBlank() && !episodeName.isNullOrBlank() && !seriesName.equals(episodeName, ignoreCase = true)) {
+                return "$seriesName • $episodeName"
             }
-            !seriesName.isNullOrBlank() -> seriesName
-            !episodeName.isNullOrBlank() -> episodeName
-            else -> fallback
+            if (!seriesName.isNullOrBlank()) return seriesName
+            if (!episodeName.isNullOrBlank()) return episodeName
         }
+
+        if (!fallback.isNullOrBlank()) {
+            val trimmed = fallback.trim()
+            if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                runCatching {
+                    val obj = JSONObject(trimmed)
+                    val sName = obj.optStringOrNull("SeriesName", "seriesName")
+                    val eName = obj.optStringOrNull("Name", "name", "EpisodeName", "episodeName", "Title", "title")
+                    if (!sName.isNullOrBlank() && !eName.isNullOrBlank() && !sName.equals(eName, ignoreCase = true)) {
+                        return "$sName • $eName"
+                    }
+                    if (!sName.isNullOrBlank()) return sName
+                    if (!eName.isNullOrBlank()) return eName
+                }
+            }
+            return trimmed
+        }
+
+        return null
     }
 
     private fun parseIsoOrEpochMillis(timestampStr: String?): Long {

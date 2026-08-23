@@ -279,20 +279,20 @@ private fun DiscoverFeatureCard(
                     Column(modifier = Modifier.weight(1f)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Text(
-                                feature.title,
+                                text = feature.title,
                                 color = VantafynColors.Ink,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f, fill = false),
                             )
                             if (feature.isNew) {
-                                Spacer(Modifier.width(8.dp))
                                 SoftBadge("NEW")
                             }
                             if (feature.adminOnly) {
-                                Spacer(Modifier.width(8.dp))
                                 SoftBadge("Admin", color = Color(0xFFFFB5BE), background = Color(0xFFFFB5BE).copy(alpha = 0.12f))
                             }
                         }
@@ -369,6 +369,8 @@ private fun DiscoverFeatureCard(
                                         "open_playback_preferences" -> "Open Playback Preferences"
                                         "open_home_layout" -> "Open Home Layout"
                                         "open_watch_party" -> "Open Watch Party"
+                                        "open_social" -> "Open Social Hub"
+                                        "open_achievements" -> "Open Achievements"
                                         "open_admin" -> "Open Admin"
                                         else -> "Open"
                                     },
@@ -394,8 +396,15 @@ private fun SoftBadge(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(background)
-            .padding(horizontal = 9.dp, vertical = 4.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
     ) {
-        Text(text, color = color, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+            text = text,
+            color = color,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }

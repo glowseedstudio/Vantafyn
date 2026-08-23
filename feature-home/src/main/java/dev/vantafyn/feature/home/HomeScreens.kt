@@ -55,6 +55,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -747,10 +748,49 @@ fun VantafynAppContent(
                         viewModel.declineOrRemoveFriend(req.id)
                     }
                 },
+                onDismiss = viewModel::dismissIncomingFriendRequest,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
     }
+}
+
+@Composable
+private fun Modifier.swipeToDismissTopNotification(
+    onDismiss: () -> Unit,
+): Modifier {
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    var isDismissed by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+    val dismissThresholdPx = remember(density) { with(density) { 20.dp.toPx() } }
+
+    return this
+        .offset { IntOffset(0, offsetY.roundToInt().coerceAtMost(0)) }
+        .pointerInput(Unit) {
+            detectVerticalDragGestures(
+                onVerticalDrag = { change, dragAmount ->
+                    if (dragAmount < 0f || offsetY < 0f) {
+                        change.consume()
+                        offsetY = (offsetY + dragAmount).coerceAtMost(0f)
+                        if (offsetY < -dismissThresholdPx && !isDismissed) {
+                            isDismissed = true
+                            onDismiss()
+                        }
+                    }
+                },
+                onDragEnd = {
+                    if (offsetY < -dismissThresholdPx && !isDismissed) {
+                        isDismissed = true
+                        onDismiss()
+                    } else {
+                        offsetY = 0f
+                    }
+                },
+                onDragCancel = {
+                    offsetY = 0f
+                }
+            )
+        }
 }
 
 @Composable
@@ -777,6 +817,7 @@ private fun DisplayMessageOverlay(
         message?.let { current ->
             VantafynGlassSurface(
                 modifier = Modifier
+                    .swipeToDismissTopNotification(onDismiss)
                     .fillMaxWidth()
                     .widthIn(max = 520.dp)
                     .vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.2.dp, durationMillis = 5200),
@@ -867,6 +908,7 @@ private fun WatchPartyInviteOverlay(
         val remainingSeconds = ((activeInvite.expiresAt - now).coerceAtLeast(0L) / 1_000L).toInt()
         VantafynGlassPanel(
             modifier = Modifier
+                .swipeToDismissTopNotification(onClearMessage)
                 .padding(horizontal = 12.dp, vertical = 8.dp)
                 .vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.5.dp),
             cornerRadius = 28.dp,
@@ -935,12 +977,15 @@ private fun FriendRequestOverlay(
     request: dev.vantafyn.core.jellyfin.JellyfinFriendRequest?,
     onAccept: () -> Unit,
     onDecline: () -> Unit,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(request?.id) {
         if (request != null) {
             dev.vantafyn.core.ui.VantafynSoundEffects.playFriendRequestAlert(context)
+            delay(5_000L)
+            onDismiss()
         }
     }
     AnimatedVisibility(
@@ -960,6 +1005,7 @@ private fun FriendRequestOverlay(
         request?.let { req ->
             Box(
                 modifier = Modifier
+                    .swipeToDismissTopNotification(onDismiss)
                     .fillMaxWidth()
                     .widthIn(max = 500.dp)
                     .clip(RoundedCornerShape(24.dp))
@@ -3985,6 +4031,8 @@ private fun MobileShellScreen(
                                     "open_playback_preferences" -> onNavigate(MobileDestination.PlaybackPreferences)
                                     "open_home_layout" -> onNavigate(MobileDestination.HomeLayout)
                                     "open_watch_party" -> onNavigate(MobileDestination.WatchParty)
+                                    "open_social" -> onNavigate(MobileDestination.Social)
+                                    "open_achievements" -> onNavigate(MobileDestination.Achievements)
                                     "open_admin" -> onNavigate(MobileDestination.Admin)
                                     else -> Unit
                                 }
@@ -5067,6 +5115,7 @@ private fun AchievementUnlockToast(
     Popup(alignment = Alignment.TopCenter) {
         Box(
             modifier = modifier
+                .swipeToDismissTopNotification(onDismiss)
                 .fillMaxWidth()
                 .widthIn(max = 500.dp)
                 .windowInsetsPadding(WindowInsets.statusBars)
@@ -11445,6 +11494,10 @@ private fun ProfileSettingsScreen(
     onToggleSocialDockEnabled: () -> Unit = {},
     onDiscoverVantafyn: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var soundEffectsOn by remember {
+        mutableStateOf(dev.vantafyn.core.ui.VantafynSoundEffects.isSoundEffectsEnabled(context))
+    }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
     var showWhatsNew by remember { mutableStateOf(false) }
@@ -11509,6 +11562,29 @@ private fun ProfileSettingsScreen(
                             selected = state.bottomRailAccent,
                             onSelect = onSetBottomRailAccent,
                         )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .clickable(onClick = {
+                                    val next = !soundEffectsOn
+                                    soundEffectsOn = next
+                                    dev.vantafyn.core.ui.VantafynSoundEffects.setSoundEffectsEnabled(context, next)
+                                })
+                                .padding(vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            SettingsRowIcon(Icons.Rounded.VolumeUp)
+                            Text(
+                                "Soundscapes",
+                                color = VantafynColors.Ink,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            VantafynPremiumSwitchVisual(checked = soundEffectsOn)
+                        }
                     }
                 }
             }
@@ -19663,6 +19739,7 @@ private fun SocialIslandBanner(
     }
     Box(
         modifier = modifier
+            .swipeToDismissTopNotification(onDismiss)
             .fillMaxWidth()
             .widthIn(max = 500.dp)
             .clip(RoundedCornerShape(24.dp))

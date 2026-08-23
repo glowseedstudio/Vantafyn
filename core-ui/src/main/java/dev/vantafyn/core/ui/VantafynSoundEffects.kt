@@ -10,6 +10,18 @@ import android.util.Log
 object VantafynSoundEffects {
     private const val TAG = "VantafynAudio"
     private const val RESPECTFUL_VOLUME = 0.65f // Calm, premium, respectful volume level
+    private const val PREFS_NAME = "vantafyn_sound_effects"
+    private const val KEY_ENABLED = "sound_effects_enabled"
+
+    fun isSoundEffectsEnabled(context: Context): Boolean {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getBoolean(KEY_ENABLED, true)
+    }
+
+    fun setSoundEffectsEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putBoolean(KEY_ENABLED, enabled).apply()
+    }
 
     private var soundPool: SoundPool? = null
     private val soundIdMap = mutableMapOf<Int, Int>()
@@ -60,6 +72,7 @@ object VantafynSoundEffects {
 
     private fun playRawSound(context: Context, rawResId: Int, volume: Float = RESPECTFUL_VOLUME) {
         val appContext = context.applicationContext
+        if (!isSoundEffectsEnabled(appContext)) return
         try {
             val pool = ensureInitialized(appContext)
             val soundId = soundIdMap.getOrPut(rawResId) {

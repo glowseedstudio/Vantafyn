@@ -10,26 +10,36 @@ import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Flight
+import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Hd
 import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lyrics
+import androidx.compose.material.icons.rounded.MilitaryTech
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.OndemandVideo
 import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PictureInPicture
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Recommend
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.Swipe
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Widgets
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -48,11 +58,13 @@ data class DiscoverFeature(
 
 enum class DiscoverCategory(val label: String, val order: Int) {
     MakeItYours("Make it yours", 0),
-    Watching("Watching", 1),
-    Music("Music", 2),
-    YourLibrary("Your library", 3),
-    Requests("Requests", 4),
-    AdminTools("Admin tools", 5),
+    Social("Social & Friends", 1),
+    Achievements("Achievements", 2),
+    Watching("Watching", 3),
+    Music("Music", 4),
+    YourLibrary("Your library", 5),
+    Requests("Requests", 6),
+    AdminTools("Admin tools", 7),
 }
 
 fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
@@ -93,6 +105,16 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         deepLinkAction = "open_settings",
     ),
     DiscoverFeature(
+        id = "soundscapes",
+        title = "Soundscapes",
+        shortDescription = "Subtle tactile sound effects for chat, alerts, and achievements.",
+        category = DiscoverCategory.MakeItYours,
+        icon = Icons.Rounded.VolumeUp,
+        isNew = true,
+        detailedDescription = "Enjoy custom ambient audio feedback when sending messages, receiving invites, unlocking achievements, or navigating menus. Toggle on or off in Settings \u2192 Appearance \u2192 Soundscapes.",
+        deepLinkAction = "open_settings",
+    ),
+    DiscoverFeature(
         id = "backgrounds",
         title = "App Backgrounds",
         shortDescription = "Five distinct backgrounds \u2014 Nebula, Glass, Twilight, Aurora, and Deep Space.",
@@ -118,6 +140,98 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         icon = Icons.Rounded.MusicNote,
         detailedDescription = "Open Settings \u2192 Appearance \u2192 Theme Music. Toggle on/off and choose volume: Soft, Medium, High, or Full.",
         deepLinkAction = "open_settings",
+    ),
+
+    // ----------------------------------------------------
+    // Social & Friends
+    // ----------------------------------------------------
+    DiscoverFeature(
+        id = "social_hub",
+        title = "Social Hub",
+        shortDescription = "Real-time 1:1 chat with friends, typing sounds, and emoji reactions.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.Forum,
+        isNew = true,
+        detailedDescription = "Chat with server friends in real-time, react to messages with animated emoji quick-bars, and manage conversation threads with live presence indicators.",
+        deepLinkAction = "open_social",
+    ),
+    DiscoverFeature(
+        id = "floating_social_dock",
+        title = "Floating Dock",
+        shortDescription = "Draggable chat bubble with live unread counts and alerts.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.NotificationsActive,
+        isNew = true,
+        detailedDescription = "The floating dock stays accessible as you browse movies, shows, and music. Drag anywhere on screen to reposition, tap to expand your social panel, or drag down to the dismiss target to hide it.",
+        steps = listOf("Tap bubble to open social panel", "Drag to reposition anywhere", "Drag down to 'X' to hide bubble"),
+        deepLinkAction = "open_social",
+    ),
+    DiscoverFeature(
+        id = "media_recommendations",
+        title = "Media Sharing",
+        shortDescription = "Share movies, TV series, episodes and albums directly into friend chats.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.Recommend,
+        isNew = true,
+        detailedDescription = "Tap the Share icon in chat or long-press any media item to send a recommendation. Friends receive rich, interactive glass cards with poster artwork, year, and instant playback shortcuts.",
+        deepLinkAction = "open_social",
+    ),
+    DiscoverFeature(
+        id = "online_presence",
+        title = "Live Presence",
+        shortDescription = "See who is online and what titles they are currently watching.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.PersonAdd,
+        isNew = true,
+        detailedDescription = "The Add Friend tab features an Online Users rail showing real-time presence, device info, and marquee now-playing titles across all server members.",
+        deepLinkAction = "open_social",
+    ),
+    DiscoverFeature(
+        id = "friend_safety_actions",
+        title = "Friend Actions",
+        shortDescription = "Star favorites, cancel requests with touch & hold, and manage privacy.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.Shield,
+        isNew = true,
+        detailedDescription = "Long-press any friend or conversation to Star, Remove, or Block. Long-press pending outgoing requests to cancel invites instantly without leaving the screen.",
+        deepLinkAction = "open_social",
+    ),
+
+    // ----------------------------------------------------
+    // Achievements
+    // ----------------------------------------------------
+    DiscoverFeature(
+        id = "achievement_badges",
+        title = "Achievements",
+        shortDescription = "Unlock achievements and earn trophies as you watch and listen.",
+        category = DiscoverCategory.Achievements,
+        icon = Icons.Rounded.EmojiEvents,
+        isNew = true,
+        detailedDescription = "Track your watch milestones, genres explored, watch streaks, and audio sessions. Unlock bronze, silver, gold, and platinum badges powered by the Jellyfin AchievementBadges plugin.",
+        deepLinkAction = "open_achievements",
+    ),
+    DiscoverFeature(
+        id = "leaderboard_ranks",
+        title = "Leaderboard",
+        shortDescription = "Climb the server ranks and compare your total score with friends.",
+        category = DiscoverCategory.Achievements,
+        icon = Icons.Rounded.Leaderboard,
+        isNew = true,
+        detailedDescription = "Level up from Rookie to Grandmaster. View the server-wide leaderboard, earn tier badges, and showcase your achievements on your profile.",
+        deepLinkAction = "open_achievements",
+    ),
+
+    // ----------------------------------------------------
+    // Watching
+    // ----------------------------------------------------
+    DiscoverFeature(
+        id = "dropdown_gestures",
+        title = "Dropdown Alerts",
+        shortDescription = "Glassmorphic top banners with 5-second auto-dismiss and swipe-to-dismiss.",
+        category = DiscoverCategory.Watching,
+        icon = Icons.Rounded.TouchApp,
+        isNew = true,
+        detailedDescription = "Incoming messages, friend requests, watch party invites, and achievement unlocks drop down elegantly from the top. Swipe up on any banner to dismiss it early while keeping notification badges intact.",
     ),
     DiscoverFeature(
         id = "playback",

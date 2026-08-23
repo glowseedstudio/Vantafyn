@@ -172,8 +172,9 @@ fun SocialScreen(
     var showManualUsernameDialog by remember { mutableStateOf(false) }
     var activeFriendActionTarget by remember { mutableStateOf<JellyfinFriend?>(null) }
     var showRemoveConfirmationFor by remember { mutableStateOf<JellyfinFriend?>(null) }
-    var showBlockConfirmationFor by remember { mutableStateOf<Triple<UUID, String, String>?>(null) }
+    var showBlockConfirmationFor by remember { mutableStateOf<BlockTarget?>(null) }
     var showDeleteConversationConfirmationFor by remember { mutableStateOf<JellyfinSocialConversation?>(null) }
+    var showCancelRequestConfirmationFor by remember { mutableStateOf<JellyfinFriendRequest?>(null) }
     var showBlockedUsersSheet by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
@@ -294,22 +295,7 @@ fun SocialScreen(
         }
 
         // Main Tab Content
-        val showFullScreenLoading = isLoading &&
-            friends.isEmpty() &&
-            conversations.isEmpty() &&
-            incomingRequests.isEmpty() &&
-            outgoingRequests.isEmpty() &&
-            discoverableUsers.isEmpty()
-
-        if (showFullScreenLoading) {
-            when (selectedTab) {
-                SocialTab.Messages -> SocialMessagesSkeleton()
-                SocialTab.Friends -> SocialFriendsSkeleton()
-                SocialTab.Requests -> SocialRequestsSkeleton()
-                SocialTab.Find -> SocialFindSkeleton()
-            }
-        } else {
-            AnimatedContent(
+        AnimatedContent(
                 targetState = selectedTab,
                 transitionSpec = {
                     if (reducedMotion) {
@@ -431,7 +417,10 @@ fun SocialScreen(
                                         )
                                     }
                                     items(outgoingRequests, key = { it.id }) { req ->
-                                        OutgoingRequestCard(request = req)
+                                        OutgoingRequestCard(
+                                            request = req,
+                                            onCancel = { showCancelRequestConfirmationFor = req },
+                                        )
                                     }
                                 }
                             }
@@ -590,7 +579,6 @@ fun SocialScreen(
                 }
             }
         }
-    }
 
     if (showManualUsernameDialog) {
         AlertDialog(
@@ -670,7 +658,7 @@ fun SocialScreen(
             },
             onRequestBlock = {
                 activeFriendActionTarget = null
-                showBlockConfirmationFor = Triple(target.userId, target.displayName, target.username)
+                showBlockConfirmationFor = BlockTarget(target.userId, target.displayName, target.username, target.avatarUrl)
             },
         )
     }
@@ -693,7 +681,7 @@ fun SocialScreen(
             },
             onRequestBlock = {
                 activeConversationActionTarget = null
-                showBlockConfirmationFor = Triple(target.peerUserId, target.peerName, target.peerName)
+                showBlockConfirmationFor = BlockTarget(target.peerUserId, target.peerName, target.peerName, target.peerAvatarUrl)
             },
         )
     }
@@ -813,7 +801,7 @@ fun SocialScreen(
 
     if (showBlockConfirmationFor != null) {
         val target = showBlockConfirmationFor!!
-        val targetDisplayName = target.second
+        val targetDisplayName = target.displayName
         AlertDialog(
             modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
             onDismissRequest = { showBlockConfirmationFor = null },
@@ -859,7 +847,7 @@ fun SocialScreen(
                         val current = showBlockConfirmationFor
                         showBlockConfirmationFor = null
                         if (current != null) {
-                            onBlockUser(current.first, current.second, current.third, null)
+                            onBlockUser(current.userId, current.displayName, current.username, current.avatarUrl)
                         }
                     },
                 ) {
@@ -873,6 +861,72 @@ fun SocialScreen(
             dismissButton = {
                 TextButton(onClick = { showBlockConfirmationFor = null }) {
                     Text("Cancel", color = Color.White)
+                }
+            },
+        )
+    }
+
+    if (showCancelRequestConfirmationFor != null) {
+        val req = showCancelRequestConfirmationFor!!
+        AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
+            onDismissRequest = { showCancelRequestConfirmationFor = null },
+            containerColor = Color(0xFF0D1322),
+            shape = RoundedCornerShape(24.dp),
+            title = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = null,
+                            tint = Color(0xFFFF3366),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Text(
+                        text = "Cancel Friend Request?",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Cancel the pending friend request to ${req.receiverName}?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = VantafynColors.Muted,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val current = showCancelRequestConfirmationFor
+                        showCancelRequestConfirmationFor = null
+                        if (current != null) {
+                            onDeclineRequest(current.id)
+                        }
+                    },
+                ) {
+                    Text(
+                        text = "Cancel Request",
+                        color = Color(0xFFFF3366),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelRequestConfirmationFor = null }) {
+                    Text("Keep", color = Color.White)
                 }
             },
         )
@@ -1479,37 +1533,73 @@ private fun FriendRequestCard(
 @Composable
 private fun OutgoingRequestCard(
     request: JellyfinFriendRequest,
+    onCancel: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val haptic = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+
     VantafynGlassCard(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onCancel,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onCancel()
+                },
+            ),
         cornerRadius = 20.dp,
         contentPadding = PaddingValues(14.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            AvatarCircle(
-                avatarUrl = request.senderAvatarUrl,
-                name = request.receiverName,
-                size = 44.dp,
-            )
-            Column(
+            Row(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                AvatarCircle(
+                    avatarUrl = request.senderAvatarUrl,
+                    name = request.receiverName,
+                    size = 44.dp,
+                )
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = request.receiverName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                    )
+                    Text(
+                        text = "Pending · Hold to cancel",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFFF3366).copy(alpha = 0.12f))
+                    .clickable(onClick = onCancel)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = request.receiverName,
-                    style = MaterialTheme.typography.titleMedium,
+                    text = "Cancel",
+                    style = MaterialTheme.typography.labelSmall,
                     fontWeight = FontWeight.Bold,
-                    color = VantafynColors.Ink,
-                )
-                Text(
-                    text = "Request pending...",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = VantafynColors.Muted,
+                    color = Color(0xFFFF4D6D),
                 )
             }
         }
@@ -2672,3 +2762,10 @@ private fun SocialFindSkeleton() {
         }
     }
 }
+
+private data class BlockTarget(
+    val userId: UUID,
+    val displayName: String,
+    val username: String,
+    val avatarUrl: String? = null,
+)
