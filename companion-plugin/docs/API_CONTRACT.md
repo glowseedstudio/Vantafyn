@@ -63,3 +63,15 @@ POST /Vantafyn/PersonalPlaylists/{playlistId}/Items
 ```
 
 Private per authenticated Jellyfin user. Stores Jellyfin item IDs only.
+
+## Ephemeral Social & Typing Indicators
+
+```http
+POST /Vantafyn/Social/Typing
+GET /Vantafyn/Social/Typing?conversationId=...&peerUserId=...
+```
+
+Transient, zero-disk-I/O in-memory state store with 3.5s TTL sliding expiration.
+Allows Vantafyn clients to display live animated typing bubbles (`TypingBubbleAnimation`) safely without generating database records or server overhead.
+Also broadcast via the authenticated `/Vantafyn/Events` SSE stream.
+

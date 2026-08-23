@@ -14,6 +14,7 @@ If Companion is available, enable only the modules reported as ready:
 - Requests
 - Watch Parties
 - Personal playlists
+- Ephemeral typing indicators
 
 The Android app must reuse the existing authenticated Jellyfin session. Do not add a second Jellyfin auth stack.
 

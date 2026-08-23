@@ -31,6 +31,7 @@ It does not replace Jellyfin users, authentication, media libraries, playback, w
 - Watch Parties: `POST /Vantafyn/WatchParties`, join/leave/end/snapshot/commands/invites
 - Live events: `GET /Vantafyn/Events`
 - Personal playlists: `GET|POST /Vantafyn/PersonalPlaylists`
+- Ephemeral typing indicators: `POST|GET /Vantafyn/Social/Typing`
 
 All user endpoints require Jellyfin authentication. Admin configuration endpoints require Jellyfin elevation.
 
