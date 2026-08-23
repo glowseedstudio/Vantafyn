@@ -46,7 +46,7 @@ I am a solo developer working on Vantafyn in my spare time as a passion project.
 
 **Vantafyn is an AI-assisted software project.**
 
-I want to be completely transparent about that. I have been developing software for around six years, and rather than building every part of Vantafyn entirely by hand and burning myself out, I use AI coding tools as part of my development workflow.
+I want to be completely transparent about that. I have been developing software without AI for around six years, and rather than building every part of Vantafyn entirely by hand and burning myself out (as a solo dev), I have decided to use AI coding tools as part of my development workflow for this project.
 
 AI is primarily used to accelerate tasks such as:
 - Initial scaffolding and boilerplate
