@@ -706,6 +706,7 @@ fun VantafynAppContent(
                 onDismissSocialIslandPreview = viewModel::dismissSocialIslandPreview,
                 onSetActiveSocialTab = viewModel::setActiveSocialTab,
                 onRefreshSocial = { viewModel.loadSocialData(force = true) },
+                onSearchChatMedia = viewModel::searchChatMedia,
                 onRefreshChatMessages = {
                     val activePeer = viewModel.state.value.activeChatPeer
                     if (activePeer != null) {
@@ -3253,6 +3254,7 @@ private fun HomeScreen(
     onDismissSocialIslandPreview: () -> Unit = {},
     onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
     onRefreshSocial: () -> Unit = {},
+    onSearchChatMedia: (String) -> Unit = {},
     onRefreshChatMessages: () -> Unit = {},
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
@@ -3499,6 +3501,7 @@ private fun MobileShellScreen(
     onDismissSocialIslandPreview: () -> Unit = {},
     onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
     onRefreshSocial: () -> Unit = {},
+    onSearchChatMedia: (String) -> Unit = {},
     onRefreshChatMessages: () -> Unit = {},
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onReorderLibraries: (List<UUID>) -> Unit,
@@ -3630,6 +3633,43 @@ private fun MobileShellScreen(
     var selectedHomeSectionName by rememberSaveable { mutableStateOf<String?>(null) }
     var draftHomeLayout by remember { mutableStateOf<List<HomeSectionPreference>?>(null) }
     var draftSmartRows by remember { mutableStateOf<List<String>?>(null) }
+    var lastPlayerExitTime by remember { mutableLongStateOf(0L) }
+    var wasInPlayer by remember { mutableStateOf(false) }
+    var isIslandBannerVisible by remember { mutableStateOf(false) }
+    var currentDisplayPreview by remember { mutableStateOf<dev.vantafyn.core.jellyfin.JellyfinSocialMessage?>(null) }
+
+    LaunchedEffect(state.mobileDestination) {
+        if (state.mobileDestination == MobileDestination.Player) {
+            wasInPlayer = true
+        } else if (wasInPlayer) {
+            wasInPlayer = false
+            lastPlayerExitTime = System.currentTimeMillis()
+        }
+    }
+
+    LaunchedEffect(state.activeSocialIslandPreview, state.mobileDestination) {
+        val preview = state.activeSocialIslandPreview
+        if (preview != null && state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat) {
+            val timeSincePlayerExit = System.currentTimeMillis() - lastPlayerExitTime
+            if (lastPlayerExitTime > 0L && timeSincePlayerExit < 2000L) {
+                // Graceful 2 second cooldown after exiting watching content
+                delay(2000L - timeSincePlayerExit)
+            }
+            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat) {
+                currentDisplayPreview = preview
+                isIslandBannerVisible = true
+                delay(5000L) // Show notification for 5 seconds
+                isIslandBannerVisible = false
+                delay(400L) // Allow exit animation to finish
+                currentDisplayPreview = null
+                onDismissSocialIslandPreview()
+            }
+        } else {
+            isIslandBannerVisible = false
+            currentDisplayPreview = null
+        }
+    }
+
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val musicController = remember(context) { MusicPlaybackController.get(context) }
@@ -4034,6 +4074,9 @@ private fun MobileShellScreen(
                                     onRefresh = onRefreshChatMessages,
                                     onClearChat = onClearChatWithActivePeer,
                                     availableMedia = chatMediaItems,
+                                    serverSearchResults = state.chatSearchResults,
+                                    isServerSearching = state.isChatSearching,
+                                    onSearchServerMedia = onSearchChatMedia,
                                     onOpenMedia = onOpenMedia,
                                 )
                             }
@@ -4328,19 +4371,37 @@ private fun MobileShellScreen(
             onClick = onOpenAchievements,
         )
     }
-    if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat) {
-        state.activeSocialIslandPreview?.let { preview ->
+    AnimatedVisibility(
+        visible = isIslandBannerVisible && currentDisplayPreview != null && state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat,
+        enter = slideInVertically(
+            initialOffsetY = { -it },
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+            ),
+        ) + fadeIn(animationSpec = tween(350)),
+        exit = slideOutVertically(
+            targetOffsetY = { -it },
+            animationSpec = tween(350, easing = FastOutSlowInEasing),
+        ) + fadeOut(animationSpec = tween(250)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        currentDisplayPreview?.let { preview ->
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.TopCenter,
             ) {
                 SocialIslandBanner(
                     message = preview,
-                    onDismiss = onDismissSocialIslandPreview,
+                    onDismiss = {
+                        isIslandBannerVisible = false
+                        onDismissSocialIslandPreview()
+                    },
                     onClick = {
+                        isIslandBannerVisible = false
                         onDismissSocialIslandPreview()
                         val friend = state.socialFriends.firstOrNull { it.userId == preview.senderId }
                             ?: dev.vantafyn.core.jellyfin.JellyfinFriend(
@@ -19599,8 +19660,6 @@ private fun SocialIslandBanner(
     val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(message.messageId) {
         dev.vantafyn.core.ui.VantafynSoundEffects.playNewMessageAlert(context)
-        delay(4_500L)
-        onDismiss()
     }
     Box(
         modifier = modifier
@@ -19684,7 +19743,7 @@ private fun SocialIslandBanner(
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    text = message.content,
+                    text = dev.vantafyn.core.jellyfin.formatSocialSnippet(message.content),
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 12.sp,
                     color = Color.White.copy(alpha = 0.82f),
@@ -19914,7 +19973,7 @@ private fun FloatingSocialPanel(
                                     color = VantafynColors.Ink,
                                 )
                                 Text(
-                                    text = conv.lastMessageText ?: "Chat",
+                                    text = dev.vantafyn.core.jellyfin.formatSocialSnippet(conv.lastMessageText),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = VantafynColors.Muted,
                                     maxLines = 1,

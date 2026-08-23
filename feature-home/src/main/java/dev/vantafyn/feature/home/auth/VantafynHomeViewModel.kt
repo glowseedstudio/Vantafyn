@@ -1780,6 +1780,45 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         deleteConversation(dummyConv)
     }
 
+    private var chatSearchJob: Job? = null
+
+    fun searchChatMedia(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) {
+            chatSearchJob?.cancel()
+            _state.update { it.copy(chatSearchResults = emptyList(), isChatSearching = false) }
+            return
+        }
+        val session = _state.value.session ?: return
+        chatSearchJob?.cancel()
+        chatSearchJob = viewModelScope.launch {
+            delay(200)
+            _state.update { it.copy(isChatSearching = true) }
+            when (val result = searchRepository.search(session, trimmed, limit = 60)) {
+                is JellyfinResult.Success -> {
+                    val cards = result.value.map { item ->
+                        dev.vantafyn.core.jellyfin.JellyfinMediaCard(
+                            id = item.id,
+                            title = item.title,
+                            subtitle = item.subtitle,
+                            year = item.year,
+                            itemType = item.itemType,
+                            imageUrl = item.imageUrl,
+                            backdropUrl = item.backdropUrl,
+                            progress = null,
+                            shape = item.shape,
+                            isFavorite = item.isFavorite,
+                        )
+                    }
+                    _state.update { it.copy(chatSearchResults = cards, isChatSearching = false) }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { it.copy(isChatSearching = false) }
+                }
+            }
+        }
+    }
+
     private fun parseIsoOrEpochMillis(timestampStr: String?): Long {
         if (timestampStr.isNullOrBlank()) return 0L
         return try {
@@ -5402,6 +5441,8 @@ data class VantafynHomeUiState(
     val activeIncomingFriendRequest: dev.vantafyn.core.jellyfin.JellyfinFriendRequest? = null,
     val activeSocialTab: dev.vantafyn.feature.home.SocialTab = dev.vantafyn.feature.home.SocialTab.Messages,
     val socialBlockedUsers: List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser> = emptyList(),
+    val chatSearchResults: List<dev.vantafyn.core.jellyfin.JellyfinMediaCard> = emptyList(),
+    val isChatSearching: Boolean = false,
 ) {
     val currentWatchPartyCandidate: WatchPartyCandidate?
         get() = watchPartyCandidates.getOrNull(watchPartyCurrentIndex)

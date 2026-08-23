@@ -997,7 +997,7 @@ private fun ConversationCard(
                     }
                 }
                 Text(
-                    text = conversation.lastMessageText ?: "Tap to start chatting",
+                    text = dev.vantafyn.core.jellyfin.formatSocialSnippet(conversation.lastMessageText),
                     style = MaterialTheme.typography.bodyMedium,
                     color = if (conversation.unreadCount > 0) VantafynColors.Ink else VantafynColors.Muted,
                     fontWeight = if (conversation.unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,

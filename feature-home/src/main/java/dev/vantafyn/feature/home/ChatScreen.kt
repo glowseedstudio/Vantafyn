@@ -139,6 +139,9 @@ fun ChatScreen(
     onRefresh: () -> Unit,
     onClearChat: () -> Unit = {},
     availableMedia: List<JellyfinMediaCard> = emptyList(),
+    serverSearchResults: List<JellyfinMediaCard> = emptyList(),
+    isServerSearching: Boolean = false,
+    onSearchServerMedia: (String) -> Unit = {},
     onOpenMedia: (UUID) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -362,6 +365,9 @@ fun ChatScreen(
         if (showActionSheet) {
             ChatActionBottomSheet(
                 availableMedia = availableMedia,
+                serverSearchResults = serverSearchResults,
+                isServerSearching = isServerSearching,
+                onSearchServerMedia = onSearchServerMedia,
                 onDismiss = { showActionSheet = false },
                 onSendQuickReaction = { emoji ->
                     showActionSheet = false
@@ -1373,6 +1379,9 @@ private fun ChatComposer(
 @Composable
 private fun ChatActionBottomSheet(
     availableMedia: List<JellyfinMediaCard>,
+    serverSearchResults: List<JellyfinMediaCard> = emptyList(),
+    isServerSearching: Boolean = false,
+    onSearchServerMedia: (String) -> Unit = {},
     onDismiss: () -> Unit,
     onSendQuickReaction: (String) -> Unit,
     onSendMediaRecommendation: (JellyfinMediaCard) -> Unit,
@@ -1380,6 +1389,10 @@ private fun ChatActionBottomSheet(
 ) {
     var mediaSearchQuery by remember { mutableStateOf("") }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    LaunchedEffect(mediaSearchQuery) {
+        onSearchServerMedia(mediaSearchQuery)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1479,6 +1492,15 @@ private fun ChatActionBottomSheet(
 
                 // 2. Recommend Movies & Shows
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    val displayMedia = remember(mediaSearchQuery, availableMedia, serverSearchResults) {
+                        if (mediaSearchQuery.isBlank()) {
+                            availableMedia
+                        } else {
+                            val localMatches = availableMedia.filter { it.title.contains(mediaSearchQuery, ignoreCase = true) }
+                            (serverSearchResults + localMatches).distinctBy { it.id }
+                        }
+                    }
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1492,14 +1514,18 @@ private fun ChatActionBottomSheet(
                             color = Color(0xFFA78BFA),
                             letterSpacing = 0.8.sp,
                         )
-                        if (availableMedia.isNotEmpty()) {
-                            Text(
-                                text = "${availableMedia.size} titles",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontSize = 10.sp,
-                                color = VantafynColors.Muted,
-                            )
-                        }
+                        Text(
+                            text = if (mediaSearchQuery.isNotBlank()) {
+                                if (isServerSearching) "Searching server..." else "${displayMedia.size} found"
+                            } else if (availableMedia.isNotEmpty()) {
+                                "${availableMedia.size} titles"
+                            } else {
+                                "Server Library"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            color = if (isServerSearching) Color(0xFF00E5FF) else VantafynColors.Muted,
+                        )
                     }
 
                     // Search Bar
@@ -1589,7 +1615,7 @@ private fun ChatActionBottomSheet(
                             Box(modifier = Modifier.weight(1f)) {
                                 if (mediaSearchQuery.isEmpty()) {
                                     Text(
-                                        text = "Search server library...",
+                                        text = "Search entire server library...",
                                         style = MaterialTheme.typography.bodyMedium,
                                         color = VantafynColors.Muted,
                                     )
@@ -1625,12 +1651,7 @@ private fun ChatActionBottomSheet(
                         }
                     }
 
-                    val filteredMedia = remember(mediaSearchQuery, availableMedia) {
-                        if (mediaSearchQuery.isBlank()) availableMedia
-                        else availableMedia.filter { it.title.contains(mediaSearchQuery, ignoreCase = true) }
-                    }
-
-                    if (filteredMedia.isEmpty()) {
+                    if (displayMedia.isEmpty()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1640,7 +1661,11 @@ private fun ChatActionBottomSheet(
                             contentAlignment = Alignment.Center,
                         ) {
                             Text(
-                                text = if (mediaSearchQuery.isBlank()) "No titles loaded from server yet" else "No results matching \"$mediaSearchQuery\"",
+                                text = when {
+                                    isServerSearching -> "Searching server library..."
+                                    mediaSearchQuery.isBlank() -> "No titles loaded from server yet"
+                                    else -> "No results matching \"$mediaSearchQuery\" on this server"
+                                },
                                 style = MaterialTheme.typography.bodySmall,
                                 color = VantafynColors.Muted,
                             )
@@ -1652,7 +1677,7 @@ private fun ChatActionBottomSheet(
                                 .fillMaxWidth()
                                 .padding(bottom = 6.dp),
                         ) {
-                            items(filteredMedia, key = { it.id.toString() }) { item ->
+                            items(displayMedia, key = { it.id.toString() }) { item ->
                                 RecommendMediaTile(
                                     item = item,
                                     onSelect = { onSendMediaRecommendation(item) },

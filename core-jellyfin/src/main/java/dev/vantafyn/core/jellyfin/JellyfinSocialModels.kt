@@ -73,3 +73,28 @@ data class JellyfinBlockedUser(
     val avatarUrl: String? = null,
     val blockedAtTimestamp: Long = System.currentTimeMillis(),
 )
+
+fun formatSocialSnippet(raw: String?): String {
+    if (raw.isNullOrBlank()) return "Tap to start chatting"
+    val trimmed = raw.trim()
+    if (trimmed.startsWith("[media_rec|") && trimmed.endsWith("]")) {
+        val content = trimmed.removePrefix("[media_rec|").removeSuffix("]")
+        val parts = content.split("|")
+        val title = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: "Media"
+        val itemType = parts.getOrNull(2)?.takeIf { it.isNotBlank() }
+        val prefix = when {
+            itemType.equals("Movie", ignoreCase = true) -> "🎬 "
+            itemType.equals("Series", ignoreCase = true) || itemType.equals("Episode", ignoreCase = true) -> "📺 "
+            itemType.equals("Audio", ignoreCase = true) || itemType.equals("Music", ignoreCase = true) -> "🎵 "
+            else -> "🍿 "
+        }
+        return "$prefix$title"
+    }
+    if (trimmed.startsWith("[reaction|") && trimmed.endsWith("]")) {
+        val content = trimmed.removePrefix("[reaction|").removeSuffix("]")
+        val parts = content.split("|")
+        val emoji = parts.getOrNull(1)?.trim() ?: "❤️"
+        return "Reacted $emoji to a message"
+    }
+    return raw
+}
