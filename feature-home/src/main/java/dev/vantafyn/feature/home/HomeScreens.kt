@@ -698,6 +698,10 @@ fun VantafynAppContent(
                 onDeclineFriendRequest = viewModel::declineOrRemoveFriend,
                 onSendFriendRequest = viewModel::sendFriendRequest,
                 onRemoveFriend = viewModel::removeFriend,
+                onBlockUser = viewModel::blockUser,
+                onUnblockUser = viewModel::unblockUser,
+                onDeleteConversation = viewModel::deleteConversation,
+                onClearChatWithActivePeer = viewModel::clearChatWithActivePeer,
                 onShareMediaToFriend = viewModel::shareMediaRecommendationToFriend,
                 onDismissSocialIslandPreview = viewModel::dismissSocialIslandPreview,
                 onSetActiveSocialTab = viewModel::setActiveSocialTab,
@@ -3241,6 +3245,10 @@ private fun HomeScreen(
     onDeclineFriendRequest: (String) -> Unit = {},
     onSendFriendRequest: (String) -> Unit = {},
     onRemoveFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
+    onBlockUser: (java.util.UUID, String, String, String?) -> Unit = { _, _, _, _ -> },
+    onUnblockUser: (java.util.UUID) -> Unit = {},
+    onDeleteConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit = {},
+    onClearChatWithActivePeer: () -> Unit = {},
     onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, dev.vantafyn.core.jellyfin.JellyfinMediaDetail) -> Unit = { _, _ -> },
     onDismissSocialIslandPreview: () -> Unit = {},
     onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
@@ -3281,6 +3289,10 @@ private fun HomeScreen(
             onDeclineFriendRequest = onDeclineFriendRequest,
             onSendFriendRequest = onSendFriendRequest,
             onRemoveFriend = onRemoveFriend,
+            onBlockUser = onBlockUser,
+            onUnblockUser = onUnblockUser,
+            onDeleteConversation = onDeleteConversation,
+            onClearChatWithActivePeer = onClearChatWithActivePeer,
             onShareMediaToFriend = onShareMediaToFriend,
             onDismissSocialIslandPreview = onDismissSocialIslandPreview,
             onSetActiveSocialTab = onSetActiveSocialTab,
@@ -3479,6 +3491,10 @@ private fun MobileShellScreen(
     onDeclineFriendRequest: (String) -> Unit = {},
     onSendFriendRequest: (String) -> Unit = {},
     onRemoveFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
+    onBlockUser: (java.util.UUID, String, String, String?) -> Unit = { _, _, _, _ -> },
+    onUnblockUser: (java.util.UUID) -> Unit = {},
+    onDeleteConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit = {},
+    onClearChatWithActivePeer: () -> Unit = {},
     onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, dev.vantafyn.core.jellyfin.JellyfinMediaDetail) -> Unit = { _, _ -> },
     onDismissSocialIslandPreview: () -> Unit = {},
     onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
@@ -3958,6 +3974,10 @@ private fun MobileShellScreen(
                             onDeclineRequest = onDeclineFriendRequest,
                             onSendRequest = onSendFriendRequest,
                             onRemoveFriend = onRemoveFriend,
+                            blockedUsers = state.socialBlockedUsers,
+                            onBlockUser = onBlockUser,
+                            onUnblockUser = onUnblockUser,
+                            onDeleteConversation = onDeleteConversation,
                             selectedTab = state.activeSocialTab,
                             onSelectTab = onSetActiveSocialTab,
                         )
@@ -4012,6 +4032,7 @@ private fun MobileShellScreen(
                                     onBack = onNavigateBack,
                                     onSendMessage = onSendChatMessage,
                                     onRefresh = onRefreshChatMessages,
+                                    onClearChat = onClearChatWithActivePeer,
                                     availableMedia = chatMediaItems,
                                     onOpenMedia = onOpenMedia,
                                 )
@@ -19922,9 +19943,14 @@ private fun FloatingSocialPanel(
                     }
                 }
 
+                val onlineFriends = remember(friends) { friends.filter { it.isOnline } }
+                val displayFriends = remember(friends, onlineFriends) {
+                    if (onlineFriends.isNotEmpty()) onlineFriends else friends
+                }
+
                 if (friends.isNotEmpty()) {
                     Text(
-                        text = "ONLINE FRIENDS",
+                        text = if (onlineFriends.isNotEmpty()) "ONLINE FRIENDS (${onlineFriends.size})" else "FRIENDS (${friends.size})",
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
                         letterSpacing = 1.sp,
@@ -19936,7 +19962,7 @@ private fun FloatingSocialPanel(
                             .horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        friends.take(6).forEach { friend ->
+                        displayFriends.take(6).forEach { friend ->
                             Column(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
@@ -19953,7 +19979,11 @@ private fun FloatingSocialPanel(
                                         .size(40.dp)
                                         .clip(CircleShape)
                                         .background(Color.White.copy(alpha = 0.10f))
-                                        .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                                        .border(
+                                            1.dp,
+                                            if (friend.isOnline) Color(0xFF55F0C0).copy(alpha = 0.60f) else Color.White.copy(alpha = 0.18f),
+                                            CircleShape,
+                                        ),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     if (!friend.avatarUrl.isNullOrBlank()) {
@@ -19971,12 +20001,22 @@ private fun FloatingSocialPanel(
                                             color = VantafynColors.Ink,
                                         )
                                     }
+                                    if (friend.isOnline) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF55F0C0))
+                                                .border(1.5.dp, Color(0xFF090B12), CircleShape)
+                                                .align(Alignment.BottomEnd),
+                                        )
+                                    }
                                 }
                                 Text(
                                     text = friend.displayName.take(8),
                                     style = MaterialTheme.typography.labelSmall,
                                     fontSize = 11.sp,
-                                    color = VantafynColors.Ink,
+                                    color = if (friend.isOnline) Color(0xFF55F0C0) else VantafynColors.Ink,
                                     maxLines = 1,
                                 )
                             }

@@ -65,3 +65,11 @@ data class JellyfinSocialSummary(
     val outgoingRequestCount: Int = 0,
     val unreadMessageCount: Int = 0,
 )
+
+data class JellyfinBlockedUser(
+    val userId: UUID,
+    val username: String,
+    val displayName: String,
+    val avatarUrl: String? = null,
+    val blockedAtTimestamp: Long = System.currentTimeMillis(),
+)

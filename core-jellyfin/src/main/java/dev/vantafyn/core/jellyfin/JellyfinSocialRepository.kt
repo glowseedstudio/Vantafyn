@@ -22,6 +22,7 @@ interface JellyfinSocialRepository {
     suspend fun getMessages(session: JellyfinSession, conversationId: String, peerUserId: UUID? = null): JellyfinResult<List<JellyfinSocialMessage>>
     suspend fun sendMessage(session: JellyfinSession, recipientId: UUID, conversationId: String?, text: String): JellyfinResult<JellyfinSocialMessage>
     suspend fun markConversationRead(session: JellyfinSession, conversationId: String): JellyfinResult<Unit>
+    suspend fun deleteOrClearConversation(session: JellyfinSession, conversationId: String, peerUserId: UUID? = null): JellyfinResult<Unit>
     suspend fun getUnreadSummary(session: JellyfinSession): JellyfinResult<JellyfinSocialSummary>
     suspend fun getDiscoverableUsers(session: JellyfinSession): JellyfinResult<List<JellyfinFriend>>
 }
@@ -409,6 +410,42 @@ class SdkJellyfinSocialRepository(
             JellyfinResult.Success(Unit)
         }
 
+    override suspend fun deleteOrClearConversation(
+        session: JellyfinSession,
+        conversationId: String,
+        peerUserId: UUID?,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val endpoints = mutableListOf<String>()
+                if (conversationId.isNotBlank() && conversationId != peerUserId?.toString()) {
+                    endpoints.add("Plugins/AchievementBadges/users/${session.user.id}/conversations/$conversationId")
+                    endpoints.add("Plugins/AchievementBadges/users/${session.user.id}/conversations/$conversationId/messages")
+                }
+                if (peerUserId != null) {
+                    endpoints.add("Plugins/AchievementBadges/users/${session.user.id}/messages/$peerUserId")
+                }
+
+                for (endpoint in endpoints) {
+                    try {
+                        val conn = session.openAuthenticatedConnection(endpoint)
+                        conn.requestMethod = "DELETE"
+                        conn.connectTimeout = 5000
+                        conn.readTimeout = 5000
+                        val code = conn.responseCode
+                        conn.disconnect()
+                        Log.d("VantafynSocial", "deleteConversation DELETE [$endpoint] -> HTTP $code")
+                    } catch (e: Exception) {
+                        Log.w("VantafynSocial", "deleteConversation DELETE [$endpoint] exception: ${e.message}")
+                    }
+                }
+                JellyfinResult.Success(Unit)
+            }.getOrElse { error ->
+                Log.e("VantafynSocial", "deleteConversation error", error)
+                JellyfinResult.Failure(error.message ?: "Failed to clear conversation", error)
+            }
+        }
+
     override suspend fun getUnreadSummary(session: JellyfinSession): JellyfinResult<JellyfinSocialSummary> =
         withContext(ioDispatcher) {
             runCatching {
@@ -529,7 +566,13 @@ class SdkJellyfinSocialRepository(
                     val uName = sItem.optStringOrNull("UserName", "userName", "Username", "username") ?: "User"
                     val devName = sItem.optStringOrNull("DeviceName", "deviceName", "Client", "client")
                     val nowPlaying = sItem.optJSONObject("NowPlayingItem")
-                    val mediaTitle = nowPlaying?.optStringOrNull("Name", "name")
+                    val lastActivityStr = sItem.optStringOrNull("LastActivityDate", "lastActivityDate")
+                    val lastActivityTime = parseIsoOrEpochMillis(lastActivityStr)
+                    val isActive = sItem.optBooleanOrNull("IsActive", "isActive") ?: true
+                    val isTrulyActive = nowPlaying != null || (isActive && (lastActivityTime == 0L || (System.currentTimeMillis() - lastActivityTime) < 5 * 60 * 1000L))
+                    if (!isTrulyActive) continue
+
+                    val mediaTitle = formatNowPlayingDescription(nowPlaying, nowPlaying?.optStringOrNull("Name", "name"))
                     val watchingDesc = when {
                         !mediaTitle.isNullOrBlank() -> mediaTitle
                         !devName.isNullOrBlank() -> "Online on $devName"
@@ -584,11 +627,14 @@ class SdkJellyfinSocialRepository(
                                 val uid = idStr.parseUuidOrNull() ?: continue
                                 if (uid == session.user.id) continue
                                 val isOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
-                                    ?: userObj.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
-                                    ?: false
+                                     ?: userObj.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
+                                     ?: false
                                 val watchingObj = item.optJSONObject("NowPlaying") ?: item.optJSONObject("nowPlaying")
-                                val watching = watchingObj?.optStringOrNull("Name", "name")
-                                    ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching")
+                                val watching = formatNowPlayingDescription(
+                                    watchingObj,
+                                    watchingObj?.optStringOrNull("Name", "name")
+                                        ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching")
+                                )
                                 val existing = userMap[uid]
                                 if (existing != null) {
                                     if (isOnline || existing.isOnline) {
@@ -693,9 +739,9 @@ class SdkJellyfinSocialRepository(
             val lastSeen = item.optStringOrNull("LastSeen", "lastSeen", "LastActivity", "lastActivity")
             val nowPlayingObj = item.optJSONObject("NowPlaying") ?: item.optJSONObject("nowPlaying")
             val lastWatchedObj = item.optJSONObject("LastWatched") ?: item.optJSONObject("lastWatched")
-            val currentlyWatching = nowPlayingObj?.optStringOrNull("Name", "name")
+            val currentlyWatching = formatNowPlayingDescription(nowPlayingObj, null)
                 ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching", "Activity", "activity")
-                ?: lastWatchedObj?.optStringOrNull("Name", "name")?.let { "Last watched $it" }
+                ?: formatNowPlayingDescription(lastWatchedObj, null)?.let { "Last watched $it" }
             val equippedBadgeName = item.optStringOrNull("EquippedBadgeName", "equippedBadgeName", "ShowcaseBadge", "showcaseBadge")
             val equippedBadgeIcon = item.optStringOrNull("EquippedBadgeIcon", "equippedBadgeIcon", "BadgeIcon", "badgeIcon")
 
@@ -983,5 +1029,33 @@ class SdkJellyfinSocialRepository(
             }
         }
         return null
+    }
+
+    private fun formatNowPlayingDescription(nowPlayingObj: JSONObject?, fallback: String? = null): String? {
+        if (nowPlayingObj == null) return fallback
+        val seriesName = nowPlayingObj.optStringOrNull("SeriesName", "seriesName")
+        val episodeName = nowPlayingObj.optStringOrNull("Name", "name", "EpisodeName", "episodeName")
+
+        return when {
+            !seriesName.isNullOrBlank() && !episodeName.isNullOrBlank() && !seriesName.equals(episodeName, ignoreCase = true) -> {
+                "$seriesName • $episodeName"
+            }
+            !seriesName.isNullOrBlank() -> seriesName
+            !episodeName.isNullOrBlank() -> episodeName
+            else -> fallback
+        }
+    }
+
+    private fun parseIsoOrEpochMillis(timestampStr: String?): Long {
+        if (timestampStr.isNullOrBlank()) return 0L
+        return try {
+            java.time.Instant.parse(timestampStr).toEpochMilli()
+        } catch (e: Exception) {
+            try {
+                timestampStr.toLong()
+            } catch (ex: Exception) {
+                0L
+            }
+        }
     }
 }

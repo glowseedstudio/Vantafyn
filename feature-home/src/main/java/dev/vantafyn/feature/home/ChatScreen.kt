@@ -53,6 +53,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import dev.vantafyn.core.ui.VantafynSkeletonBlock
+import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -65,6 +66,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -81,6 +83,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -130,10 +133,11 @@ fun ChatScreen(
     peer: JellyfinFriend,
     messages: List<JellyfinSocialMessage>,
     isSending: Boolean,
-    errorMessage: String?,
+    errorMessage: String? = null,
     onBack: () -> Unit,
     onSendMessage: (String) -> Unit,
     onRefresh: () -> Unit,
+    onClearChat: () -> Unit = {},
     availableMedia: List<JellyfinMediaCard> = emptyList(),
     onOpenMedia: (UUID) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -145,6 +149,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     var showActionSheet by remember { mutableStateOf(false) }
     var activeReactionTargetMessage by remember { mutableStateOf<JellyfinSocialMessage?>(null) }
+    var showClearChatConfirmation by remember { mutableStateOf(false) }
 
     val parsedReactions = remember(messages) {
         val map = mutableMapOf<String, MutableList<String>>()
@@ -240,6 +245,7 @@ fun ChatScreen(
             ChatHeader(
                 peer = peer,
                 onBack = onBack,
+                onClearChat = { showClearChatConfirmation = true },
                 modifier = Modifier.windowInsetsPadding(
                     WindowInsets.statusBars.union(WindowInsets.displayCutout),
                 ),
@@ -383,6 +389,69 @@ fun ChatScreen(
                 },
             )
         }
+
+        if (showClearChatConfirmation) {
+            AlertDialog(
+                modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
+                onDismissRequest = { showClearChatConfirmation = false },
+                containerColor = Color(0xFF0D1322),
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.DeleteOutline,
+                                contentDescription = null,
+                                tint = Color(0xFFFF4D6D),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Text(
+                            text = "Clear Chat?",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                        )
+                    }
+                },
+                text = {
+                    Text(
+                        text = "Are you sure you want to clear your chat history with ${peer.displayName}? Past messages will be removed from your screen.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = VantafynColors.Muted,
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showClearChatConfirmation = false
+                            onClearChat()
+                            onBack()
+                        },
+                    ) {
+                        Text(
+                            text = "Clear Chat",
+                            color = Color(0xFFFF3366),
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearChatConfirmation = false }) {
+                        Text("Cancel", color = Color.White)
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -392,6 +461,7 @@ fun ChatScreen(
 private fun ChatHeader(
     peer: JellyfinFriend,
     onBack: () -> Unit,
+    onClearChat: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -540,7 +610,12 @@ private fun ChatHeader(
                                 fontWeight = FontWeight.Medium,
                                 color = Color(0xFF55F0C0),
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
+                                overflow = TextOverflow.Clip,
+                                modifier = rememberLifecycleAwareMarquee(
+                                    iterations = Int.MAX_VALUE,
+                                    initialDelayMillis = 2000,
+                                    repeatDelayMillis = 3500,
+                                ),
                             )
                         } else {
                             Text(
@@ -558,6 +633,22 @@ private fun ChatHeader(
                         }
                     }
                 }
+            }
+
+            // Clear Chat Header Action
+            IconButton(
+                onClick = onClearChat,
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.05f)),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DeleteOutline,
+                    contentDescription = "Clear Chat",
+                    tint = Color.White.copy(alpha = 0.65f),
+                    modifier = Modifier.size(20.dp),
+                )
             }
         }
     }

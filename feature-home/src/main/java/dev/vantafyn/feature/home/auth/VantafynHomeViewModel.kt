@@ -1386,19 +1386,44 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             val summaryRes = summaryDeferred.await()
             val discoverableRes = discoverableDeferred.await()
 
+            val blockedUsers = _state.value.socialBlockedUsers.ifEmpty { loadBlockedUsers(session.user.id) }
+            val blockedUserIds = blockedUsers.map { it.userId }.toSet()
+
+            val clearedPrefs = runCatching {
+                getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+            }.getOrNull()
+
             _state.update { state ->
-                val convos = (convosRes as? JellyfinResult.Success)?.value ?: state.socialConversations
+                val rawConvos = ((convosRes as? JellyfinResult.Success)?.value ?: state.socialConversations)
+                    .filter { it.peerUserId !in blockedUserIds }
+                val convos = rawConvos.filter { conv ->
+                    val cutoff = maxOf(
+                        clearedPrefs?.getLong("cleared_${conv.peerUserId}", 0L) ?: 0L,
+                        clearedPrefs?.getLong("cleared_${conv.conversationId}", 0L) ?: 0L
+                    )
+                    if (cutoff > 0L) {
+                        val msgTime = parseIsoOrEpochMillis(conv.lastMessageTimestamp)
+                        msgTime > cutoff
+                    } else {
+                        true
+                    }
+                }
                 val unread = (summaryRes as? JellyfinResult.Success)?.value?.unreadMessageCount ?: convos.sumOf { it.unreadCount }
                 val fetchedDiscoverable = (discoverableRes as? JellyfinResult.Success)?.value ?: state.socialDiscoverableUsers
 
                 val realtimeUsers = state.watchPartyRealtimeMembers
-                    .filter { it.userId != null && it.userId != session.user.id }
+                    .filter { it.userId != null && it.userId != session.user.id && it.userId !in blockedUserIds }
                     .map { member ->
                         val uId = member.userId!!
                         val existing = fetchedDiscoverable.firstOrNull { it.userId == uId }
+                        val watching = if (!existing?.currentlyWatching.isNullOrBlank() && existing?.currentlyWatching != "Active now") {
+                            existing?.currentlyWatching
+                        } else {
+                            member.deviceName?.let { "Online on $it" } ?: existing?.currentlyWatching ?: "Active now"
+                        }
                         existing?.copy(
                             isOnline = true,
-                            currentlyWatching = member.deviceName?.let { "Online on $it" } ?: existing.currentlyWatching ?: "Active now",
+                            currentlyWatching = watching,
                         ) ?: JellyfinFriend(
                             userId = uId,
                             username = member.displayName,
@@ -1417,12 +1442,25 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
 
                 val mergedDiscoverable = (fetchedDiscoverable + realtimeUsers)
+                    .filter { it.userId !in blockedUserIds }
                     .associateBy { it.userId }
                     .values
                     .sortedWith(compareByDescending<JellyfinFriend> { it.isOnline }.thenBy { it.displayName })
 
-                val fetchedRequests = (requestsRes as? JellyfinResult.Success)?.value ?: state.socialRequests
-                val unseenIncoming = fetchedRequests.firstOrNull { it.isIncoming && it.id !in seenFriendRequestNotificationIds }
+                val allFetchedRequests = (requestsRes as? JellyfinResult.Success)?.value ?: state.socialRequests
+                val validRequests = mutableListOf<JellyfinFriendRequest>()
+                for (req in allFetchedRequests) {
+                    if (req.senderId in blockedUserIds || req.receiverId in blockedUserIds) {
+                        if (req.isIncoming) {
+                            // Auto-reject any spam friend requests from blocked users
+                            launch { socialRepository.declineOrRemoveFriend(session, req.id) }
+                        }
+                    } else {
+                        validRequests.add(req)
+                    }
+                }
+
+                val unseenIncoming = validRequests.firstOrNull { it.isIncoming && it.id !in seenFriendRequestNotificationIds }
                 val activeReq = if (unseenIncoming != null) {
                     seenFriendRequestNotificationIds += unseenIncoming.id
                     unseenIncoming
@@ -1432,11 +1470,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
                 state.copy(
                     isSocialLoading = false,
-                    socialFriends = (friendsRes as? JellyfinResult.Success)?.value ?: state.socialFriends,
-                    socialRequests = fetchedRequests,
+                    socialFriends = ((friendsRes as? JellyfinResult.Success)?.value ?: state.socialFriends).filter { it.userId !in blockedUserIds },
+                    socialRequests = validRequests,
                     socialConversations = convos,
                     socialUnreadCount = unread,
                     socialDiscoverableUsers = mergedDiscoverable,
+                    socialBlockedUsers = blockedUsers,
                     activeIncomingFriendRequest = activeReq,
                 )
             }
@@ -1545,7 +1584,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun openSocialPanel() {
         _state.update { it.copy(isSocialPanelOpen = true, activeSocialIslandPreview = null) }
-        loadSocialData()
+        loadSocialData(force = true)
     }
 
     fun closeSocialPanel() {
@@ -1584,9 +1623,24 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
         navigateMobile(MobileDestination.Chat)
         viewModelScope.launch {
+            val clearedPrefs = runCatching {
+                getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+            }.getOrNull()
+            val cutoff = maxOf(
+                clearedPrefs?.getLong("cleared_${friend.userId}", 0L) ?: 0L,
+                clearedPrefs?.getLong("cleared_$convId", 0L) ?: 0L
+            )
             when (val res = socialRepository.getMessages(session, convId, friend.userId)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(activeChatMessages = res.value) }
+                    val msgs = if (cutoff > 0L) {
+                        res.value.filter { msg ->
+                            val t = parseIsoOrEpochMillis(msg.timestamp)
+                            t == 0L || t > cutoff
+                        }
+                    } else {
+                        res.value
+                    }
+                    _state.update { it.copy(activeChatMessages = msgs) }
                     socialRepository.markConversationRead(session, convId)
                     loadSocialData(force = false)
                 }
@@ -1621,6 +1675,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val payload = "[media_rec|${detail.id}|$cleanTitle|$cleanType|$cleanYear|$cleanImage]"
 
         viewModelScope.launch {
+            try {
+                val clearedPrefs = getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+                clearedPrefs.edit()
+                    .remove("cleared_${friend.userId}")
+                    .remove("cleared_$convId")
+                    .apply()
+            } catch (e: Exception) {}
+
             when (val res = socialRepository.sendMessage(session, friend.userId, convId, payload)) {
                 is JellyfinResult.Success -> {
                     _state.update {
@@ -1645,6 +1707,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val peer = _state.value.activeChatPeer ?: return
         val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == peer.userId }?.conversationId ?: peer.userId.toString()
         viewModelScope.launch {
+            try {
+                val clearedPrefs = getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+                clearedPrefs.edit()
+                    .remove("cleared_${peer.userId}")
+                    .remove("cleared_$convId")
+                    .apply()
+            } catch (e: Exception) {}
+
             _state.update { it.copy(isSendingChatMessage = true, chatErrorMessage = null) }
             when (val res = socialRepository.sendMessage(session, peer.userId, convId, text)) {
                 is JellyfinResult.Success -> {
@@ -1664,6 +1734,61 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                 }
+            }
+        }
+    }
+
+    fun deleteConversation(conversation: JellyfinSocialConversation) {
+        val session = _state.value.session ?: return
+        val peerId = conversation.peerUserId
+        val convId = conversation.conversationId
+        val clearedCutoff = System.currentTimeMillis()
+
+        try {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+            prefs.edit()
+                .putLong("cleared_$peerId", clearedCutoff)
+                .putLong("cleared_$convId", clearedCutoff)
+                .apply()
+        } catch (e: Exception) {}
+
+        _state.update { curr ->
+            val updatedConvos = curr.socialConversations.filter { it.conversationId != convId && it.peerUserId != peerId }
+            curr.copy(
+                socialConversations = updatedConvos,
+                socialUnreadCount = updatedConvos.sumOf { it.unreadCount },
+                activeChatMessages = if (curr.activeChatPeer?.userId == peerId) emptyList() else curr.activeChatMessages,
+                mobileMessage = "Conversation cleared",
+            )
+        }
+
+        viewModelScope.launch {
+            socialRepository.deleteOrClearConversation(session, convId, peerId)
+            loadSocialData(force = false)
+        }
+    }
+
+    fun clearChatWithActivePeer() {
+        val peer = _state.value.activeChatPeer ?: return
+        val conv = _state.value.socialConversations.firstOrNull { it.peerUserId == peer.userId }
+        val convId = conv?.conversationId ?: peer.userId.toString()
+        val dummyConv = conv ?: JellyfinSocialConversation(
+            conversationId = convId,
+            peerUserId = peer.userId,
+            peerName = peer.displayName,
+        )
+        deleteConversation(dummyConv)
+    }
+
+    private fun parseIsoOrEpochMillis(timestampStr: String?): Long {
+        if (timestampStr.isNullOrBlank()) return 0L
+        return try {
+            java.time.Instant.parse(timestampStr).toEpochMilli()
+        } catch (e: Exception) {
+            try {
+                timestampStr.toLong()
+            } catch (ex: Exception) {
+                0L
             }
         }
     }
@@ -1717,6 +1842,97 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         }
+    }
+
+    fun blockUser(targetUserId: UUID, displayName: String, username: String, avatarUrl: String? = null) {
+        val session = _state.value.session ?: return
+        val currentBlocked = _state.value.socialBlockedUsers.toMutableList()
+        if (currentBlocked.none { it.userId == targetUserId }) {
+            currentBlocked.add(
+                dev.vantafyn.core.jellyfin.JellyfinBlockedUser(
+                    userId = targetUserId,
+                    username = username,
+                    displayName = displayName,
+                    avatarUrl = avatarUrl,
+                    blockedAtTimestamp = System.currentTimeMillis(),
+                )
+            )
+        }
+        persistBlockedUsers(session.user.id, currentBlocked)
+
+        _state.update { state ->
+            state.copy(
+                socialBlockedUsers = currentBlocked,
+                socialFriends = state.socialFriends.filter { it.userId != targetUserId },
+                socialConversations = state.socialConversations.filter { it.peerUserId != targetUserId },
+                socialRequests = state.socialRequests.filter { it.senderId != targetUserId && it.receiverId != targetUserId },
+                socialDiscoverableUsers = state.socialDiscoverableUsers.filter { it.userId != targetUserId },
+                mobileMessage = "Blocked $displayName",
+            )
+        }
+
+        // Sever friendship and reject any pending invite on the server
+        viewModelScope.launch {
+            socialRepository.declineOrRemoveFriend(session, targetUserId.toString())
+        }
+    }
+
+    fun unblockUser(targetUserId: UUID) {
+        val session = _state.value.session ?: return
+        val unblockedUser = _state.value.socialBlockedUsers.firstOrNull { it.userId == targetUserId }
+        val currentBlocked = _state.value.socialBlockedUsers.filter { it.userId != targetUserId }
+        persistBlockedUsers(session.user.id, currentBlocked)
+
+        _state.update { state ->
+            state.copy(
+                socialBlockedUsers = currentBlocked,
+                mobileMessage = "Unblocked ${unblockedUser?.displayName ?: "user"}",
+            )
+        }
+        loadSocialData(force = true)
+    }
+
+    private fun loadBlockedUsers(userId: UUID): List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser> {
+        return try {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_blocked_users_$userId", Context.MODE_PRIVATE)
+            val rawJson = prefs.getString("blocked_list", "[]") ?: "[]"
+            val array = org.json.JSONArray(rawJson)
+            val list = mutableListOf<dev.vantafyn.core.jellyfin.JellyfinBlockedUser>()
+            for (i in 0 until array.length()) {
+                val obj = array.optJSONObject(i) ?: continue
+                val uIdStr = obj.optString("userId")
+                val uId = runCatching { UUID.fromString(uIdStr) }.getOrNull() ?: continue
+                list.add(
+                    dev.vantafyn.core.jellyfin.JellyfinBlockedUser(
+                        userId = uId,
+                        username = obj.optString("username", "User"),
+                        displayName = obj.optString("displayName", "User"),
+                        avatarUrl = obj.optString("avatarUrl").takeIf { it.isNotBlank() && it != "null" },
+                        blockedAtTimestamp = obj.optLong("blockedAtTimestamp", System.currentTimeMillis()),
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun persistBlockedUsers(userId: UUID, list: List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser>) {
+        try {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_blocked_users_$userId", Context.MODE_PRIVATE)
+            val array = org.json.JSONArray()
+            for (u in list) {
+                val obj = org.json.JSONObject()
+                obj.put("userId", u.userId.toString())
+                obj.put("username", u.username)
+                obj.put("displayName", u.displayName)
+                obj.put("avatarUrl", u.avatarUrl ?: "")
+                obj.put("blockedAtTimestamp", u.blockedAtTimestamp)
+                array.put(obj)
+            }
+            prefs.edit().putString("blocked_list", array.toString()).apply()
+        } catch (e: Exception) {}
     }
 
     fun sendFriendRequest(target: String) {
@@ -3756,9 +3972,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         val uId = member.userId ?: continue
                         if (uId == session.user.id) continue
                         val existing = currentMap[uId]
+                        val watching = if (!existing?.currentlyWatching.isNullOrBlank() && existing?.currentlyWatching != "Active now") {
+                            existing?.currentlyWatching
+                        } else {
+                            member.deviceName?.let { "Online on $it" } ?: existing?.currentlyWatching ?: "Active now"
+                        }
                         currentMap[uId] = existing?.copy(
                             isOnline = true,
-                            currentlyWatching = member.deviceName?.let { "Online on $it" } ?: existing.currentlyWatching ?: "Active now",
+                            currentlyWatching = watching,
                         ) ?: JellyfinFriend(
                             userId = uId,
                             username = member.displayName,
@@ -5180,6 +5401,7 @@ data class VantafynHomeUiState(
     val socialDiscoverableUsers: List<JellyfinFriend> = emptyList(),
     val activeIncomingFriendRequest: dev.vantafyn.core.jellyfin.JellyfinFriendRequest? = null,
     val activeSocialTab: dev.vantafyn.feature.home.SocialTab = dev.vantafyn.feature.home.SocialTab.Messages,
+    val socialBlockedUsers: List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser> = emptyList(),
 ) {
     val currentWatchPartyCandidate: WatchPartyCandidate?
         get() = watchPartyCandidates.getOrNull(watchPartyCurrentIndex)

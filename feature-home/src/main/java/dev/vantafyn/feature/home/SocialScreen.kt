@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -42,6 +43,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -64,6 +67,12 @@ import android.content.Context
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Block
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material.icons.rounded.DeleteOutline
+import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
@@ -148,6 +157,10 @@ fun SocialScreen(
     onDeclineRequest: (String) -> Unit,
     onSendRequest: (String) -> Unit,
     onRemoveFriend: (JellyfinFriend) -> Unit = {},
+    blockedUsers: List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser> = emptyList(),
+    onBlockUser: (java.util.UUID, String, String, String?) -> Unit = { _, _, _, _ -> },
+    onUnblockUser: (java.util.UUID) -> Unit = {},
+    onDeleteConversation: (JellyfinSocialConversation) -> Unit = {},
     selectedTab: SocialTab = SocialTab.Messages,
     onSelectTab: (SocialTab) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -159,6 +172,9 @@ fun SocialScreen(
     var showManualUsernameDialog by remember { mutableStateOf(false) }
     var activeFriendActionTarget by remember { mutableStateOf<JellyfinFriend?>(null) }
     var showRemoveConfirmationFor by remember { mutableStateOf<JellyfinFriend?>(null) }
+    var showBlockConfirmationFor by remember { mutableStateOf<Triple<UUID, String, String>?>(null) }
+    var showDeleteConversationConfirmationFor by remember { mutableStateOf<JellyfinSocialConversation?>(null) }
+    var showBlockedUsersSheet by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
     val prefs = remember(context) { context.getSharedPreferences("vantafyn_social_prefs", Context.MODE_PRIVATE) }
@@ -229,28 +245,51 @@ fun SocialScreen(
                     color = VantafynColors.Ink,
                 )
             }
-            var isRefreshing by remember { mutableStateOf(false) }
-            LaunchedEffect(isLoading) {
-                if (!isLoading) isRefreshing = false
-            }
-            val refreshRotation by animateFloatAsState(
-                targetValue = if (isRefreshing || isLoading) 360f else 0f,
-                animationSpec = if (isRefreshing || isLoading) infiniteRepeatable(
-                    animation = tween(800, easing = LinearEasing),
-                    repeatMode = RepeatMode.Restart,
-                ) else tween(300),
-                label = "refreshRotation",
-            )
-            IconButton(onClick = {
-                isRefreshing = true
-                onRefresh()
-            }) {
-                Icon(
-                    imageVector = Icons.Rounded.Refresh,
-                    contentDescription = "Refresh",
-                    tint = if (isRefreshing || isLoading) VantafynColors.Primary else VantafynColors.Ink.copy(alpha = 0.85f),
-                    modifier = Modifier.rotate(refreshRotation),
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (blockedUsers.isNotEmpty()) {
+                    IconButton(onClick = { showBlockedUsersSheet = true }) {
+                        Box(contentAlignment = Alignment.TopEnd) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shield,
+                                contentDescription = "Blocked Users",
+                                tint = Color(0xFFFF4D6D),
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF3366)),
+                            )
+                        }
+                    }
+                }
+                var isRefreshing by remember { mutableStateOf(false) }
+                LaunchedEffect(isLoading) {
+                    if (!isLoading) isRefreshing = false
+                }
+                val refreshRotation by animateFloatAsState(
+                    targetValue = if (isRefreshing || isLoading) 360f else 0f,
+                    animationSpec = if (isRefreshing || isLoading) infiniteRepeatable(
+                        animation = tween(800, easing = LinearEasing),
+                        repeatMode = RepeatMode.Restart,
+                    ) else tween(300),
+                    label = "refreshRotation",
                 )
+                IconButton(onClick = {
+                    isRefreshing = true
+                    onRefresh()
+                }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Refresh,
+                        contentDescription = "Refresh",
+                        tint = if (isRefreshing || isLoading) VantafynColors.Primary else VantafynColors.Ink.copy(alpha = 0.85f),
+                        modifier = Modifier.rotate(refreshRotation),
+                    )
+                }
             }
         }
 
@@ -629,6 +668,10 @@ fun SocialScreen(
                 activeFriendActionTarget = null
                 showRemoveConfirmationFor = target
             },
+            onRequestBlock = {
+                activeFriendActionTarget = null
+                showBlockConfirmationFor = Triple(target.userId, target.displayName, target.username)
+            },
         )
     }
 
@@ -643,6 +686,80 @@ fun SocialScreen(
             onOpenChat = {
                 activeConversationActionTarget = null
                 onOpenConversation(target)
+            },
+            onRequestDelete = {
+                activeConversationActionTarget = null
+                showDeleteConversationConfirmationFor = target
+            },
+            onRequestBlock = {
+                activeConversationActionTarget = null
+                showBlockConfirmationFor = Triple(target.peerUserId, target.peerName, target.peerName)
+            },
+        )
+    }
+
+    if (showDeleteConversationConfirmationFor != null) {
+        val conv = showDeleteConversationConfirmationFor!!
+        AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
+            onDismissRequest = { showDeleteConversationConfirmationFor = null },
+            containerColor = Color(0xFF0D1322),
+            shape = RoundedCornerShape(24.dp),
+            title = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = null,
+                            tint = Color(0xFFFF4D6D),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Text(
+                        text = "Clear Chat?",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to clear your conversation history with ${conv.peerName}? Past messages will be removed from your chat.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = VantafynColors.Muted,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val toDelete = showDeleteConversationConfirmationFor
+                        showDeleteConversationConfirmationFor = null
+                        if (toDelete != null) {
+                            onDeleteConversation(toDelete)
+                        }
+                    },
+                ) {
+                    Text(
+                        text = "Clear Chat",
+                        color = Color(0xFFFF3366),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConversationConfirmationFor = null }) {
+                    Text("Cancel", color = Color.White)
+                }
             },
         )
     }
@@ -690,6 +807,83 @@ fun SocialScreen(
                 TextButton(onClick = { showRemoveConfirmationFor = null }) {
                     Text("Cancel", color = Color.White)
                 }
+            },
+        )
+    }
+
+    if (showBlockConfirmationFor != null) {
+        val target = showBlockConfirmationFor!!
+        val targetDisplayName = target.second
+        AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
+            onDismissRequest = { showBlockConfirmationFor = null },
+            containerColor = Color(0xFF0D1322),
+            shape = RoundedCornerShape(24.dp),
+            title = {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Block,
+                            contentDescription = null,
+                            tint = Color(0xFFFF3366),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                    Text(
+                        text = "Block $targetDisplayName?",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            },
+            text = {
+                Text(
+                    text = "They will be removed from your friends list, their messages and invites will be blocked, and they won't be able to contact you.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = VantafynColors.Muted,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val current = showBlockConfirmationFor
+                        showBlockConfirmationFor = null
+                        if (current != null) {
+                            onBlockUser(current.first, current.second, current.third, null)
+                        }
+                    },
+                ) {
+                    Text(
+                        text = "Block",
+                        color = Color(0xFFFF3366),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockConfirmationFor = null }) {
+                    Text("Cancel", color = Color.White)
+                }
+            },
+        )
+    }
+
+    if (showBlockedUsersSheet) {
+        BlockedUsersBottomSheet(
+            blockedUsers = blockedUsers,
+            onDismiss = { showBlockedUsersSheet = false },
+            onUnblock = { uId ->
+                onUnblockUser(uId)
             },
         )
     }
@@ -920,18 +1114,41 @@ private fun FriendCard(
                         }
                     }
                 }
-                Text(
-                    text = when {
-                        !friend.currentlyWatching.isNullOrBlank() -> "Watching ${friend.currentlyWatching}"
-                        friend.isOnline -> "Online"
-                        !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
-                        else -> "Offline"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (!friend.currentlyWatching.isNullOrBlank()) Color(0xFF55F0C0) else VantafynColors.Muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val isWatching = !friend.currentlyWatching.isNullOrBlank()
+                val statusText = when {
+                    isWatching -> "Watching ${friend.currentlyWatching}"
+                    friend.isOnline -> "Online"
+                    !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
+                    else -> "Offline"
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (isWatching) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = Color(0xFF55F0C0),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isWatching) Color(0xFF55F0C0) else VantafynColors.Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        modifier = if (isWatching) {
+                            rememberLifecycleAwareMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 2000,
+                                repeatDelayMillis = 3500,
+                            )
+                        } else Modifier,
+                    )
+                }
             }
 
             // Chat action button
@@ -960,6 +1177,7 @@ private fun FriendActionBottomSheet(
     onDismiss: () -> Unit,
     onOpenChat: () -> Unit,
     onRequestRemove: () -> Unit,
+    onRequestBlock: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1050,18 +1268,41 @@ private fun FriendActionBottomSheet(
                                 }
                             }
                         }
-                        Text(
-                            text = when {
-                                !friend.currentlyWatching.isNullOrBlank() -> "Watching ${friend.currentlyWatching}"
-                                friend.isOnline -> "Online"
-                                !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
-                                else -> "Offline"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (!friend.currentlyWatching.isNullOrBlank()) Color(0xFF55F0C0) else VantafynColors.Muted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        val isWatching = !friend.currentlyWatching.isNullOrBlank()
+                        val statusText = when {
+                            isWatching -> "Watching ${friend.currentlyWatching}"
+                            friend.isOnline -> "Online"
+                            !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
+                            else -> "Offline"
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            if (isWatching) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color(0xFF55F0C0),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                            }
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (isWatching) Color(0xFF55F0C0) else VantafynColors.Muted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Clip,
+                                modifier = if (isWatching) {
+                                    rememberLifecycleAwareMarquee(
+                                        iterations = Int.MAX_VALUE,
+                                        initialDelayMillis = 2000,
+                                        repeatDelayMillis = 3500,
+                                    )
+                                } else Modifier,
+                            )
+                        }
                     }
                 }
 
@@ -1095,13 +1336,12 @@ private fun FriendActionBottomSheet(
                     )
                 }
 
-                // Action 2: Remove Friend (Danger)
+                // Action 2: Remove Friend
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFFFF3366).copy(alpha = 0.10f))
-                        .border(1.dp, Color(0xFFFF3366).copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
                         .clickable {
                             onDismiss()
                             onRequestRemove()
@@ -1113,15 +1353,51 @@ private fun FriendActionBottomSheet(
                     Icon(
                         imageVector = Icons.Rounded.PersonRemove,
                         contentDescription = null,
-                        tint = Color(0xFFFF4D6D),
+                        tint = VantafynColors.Ink.copy(alpha = 0.85f),
                         modifier = Modifier.size(20.dp),
                     )
                     Text(
                         text = "Remove Friend",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFFFF4D6D),
+                        color = Color.White,
                     )
+                }
+
+                // Action 3: Block User (Danger)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFFF3366).copy(alpha = 0.10f))
+                        .border(1.dp, Color(0xFFFF3366).copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+                        .clickable {
+                            onDismiss()
+                            onRequestBlock()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Block,
+                        contentDescription = null,
+                        tint = Color(0xFFFF4D6D),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                        Text(
+                            text = "Block User",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFFFF4D6D),
+                        )
+                        Text(
+                            text = "Unfriend and prevent future messages & invites",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VantafynColors.Muted,
+                        )
+                    }
                 }
             }
         }
@@ -1395,18 +1671,27 @@ private fun OnlineUserTile(
         )
 
         // Activity / Status
+        val isWatching = !user.currentlyWatching.isNullOrBlank()
+        val activityText = when {
+            isWatching -> user.currentlyWatching.orEmpty()
+            user.isOnline -> "Active now"
+            else -> "Online"
+        }
         Text(
-            text = when {
-                !user.currentlyWatching.isNullOrBlank() -> user.currentlyWatching.orEmpty()
-                user.isOnline -> "Active now"
-                else -> "Online"
-            },
+            text = activityText,
             style = MaterialTheme.typography.labelSmall,
             fontSize = 9.5.sp,
             color = Color(0xFF55F0C0),
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+            overflow = TextOverflow.Clip,
             textAlign = TextAlign.Center,
+            modifier = if (isWatching) {
+                rememberLifecycleAwareMarquee(
+                    iterations = Int.MAX_VALUE,
+                    initialDelayMillis = 2000,
+                    repeatDelayMillis = 3500,
+                )
+            } else Modifier,
         )
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -1588,17 +1873,40 @@ private fun DiscoverUserCard(
                         }
                     }
                 }
-                Text(
-                    text = when {
-                        !user.currentlyWatching.isNullOrBlank() -> "Watching ${user.currentlyWatching}"
-                        user.isOnline -> "Active now"
-                        else -> "Server member"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (user.isOnline) Color(0xFF55F0C0) else VantafynColors.Muted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                val isWatching = !user.currentlyWatching.isNullOrBlank()
+                val statusText = when {
+                    isWatching -> "Watching ${user.currentlyWatching}"
+                    user.isOnline -> "Active now"
+                    else -> "Server member"
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (isWatching) {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = Color(0xFF55F0C0),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isWatching || user.isOnline) Color(0xFF55F0C0) else VantafynColors.Muted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip,
+                        modifier = if (isWatching) {
+                            rememberLifecycleAwareMarquee(
+                                iterations = Int.MAX_VALUE,
+                                initialDelayMillis = 2000,
+                                repeatDelayMillis = 3500,
+                            )
+                        } else Modifier,
+                    )
+                }
             }
 
             when {
@@ -1728,6 +2036,8 @@ private fun ConversationActionBottomSheet(
     onDismiss: () -> Unit,
     onToggleStar: () -> Unit,
     onOpenChat: () -> Unit,
+    onRequestDelete: () -> Unit,
+    onRequestBlock: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1906,6 +2216,294 @@ private fun ConversationActionBottomSheet(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = VantafynColors.Muted,
                                 )
+                            }
+                        }
+                    }
+
+                    // Clear Chat
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onRequestDelete()
+                            },
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DeleteOutline,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF4D6D),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    text = "Clear Chat",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFFF4D6D),
+                                )
+                                Text(
+                                    text = "Delete chat history and remove conversation thread",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Muted,
+                                )
+                            }
+                        }
+                    }
+
+                    // Block User
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onRequestBlock()
+                            },
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Block,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF4D6D),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    text = "Block User",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = Color(0xFFFF4D6D),
+                                )
+                                Text(
+                                    text = "Unfriend and block messages and future invites",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Muted,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BlockedUsersBottomSheet(
+    blockedUsers: List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser>,
+    onDismiss: () -> Unit,
+    onUnblock: (UUID) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.70f),
+        dragHandle = null,
+        modifier = modifier,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .vantafynAnimatedModalBorder(
+                    cornerRadius = 28.dp,
+                    strokeWidth = 1.35.dp,
+                    durationMillis = 4800,
+                )
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF141926).copy(alpha = 0.98f),
+                            Color(0xFF0F1420).copy(alpha = 0.98f),
+                            Color(0xFF080B12).copy(alpha = 0.98f),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Drag handle
+                Box(
+                    modifier = Modifier
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.25f))
+                        .align(Alignment.CenterHorizontally),
+                )
+
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFFFF3366).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shield,
+                                contentDescription = null,
+                                tint = Color(0xFFFF4D6D),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Blocked Users",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                            Text(
+                                text = "${blockedUsers.size} user${if (blockedUsers.size != 1) "s" else ""} blocked",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VantafynColors.Muted,
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = VantafynColors.Ink.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                if (blockedUsers.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shield,
+                                contentDescription = null,
+                                tint = VantafynColors.Muted.copy(alpha = 0.5f),
+                                modifier = Modifier.size(44.dp),
+                            )
+                            Text(
+                                text = "No blocked users",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = VantafynColors.Muted,
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 360.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(blockedUsers, key = { it.userId }) { user ->
+                            VantafynGlassCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                cornerRadius = 16.dp,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        AvatarCircle(
+                                            avatarUrl = user.avatarUrl,
+                                            name = user.displayName,
+                                            size = 42.dp,
+                                        )
+                                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                            Text(
+                                                text = user.displayName,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color.White,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = "@${user.username}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = VantafynColors.Muted,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+
+                                    Button(
+                                        onClick = { onUnblock(user.userId) },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = Color.White.copy(alpha = 0.10f),
+                                            contentColor = Color(0xFF55F0C0),
+                                        ),
+                                        shape = RoundedCornerShape(10.dp),
+                                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                                    ) {
+                                        Text(
+                                            text = "Unblock",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
