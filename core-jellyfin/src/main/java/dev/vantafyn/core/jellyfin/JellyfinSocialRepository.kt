@@ -637,24 +637,24 @@ class SdkJellyfinSocialRepository(
                     val lastActivityStr = sItem.optStringOrNull("LastActivityDate", "lastActivityDate")
                     val lastActivityTime = parseIsoOrEpochMillis(lastActivityStr)
                     val isActive = sItem.optBooleanOrNull("IsActive", "isActive") ?: true
-                    val timeDiff = if (lastActivityTime > 0L) Math.abs(System.currentTimeMillis() - lastActivityTime) else 0L
-                    val isTrulyActive = nowPlaying != null || (isActive && (lastActivityTime == 0L || timeDiff < 15 * 60 * 1000L))
+                    val timeDiff = if (lastActivityTime > 0L) (System.currentTimeMillis() - lastActivityTime) else 0L
+                    val isTrulyActive = nowPlaying != null || (isActive && lastActivityTime > 0L && timeDiff < 90 * 1000L)
                     Log.d("VantafynSocial", "Session: uId=$uId uName=$uName dev=$devName isAct=$isActive timeDiffMs=$timeDiff isTrulyAct=$isTrulyActive")
-                    if (!isTrulyActive) continue
 
                     val mediaTitle = formatNowPlayingDescription(nowPlaying, nowPlaying?.optStringOrNull("Name", "name"))
                     val watchingDesc = when {
                         !mediaTitle.isNullOrBlank() -> mediaTitle
-                        !devName.isNullOrBlank() -> "Online on $devName"
-                        else -> "Active now"
+                        isTrulyActive && !devName.isNullOrBlank() -> "Online on $devName"
+                        isTrulyActive -> "Active now"
+                        else -> null
                     }
 
                     val existing = userMap[uId]
                     if (existing != null) {
                         userMap[uId] = existing.copy(
-                            isOnline = true,
-                            currentlyWatching = mediaTitle ?: existing.currentlyWatching ?: watchingDesc,
-                            lastSeen = "Now",
+                            isOnline = isTrulyActive,
+                            currentlyWatching = if (isTrulyActive) (mediaTitle ?: existing.currentlyWatching ?: watchingDesc) else existing.currentlyWatching,
+                            lastSeen = if (isTrulyActive) "Now" else existing.lastSeen,
                         )
                     } else {
                         userMap[uId] = JellyfinFriend(
@@ -666,8 +666,8 @@ class SdkJellyfinSocialRepository(
                             rankName = "Server Member",
                             rankTier = 1,
                             currentScore = 0,
-                            isOnline = true,
-                            lastSeen = "Now",
+                            isOnline = isTrulyActive,
+                            lastSeen = if (isTrulyActive) "Now" else "Recently",
                             currentlyWatching = watchingDesc,
                             equippedBadgeName = null,
                             equippedBadgeIcon = null,
@@ -676,8 +676,6 @@ class SdkJellyfinSocialRepository(
                 }
 
                 // 4. Apply IsOnline & NowPlaying from the AchievementBadges friends endpoint
-                //    The plugin calculates Online via ISessionManager internally, ensuring accurate
-                //    online status for non-admin accounts.
                 runCatching {
                     val frConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/friends")
                     val frCode = frConn.responseCode
@@ -697,23 +695,30 @@ class SdkJellyfinSocialRepository(
                                 val idStr = userObj.optStringOrNull("Id", "id", "UserId", "userId") ?: continue
                                 val uid = idStr.parseUuidOrNull() ?: continue
                                 if (uid == session.user.id) continue
-                                val isOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
+                                val rawOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
                                      ?: userObj.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
                                      ?: false
+                                val lastSeen = item.optStringOrNull("LastSeen", "lastSeen", "LastActivityDate", "lastActivityDate")
+                                     ?: userObj.optStringOrNull("LastSeen", "lastSeen", "LastActivityDate", "lastActivityDate")
+                                val lastActivityTime = parseSocialTimestampToMillis(lastSeen).takeIf { it > 0L }
+                                     ?: parseIsoOrEpochMillis(lastSeen)
+                                val isRecent = lastActivityTime > 0L && (System.currentTimeMillis() - lastActivityTime) < 90 * 1000L
                                 val watchingObj = item.optJSONObject("NowPlaying") ?: item.optJSONObject("nowPlaying")
                                 val watching = formatNowPlayingDescription(
                                     watchingObj,
                                     watchingObj?.optStringOrNull("Name", "name")
                                         ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching")
                                 )
+                                val hasNowPlaying = watchingObj != null || !watching.isNullOrBlank()
+                                val isTrulyOnline = hasNowPlaying || (rawOnline && isRecent)
+
                                 val existing = userMap[uid]
                                 if (existing != null) {
-                                    if (isOnline || existing.isOnline) {
-                                        userMap[uid] = existing.copy(
-                                            isOnline = true,
-                                            currentlyWatching = watching ?: existing.currentlyWatching ?: "Active now",
-                                        )
-                                    }
+                                    userMap[uid] = existing.copy(
+                                        isOnline = isTrulyOnline,
+                                        currentlyWatching = if (isTrulyOnline) (watching ?: existing.currentlyWatching ?: "Active now") else existing.currentlyWatching,
+                                        lastSeen = if (isTrulyOnline) "Now" else (lastSeen ?: existing.lastSeen),
+                                    )
                                 }
                             }
                         }
@@ -736,35 +741,31 @@ class SdkJellyfinSocialRepository(
     // --- JSON Parsing Helpers ---
 
     private fun parseFriends(session: JellyfinSession, body: String): List<JellyfinFriend> {
+        val result = mutableListOf<JellyfinFriend>()
         val trimmed = body.trim()
-        val array = when {
-            trimmed.startsWith("[") -> JSONArray(trimmed)
+        val jsonArray: JSONArray = when {
+            trimmed.startsWith("[") -> runCatching { JSONArray(trimmed) }.getOrDefault(JSONArray())
             trimmed.startsWith("{") -> {
-                val json = JSONObject(trimmed)
-                json.optJSONArray("Friends")
-                    ?: json.optJSONArray("friends")
-                    ?: json.optJSONArray("Items")
-                    ?: json.optJSONArray("items")
-                    ?: json.optJSONArray("Leaderboard")
-                    ?: json.optJSONArray("leaderboard")
-                    ?: json.optJSONArray("Users")
-                    ?: json.optJSONArray("users")
-                    ?: json.optJSONArray("Entries")
-                    ?: json.optJSONArray("entries")
-                    ?: json.optJSONArray("Members")
-                    ?: json.optJSONArray("members")
-                    ?: json.optJSONArray("Results")
-                    ?: json.optJSONArray("results")
-                    ?: json.optJSONArray("Data")
-                    ?: json.optJSONArray("data")
-                    ?: JSONArray()
+                runCatching {
+                    val obj = JSONObject(trimmed)
+                    obj.optJSONArray("Items")
+                        ?: obj.optJSONArray("items")
+                        ?: obj.optJSONArray("Friends")
+                        ?: obj.optJSONArray("friends")
+                        ?: obj.optJSONArray("Users")
+                        ?: obj.optJSONArray("users")
+                        ?: obj.optJSONArray("Leaderboard")
+                        ?: obj.optJSONArray("leaderboard")
+                        ?: obj.optJSONArray("Members")
+                        ?: obj.optJSONArray("members")
+                        ?: JSONArray()
+                }.getOrDefault(JSONArray())
             }
             else -> JSONArray()
         }
 
-        val result = mutableListOf<JellyfinFriend>()
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
+        for (i in 0 until jsonArray.length()) {
+            val item = jsonArray.optJSONObject(i) ?: continue
             val nestedUser = item.optJSONObject("User")
                 ?: item.optJSONObject("user")
                 ?: item.optJSONObject("Friend")
@@ -813,7 +814,7 @@ class SdkJellyfinSocialRepository(
                 ?: nestedUser?.optStringOrNull("LastActivityDate", "lastActivityDate", "LastSeenDate", "lastSeenDate", "LastSeen", "lastSeen", "LastActivity", "lastActivity")
             val lastActivityTime = parseSocialTimestampToMillis(lastSeen).takeIf { it > 0L }
                 ?: parseIsoOrEpochMillis(lastSeen)
-            val isRecentActivity = lastActivityTime > 0L && (System.currentTimeMillis() - lastActivityTime) < 5 * 60 * 1000L
+            val isRecentActivity = lastActivityTime > 0L && (System.currentTimeMillis() - lastActivityTime) < 90 * 1000L
             val nowPlayingString = item.optStringOrNull(
                 "NowPlaying", "nowPlaying",
                 "CurrentlyWatching", "currentlyWatching",
@@ -851,7 +852,7 @@ class SdkJellyfinSocialRepository(
                 ?: nestedUser?.optStringOrNull("DeviceName", "deviceName", "Client", "client")
             val lastWatchedObj = item.optJSONObject("LastWatched") ?: item.optJSONObject("lastWatched")
             val mediaDescription = formatNowPlayingDescription(nowPlayingObj, nowPlayingString)
-            val isOnline = rawOnline || nowPlayingObj != null || isRecentActivity || !nowPlayingString.isNullOrBlank()
+            val isOnline = (nowPlayingObj != null || !nowPlayingString.isNullOrBlank()) || (rawOnline && isRecentActivity) || isRecentActivity
             val currentlyWatching = when {
                 !mediaDescription.isNullOrBlank() -> mediaDescription
                 isOnline && !devName.isNullOrBlank() -> "Online on $devName"

@@ -1475,7 +1475,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 val baseFriends = ((friendsRes as? JellyfinResult.Success)?.value ?: state.socialFriends).filter { it.userId !in blockedUserIds }
                 val updatedFriends = baseFriends.map { friend ->
                     val disc = mergedDiscoverable.firstOrNull { it.userId == friend.userId }
-                    val isOnline = friend.isOnline || (disc?.isOnline == true)
+                    val isOnline = disc?.isOnline ?: friend.isOnline
                     val watching = if (isOnline) (disc?.currentlyWatching ?: friend.currentlyWatching ?: "Active now") else (friend.currentlyWatching ?: disc?.currentlyWatching)
                     friend.copy(
                         isOnline = isOnline,
@@ -3870,11 +3870,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppForegrounded() {
         isAppForeground = true
-        if (_state.value.session != null) {
+        val session = _state.value.session
+        if (session != null) {
             offlineSyncScheduler.schedule()
             refreshAchievementsAvailability()
             if (_state.value.isAchievementsAvailable) {
                 pollAchievementUnlocks()
+            }
+            if (_state.value.socialEnabled) {
+                viewModelScope.launch { socialRepository.reportPresence(session) }
+                startSocialPolling()
             }
         }
         if (_state.value.adminOverview != null && _state.value.session?.user?.isAdministrator == true) {
@@ -3887,6 +3892,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppBackgrounded() {
         isAppForeground = false
+        stopSocialPolling()
         if (_state.value.activeWatchParty == null) {
             stopWatchPartyRealtime(clearInvites = false)
         }
