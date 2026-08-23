@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
-  <img src="https://img.shields.io/badge/Version-0.9.1-blueviolet.svg" alt="Version 0.9.1" />
+  <img src="https://img.shields.io/badge/Version-0.9.2-blueviolet.svg" alt="Version 0.9.2" />
   <a href="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml"><img src="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml/badge.svg" alt="Build & Verify" /></a>
   <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-2.0+-7F52FF.svg?logo=kotlin&logoColor=white" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=android&logoColor=white" alt="Jetpack Compose" /></a>

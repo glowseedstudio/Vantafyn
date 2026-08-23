@@ -2648,11 +2648,12 @@ private fun LyricsEmptyState(title: String, subtitle: String) {
 
 @Composable
 private fun MusicSuccessToast(message: String, modifier: Modifier = Modifier) {
-    VantafynGlassSurface(
-        modifier = modifier,
-        variant = VantafynGlassVariant.Card,
-        cornerRadius = 999.dp,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 11.dp),
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xFF0D1322).copy(alpha = 0.96f))
+            .border(1.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(999.dp))
+            .padding(horizontal = 18.dp, vertical = 12.dp),
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -2662,12 +2663,19 @@ private fun MusicSuccessToast(message: String, modifier: Modifier = Modifier) {
                 modifier = Modifier
                     .size(22.dp)
                     .clip(RoundedCornerShape(999.dp))
-                    .background(Color(0xFF1EC878).copy(alpha = 0.92f)),
+                    .background(Color(0xFF1EC878)),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(Icons.Rounded.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
             }
-            Text(message, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                text = message,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }

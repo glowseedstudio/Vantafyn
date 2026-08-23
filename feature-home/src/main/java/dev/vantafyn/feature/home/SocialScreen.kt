@@ -4,11 +4,18 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +52,7 @@ import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,6 +63,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -73,6 +82,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.material.icons.rounded.PersonRemove
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import dev.vantafyn.core.jellyfin.JellyfinFriend
 import dev.vantafyn.core.jellyfin.JellyfinFriendRequest
 import dev.vantafyn.core.jellyfin.JellyfinSocialConversation
@@ -89,6 +109,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 
 enum class SocialTab(val label: String, val icon: ImageVector) {
     Messages("Messages", Icons.Rounded.ChatBubbleOutline),
@@ -111,12 +132,18 @@ fun SocialScreen(
     onAcceptRequest: (String) -> Unit,
     onDeclineRequest: (String) -> Unit,
     onSendRequest: (String) -> Unit,
+    onRemoveFriend: (JellyfinFriend) -> Unit = {},
+    selectedTab: SocialTab = SocialTab.Messages,
+    onSelectTab: (SocialTab) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
 
-    var selectedTab by remember { mutableStateOf(SocialTab.Messages) }
     var searchQuery by remember { mutableStateOf("") }
+    val invitedUserIds = remember { mutableStateListOf<UUID>() }
+    var showManualUsernameDialog by remember { mutableStateOf(false) }
+    var activeFriendActionTarget by remember { mutableStateOf<JellyfinFriend?>(null) }
+    var showRemoveConfirmationFor by remember { mutableStateOf<JellyfinFriend?>(null) }
     val focusManager = LocalFocusManager.current
 
     val incomingRequests = remember(requests) { requests.filter { it.isIncoming } }
@@ -149,75 +176,40 @@ fun SocialScreen(
                     color = VantafynColors.Ink,
                 )
             }
-            IconButton(onClick = onRefresh) {
+            var isRefreshing by remember { mutableStateOf(false) }
+            LaunchedEffect(isLoading) {
+                if (!isLoading) isRefreshing = false
+            }
+            val refreshRotation by animateFloatAsState(
+                targetValue = if (isRefreshing || isLoading) 360f else 0f,
+                animationSpec = if (isRefreshing || isLoading) infiniteRepeatable(
+                    animation = tween(800, easing = LinearEasing),
+                    repeatMode = RepeatMode.Restart,
+                ) else tween(300),
+                label = "refreshRotation",
+            )
+            IconButton(onClick = {
+                isRefreshing = true
+                onRefresh()
+            }) {
                 Icon(
                     imageVector = Icons.Rounded.Refresh,
                     contentDescription = "Refresh",
-                    tint = VantafynColors.Ink.copy(alpha = 0.85f),
+                    tint = if (isRefreshing || isLoading) VantafynColors.Primary else VantafynColors.Ink.copy(alpha = 0.85f),
+                    modifier = Modifier.rotate(refreshRotation),
                 )
             }
         }
 
-        // Tab Row
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(bottom = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            SocialTab.entries.forEach { tab ->
-                val isSelected = selectedTab == tab
-                val badgeCount = when (tab) {
-                    SocialTab.Messages -> totalUnreadMessages
-                    SocialTab.Requests -> incomingRequests.size
-                    else -> 0
-                }
-                VantafynGlassChip(
-                    selected = isSelected,
-                    onClick = { selectedTab = tab },
-                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 7.dp),
-                ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            imageVector = tab.icon,
-                            contentDescription = null,
-                            tint = if (isSelected) Color.White else VantafynColors.Muted,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Text(
-                            text = tab.label,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isSelected) Color.White else VantafynColors.Muted,
-                        )
-                        if (badgeCount > 0) {
-                            Box(
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(Color(0xFFFF3366))
-                                    .padding(horizontal = 6.dp, vertical = 1.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = badgeCount.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         // Main Tab Content
-        if (isLoading) {
+        val showFullScreenLoading = isLoading &&
+            friends.isEmpty() &&
+            conversations.isEmpty() &&
+            incomingRequests.isEmpty() &&
+            outgoingRequests.isEmpty() &&
+            discoverableUsers.isEmpty()
+
+        if (showFullScreenLoading) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -243,12 +235,12 @@ fun SocialScreen(
                                 title = "No Messages Yet",
                                 description = "Start a chat with one of your friends to share watch recommendations!",
                                 actionText = "View Friends",
-                                onAction = { selectedTab = SocialTab.Friends },
+                                onAction = { onSelectTab(SocialTab.Friends) },
                             )
                         } else {
                             LazyColumn(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                                contentPadding = PaddingValues(bottom = 24.dp),
+                                contentPadding = PaddingValues(bottom = 110.dp),
                             ) {
                                 items(conversations, key = { it.conversationId }) { conv ->
                                     ConversationCard(
@@ -266,17 +258,18 @@ fun SocialScreen(
                                 title = "No Friends Added",
                                 description = "Connect with friends on this server to see their achievement ranks and send messages.",
                                 actionText = "Add a Friend",
-                                onAction = { selectedTab = SocialTab.Find },
+                                onAction = { onSelectTab(SocialTab.Find) },
                             )
                         } else {
                             LazyColumn(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
-                                contentPadding = PaddingValues(bottom = 24.dp),
+                                contentPadding = PaddingValues(bottom = 110.dp),
                             ) {
                                 items(friends, key = { it.userId.toString() }) { friend ->
                                     FriendCard(
                                         friend = friend,
                                         onChat = { onOpenChat(friend) },
+                                        onLongPress = { activeFriendActionTarget = friend },
                                     )
                                 }
                             }
@@ -289,12 +282,12 @@ fun SocialScreen(
                                 title = "No Friend Requests",
                                 description = "You have no pending incoming or outgoing friend requests.",
                                 actionText = "Find Friends",
-                                onAction = { selectedTab = SocialTab.Find },
+                                onAction = { onSelectTab(SocialTab.Find) },
                             )
                         } else {
                             LazyColumn(
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
-                                contentPadding = PaddingValues(bottom = 24.dp),
+                                contentPadding = PaddingValues(bottom = 110.dp),
                             ) {
                                 if (incomingRequests.isNotEmpty()) {
                                     item {
@@ -336,79 +329,148 @@ fun SocialScreen(
                     }
                     SocialTab.Find -> {
                         val existingFriendUserIds = remember(friends) { friends.map { it.userId }.toSet() }
-                        val existingRequestUserIds = remember(requests) {
-                            (requests.map { it.senderId } + requests.map { it.receiverId }).toSet()
-                        }
-                        val availableProfiles = remember(discoverableUsers, existingFriendUserIds, existingRequestUserIds) {
-                            discoverableUsers.filter { it.userId !in existingFriendUserIds && it.userId !in existingRequestUserIds }
-                        }
+                        val incomingRequestMap = remember(incomingRequests) { incomingRequests.associateBy { it.senderId } }
+                        val outgoingRequestUserIds = remember(outgoingRequests) { outgoingRequests.map { it.receiverId }.toSet() }
 
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .imePadding(),
-                            verticalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(bottom = 32.dp),
-                        ) {
-                            item {
-                                VantafynGlassCard(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    cornerRadius = 20.dp,
-                                    contentPadding = PaddingValues(16.dp),
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                        Text(
-                                            text = "Add Friend by Username",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = VantafynColors.Ink,
-                                        )
-                                        Text(
-                                            text = "Send a friend request to any registered user on this Jellyfin server.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = VantafynColors.Muted,
-                                        )
-                                        VantafynTextField(
-                                            value = searchQuery,
-                                            onValueChange = { searchQuery = it },
-                                            label = "Username",
-                                            placeholder = "Enter Jellyfin username",
-                                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                                            modifier = Modifier.fillMaxWidth(),
-                                        )
-                                        VantafynButton(
-                                            text = "Send Friend Request",
-                                            enabled = searchQuery.isNotBlank(),
-                                            onClick = {
-                                                if (searchQuery.isNotBlank()) {
-                                                    onSendRequest(searchQuery.trim())
-                                                    searchQuery = ""
-                                                    focusManager.clearFocus()
+                        val onlineProfiles = remember(discoverableUsers) { discoverableUsers.filter { it.isOnline } }
+                        val offlineProfiles = remember(discoverableUsers) { discoverableUsers.filter { !it.isOnline } }
+
+                        if (discoverableUsers.isEmpty()) {
+                            SocialEmptyView(
+                                icon = Icons.Rounded.PersonAdd,
+                                title = "No Server Members Found",
+                                description = "Search and connect with friends on your Jellyfin server by username.",
+                                actionText = "Invite by Username",
+                                onAction = { showManualUsernameDialog = true },
+                            )
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .imePadding(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                contentPadding = PaddingValues(bottom = 110.dp),
+                            ) {
+                                if (onlineProfiles.isNotEmpty()) {
+                                    item {
+                                        VantafynGlassCard(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 4.dp),
+                                            cornerRadius = 24.dp,
+                                            contentPadding = PaddingValues(14.dp),
+                                        ) {
+                                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                                Row(
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    modifier = Modifier.padding(horizontal = 2.dp),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(8.dp)
+                                                            .clip(CircleShape)
+                                                            .background(Color(0xFF55F0C0)),
+                                                    )
+                                                    Text(
+                                                        text = "ONLINE USERS (${onlineProfiles.size})",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.Bold,
+                                                        letterSpacing = 1.sp,
+                                                        color = Color(0xFF55F0C0),
+                                                    )
                                                 }
+
+                                                FlowRow(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                                ) {
+                                                    onlineProfiles.forEach { user ->
+                                                        val isFriend = user.userId in existingFriendUserIds
+                                                        val incomingReq = incomingRequestMap[user.userId]
+                                                        val isOutgoing = user.userId in outgoingRequestUserIds || user.userId in invitedUserIds
+
+                                                        OnlineUserTile(
+                                                            user = user,
+                                                            isFriend = isFriend,
+                                                            incomingRequestId = incomingReq?.id,
+                                                            isOutgoingPending = isOutgoing,
+                                                            onAdd = {
+                                                                invitedUserIds.add(user.userId)
+                                                                onSendRequest(user.userId.toString())
+                                                            },
+                                                            onAccept = { reqId -> onAcceptRequest(reqId) },
+                                                            onOpenChat = { onOpenChat(user) },
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (offlineProfiles.isNotEmpty()) {
+                                    item {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "OTHER SERVER MEMBERS (${offlineProfiles.size})",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 1.sp,
+                                            color = VantafynColors.Muted,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                                        )
+                                    }
+                                    items(offlineProfiles, key = { it.userId.toString() }) { user ->
+                                        val isFriend = user.userId in existingFriendUserIds
+                                        val incomingReq = incomingRequestMap[user.userId]
+                                        val isOutgoing = user.userId in outgoingRequestUserIds || user.userId in invitedUserIds
+
+                                        DiscoverUserCard(
+                                            user = user,
+                                            isFriend = isFriend,
+                                            incomingRequestId = incomingReq?.id,
+                                            isOutgoingPending = isOutgoing,
+                                            onAdd = {
+                                                invitedUserIds.add(user.userId)
+                                                onSendRequest(user.userId.toString())
                                             },
-                                            modifier = Modifier.fillMaxWidth(),
+                                            onAccept = { reqId -> onAcceptRequest(reqId) },
+                                            onOpenChat = { onOpenChat(user) },
                                         )
                                     }
                                 }
-                            }
 
-                            if (availableProfiles.isNotEmpty()) {
                                 item {
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = "SERVER PROFILES (${availableProfiles.size})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp,
-                                        color = VantafynColors.Muted,
-                                        modifier = Modifier.padding(horizontal = 4.dp),
-                                    )
-                                }
-                                items(availableProfiles, key = { it.userId.toString() }) { user ->
-                                    DiscoverUserCard(
-                                        user = user,
-                                        onAdd = { onSendRequest(user.username) },
-                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .clickable { showManualUsernameDialog = true }
+                                            .background(Color.White.copy(alpha = 0.04f))
+                                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                                            .padding(14.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Row(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Search,
+                                                contentDescription = null,
+                                                tint = VantafynColors.Muted,
+                                                modifier = Modifier.size(16.dp),
+                                            )
+                                            Text(
+                                                text = "Can't find someone? Invite by username",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = VantafynColors.Muted,
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -416,6 +478,132 @@ fun SocialScreen(
                 }
             }
         }
+    }
+
+    if (showManualUsernameDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showManualUsernameDialog = false
+                searchQuery = ""
+            },
+            containerColor = Color(0xFF0D1322),
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
+            title = {
+                Text(
+                    text = "Invite Friend by Username",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = VantafynColors.Ink,
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Enter the Jellyfin username of the person you'd like to invite.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VantafynColors.Muted,
+                    )
+                    VantafynTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = "Username",
+                        placeholder = "Enter Jellyfin username",
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            },
+            confirmButton = {
+                VantafynButton(
+                    text = "Send Invite",
+                    enabled = searchQuery.isNotBlank(),
+                    onClick = {
+                        if (searchQuery.isNotBlank()) {
+                            onSendRequest(searchQuery.trim())
+                            searchQuery = ""
+                            showManualUsernameDialog = false
+                            focusManager.clearFocus()
+                        }
+                    },
+                )
+            },
+            dismissButton = {
+                IconButton(onClick = {
+                    showManualUsernameDialog = false
+                    searchQuery = ""
+                }) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Cancel",
+                        tint = VantafynColors.Muted,
+                    )
+                }
+            },
+        )
+    }
+
+    if (activeFriendActionTarget != null) {
+        val target = activeFriendActionTarget!!
+        FriendActionBottomSheet(
+            friend = target,
+            onDismiss = { activeFriendActionTarget = null },
+            onOpenChat = {
+                activeFriendActionTarget = null
+                onOpenChat(target)
+            },
+            onRequestRemove = {
+                activeFriendActionTarget = null
+                showRemoveConfirmationFor = target
+            },
+        )
+    }
+
+    if (showRemoveConfirmationFor != null) {
+        val friendToRemove = showRemoveConfirmationFor!!
+        AlertDialog(
+            modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp, strokeWidth = 1.3.dp),
+            onDismissRequest = { showRemoveConfirmationFor = null },
+            containerColor = Color(0xFF0D1322),
+            shape = RoundedCornerShape(24.dp),
+            title = {
+                Text(
+                    text = "Remove Friend",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                )
+            },
+            text = {
+                Text(
+                    text = "Are you sure you want to remove ${friendToRemove.displayName} from your friends list? This will remove the friendship for both of you.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = VantafynColors.Muted,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val toRemove = showRemoveConfirmationFor
+                        showRemoveConfirmationFor = null
+                        if (toRemove != null) {
+                            onRemoveFriend(toRemove)
+                        }
+                    },
+                ) {
+                    Text(
+                        text = "Remove",
+                        color = Color(0xFFFF3366),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRemoveConfirmationFor = null }) {
+                    Text("Cancel", color = Color.White)
+                }
+            },
+        )
     }
 }
 
@@ -521,10 +709,25 @@ private fun ConversationCard(
 private fun FriendCard(
     friend: JellyfinFriend,
     onChat: () -> Unit,
+    onLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val haptic = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+
     VantafynGlassCard(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onChat,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                },
+            ),
         cornerRadius = 20.dp,
         contentPadding = PaddingValues(14.dp),
     ) {
@@ -615,6 +818,181 @@ private fun FriendCard(
                     tint = VantafynColors.Ink,
                     modifier = Modifier.size(20.dp),
                 )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FriendActionBottomSheet(
+    friend: JellyfinFriend,
+    onDismiss: () -> Unit,
+    onOpenChat: () -> Unit,
+    onRequestRemove: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.70f),
+        dragHandle = null,
+        modifier = modifier,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .vantafynAnimatedModalBorder(
+                    cornerRadius = 28.dp,
+                    strokeWidth = 1.35.dp,
+                    durationMillis = 4800,
+                )
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF141926).copy(alpha = 0.98f),
+                            Color(0xFF0F1420).copy(alpha = 0.98f),
+                            Color(0xFF080B12).copy(alpha = 0.98f),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 18.dp, vertical = 16.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Drag Handle
+                Box(
+                    modifier = Modifier
+                        .size(width = 38.dp, height = 4.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.25f))
+                        .align(Alignment.CenterHorizontally),
+                )
+
+                // Header with friend profile preview
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    AvatarCircle(
+                        avatarUrl = friend.avatarUrl,
+                        name = friend.displayName,
+                        size = 54.dp,
+                    )
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = friend.displayName,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = VantafynColors.Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            friend.rankName?.let { rank ->
+                                Surface(
+                                    shape = RoundedCornerShape(999.dp),
+                                    color = Color.White.copy(alpha = 0.08f),
+                                ) {
+                                    Text(
+                                        text = "Lvl ${friend.rankTier} • $rank",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = VantafynColors.Primary,
+                                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            text = when {
+                                !friend.currentlyWatching.isNullOrBlank() -> "Watching ${friend.currentlyWatching}"
+                                friend.isOnline -> "Online"
+                                !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
+                                else -> "Offline"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (!friend.currentlyWatching.isNullOrBlank()) Color(0xFF55F0C0) else VantafynColors.Muted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                // Action 1: Send Message
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .clickable {
+                            onDismiss()
+                            onOpenChat()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ChatBubbleOutline,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = "Send Message",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                    )
+                }
+
+                // Action 2: Remove Friend (Danger)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0xFFFF3366).copy(alpha = 0.10f))
+                        .border(1.dp, Color(0xFFFF3366).copy(alpha = 0.30f), RoundedCornerShape(16.dp))
+                        .clickable {
+                            onDismiss()
+                            onRequestRemove()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PersonRemove,
+                        contentDescription = null,
+                        tint = Color(0xFFFF4D6D),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = "Remove Friend",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xFFFF4D6D),
+                    )
+                }
             }
         }
     }
@@ -830,9 +1208,191 @@ private fun SocialEmptyView(
 }
 
 @Composable
+private fun OnlineUserTile(
+    user: JellyfinFriend,
+    isFriend: Boolean,
+    incomingRequestId: String?,
+    isOutgoingPending: Boolean,
+    onAdd: () -> Unit,
+    onAccept: (String) -> Unit,
+    onOpenChat: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .width(96.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(Color.White.copy(alpha = 0.055f))
+            .border(
+                width = 1.dp,
+                brush = Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.16f),
+                        Color.White.copy(alpha = 0.04f),
+                    ),
+                ),
+                shape = RoundedCornerShape(22.dp),
+            )
+            .padding(horizontal = 6.dp, vertical = 10.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        // Avatar with Live Presence dot
+        Box(contentAlignment = Alignment.BottomEnd) {
+            AvatarCircle(
+                avatarUrl = user.avatarUrl,
+                name = user.displayName,
+                size = 52.dp,
+            )
+            Box(
+                modifier = Modifier
+                    .size(13.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF55F0C0))
+                    .border(2.dp, Color(0xFF0F1420), CircleShape),
+            )
+        }
+
+        // Display Name
+        Text(
+            text = user.displayName,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+
+        // Activity / Status
+        Text(
+            text = when {
+                !user.currentlyWatching.isNullOrBlank() -> user.currentlyWatching.orEmpty()
+                user.isOnline -> "Active now"
+                else -> "Online"
+            },
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 9.5.sp,
+            color = Color(0xFF55F0C0),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Action Button
+        when {
+            isFriend -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+                        .clickable(onClick = onOpenChat)
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(12.dp),
+                        )
+                        Text(
+                            text = "Chat",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
+            incomingRequestId != null -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF8B5CF6))
+                        .clickable { onAccept(incomingRequestId) }
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Accept",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            }
+            isOutgoingPending -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "Pending",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+            else -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(VantafynGradients.accentHorizontal())
+                        .clickable(onClick = onAdd)
+                        .padding(vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.PersonAdd,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(11.dp),
+                        )
+                        Text(
+                            text = "Invite",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun DiscoverUserCard(
     user: JellyfinFriend,
+    isFriend: Boolean,
+    incomingRequestId: String?,
+    isOutgoingPending: Boolean,
     onAdd: () -> Unit,
+    onAccept: (String) -> Unit,
+    onOpenChat: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     VantafynGlassCard(
@@ -846,18 +1406,18 @@ private fun DiscoverUserCard(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
-                modifier = Modifier.size(48.dp),
+                modifier = Modifier.size(50.dp),
                 contentAlignment = Alignment.BottomEnd,
             ) {
                 AvatarCircle(
                     avatarUrl = user.avatarUrl,
                     name = user.displayName,
-                    size = 48.dp,
+                    size = 50.dp,
                 )
                 if (user.isOnline) {
                     Box(
                         modifier = Modifier
-                            .size(13.dp)
+                            .size(14.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF55F0C0))
                             .border(2.dp, VantafynColors.Surface, CircleShape),
@@ -866,43 +1426,125 @@ private fun DiscoverUserCard(
             }
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = user.displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    user.rankName?.let { rank ->
+                        if (rank.isNotBlank() && rank != "Rookie" && rank != "Server Member") {
+                            Surface(
+                                shape = RoundedCornerShape(999.dp),
+                                color = Color.White.copy(alpha = 0.08f),
+                            ) {
+                                Text(
+                                    text = "Lvl ${user.rankTier}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = VantafynColors.Primary,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
+                    }
+                }
                 Text(
-                    text = user.displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = VantafynColors.Ink,
+                    text = when {
+                        !user.currentlyWatching.isNullOrBlank() -> "Watching ${user.currentlyWatching}"
+                        user.isOnline -> "Active now"
+                        else -> "Server member"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (user.isOnline) Color(0xFF55F0C0) else VantafynColors.Muted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(
-                    text = if (user.isOnline) "Active Now" else "Server Member",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (user.isOnline) Color(0xFF55F0C0) else VantafynColors.Muted,
-                )
             }
-            VantafynGlassChip(
-                selected = true,
-                onClick = onAdd,
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.PersonAdd,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Text(
-                        text = "Add",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                    )
+
+            when {
+                isFriend -> {
+                    IconButton(
+                        onClick = onOpenChat,
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ChatBubbleOutline,
+                            contentDescription = "Message",
+                            tint = VantafynColors.Ink,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+                incomingRequestId != null -> {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color(0xFF8B5CF6))
+                            .clickable { onAccept(incomingRequestId) }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = "Accept",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                        )
+                    }
+                }
+                isOutgoingPending -> {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = Color.White.copy(alpha = 0.08f),
+                    ) {
+                        Text(
+                            text = "Pending",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = VantafynColors.Muted,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(VantafynGradients.accentHorizontal())
+                            .clickable(onClick = onAdd)
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PersonAdd,
+                                contentDescription = "Invite",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Text(
+                                text = "Invite",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                        }
+                    }
                 }
             }
         }

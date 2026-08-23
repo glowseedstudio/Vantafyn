@@ -1,5 +1,6 @@
 package dev.vantafyn.core.jellyfin
 
+import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,34 +47,25 @@ class SdkJellyfinSocialRepository(
     override suspend fun getFriends(session: JellyfinSession): JellyfinResult<List<JellyfinFriend>> =
         withContext(ioDispatcher) {
             runCatching {
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/friends")
-                var code = conn.responseCode
-                var body = if (code in 200..299) {
+                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/friends")
+                val code = conn.responseCode
+                val body = if (code in 200..299) {
                     conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 } else {
                     conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 }
                 conn.disconnect()
-
-                if (code !in 200..299) {
-                    // Fallback to /Plugins/AchievementBadges/friends
-                    conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends")
-                    code = conn.responseCode
-                    body = if (code in 200..299) {
-                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    } else {
-                        conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    }
-                    conn.disconnect()
-                }
+                Log.d("VantafynSocial", "getFriends [users/{id}/friends] -> HTTP $code (len=${body.length})")
 
                 if (code !in 200..299) {
                     return@withContext JellyfinResult.Failure("Friends unavailable (HTTP $code)")
                 }
 
                 val friends = parseFriends(session, body)
+                Log.d("VantafynSocial", "getFriends parsed: ${friends.size} friends")
                 JellyfinResult.Success(friends)
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "getFriends error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to load friends", error)
             }
         }
@@ -81,34 +73,25 @@ class SdkJellyfinSocialRepository(
     override suspend fun getFriendRequests(session: JellyfinSession): JellyfinResult<List<JellyfinFriendRequest>> =
         withContext(ioDispatcher) {
             runCatching {
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/requests")
-                var code = conn.responseCode
-                var body = if (code in 200..299) {
+                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/friends")
+                val code = conn.responseCode
+                val body = if (code in 200..299) {
                     conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 } else {
                     conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 }
                 conn.disconnect()
-
-                if (code !in 200..299) {
-                    // Fallback to user-scoped path
-                    conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/friends/requests")
-                    code = conn.responseCode
-                    body = if (code in 200..299) {
-                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    } else {
-                        conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    }
-                    conn.disconnect()
-                }
+                Log.d("VantafynSocial", "getFriendRequests [users/{id}/friends] -> HTTP $code (len=${body.length})")
 
                 if (code !in 200..299) {
                     return@withContext JellyfinResult.Failure("Friend requests unavailable (HTTP $code)")
                 }
 
                 val requests = parseFriendRequests(session, body)
+                Log.d("VantafynSocial", "getFriendRequests total found: ${requests.size}")
                 JellyfinResult.Success(requests)
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "getFriendRequests error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to load friend requests", error)
             }
         }
@@ -116,31 +99,70 @@ class SdkJellyfinSocialRepository(
     override suspend fun sendFriendRequest(session: JellyfinSession, targetUsernameOrId: String): JellyfinResult<Unit> =
         withContext(ioDispatcher) {
             runCatching {
-                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/requests")
-                conn.requestMethod = "POST"
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-
-                val payload = JSONObject().apply {
-                    put("target", targetUsernameOrId)
-                    put("username", targetUsernameOrId)
-                    put("userId", targetUsernameOrId)
+                var targetGuidStr = targetUsernameOrId.trim()
+                val parsedGuid = targetGuidStr.parseUuidOrNull()
+                if (parsedGuid != null) {
+                    targetGuidStr = parsedGuid.toString()
+                } else {
+                    val usersRes = getDiscoverableUsers(session)
+                    val matched = (usersRes as? JellyfinResult.Success)?.value?.firstOrNull {
+                        it.username.equals(targetUsernameOrId, ignoreCase = true) ||
+                        it.displayName.equals(targetUsernameOrId, ignoreCase = true)
+                    }
+                    if (matched != null) {
+                        targetGuidStr = matched.userId.toString()
+                    }
                 }
 
-                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(payload.toString())
-                    writer.flush()
+                Log.d("VantafynSocial", "sendFriendRequest sender=${session.user.id} target=$targetGuidStr")
+
+                // C# AchievementBadges controller:
+                //   POST /Plugins/AchievementBadges/users/{userId}/friends/{friendUserId}
+                val endpoint = "Plugins/AchievementBadges/users/${session.user.id}/friends/$targetGuidStr"
+                var success = false
+                var lastCode = 0
+                var lastErrorMessage = ""
+
+                try {
+                    val conn = session.openAuthenticatedConnection(endpoint)
+                    conn.requestMethod = "POST"
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 8000
+                    conn.setRequestProperty("Content-Length", "0")
+                    conn.doOutput = false
+
+                    lastCode = conn.responseCode
+                    val respBody = if (lastCode in 200..299) {
+                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } else {
+                        conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    }
+                    conn.disconnect()
+                    Log.d("VantafynSocial", "POST [$endpoint] -> HTTP $lastCode, resp: $respBody")
+
+                    val isExplicitFailure = respBody.contains("\"Success\":false", ignoreCase = true) ||
+                        respBody.contains("\"success\":false", ignoreCase = true)
+
+                    if (isExplicitFailure) {
+                        val msg = runCatching { JSONObject(respBody).optString("Message") }.getOrNull()
+                        if (!msg.isNullOrBlank()) lastErrorMessage = msg
+                    }
+
+                    success = lastCode in 200..299 && !isExplicitFailure
+                } catch (e: Exception) {
+                    Log.w("VantafynSocial", "POST [$endpoint] exception: ${e.message}")
                 }
 
-                val code = conn.responseCode
-                conn.disconnect()
-
-                if (code in 200..299) {
+                if (success) {
+                    Log.d("VantafynSocial", "sendFriendRequest SUCCESS for $targetGuidStr")
                     JellyfinResult.Success(Unit)
                 } else {
-                    JellyfinResult.Failure("Failed to send friend request (HTTP $code)")
+                    val errMsg = lastErrorMessage.ifBlank { "Failed to send friend request (HTTP $lastCode)" }
+                    Log.w("VantafynSocial", "sendFriendRequest FAILED: $errMsg")
+                    JellyfinResult.Failure(errMsg)
                 }
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "sendFriendRequest error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to send friend request", error)
             }
         }
@@ -148,32 +170,48 @@ class SdkJellyfinSocialRepository(
     override suspend fun acceptFriendRequest(session: JellyfinSession, requestId: String): JellyfinResult<Unit> =
         withContext(ioDispatcher) {
             runCatching {
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/requests/$requestId/accept")
-                conn.requestMethod = "POST"
-                var code = conn.responseCode
-                conn.disconnect()
+                // C# AchievementBadges controller:
+                //   POST /Plugins/AchievementBadges/users/{userId}/friends/{friendUserId}/accept
+                val cleanId = requestId.parseUuidOrNull()?.toString() ?: requestId.trim()
+                val endpoint = "Plugins/AchievementBadges/users/${session.user.id}/friends/$cleanId/accept"
 
-                if (code !in 200..299) {
-                    // Fallback to body-based accept
-                    conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/accept")
+                var success = false
+                var lastCode = 0
+                var lastErrorMessage = ""
+                try {
+                    val conn = session.openAuthenticatedConnection(endpoint)
                     conn.requestMethod = "POST"
-                    conn.doOutput = true
-                    conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                    val payload = JSONObject().apply { put("requestId", requestId) }
-                    OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                        writer.write(payload.toString())
-                        writer.flush()
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 8000
+                    conn.setRequestProperty("Content-Length", "0")
+                    conn.doOutput = false
+                    lastCode = conn.responseCode
+                    val respBody = if (lastCode in 200..299) {
+                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } else {
+                        conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                     }
-                    code = conn.responseCode
                     conn.disconnect()
+                    Log.d("VantafynSocial", "acceptFriendRequest POST [$endpoint] -> HTTP $lastCode, resp: $respBody")
+                    val isExplicitFailure = respBody.contains("\"Success\":false", ignoreCase = true)
+                    if (isExplicitFailure) {
+                        val msg = runCatching { JSONObject(respBody).optString("Message") }.getOrNull()
+                        if (!msg.isNullOrBlank()) lastErrorMessage = msg
+                    }
+                    if (lastCode in 200..299 && !isExplicitFailure) {
+                        success = true
+                    }
+                } catch (e: Exception) {
+                    Log.w("VantafynSocial", "acceptFriendRequest exception: ${e.message}")
                 }
 
-                if (code in 200..299) {
+                if (success) {
                     JellyfinResult.Success(Unit)
                 } else {
-                    JellyfinResult.Failure("Failed to accept friend request (HTTP $code)")
+                    JellyfinResult.Failure(lastErrorMessage.ifBlank { "Failed to accept friend request (HTTP $lastCode)" })
                 }
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "acceptFriendRequest error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to accept friend request", error)
             }
         }
@@ -181,52 +219,59 @@ class SdkJellyfinSocialRepository(
     override suspend fun declineOrRemoveFriend(session: JellyfinSession, targetId: String): JellyfinResult<Unit> =
         withContext(ioDispatcher) {
             runCatching {
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/requests/$targetId/decline")
-                conn.requestMethod = "POST"
-                var code = conn.responseCode
-                conn.disconnect()
+                // C# AchievementBadges controller:
+                //   DELETE /Plugins/AchievementBadges/users/{userId}/friends/{friendUserId}
+                val cleanId = targetId.parseUuidOrNull()?.toString() ?: targetId.trim()
+                val endpoint = "Plugins/AchievementBadges/users/${session.user.id}/friends/$cleanId"
 
-                if (code !in 200..299) {
-                    // Try DELETE /Plugins/AchievementBadges/friends/$targetId
-                    conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/$targetId")
+                var success = false
+                var lastCode = 0
+                try {
+                    val conn = session.openAuthenticatedConnection(endpoint)
                     conn.requestMethod = "DELETE"
-                    code = conn.responseCode
+                    conn.connectTimeout = 8000
+                    conn.readTimeout = 8000
+                    lastCode = conn.responseCode
+                    val respBody = if (lastCode in 200..299) {
+                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } else {
+                        conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    }
                     conn.disconnect()
+                    Log.d("VantafynSocial", "declineOrRemoveFriend DELETE [$endpoint] -> HTTP $lastCode, resp: $respBody")
+                    val isExplicitFailure = respBody.contains("\"Success\":false", ignoreCase = true)
+                    if (lastCode in 200..299 && !isExplicitFailure) {
+                        success = true
+                    }
+                } catch (e: Exception) {
+                    Log.w("VantafynSocial", "declineOrRemoveFriend exception: ${e.message}")
                 }
 
-                if (code in 200..299) {
+                if (success) {
                     JellyfinResult.Success(Unit)
                 } else {
-                    JellyfinResult.Failure("Failed to decline/remove friend (HTTP $code)")
+                    JellyfinResult.Failure("Failed to remove friend or decline request (HTTP $lastCode)")
                 }
             }.getOrElse { error ->
-                JellyfinResult.Failure(error.message ?: "Failed to remove friend", error)
+                Log.e("VantafynSocial", "declineOrRemoveFriend error", error)
+                JellyfinResult.Failure(error.message ?: "Failed to remove friend or decline request", error)
             }
         }
 
     override suspend fun getConversations(session: JellyfinSession): JellyfinResult<List<JellyfinSocialConversation>> =
         withContext(ioDispatcher) {
             runCatching {
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/conversations")
-                var code = conn.responseCode
-                var body = if (code in 200..299) {
+                // C# AchievementBadges controller:
+                //   GET /Plugins/AchievementBadges/users/{userId}/messages/threads
+                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/messages/threads")
+                val code = conn.responseCode
+                val body = if (code in 200..299) {
                     conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
                 } else {
                     conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                 }
                 conn.disconnect()
-
-                if (code !in 200..299) {
-                    // Fallback to /Plugins/AchievementBadges/messages/conversations
-                    conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/messages/conversations")
-                    code = conn.responseCode
-                    body = if (code in 200..299) {
-                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    } else {
-                        conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-                    }
-                    conn.disconnect()
-                }
+                Log.d("VantafynSocial", "getConversations [messages/threads] -> HTTP $code (len=${body.length})")
 
                 if (code !in 200..299) {
                     return@withContext JellyfinResult.Failure("Conversations unavailable (HTTP $code)")
@@ -235,6 +280,7 @@ class SdkJellyfinSocialRepository(
                 val conversations = parseConversations(session, body)
                 JellyfinResult.Success(conversations)
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "getConversations error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to load conversations", error)
             }
         }
@@ -246,19 +292,24 @@ class SdkJellyfinSocialRepository(
     ): JellyfinResult<List<JellyfinSocialMessage>> =
         withContext(ioDispatcher) {
             runCatching {
-                val encodedConvId = URLEncoder.encode(conversationId, Charsets.UTF_8.name())
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/messages?conversationId=$encodedConvId")
-                var code = conn.responseCode
-                var body = if (code in 200..299) {
-                    conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                } else {
-                    conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                // C# AchievementBadges controller:
+                //   GET /Plugins/AchievementBadges/users/{userId}/conversations/{convId}/messages
+                //   GET /Plugins/AchievementBadges/users/{userId}/messages/{otherUserId}
+                val endpoints = mutableListOf<String>()
+                if (conversationId.isNotBlank() && conversationId != peerUserId?.toString()) {
+                    endpoints.add("Plugins/AchievementBadges/users/${session.user.id}/conversations/$conversationId/messages")
                 }
-                conn.disconnect()
+                if (peerUserId != null) {
+                    endpoints.add("Plugins/AchievementBadges/users/${session.user.id}/messages/$peerUserId")
+                }
+                if (endpoints.isEmpty() && conversationId.isNotBlank()) {
+                    endpoints.add("Plugins/AchievementBadges/users/${session.user.id}/conversations/$conversationId/messages")
+                }
 
-                if (code !in 200..299 && peerUserId != null) {
-                    // Fallback to /Plugins/AchievementBadges/users/{userId}/messages/{peerId}
-                    conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/messages/$peerUserId")
+                var body = ""
+                var code = 0
+                for (endpoint in endpoints) {
+                    val conn = session.openAuthenticatedConnection(endpoint)
                     code = conn.responseCode
                     body = if (code in 200..299) {
                         conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -266,6 +317,7 @@ class SdkJellyfinSocialRepository(
                         conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
                     }
                     conn.disconnect()
+                    if (code in 200..299) break
                 }
 
                 if (code !in 200..299) {
@@ -275,6 +327,7 @@ class SdkJellyfinSocialRepository(
                 val messages = parseMessages(session, body, conversationId)
                 JellyfinResult.Success(messages)
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "getMessages error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to load messages", error)
             }
         }
@@ -287,18 +340,23 @@ class SdkJellyfinSocialRepository(
     ): JellyfinResult<JellyfinSocialMessage> =
         withContext(ioDispatcher) {
             runCatching {
-                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/messages")
+                // C# AchievementBadges controller:
+                //   POST /Plugins/AchievementBadges/users/{userId}/conversations/{convId}/messages (for existing convo)
+                //   POST /Plugins/AchievementBadges/users/{userId}/messages/{otherUserId} (for 1:1 DM)
+                val endpoint = if (!conversationId.isNullOrBlank() && conversationId != recipientId.toString()) {
+                    "Plugins/AchievementBadges/users/${session.user.id}/conversations/$conversationId/messages"
+                } else {
+                    "Plugins/AchievementBadges/users/${session.user.id}/messages/$recipientId"
+                }
+
+                val conn = session.openAuthenticatedConnection(endpoint)
                 conn.requestMethod = "POST"
                 conn.doOutput = true
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
 
                 val payload = JSONObject().apply {
-                    put("recipientId", recipientId.toString())
-                    if (!conversationId.isNullOrBlank()) {
-                        put("conversationId", conversationId)
-                    }
-                    put("content", text)
                     put("text", text)
+                    put("attachmentId", JSONObject.NULL)
                 }
 
                 OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
@@ -319,7 +377,10 @@ class SdkJellyfinSocialRepository(
                 }
 
                 val parsed = if (body.isNotBlank() && body.trim().startsWith("{")) {
-                    parseSingleMessage(session, JSONObject(body), conversationId ?: recipientId.toString())
+                    val root = JSONObject(body.trim())
+                    val sentObj = root.optJSONObject("Sent") ?: root.optJSONObject("sent") ?: root
+                    val returnedConvId = root.optStringOrNull("ConversationId", "conversationId") ?: conversationId ?: recipientId.toString()
+                    parseSingleMessage(session, sentObj, returnedConvId)
                 } else {
                     JellyfinSocialMessage(
                         messageId = UUID.randomUUID().toString(),
@@ -327,7 +388,7 @@ class SdkJellyfinSocialRepository(
                         senderId = session.user.id,
                         senderName = session.user.name,
                         senderAvatarTag = null,
-                        senderAvatarUrl = null,
+                        senderAvatarUrl = toUserAvatarUrl(session, session.user.id, null),
                         recipientId = recipientId,
                         content = text,
                         timestamp = null,
@@ -337,44 +398,23 @@ class SdkJellyfinSocialRepository(
                 }
                 JellyfinResult.Success(parsed)
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "sendMessage error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to send message", error)
             }
         }
 
     override suspend fun markConversationRead(session: JellyfinSession, conversationId: String): JellyfinResult<Unit> =
         withContext(ioDispatcher) {
-            runCatching {
-                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/messages/read")
-                conn.requestMethod = "POST"
-                conn.doOutput = true
-                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-
-                val payload = JSONObject().apply {
-                    put("conversationId", conversationId)
-                }
-
-                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(payload.toString())
-                    writer.flush()
-                }
-
-                val code = conn.responseCode
-                conn.disconnect()
-
-                if (code in 200..299) {
-                    JellyfinResult.Success(Unit)
-                } else {
-                    JellyfinResult.Failure("Failed to mark read (HTTP $code)")
-                }
-            }.getOrElse { error ->
-                JellyfinResult.Failure(error.message ?: "Failed to mark read", error)
-            }
+            // Getting messages automatically marks them read on the AchievementBadges plugin server.
+            JellyfinResult.Success(Unit)
         }
 
     override suspend fun getUnreadSummary(session: JellyfinSession): JellyfinResult<JellyfinSocialSummary> =
         withContext(ioDispatcher) {
             runCatching {
-                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/messages/unread-count")
+                // C# AchievementBadges controller:
+                //   GET /Plugins/AchievementBadges/users/{userId}/messages/unread-count
+                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/messages/unread-count")
                 val code = conn.responseCode
                 val body = if (code in 200..299) {
                     conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -383,35 +423,29 @@ class SdkJellyfinSocialRepository(
                 }
                 conn.disconnect()
 
-                if (code in 200..299 && body.isNotBlank()) {
-                    val json = if (body.trim().startsWith("{")) JSONObject(body) else JSONObject().put("unreadCount", body.trim().toIntOrNull() ?: 0)
-                    val unread = json.optIntOrNull("UnreadCount", "unreadCount", "Unread", "unread", "count") ?: 0
-                    val requests = json.optIntOrNull("PendingRequests", "pendingRequests", "Requests", "requests") ?: 0
-                    val friends = json.optIntOrNull("FriendCount", "friendCount", "Friends", "friends") ?: 0
-                    JellyfinResult.Success(
-                        JellyfinSocialSummary(
-                            friendCount = friends,
-                            incomingRequestCount = requests,
-                            outgoingRequestCount = 0,
-                            unreadMessageCount = unread,
-                        ),
-                    )
+                val unreadCount = if (code in 200..299 && body.isNotBlank() && body.trim().startsWith("{")) {
+                    JSONObject(body.trim()).optIntOrNull("Count", "count") ?: 0
                 } else {
-                    // Fallback to computing from conversations
-                    val convos = (getConversations(session) as? JellyfinResult.Success)?.value.orEmpty()
-                    val totalUnread = convos.sumOf { it.unreadCount }
-                    val requests = (getFriendRequests(session) as? JellyfinResult.Success)?.value.orEmpty().count { it.isIncoming }
-                    val friends = (getFriends(session) as? JellyfinResult.Success)?.value.orEmpty().size
-                    JellyfinResult.Success(
-                        JellyfinSocialSummary(
-                            friendCount = friends,
-                            incomingRequestCount = requests,
-                            outgoingRequestCount = 0,
-                            unreadMessageCount = totalUnread,
-                        ),
-                    )
+                    0
                 }
+
+                // Query friends count & pending request count from friends endpoint
+                val friendsRes = getFriends(session)
+                val friendCount = (friendsRes as? JellyfinResult.Success)?.value?.size ?: 0
+                val reqsRes = getFriendRequests(session)
+                val incCount = (reqsRes as? JellyfinResult.Success)?.value?.count { it.isIncoming } ?: 0
+                val outCount = (reqsRes as? JellyfinResult.Success)?.value?.count { !it.isIncoming } ?: 0
+
+                JellyfinResult.Success(
+                    JellyfinSocialSummary(
+                        friendCount = friendCount,
+                        incomingRequestCount = incCount,
+                        outgoingRequestCount = outCount,
+                        unreadMessageCount = unreadCount,
+                    ),
+                )
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "getUnreadSummary error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to fetch unread count", error)
             }
         }
@@ -419,35 +453,165 @@ class SdkJellyfinSocialRepository(
     override suspend fun getDiscoverableUsers(session: JellyfinSession): JellyfinResult<List<JellyfinFriend>> =
         withContext(ioDispatcher) {
             runCatching {
-                // Try plugin suggestions endpoint first
-                var conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/friends/suggestions")
-                var code = conn.responseCode
-                var body = if (code in 200..299) {
-                    conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                } else {
-                    ""
-                }
-                conn.disconnect()
+                val userMap = mutableMapOf<UUID, JellyfinFriend>()
 
-                if (code !in 200..299 || body.isBlank() || body.trim() == "[]") {
-                    // Fallback to Jellyfin public users list
-                    conn = session.openAuthenticatedConnection("Users/Public")
-                    code = conn.responseCode
-                    body = if (code in 200..299) {
-                        conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-                    } else {
-                        ""
+                // 1. Fetch server-wide members from Jellyfin standard Users / Users/Public endpoints
+                for (uEndpoint in listOf("Users", "Users/Public")) {
+                    runCatching {
+                        val conn = session.openAuthenticatedConnection(uEndpoint)
+                        val code = conn.responseCode
+                        val body = if (code in 200..299) {
+                            conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        } else ""
+                        conn.disconnect()
+                        Log.d("VantafynSocial", "discoverable [$uEndpoint] -> HTTP $code (len=${body.length})")
+
+                        if (body.isNotBlank() && body.trim() != "[]" && body.trim() != "{}") {
+                            parseFriends(session, body).forEach {
+                                if (it.userId != session.user.id && !userMap.containsKey(it.userId)) {
+                                    userMap[it.userId] = it
+                                }
+                            }
+                        }
                     }
-                    conn.disconnect()
                 }
 
-                if (code in 200..299 && body.isNotBlank()) {
-                    val users = parseFriends(session, body)
-                    JellyfinResult.Success(users.filter { it.userId != session.user.id })
-                } else {
-                    JellyfinResult.Success(emptyList())
+                // 2. Fetch AchievementBadges leaderboard for ranks & scores
+                runCatching {
+                    val lbConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/leaderboard")
+                    val lbCode = lbConn.responseCode
+                    val lbBody = if (lbCode in 200..299) {
+                        lbConn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } else ""
+                    lbConn.disconnect()
+                    Log.d("VantafynSocial", "discoverable [leaderboard] -> HTTP $lbCode (len=${lbBody.length})")
+
+                    if (lbBody.isNotBlank() && lbBody.trim() != "[]") {
+                        parseFriends(session, lbBody).forEach { lbUser ->
+                            if (lbUser.userId != session.user.id) {
+                                val existing = userMap[lbUser.userId]
+                                if (existing != null) {
+                                    userMap[lbUser.userId] = existing.copy(
+                                        rankName = lbUser.rankName,
+                                        rankTier = lbUser.rankTier,
+                                        currentScore = lbUser.currentScore,
+                                    )
+                                } else {
+                                    userMap[lbUser.userId] = lbUser
+                                }
+                            }
+                        }
+                    }
                 }
+
+                // 3. Query active Sessions (if admin or self)
+                val activeSessions = mutableListOf<JSONObject>()
+                runCatching {
+                    val sConn = session.openAuthenticatedConnection("Sessions")
+                    val sCode = sConn.responseCode
+                    val sBody = if (sCode in 200..299) {
+                        sConn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } else ""
+                    sConn.disconnect()
+                    Log.d("VantafynSocial", "discoverable [Sessions] -> HTTP $sCode (len=${sBody.length})")
+                    if (sBody.isNotBlank() && sBody.trim().startsWith("[")) {
+                        val sArray = JSONArray(sBody.trim())
+                        for (i in 0 until sArray.length()) {
+                            sArray.optJSONObject(i)?.let { activeSessions.add(it) }
+                        }
+                    }
+                }
+
+                for (sItem in activeSessions) {
+                    val uIdStr = sItem.optStringOrNull("UserId", "userId") ?: continue
+                    val uId = uIdStr.parseUuidOrNull() ?: continue
+                    if (uId == session.user.id) continue
+                    val uName = sItem.optStringOrNull("UserName", "userName", "Username", "username") ?: "User"
+                    val devName = sItem.optStringOrNull("DeviceName", "deviceName", "Client", "client")
+                    val nowPlaying = sItem.optJSONObject("NowPlayingItem")
+                    val mediaTitle = nowPlaying?.optStringOrNull("Name", "name")
+                    val watchingDesc = when {
+                        !mediaTitle.isNullOrBlank() -> mediaTitle
+                        !devName.isNullOrBlank() -> "Online on $devName"
+                        else -> "Active now"
+                    }
+
+                    val existing = userMap[uId]
+                    if (existing != null) {
+                        userMap[uId] = existing.copy(
+                            isOnline = true,
+                            currentlyWatching = mediaTitle ?: existing.currentlyWatching ?: "Active now",
+                        )
+                    } else {
+                        userMap[uId] = JellyfinFriend(
+                            userId = uId,
+                            username = uName,
+                            displayName = uName,
+                            avatarTag = null,
+                            avatarUrl = toUserAvatarUrl(session, uId, null),
+                            rankName = "Server Member",
+                            rankTier = 1,
+                            currentScore = 0,
+                            isOnline = true,
+                            lastSeen = "Now",
+                            currentlyWatching = watchingDesc,
+                            equippedBadgeName = null,
+                            equippedBadgeIcon = null,
+                        )
+                    }
+                }
+
+                // 4. Apply IsOnline & NowPlaying from the AchievementBadges friends endpoint
+                //    The plugin calculates Online via ISessionManager internally, ensuring accurate
+                //    online status for non-admin accounts.
+                runCatching {
+                    val frConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/friends")
+                    val frCode = frConn.responseCode
+                    val frBody = if (frCode in 200..299) {
+                        frConn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                    } else ""
+                    frConn.disconnect()
+                    Log.d("VantafynSocial", "discoverable [friends isOnline pass] -> HTTP $frCode (len=${frBody.length})")
+
+                    if (frBody.isNotBlank() && frBody.trim().startsWith("{")) {
+                        val frJson = JSONObject(frBody.trim())
+                        for (key in listOf("Friends", "friends", "Incoming", "incoming", "Outgoing", "outgoing")) {
+                            val arr = frJson.optJSONArray(key) ?: continue
+                            for (i in 0 until arr.length()) {
+                                val item = arr.optJSONObject(i) ?: continue
+                                val userObj = item.optJSONObject("User") ?: item.optJSONObject("user") ?: item
+                                val idStr = userObj.optStringOrNull("Id", "id", "UserId", "userId") ?: continue
+                                val uid = idStr.parseUuidOrNull() ?: continue
+                                if (uid == session.user.id) continue
+                                val isOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
+                                    ?: userObj.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
+                                    ?: false
+                                val watchingObj = item.optJSONObject("NowPlaying") ?: item.optJSONObject("nowPlaying")
+                                val watching = watchingObj?.optStringOrNull("Name", "name")
+                                    ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching")
+                                val existing = userMap[uid]
+                                if (existing != null) {
+                                    if (isOnline || existing.isOnline) {
+                                        userMap[uid] = existing.copy(
+                                            isOnline = true,
+                                            currentlyWatching = watching ?: existing.currentlyWatching ?: "Active now",
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Filter out current user and sort online users first
+                val resultList = userMap.values
+                    .filter { it.userId != session.user.id }
+                    .sortedWith(compareByDescending<JellyfinFriend> { it.isOnline }.thenBy { it.displayName })
+
+                Log.d("VantafynSocial", "getDiscoverableUsers result total: ${resultList.size}")
+                JellyfinResult.Success(resultList)
             }.getOrElse { error ->
+                Log.e("VantafynSocial", "getDiscoverableUsers error", error)
                 JellyfinResult.Failure(error.message ?: "Failed to load discoverable users", error)
             }
         }
@@ -460,10 +624,22 @@ class SdkJellyfinSocialRepository(
             trimmed.startsWith("[") -> JSONArray(trimmed)
             trimmed.startsWith("{") -> {
                 val json = JSONObject(trimmed)
-                json.optJSONArray("Items")
-                    ?: json.optJSONArray("items")
-                    ?: json.optJSONArray("Friends")
+                json.optJSONArray("Friends")
                     ?: json.optJSONArray("friends")
+                    ?: json.optJSONArray("Items")
+                    ?: json.optJSONArray("items")
+                    ?: json.optJSONArray("Leaderboard")
+                    ?: json.optJSONArray("leaderboard")
+                    ?: json.optJSONArray("Users")
+                    ?: json.optJSONArray("users")
+                    ?: json.optJSONArray("Entries")
+                    ?: json.optJSONArray("entries")
+                    ?: json.optJSONArray("Members")
+                    ?: json.optJSONArray("members")
+                    ?: json.optJSONArray("Results")
+                    ?: json.optJSONArray("results")
+                    ?: json.optJSONArray("Data")
+                    ?: json.optJSONArray("data")
                     ?: JSONArray()
             }
             else -> JSONArray()
@@ -472,18 +648,54 @@ class SdkJellyfinSocialRepository(
         val result = mutableListOf<JellyfinFriend>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
-            val idStr = item.optStringOrNull("UserId", "userId", "Id", "id") ?: continue
-            val userId = runCatching { UUID.fromString(idStr) }.getOrNull() ?: continue
-            val username = item.optStringOrNull("Username", "username", "Name", "name") ?: "User"
-            val displayName = item.optStringOrNull("DisplayName", "displayName", "Name", "name") ?: username
-            val avatarTag = item.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag", "ImageTag", "imageTag")
+            val nestedUser = item.optJSONObject("User")
+                ?: item.optJSONObject("user")
+                ?: item.optJSONObject("Friend")
+                ?: item.optJSONObject("friend")
+                ?: item.optJSONObject("Member")
+                ?: item.optJSONObject("member")
+
+            val idStr = nestedUser?.optStringOrNull("Id", "id", "UserId", "userId")
+                ?: item.optStringOrNull(
+                    "UserId", "userId",
+                    "Id", "id",
+                    "User_Id", "user_id",
+                    "TargetUserId", "targetUserId",
+                    "PeerId", "peerId",
+                ) ?: continue
+
+            val userId = idStr.parseUuidOrNull() ?: continue
+
+            val username = nestedUser?.optStringOrNull("Username", "username", "Name", "name", "UserName", "userName")
+                ?: item.optStringOrNull(
+                    "UserName", "userName",
+                    "Username", "username",
+                    "Name", "name",
+                    "DisplayName", "displayName",
+                ) ?: "User"
+
+            val displayName = nestedUser?.optStringOrNull("DisplayName", "displayName", "Name", "name")
+                ?: item.optStringOrNull(
+                    "DisplayName", "displayName",
+                    "UserName", "userName",
+                    "Name", "name",
+                    "Username", "username",
+                ) ?: username
+
+            val avatarTag = nestedUser?.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag", "ImageTag", "imageTag")
+                ?: item.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag", "ImageTag", "imageTag", "UserAvatarTag")
+
             val avatarUrl = toUserAvatarUrl(session, userId, avatarTag)
-            val rankName = item.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName") ?: "Rookie"
+            val rankName = item.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName") ?: "Rookie"
             val rankTier = item.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level") ?: 1
-            val currentScore = item.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points") ?: 0
-            val isOnline = item.optBooleanOrNull("IsOnline", "isOnline", "Online", "online") ?: false
+            val currentScore = item.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points", "TotalScore") ?: 0
+            val isOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline") ?: false
             val lastSeen = item.optStringOrNull("LastSeen", "lastSeen", "LastActivity", "lastActivity")
-            val currentlyWatching = item.optStringOrNull("CurrentlyWatching", "currentlyWatching", "NowPlaying", "nowPlaying", "Activity", "activity")
+            val nowPlayingObj = item.optJSONObject("NowPlaying") ?: item.optJSONObject("nowPlaying")
+            val lastWatchedObj = item.optJSONObject("LastWatched") ?: item.optJSONObject("lastWatched")
+            val currentlyWatching = nowPlayingObj?.optStringOrNull("Name", "name")
+                ?: item.optStringOrNull("CurrentlyWatching", "currentlyWatching", "Activity", "activity")
+                ?: lastWatchedObj?.optStringOrNull("Name", "name")?.let { "Last watched $it" }
             val equippedBadgeName = item.optStringOrNull("EquippedBadgeName", "equippedBadgeName", "ShowcaseBadge", "showcaseBadge")
             val equippedBadgeIcon = item.optStringOrNull("EquippedBadgeIcon", "equippedBadgeIcon", "BadgeIcon", "badgeIcon")
 
@@ -508,47 +720,106 @@ class SdkJellyfinSocialRepository(
 
     private fun parseFriendRequests(session: JellyfinSession, body: String): List<JellyfinFriendRequest> {
         val trimmed = body.trim()
-        val array = when {
-            trimmed.startsWith("[") -> JSONArray(trimmed)
-            trimmed.startsWith("{") -> {
+        val arrayEntries = mutableListOf<Pair<JSONArray, Boolean?>>()
+        if (trimmed.startsWith("[")) {
+            runCatching { arrayEntries.add(JSONArray(trimmed) to null) }
+        } else if (trimmed.startsWith("{")) {
+            runCatching {
                 val json = JSONObject(trimmed)
-                json.optJSONArray("Items")
-                    ?: json.optJSONArray("items")
-                    ?: json.optJSONArray("Requests")
-                    ?: json.optJSONArray("requests")
-                    ?: JSONArray()
+                json.optJSONArray("Incoming")?.let { arrayEntries.add(it to true) }
+                json.optJSONArray("incoming")?.let { arrayEntries.add(it to true) }
+                json.optJSONArray("IncomingRequests")?.let { arrayEntries.add(it to true) }
+                json.optJSONArray("incomingRequests")?.let { arrayEntries.add(it to true) }
+                json.optJSONArray("Outgoing")?.let { arrayEntries.add(it to false) }
+                json.optJSONArray("outgoing")?.let { arrayEntries.add(it to false) }
+                json.optJSONArray("OutgoingRequests")?.let { arrayEntries.add(it to false) }
+                json.optJSONArray("outgoingRequests")?.let { arrayEntries.add(it to false) }
+                json.optJSONArray("pending")?.let { arrayEntries.add(it to false) }
+                json.optJSONArray("Pending")?.let { arrayEntries.add(it to false) }
+                json.optJSONArray("requests")?.let { arrayEntries.add(it to null) }
+                json.optJSONArray("Requests")?.let { arrayEntries.add(it to null) }
+                json.optJSONArray("items")?.let { arrayEntries.add(it to null) }
+                json.optJSONArray("Items")?.let { arrayEntries.add(it to null) }
             }
-            else -> JSONArray()
         }
 
         val result = mutableListOf<JellyfinFriendRequest>()
-        for (i in 0 until array.length()) {
-            val item = array.optJSONObject(i) ?: continue
-            val id = item.optStringOrNull("Id", "id", "RequestId", "requestId") ?: UUID.randomUUID().toString()
-            val senderIdStr = item.optStringOrNull("SenderId", "senderId", "FromUserId", "fromUserId", "UserId", "userId") ?: continue
-            val senderId = runCatching { UUID.fromString(senderIdStr) }.getOrNull() ?: continue
-            val senderName = item.optStringOrNull("SenderName", "senderName", "FromName", "fromName", "Username", "username") ?: "User"
-            val senderAvatarTag = item.optStringOrNull("SenderAvatarTag", "senderAvatarTag", "PrimaryImageTag", "primaryImageTag", "ImageTag", "imageTag")
-            val senderAvatarUrl = toUserAvatarUrl(session, senderId, senderAvatarTag)
-            val senderRankTier = item.optIntOrNull("SenderRankTier", "senderRankTier", "RankTier", "rankTier", "Tier", "tier") ?: 1
-            val receiverIdStr = item.optStringOrNull("ReceiverId", "receiverId", "ToUserId", "toUserId") ?: session.user.id.toString()
-            val receiverId = runCatching { UUID.fromString(receiverIdStr) }.getOrNull() ?: session.user.id
-            val receiverName = item.optStringOrNull("ReceiverName", "receiverName", "ToName", "toName") ?: session.user.name
-            val createdAt = item.optStringOrNull("CreatedAt", "createdAt", "Date", "date", "Timestamp", "timestamp")
-            val isIncoming = receiverId == session.user.id || senderId != session.user.id
+        for ((array, forcedDirection) in arrayEntries) {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
 
-            result += JellyfinFriendRequest(
-                id = id,
-                senderId = senderId,
-                senderName = senderName,
-                senderAvatarTag = senderAvatarTag,
-                senderAvatarUrl = senderAvatarUrl,
-                senderRankTier = senderRankTier,
-                receiverId = receiverId,
-                receiverName = receiverName,
-                createdAt = createdAt,
-                isIncoming = isIncoming,
-            )
+                val explicitDirection = item.optStringOrNull("Direction", "direction", "Type", "type")
+                val explicitIsIncoming = item.optBooleanOrNull("IsIncoming", "isIncoming", "Incoming", "incoming")
+
+                val senderObj = item.optJSONObject("Sender") ?: item.optJSONObject("sender") ?: item.optJSONObject("FromUser")
+                val receiverObj = item.optJSONObject("Receiver") ?: item.optJSONObject("receiver") ?: item.optJSONObject("ToUser")
+
+                val rawUserIdStr = item.optStringOrNull(
+                    "UserId", "userId",
+                    "Id", "id",
+                    "SenderId", "senderId",
+                    "FromUserId", "fromUserId",
+                    "RequesterId", "requesterId",
+                )
+
+                val senderIdStr = senderObj?.optStringOrNull("Id", "id", "UserId", "userId")
+                    ?: item.optStringOrNull("SenderId", "senderId", "FromUserId", "fromUserId", "RequesterId", "requesterId")
+                val receiverIdStr = receiverObj?.optStringOrNull("Id", "id", "UserId", "userId")
+                    ?: item.optStringOrNull("ReceiverId", "receiverId", "ToUserId", "toUserId", "TargetUserId", "targetUserId")
+
+                val parsedSenderId = senderIdStr?.parseUuidOrNull()
+                val parsedReceiverId = receiverIdStr?.parseUuidOrNull()
+                val parsedRawUserId = rawUserIdStr?.parseUuidOrNull()
+
+                val isIncoming = when {
+                    forcedDirection != null -> forcedDirection
+                    explicitIsIncoming != null -> explicitIsIncoming
+                    explicitDirection?.contains("In", ignoreCase = true) == true -> true
+                    explicitDirection?.contains("Out", ignoreCase = true) == true -> false
+                    parsedReceiverId == session.user.id -> true
+                    parsedSenderId == session.user.id -> false
+                    parsedSenderId != null && parsedSenderId != session.user.id -> true
+                    else -> true
+                }
+
+                val finalSenderId = when {
+                    isIncoming -> parsedSenderId ?: parsedRawUserId ?: session.user.id
+                    else -> session.user.id
+                }
+
+                val finalReceiverId = when {
+                    isIncoming -> session.user.id
+                    else -> parsedReceiverId ?: parsedRawUserId ?: session.user.id
+                }
+
+                val targetOtherId = if (isIncoming) finalSenderId else finalReceiverId
+
+                val otherName = item.optStringOrNull(
+                    "UserName", "userName",
+                    "Username", "username",
+                    "DisplayName", "displayName",
+                    "Name", "name",
+                ) ?: "User"
+
+                val senderName = if (isIncoming) otherName else session.user.name
+                val receiverName = if (isIncoming) session.user.name else otherName
+
+                val avatarTag = item.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag")
+                val avatarUrl = toUserAvatarUrl(session, targetOtherId, avatarTag)
+
+                result += JellyfinFriendRequest(
+                    id = targetOtherId.toString(),
+                    senderId = finalSenderId,
+                    senderName = senderName,
+                    senderAvatarTag = avatarTag,
+                    senderAvatarUrl = avatarUrl,
+                    senderRankTier = item.optIntOrNull("SenderRankTier", "RankTier", "tier", "Level") ?: 1,
+                    receiverId = finalReceiverId,
+                    receiverName = receiverName,
+                    createdAt = item.optStringOrNull("CreatedAt", "createdAt", "Date", "date"),
+                    isIncoming = isIncoming,
+                )
+            }
         }
         return result
     }
@@ -559,10 +830,12 @@ class SdkJellyfinSocialRepository(
             trimmed.startsWith("[") -> JSONArray(trimmed)
             trimmed.startsWith("{") -> {
                 val json = JSONObject(trimmed)
-                json.optJSONArray("Items")
-                    ?: json.optJSONArray("items")
+                json.optJSONArray("Threads")
+                    ?: json.optJSONArray("threads")
                     ?: json.optJSONArray("Conversations")
                     ?: json.optJSONArray("conversations")
+                    ?: json.optJSONArray("Items")
+                    ?: json.optJSONArray("items")
                     ?: JSONArray()
             }
             else -> JSONArray()
@@ -571,32 +844,35 @@ class SdkJellyfinSocialRepository(
         val result = mutableListOf<JellyfinSocialConversation>()
         for (i in 0 until array.length()) {
             val item = array.optJSONObject(i) ?: continue
-            val peerIdStr = item.optStringOrNull("PeerUserId", "peerUserId", "UserId", "userId", "PeerId", "peerId", "RecipientId", "recipientId") ?: continue
-            val peerUserId = runCatching { UUID.fromString(peerIdStr) }.getOrNull() ?: continue
-            val convId = item.optStringOrNull("ConversationId", "conversationId", "Id", "id") ?: peerUserId.toString()
-            val peerName = item.optStringOrNull("PeerName", "peerName", "Username", "username", "DisplayName", "displayName", "Name", "name") ?: "Friend"
-            val peerAvatarTag = item.optStringOrNull("PeerAvatarTag", "peerAvatarTag", "PrimaryImageTag", "primaryImageTag", "ImageTag", "imageTag")
-            val peerAvatarUrl = toUserAvatarUrl(session, peerUserId, peerAvatarTag)
-            val peerRankTier = item.optIntOrNull("PeerRankTier", "peerRankTier", "RankTier", "rankTier", "Tier", "tier") ?: 1
-            val peerIsOnline = item.optBooleanOrNull("PeerIsOnline", "peerIsOnline", "IsOnline", "isOnline") ?: false
-            val lastMessageText = item.optStringOrNull("LastMessageText", "lastMessageText", "LastMessage", "lastMessage", "Content", "content", "Text", "text")
-            val lastMessageTimestamp = item.optStringOrNull("LastMessageTimestamp", "lastMessageTimestamp", "LastTimestamp", "lastTimestamp", "Timestamp", "timestamp", "Date", "date")
-            val unreadCount = item.optIntOrNull("UnreadCount", "unreadCount", "Unread", "unread") ?: 0
-            val lastSenderIdStr = item.optStringOrNull("LastSenderId", "lastSenderId", "SenderId", "senderId")
-            val lastSenderId = lastSenderIdStr?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            val otherUserIdStr = item.optStringOrNull("otherUserId", "OtherUserId", "peerUserId", "userId", "peerId")
+            val participantsArr = item.optJSONArray("participants")
+            val participantIdStr = if (participantsArr != null && participantsArr.length() > 0) {
+                participantsArr.optJSONObject(0)?.optStringOrNull("userId", "UserId")
+            } else null
+
+            val peerUserId = otherUserIdStr?.parseUuidOrNull()
+                ?: participantIdStr?.parseUuidOrNull()
+                ?: continue
+
+            val convId = item.optStringOrNull("conversationId", "ConversationId", "id", "Id") ?: peerUserId.toString()
+            val peerName = item.optStringOrNull("otherUserName", "OtherUserName", "peerName", "title", "username", "displayName", "name") ?: "Friend"
+            val peerAvatarUrl = toUserAvatarUrl(session, peerUserId, null)
+            val lastMessageText = item.optStringOrNull("lastMessage", "LastMessage", "content", "text")
+            val lastMessageTimestamp = item.optStringOrNull("lastAt", "LastAt", "sentAt", "timestamp", "date")
+            val unreadCount = item.optIntOrNull("unreadCount", "UnreadCount", "unread") ?: 0
 
             result += JellyfinSocialConversation(
                 conversationId = convId,
                 peerUserId = peerUserId,
                 peerName = peerName,
-                peerAvatarTag = peerAvatarTag,
+                peerAvatarTag = null,
                 peerAvatarUrl = peerAvatarUrl,
-                peerRankTier = peerRankTier,
-                peerIsOnline = peerIsOnline,
+                peerRankTier = 1,
+                peerIsOnline = false,
                 lastMessageText = lastMessageText,
                 lastMessageTimestamp = lastMessageTimestamp,
                 unreadCount = unreadCount,
-                lastSenderId = lastSenderId,
+                lastSenderId = null,
             )
         }
         return result
@@ -608,10 +884,10 @@ class SdkJellyfinSocialRepository(
             trimmed.startsWith("[") -> JSONArray(trimmed)
             trimmed.startsWith("{") -> {
                 val json = JSONObject(trimmed)
-                json.optJSONArray("Items")
-                    ?: json.optJSONArray("items")
-                    ?: json.optJSONArray("Messages")
+                json.optJSONArray("Messages")
                     ?: json.optJSONArray("messages")
+                    ?: json.optJSONArray("Items")
+                    ?: json.optJSONArray("items")
                     ?: JSONArray()
             }
             else -> JSONArray()
@@ -626,18 +902,17 @@ class SdkJellyfinSocialRepository(
     }
 
     private fun parseSingleMessage(session: JellyfinSession, item: JSONObject, defaultConvId: String): JellyfinSocialMessage {
-        val id = item.optStringOrNull("Id", "id", "MessageId", "messageId") ?: UUID.randomUUID().toString()
-        val convId = item.optStringOrNull("ConversationId", "conversationId") ?: defaultConvId
-        val senderIdStr = item.optStringOrNull("SenderId", "senderId", "FromUserId", "fromUserId", "UserId", "userId") ?: session.user.id.toString()
-        val senderId = runCatching { UUID.fromString(senderIdStr) }.getOrNull() ?: session.user.id
-        val senderName = item.optStringOrNull("SenderName", "senderName", "FromName", "fromName", "Username", "username") ?: if (senderId == session.user.id) session.user.name else "Friend"
-        val senderAvatarTag = item.optStringOrNull("SenderAvatarTag", "senderAvatarTag", "PrimaryImageTag", "primaryImageTag", "ImageTag", "imageTag")
-        val senderAvatarUrl = toUserAvatarUrl(session, senderId, senderAvatarTag)
-        val recipientIdStr = item.optStringOrNull("RecipientId", "recipientId", "ToUserId", "toUserId") ?: session.user.id.toString()
-        val recipientId = runCatching { UUID.fromString(recipientIdStr) }.getOrNull() ?: session.user.id
-        val content = item.optStringOrNull("Content", "content", "Text", "text", "Message", "message").orEmpty()
-        val timestamp = item.optStringOrNull("Timestamp", "timestamp", "CreatedAt", "createdAt", "Date", "date")
-        val isRead = item.optBooleanOrNull("IsRead", "isRead", "Read", "read") ?: false
+        val id = item.optStringOrNull("id", "Id", "messageId", "MessageId") ?: UUID.randomUUID().toString()
+        val convId = item.optStringOrNull("conversationId", "ConversationId") ?: defaultConvId
+        val senderIdStr = item.optStringOrNull("fromUserId", "FromUserId", "senderId", "SenderId", "userId") ?: session.user.id.toString()
+        val senderId = senderIdStr.parseUuidOrNull() ?: session.user.id
+        val senderName = item.optStringOrNull("fromUserName", "FromUserName", "senderName", "username") ?: if (senderId == session.user.id) session.user.name else "Friend"
+        val senderAvatarUrl = toUserAvatarUrl(session, senderId, null)
+        val recipientIdStr = item.optStringOrNull("toUserId", "ToUserId", "recipientId", "RecipientId") ?: session.user.id.toString()
+        val recipientId = recipientIdStr.parseUuidOrNull() ?: session.user.id
+        val content = item.optStringOrNull("text", "Text", "content", "message").orEmpty()
+        val timestamp = item.optStringOrNull("sentAt", "SentAt", "timestamp", "createdAt", "date")
+        val isRead = item.optStringOrNull("readAt", "ReadAt") != null || item.optBooleanOrNull("isRead", "read") == true
         val isFromSelf = senderId == session.user.id
 
         return JellyfinSocialMessage(
@@ -645,7 +920,7 @@ class SdkJellyfinSocialRepository(
             conversationId = convId,
             senderId = senderId,
             senderName = senderName,
-            senderAvatarTag = senderAvatarTag,
+            senderAvatarTag = null,
             senderAvatarUrl = senderAvatarUrl,
             recipientId = recipientId,
             content = content,
@@ -662,6 +937,19 @@ class SdkJellyfinSocialRepository(
         } else {
             "$baseUrl/Users/$userId/Images/Primary?api_key=${session.accessToken}"
         }
+    }
+
+    private fun String?.parseUuidOrNull(): UUID? {
+        if (this.isNullOrBlank()) return null
+        val trimmed = this.trim()
+        val clean = trimmed.replace("-", "")
+        if (clean.length == 32) {
+            return runCatching {
+                val formatted = "${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20, 32)}"
+                UUID.fromString(formatted)
+            }.getOrNull()
+        }
+        return runCatching { UUID.fromString(trimmed) }.getOrNull()
     }
 
     private fun JSONObject.optStringOrNull(vararg keys: String): String? {
@@ -687,7 +975,11 @@ class SdkJellyfinSocialRepository(
     private fun JSONObject.optBooleanOrNull(vararg keys: String): Boolean? {
         for (key in keys) {
             if (!isNull(key)) {
-                return optBoolean(key)
+                val raw = opt(key)
+                if (raw is Boolean) return raw
+                if (raw is Number) return raw.toInt() == 1
+                if (raw is String) return raw.equals("true", ignoreCase = true)
+                return optBoolean(key, false)
             }
         }
         return null
