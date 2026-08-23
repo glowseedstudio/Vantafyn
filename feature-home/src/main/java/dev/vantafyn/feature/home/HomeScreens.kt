@@ -19487,34 +19487,28 @@ private fun FloatingSocialDock(
         prevBadgeCount = totalBadge
     }
 
-    val pulseTransition = rememberInfiniteTransition(label = "dockPulse")
-    val pulseScale by if (totalBadge > 0 && !isDragging) {
-        pulseTransition.animateFloat(
-            initialValue = 1.0f,
-            targetValue = 1.25f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1600, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "pulseScale",
-        )
-    } else {
-        remember { mutableFloatStateOf(1f) }
+    val pulseScaleAnim = remember { Animatable(1f) }
+    val pulseAlphaAnim = remember { Animatable(0f) }
+
+    LaunchedEffect(totalBadge) {
+        if (totalBadge > 0) {
+            repeat(3) {
+                launch {
+                    pulseScaleAnim.snapTo(1f)
+                    pulseScaleAnim.animateTo(1.22f, tween(700, easing = FastOutSlowInEasing))
+                    pulseScaleAnim.animateTo(1f, tween(400, easing = FastOutSlowInEasing))
+                }
+                launch {
+                    pulseAlphaAnim.snapTo(0.45f)
+                    pulseAlphaAnim.animateTo(0f, tween(700, easing = FastOutSlowInEasing))
+                }
+                delay(1200L)
+            }
+        }
     }
 
-    val pulseAlpha by if (totalBadge > 0 && !isDragging) {
-        pulseTransition.animateFloat(
-            initialValue = 0.50f,
-            targetValue = 0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1600, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "pulseAlpha",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
+    val pulseScale = pulseScaleAnim.value
+    val pulseAlpha = pulseAlphaAnim.value
 
     Box(
         modifier = modifier

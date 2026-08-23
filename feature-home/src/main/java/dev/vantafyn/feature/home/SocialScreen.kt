@@ -269,17 +269,16 @@ fun SocialScreen(
                     }
                 }
                 var isRefreshing by remember { mutableStateOf(false) }
-                LaunchedEffect(isLoading) {
-                    if (!isLoading) isRefreshing = false
+                val refreshRotation = remember { Animatable(0f) }
+                LaunchedEffect(isRefreshing) {
+                    if (isRefreshing) {
+                        refreshRotation.animateTo(
+                            targetValue = refreshRotation.value + 360f,
+                            animationSpec = tween(600, easing = FastOutSlowInEasing),
+                        )
+                        isRefreshing = false
+                    }
                 }
-                val refreshRotation by animateFloatAsState(
-                    targetValue = if (isRefreshing || isLoading) 360f else 0f,
-                    animationSpec = if (isRefreshing || isLoading) infiniteRepeatable(
-                        animation = tween(800, easing = LinearEasing),
-                        repeatMode = RepeatMode.Restart,
-                    ) else tween(300),
-                    label = "refreshRotation",
-                )
                 IconButton(onClick = {
                     isRefreshing = true
                     onRefresh()
@@ -288,7 +287,7 @@ fun SocialScreen(
                         imageVector = Icons.Rounded.Refresh,
                         contentDescription = "Refresh",
                         tint = if (isRefreshing || isLoading) VantafynColors.Primary else VantafynColors.Ink.copy(alpha = 0.85f),
-                        modifier = Modifier.rotate(refreshRotation),
+                        modifier = Modifier.rotate(refreshRotation.value),
                     )
                 }
             }

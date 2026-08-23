@@ -1367,7 +1367,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     private val seenFriendRequestNotificationIds = mutableSetOf<String>()
 
-    fun loadSocialData(force: Boolean = false) {
+    fun loadSocialData(force: Boolean = false, includeDiscoverable: Boolean = true) {
         if (!_state.value.socialEnabled) return
         val session = _state.value.session ?: return
         viewModelScope.launch {
@@ -1378,13 +1378,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             val requestsDeferred = async { socialRepository.getFriendRequests(session) }
             val convosDeferred = async { socialRepository.getConversations(session) }
             val summaryDeferred = async { socialRepository.getUnreadSummary(session) }
-            val discoverableDeferred = async { socialRepository.getDiscoverableUsers(session) }
+            val discoverableDeferred = if (includeDiscoverable || _state.value.socialDiscoverableUsers.isEmpty()) {
+                async { socialRepository.getDiscoverableUsers(session) }
+            } else {
+                null
+            }
 
             val friendsRes = friendsDeferred.await()
             val requestsRes = requestsDeferred.await()
             val convosRes = convosDeferred.await()
             val summaryRes = summaryDeferred.await()
-            val discoverableRes = discoverableDeferred.await()
+            val discoverableRes = discoverableDeferred?.await()
 
             val blockedUsers = _state.value.socialBlockedUsers.ifEmpty { loadBlockedUsers(session.user.id) }
             val blockedUserIds = blockedUsers.map { it.userId }.toSet()
@@ -1409,7 +1413,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
                 val unread = (summaryRes as? JellyfinResult.Success)?.value?.unreadMessageCount ?: convos.sumOf { it.unreadCount }
-                val fetchedDiscoverable = (discoverableRes as? JellyfinResult.Success)?.value ?: state.socialDiscoverableUsers
+                val fetchedDiscoverable = if (discoverableRes is JellyfinResult.Success) discoverableRes.value else state.socialDiscoverableUsers
 
                 val realtimeUsers = state.watchPartyRealtimeMembers
                     .filter { it.userId != null && it.userId != session.user.id && it.userId !in blockedUserIds }
@@ -1504,8 +1508,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     break
                 }
 
-                // Keep session active on Jellyfin server so ISessionManager & AchievementBadges report user as Online
-                launch { socialRepository.reportPresence(session) }
+                // Suppress background network polling completely during full-screen media playback
+                if (_state.value.mobileDestination == MobileDestination.Player) {
+                    delay(15_000L)
+                    continue
+                }
 
                 val isChatting = _state.value.mobileDestination == MobileDestination.Chat
                 val isSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
@@ -1538,7 +1545,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 } else if (isSocialScreen) {
-                    loadSocialData(force = false)
+                    val onAddFriendTab = _state.value.activeSocialTab == dev.vantafyn.feature.home.SocialTab.Find
+                    loadSocialData(force = false, includeDiscoverable = onAddFriendTab)
                     _state.value.socialConversations.forEach { c ->
                         val txt = c.lastMessageText
                         if (!txt.isNullOrBlank()) {
@@ -1546,7 +1554,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 } else {
-                    // Check unread summary and conversations
+                    // Check unread summary and conversations periodically (relaxed interval)
                     when (val convRes = socialRepository.getConversations(session)) {
                         is JellyfinResult.Success -> {
                             val newConvos = convRes.value
@@ -1601,7 +1609,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
                 val nextIsChatting = _state.value.mobileDestination == MobileDestination.Chat
                 val nextIsSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
-                val interval = if (nextIsChatting || nextIsSocialScreen) 4_000L else 20_000L
+                val interval = when {
+                    nextIsChatting -> 8_000L
+                    nextIsSocialScreen -> 15_000L
+                    else -> 60_000L
+                }
                 delay(interval)
             }
         }
@@ -1614,7 +1626,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun openSocialPanel() {
         _state.update { it.copy(isSocialPanelOpen = true, activeSocialIslandPreview = null) }
-        loadSocialData(force = true)
+        loadSocialData(force = true, includeDiscoverable = false)
     }
 
     fun closeSocialPanel() {
@@ -1624,11 +1636,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun openSocialScreen(tab: dev.vantafyn.feature.home.SocialTab = dev.vantafyn.feature.home.SocialTab.Messages) {
         _state.update { it.copy(isSocialPanelOpen = false, activeSocialIslandPreview = null, activeSocialTab = tab) }
         navigateMobile(MobileDestination.Social)
-        loadSocialData(force = true)
+        loadSocialData(force = true, includeDiscoverable = tab == dev.vantafyn.feature.home.SocialTab.Find)
     }
 
     fun setActiveSocialTab(tab: dev.vantafyn.feature.home.SocialTab) {
         _state.update { it.copy(activeSocialTab = tab) }
+        if (tab == dev.vantafyn.feature.home.SocialTab.Find && _state.value.socialDiscoverableUsers.isEmpty()) {
+            loadSocialData(force = false, includeDiscoverable = true)
+        }
     }
 
     fun openChatWithFriend(friend: JellyfinFriend) {
@@ -4031,11 +4046,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun shouldUseWatchPartyRealtime(state: VantafynHomeUiState): Boolean =
-        state.session != null ||
+        state.session != null && (
             state.activeWatchParty != null ||
-            state.mobileDestination == MobileDestination.WatchParty ||
-            state.isWatchPartyRecipientsLoading ||
-            state.isWatchPartyLoading
+                state.mobileDestination == MobileDestination.WatchParty ||
+                state.isWatchPartyRecipientsLoading ||
+                state.isWatchPartyLoading
+        )
 
     private fun reduceWatchPartyRealtimeEvent(event: JellyfinWebSocketEvent) {
         when (event) {
