@@ -54,6 +54,13 @@ class SdkJellyfinSocialRepository(
             }.onFailure {
                 Log.w("VantafynSocial", "reportPresence error: ${it.message}")
             }
+            runCatching {
+                val pConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/summary")
+                pConn.connectTimeout = 4000
+                pConn.readTimeout = 4000
+                pConn.responseCode
+                pConn.disconnect()
+            }
         }
 
     override suspend fun checkSocialAvailability(session: JellyfinSession): Boolean =

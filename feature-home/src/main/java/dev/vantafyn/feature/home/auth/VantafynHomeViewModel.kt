@@ -1502,10 +1502,18 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (!_state.value.socialEnabled) return
         socialPollingJob?.cancel()
         socialPollingJob = viewModelScope.launch {
+            var lastPresenceReportTime = 0L
             while (isActive) {
                 val session = _state.value.session
                 if (session == null || !_state.value.isAppForeground || !_state.value.socialEnabled) {
                     break
+                }
+
+                // Keep session presence active on Jellyfin server every 45 seconds (low battery, lightweight ping)
+                val now = System.currentTimeMillis()
+                if (now - lastPresenceReportTime >= 45_000L) {
+                    lastPresenceReportTime = now
+                    launch { socialRepository.reportPresence(session) }
                 }
 
                 // Suppress background network polling completely during full-screen media playback
@@ -1545,8 +1553,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 } else if (isSocialScreen) {
-                    val onAddFriendTab = _state.value.activeSocialTab == dev.vantafyn.feature.home.SocialTab.Find
-                    loadSocialData(force = false, includeDiscoverable = onAddFriendTab)
+                    loadSocialData(force = false, includeDiscoverable = true)
                     _state.value.socialConversations.forEach { c ->
                         val txt = c.lastMessageText
                         if (!txt.isNullOrBlank()) {
@@ -1612,7 +1619,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 val interval = when {
                     nextIsChatting -> 8_000L
                     nextIsSocialScreen -> 15_000L
-                    else -> 60_000L
+                    else -> 45_000L
                 }
                 delay(interval)
             }
@@ -1626,7 +1633,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun openSocialPanel() {
         _state.update { it.copy(isSocialPanelOpen = true, activeSocialIslandPreview = null) }
-        loadSocialData(force = true, includeDiscoverable = false)
+        loadSocialData(force = true, includeDiscoverable = true)
     }
 
     fun closeSocialPanel() {
@@ -1636,7 +1643,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun openSocialScreen(tab: dev.vantafyn.feature.home.SocialTab = dev.vantafyn.feature.home.SocialTab.Messages) {
         _state.update { it.copy(isSocialPanelOpen = false, activeSocialIslandPreview = null, activeSocialTab = tab) }
         navigateMobile(MobileDestination.Social)
-        loadSocialData(force = true, includeDiscoverable = tab == dev.vantafyn.feature.home.SocialTab.Find)
+        loadSocialData(force = true, includeDiscoverable = true)
     }
 
     fun setActiveSocialTab(tab: dev.vantafyn.feature.home.SocialTab) {
