@@ -39,6 +39,10 @@ data class JellyfinAchievement(
     val score: Int = 0,
     val isEquipped: Boolean = false,
     val progressRatio: Float? = null,
+    val currentProgress: Double? = null,
+    val maxProgress: Double? = null,
+    val progressUnit: String? = null,
+    val progressText: String? = null,
 )
 
 data class JellyfinAchievementSummary(

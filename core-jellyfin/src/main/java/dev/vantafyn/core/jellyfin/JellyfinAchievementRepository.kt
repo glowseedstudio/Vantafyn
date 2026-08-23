@@ -174,7 +174,36 @@ class SdkJellyfinAchievementRepository(
             val isHidden = obj.optBooleanOrNull("IsHidden", "isHidden", "Hidden", "hidden", "Secret", "secret") ?: false
             val score = obj.optIntOrNull("Score", "score", "Points", "points", "Value", "value") ?: 0
             val isEquipped = obj.optBooleanOrNull("IsEquipped", "isEquipped", "Equipped", "equipped") ?: false
-            val progressRatio = obj.optDoubleOrNull("ProgressRatio", "progressRatio", "Progress", "progress")?.toFloat()
+
+            val rawCurrent = obj.optDoubleOrNull("CurrentProgress", "currentProgress", "ProgressValue", "progressValue", "Current", "current", "Progress", "progress", "Value", "value")
+            val rawTarget = obj.optDoubleOrNull("TargetProgress", "targetProgress", "Target", "target", "MaxProgress", "maxProgress", "Max", "max", "Required", "required", "Goal", "goal")
+            val rawRatio = obj.optDoubleOrNull("ProgressRatio", "progressRatio", "ProgressPercentage", "progressPercentage", "CompletionRatio", "completionRatio", "Percentage", "percentage")?.toFloat()
+            val rawUnit = obj.optStringOrNull("Unit", "unit", "ProgressUnit", "progressUnit", "Metric", "metric")
+
+            val normalizedRatio: Float? = when {
+                isUnlocked -> 1.0f
+                rawCurrent != null && rawTarget != null && rawTarget > 0.0 -> {
+                    (rawCurrent / rawTarget).toFloat().coerceIn(0f, 1f)
+                }
+                rawRatio != null -> {
+                    if (rawRatio > 1.0f) (rawRatio / 100f).coerceIn(0f, 1f) else rawRatio.coerceIn(0f, 1f)
+                }
+                rawCurrent != null && rawCurrent > 0.0 && rawCurrent <= 1.0 -> rawCurrent.toFloat()
+                else -> null
+            }
+
+            val progressText: String? = when {
+                isUnlocked -> "Completed"
+                rawCurrent != null && rawTarget != null && rawTarget > 0.0 -> {
+                    val curStr = if (rawCurrent % 1.0 == 0.0) rawCurrent.toLong().toString() else "%.1f".format(rawCurrent)
+                    val tarStr = if (rawTarget % 1.0 == 0.0) rawTarget.toLong().toString() else "%.1f".format(rawTarget)
+                    if (!rawUnit.isNullOrBlank()) "$curStr / $tarStr $rawUnit" else "$curStr / $tarStr"
+                }
+                normalizedRatio != null && normalizedRatio > 0f -> {
+                    "${(normalizedRatio * 100).toInt()}%"
+                }
+                else -> null
+            }
 
             JellyfinAchievement(
                 id = id,
@@ -189,7 +218,11 @@ class SdkJellyfinAchievementRepository(
                 isHidden = isHidden,
                 score = score,
                 isEquipped = isEquipped,
-                progressRatio = progressRatio,
+                progressRatio = normalizedRatio,
+                currentProgress = rawCurrent,
+                maxProgress = rawTarget,
+                progressUnit = rawUnit,
+                progressText = progressText,
             )
         }
     }

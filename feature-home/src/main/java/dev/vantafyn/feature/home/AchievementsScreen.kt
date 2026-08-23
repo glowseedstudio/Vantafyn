@@ -698,6 +698,60 @@ private fun AchievementCard(
                     overflow = TextOverflow.Ellipsis,
                 )
 
+                if (!achievement.isUnlocked && !isHiddenLocked && (achievement.progressRatio != null || achievement.progressText != null)) {
+                    val ratio = (achievement.progressRatio ?: 0f).coerceIn(0f, 1f)
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Progress",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                color = VantafynColors.Muted,
+                            )
+                            Text(
+                                text = achievement.progressText ?: "${(ratio * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (ratio > 0f) rarityColor else VantafynColors.Muted,
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(Color.White.copy(alpha = 0.08f)),
+                        ) {
+                            if (ratio > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(ratio)
+                                        .height(5.dp)
+                                        .clip(RoundedCornerShape(3.dp))
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(
+                                                    rarityColor.copy(alpha = 0.75f),
+                                                    rarityColor,
+                                                ),
+                                            ),
+                                        ),
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Bottom tags (Rarity & Points)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -861,6 +915,7 @@ private fun AchievementDetailDialog(
                 // Unlock status / Progress
                 val unlockedAt = achievement.unlockedAt
                 val progressRatio = achievement.progressRatio
+                val progressText = achievement.progressText
                 val localizedUnlockedDate = remember(unlockedAt) { formatLocalizedDate(unlockedAt) }
                 if (achievement.isUnlocked) {
                     Row(
@@ -884,32 +939,75 @@ private fun AchievementDetailDialog(
                             color = Color(0xFF55F0C0),
                         )
                     }
-                } else if (progressRatio != null && progressRatio > 0f) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                } else if (!isHiddenLocked) {
+                    val ratio = (progressRatio ?: 0f).coerceIn(0f, 1f)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White.copy(alpha = 0.05f))
+                            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(6.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(Color.White.copy(alpha = 0.12f)),
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Timer,
+                                        contentDescription = null,
+                                        tint = if (ratio > 0f) rarityColor else VantafynColors.Muted,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Text(
+                                        text = if (ratio > 0f) "In Progress" else "Not Started",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = VantafynColors.Ink,
+                                    )
+                                }
+                                Text(
+                                    text = progressText ?: if (ratio > 0f) "${(ratio * 100).toInt()}%" else "0%",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (ratio > 0f) rarityColor else VantafynColors.Muted,
+                                )
+                            }
                             Box(
                                 modifier = Modifier
-                                    .fillMaxWidth(progressRatio.coerceIn(0.02f, 1f))
-                                    .height(6.dp)
-                                    .clip(RoundedCornerShape(999.dp))
-                                    .background(VantafynGradients.accentHorizontal()),
-                            )
+                                    .fillMaxWidth()
+                                    .height(7.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.08f)),
+                            ) {
+                                if (ratio > 0f) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(ratio)
+                                            .height(7.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    listOf(
+                                                        rarityColor.copy(alpha = 0.75f),
+                                                        rarityColor,
+                                                        Color(0xFF55F0C0),
+                                                    ),
+                                                ),
+                                            ),
+                                    )
+                                }
+                            }
                         }
-                        Text(
-                            text = "Progress: ${(progressRatio * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = VantafynColors.Muted,
-                            modifier = Modifier.align(Alignment.End),
-                        )
                     }
                 }
             }
