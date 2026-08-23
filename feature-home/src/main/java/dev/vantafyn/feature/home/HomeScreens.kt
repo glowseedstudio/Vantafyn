@@ -86,6 +86,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -697,6 +698,7 @@ fun VantafynAppContent(
                 onDeclineFriendRequest = viewModel::declineOrRemoveFriend,
                 onSendFriendRequest = viewModel::sendFriendRequest,
                 onRemoveFriend = viewModel::removeFriend,
+                onShareMediaToFriend = viewModel::shareMediaRecommendationToFriend,
                 onDismissSocialIslandPreview = viewModel::dismissSocialIslandPreview,
                 onSetActiveSocialTab = viewModel::setActiveSocialTab,
                 onRefreshSocial = { viewModel.loadSocialData(force = true) },
@@ -3239,6 +3241,7 @@ private fun HomeScreen(
     onDeclineFriendRequest: (String) -> Unit = {},
     onSendFriendRequest: (String) -> Unit = {},
     onRemoveFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
+    onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, dev.vantafyn.core.jellyfin.JellyfinMediaDetail) -> Unit = { _, _ -> },
     onDismissSocialIslandPreview: () -> Unit = {},
     onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
     onRefreshSocial: () -> Unit = {},
@@ -3278,6 +3281,7 @@ private fun HomeScreen(
             onDeclineFriendRequest = onDeclineFriendRequest,
             onSendFriendRequest = onSendFriendRequest,
             onRemoveFriend = onRemoveFriend,
+            onShareMediaToFriend = onShareMediaToFriend,
             onDismissSocialIslandPreview = onDismissSocialIslandPreview,
             onSetActiveSocialTab = onSetActiveSocialTab,
             onRefreshSocial = onRefreshSocial,
@@ -3475,6 +3479,7 @@ private fun MobileShellScreen(
     onDeclineFriendRequest: (String) -> Unit = {},
     onSendFriendRequest: (String) -> Unit = {},
     onRemoveFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
+    onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, dev.vantafyn.core.jellyfin.JellyfinMediaDetail) -> Unit = { _, _ -> },
     onDismissSocialIslandPreview: () -> Unit = {},
     onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
     onRefreshSocial: () -> Unit = {},
@@ -3727,6 +3732,7 @@ private fun MobileShellScreen(
                     onTogglePlayed = onToggleMediaPlayed,
                     onQueueDownload = onQueueMediaDownload,
                     onStartWatchParty = onStartWatchPartyFromDetail,
+                    onShareMediaToFriend = onShareMediaToFriend,
                 )
                 MobileDestination.Player -> Box(Modifier.fillMaxSize()) {
                     if (state.videoPlayerPreference == VantafynVideoPlayerPreference.External) {
@@ -15784,6 +15790,7 @@ private fun MediaDetailScreen(
     onTogglePlayed: () -> Unit,
     onQueueDownload: (java.util.UUID) -> Unit,
     onStartWatchParty: (WatchPartyMode) -> Unit,
+    onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, JellyfinMediaDetail) -> Unit = { _, _ -> },
 ) {
     val detail = state.mediaDetail
     val detailRevealKey = state.selectedMediaId ?: detail?.id ?: "media-detail"
@@ -15816,6 +15823,7 @@ private fun MediaDetailScreen(
     var showActions by remember { mutableStateOf(false) }
     var showMediaInfo by remember { mutableStateOf(false) }
     var showWatchPartyStart by remember { mutableStateOf(false) }
+    var showShareToFriend by remember { mutableStateOf(false) }
     var detailRevealActive by remember(state.selectedMediaId) { mutableStateOf(true) }
     LaunchedEffect(state.selectedMediaId) {
         detailRevealActive = true
@@ -15975,6 +15983,7 @@ private fun MediaDetailScreen(
         DetailActionSheet(
             detail = detail,
             isAdmin = state.session?.user?.isAdministrator == true,
+            socialEnabled = state.socialEnabled && state.session != null,
             onDismiss = { showActions = false },
             onPlay = {
                 showActions = false
@@ -15996,6 +16005,10 @@ private fun MediaDetailScreen(
                 showActions = false
                 detail?.id?.let { onQueueDownload(it) }
             },
+            onShareToFriend = {
+                showActions = false
+                showShareToFriend = true
+            },
             onMediaInfo = {
                 showActions = false
                 showMediaInfo = true
@@ -16003,6 +16016,17 @@ private fun MediaDetailScreen(
             onStartWatchParty = {
                 showActions = false
                 showWatchPartyStart = true
+            },
+        )
+    }
+    if (detail != null && showShareToFriend) {
+        ShareMediaToFriendSheet(
+            detail = detail,
+            friends = state.socialFriends,
+            onDismiss = { showShareToFriend = false },
+            onShare = { friend ->
+                showShareToFriend = false
+                onShareMediaToFriend(friend, detail)
             },
         )
     }
@@ -16455,12 +16479,14 @@ private fun EpisodeSection(
 private fun DetailActionSheet(
     detail: JellyfinMediaDetail,
     isAdmin: Boolean,
+    socialEnabled: Boolean = false,
     onDismiss: () -> Unit,
     onPlay: () -> Unit,
     onWatchFromBeginning: () -> Unit,
     onToggleFavorite: () -> Unit,
     onTogglePlayed: () -> Unit,
     onQueueDownload: (java.util.UUID) -> Unit,
+    onShareToFriend: () -> Unit = {},
     onMediaInfo: () -> Unit,
     onStartWatchParty: () -> Unit,
 ) {
@@ -16489,6 +16515,9 @@ private fun DetailActionSheet(
                 if (!detail.itemType.equals("Audio", ignoreCase = true) && !detail.itemType.equals("LiveTvChannel", ignoreCase = true)) {
                     DetailSheetAction("◌", "Start Watch Party", onStartWatchParty)
                 }
+                if (socialEnabled) {
+                    DetailSheetAction("↗", "Share to a Friend", onShareToFriend)
+                }
                 DetailSheetAction("ⓘ", "Media info", onMediaInfo)
                 if (detail.mediaSources.size > 1) {
                     DetailSheetAction("▤", "Versions available in Media info", onMediaInfo)
@@ -16496,6 +16525,202 @@ private fun DetailActionSheet(
                 if (isAdmin) {
                     DetailSheetAction("↻", "Refresh metadata requires admin tools later", onDismiss, enabled = false)
                 }
+            }
+        },
+    )
+}
+
+@Composable
+private fun ShareMediaToFriendSheet(
+    detail: JellyfinMediaDetail,
+    friends: List<dev.vantafyn.core.jellyfin.JellyfinFriend>,
+    onDismiss: () -> Unit,
+    onShare: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit,
+) {
+    val context = LocalContext.current
+    val sortedFriends = remember(friends) {
+        friends.sortedWith(
+            compareByDescending<dev.vantafyn.core.jellyfin.JellyfinFriend> { it.isOnline }
+                .thenBy { it.displayName.lowercase() }
+        )
+    }
+
+    AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.3.dp),
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Send,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = "Share to a Friend",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                Text(
+                    text = "Recommend \"${detail.title}\" directly into your chat",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        },
+        text = {
+            if (sortedFriends.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 24.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No friends found yet.\nAdd friends from Friends & Messages to recommend movies and shows!",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 340.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(sortedFriends, key = { it.userId }) { friend ->
+                        VantafynGlassCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    dev.vantafyn.core.ui.VantafynSoundEffects.playMessageSent(context)
+                                    onShare(friend)
+                                },
+                            cornerRadius = 16.dp,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    Box(
+                                        modifier = Modifier.size(38.dp),
+                                        contentAlignment = Alignment.BottomEnd,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(CircleShape)
+                                                .background(Color(0xFF1E2638))
+                                                .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (!friend.avatarUrl.isNullOrBlank()) {
+                                                coil3.compose.AsyncImage(
+                                                    model = friend.avatarUrl,
+                                                    contentDescription = null,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop,
+                                                )
+                                            } else {
+                                                Text(
+                                                    text = friend.displayName.take(1).uppercase(),
+                                                    style = MaterialTheme.typography.titleMedium,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                )
+                                            }
+                                        }
+                                        if (friend.isOnline) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(10.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFF00E676))
+                                                    .border(1.5.dp, Color(0xFF0D1019), CircleShape),
+                                            )
+                                        }
+                                    }
+
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(
+                                            text = friend.displayName,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = VantafynColors.Ink,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = if (friend.isOnline) "Active now" else "Offline",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (friend.isOnline) Color(0xFF55F0C0) else VantafynColors.Muted,
+                                        )
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.horizontalGradient(
+                                                listOf(Color(0xFF00E5FF).copy(alpha = 0.20f), Color(0xFF7C4DFF).copy(alpha = 0.20f))
+                                            )
+                                        )
+                                        .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.50f), CircleShape)
+                                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Send,
+                                            contentDescription = "Send",
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(13.dp),
+                                        )
+                                        Text(
+                                            text = "Send",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            IconButton(onClick = onDismiss) {
+                Icon(
+                    imageVector = Icons.Rounded.Close,
+                    contentDescription = "Cancel",
+                    tint = VantafynColors.Muted,
+                )
             }
         },
     )
@@ -19137,10 +19362,7 @@ private fun FloatingSocialDock(
         modifier = modifier
             .offset { IntOffset(offsetX.value.roundToInt(), offsetY.value.roundToInt()) }
             .scale(if (isHoveringDismiss) 0.85f else 1f)
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(VantafynColors.SurfaceHigh.copy(alpha = if (isDragging) 0.98f else 0.90f))
-            .vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.3.dp, durationMillis = 3800)
+            .size(48.dp)
             .pointerInput(Unit) {
                 val velocityTracker = VelocityTracker()
                 awaitEachGesture {
@@ -19278,36 +19500,49 @@ private fun FloatingSocialDock(
             },
         contentAlignment = Alignment.Center,
     ) {
-        if (totalBadge > 0 && pulseAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .scale(pulseScale)
-                    .clip(CircleShape)
-                    .border(
-                        1.5.dp,
-                        Brush.horizontalGradient(
-                            listOf(
-                                Color(0xFF00E5FF).copy(alpha = pulseAlpha),
-                                Color(0xFFFF3366).copy(alpha = pulseAlpha),
+        // Main circular bubble body
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(VantafynColors.SurfaceHigh.copy(alpha = if (isDragging) 0.98f else 0.90f))
+                .vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.3.dp, durationMillis = 3800),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (totalBadge > 0 && pulseAlpha > 0f) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .scale(pulseScale)
+                        .clip(CircleShape)
+                        .border(
+                            1.5.dp,
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFF00E5FF).copy(alpha = pulseAlpha),
+                                    Color(0xFFFF3366).copy(alpha = pulseAlpha),
+                                ),
                             ),
+                            CircleShape,
                         ),
-                        CircleShape,
-                    ),
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.Forum,
+                contentDescription = "Friends & Messages",
+                tint = Color.White,
+                modifier = Modifier.size(20.dp),
             )
         }
-        Icon(
-            imageVector = Icons.Rounded.Forum,
-            contentDescription = "Friends & Messages",
-            tint = Color.White,
-            modifier = Modifier.size(20.dp),
-        )
+
+        // Notification count badge (Placed cleanly above bubble, not clipped)
         if (totalBadge > 0) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .offset(x = (-1).dp, y = 1.dp)
+                    .offset(x = 2.dp, y = (-2).dp)
                     .scale(badgeScale.value)
+                    .sizeIn(minWidth = 18.dp, minHeight = 18.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.horizontalGradient(
@@ -19317,13 +19552,14 @@ private fun FloatingSocialDock(
                             ),
                         ),
                     )
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                    .border(1.5.dp, Color(0xFF07090F), CircleShape)
+                    .padding(horizontal = 4.5.dp, vertical = 1.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = if (totalBadge > 99) "99+" else totalBadge.toString(),
                     style = MaterialTheme.typography.labelSmall,
-                    fontSize = 8.5.sp,
+                    fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                 )
@@ -19667,9 +19903,10 @@ private fun FloatingSocialPanel(
                             if (conv.unreadCount > 0) {
                                 Box(
                                     modifier = Modifier
+                                        .sizeIn(minWidth = 19.dp, minHeight = 19.dp)
                                         .clip(CircleShape)
                                         .background(Color(0xFFFF3366))
-                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                        .padding(horizontal = 5.dp, vertical = 1.dp),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(

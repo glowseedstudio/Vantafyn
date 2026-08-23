@@ -1,16 +1,25 @@
 package dev.vantafyn.feature.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -30,6 +39,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -50,6 +60,11 @@ import androidx.compose.material.icons.rounded.MarkChatUnread
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.Refresh
+import android.content.Context
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.StarBorder
+import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.AlertDialog
@@ -145,16 +160,54 @@ fun SocialScreen(
     var activeFriendActionTarget by remember { mutableStateOf<JellyfinFriend?>(null) }
     var showRemoveConfirmationFor by remember { mutableStateOf<JellyfinFriend?>(null) }
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+    val prefs = remember(context) { context.getSharedPreferences("vantafyn_social_prefs", Context.MODE_PRIVATE) }
+    var starredConversationIds by remember {
+        mutableStateOf(prefs.getStringSet("starred_conversations", emptySet())?.toSet() ?: emptySet())
+    }
+    var activeConversationActionTarget by remember { mutableStateOf<JellyfinSocialConversation?>(null) }
+
+    fun toggleStarConversation(convId: String) {
+        val updated = if (convId in starredConversationIds) {
+            starredConversationIds - convId
+        } else {
+            starredConversationIds + convId
+        }
+        starredConversationIds = updated
+        prefs.edit().putStringSet("starred_conversations", updated).apply()
+    }
+
+    val sortedConversations = remember(conversations, starredConversationIds) {
+        conversations.sortedWith(
+            compareByDescending<JellyfinSocialConversation> { it.conversationId in starredConversationIds }
+                .thenByDescending { it.lastMessageTimestamp }
+        )
+    }
 
     val incomingRequests = remember(requests) { requests.filter { it.isIncoming } }
     val outgoingRequests = remember(requests) { requests.filter { !it.isIncoming } }
     val totalUnreadMessages = remember(conversations) { conversations.sumOf { it.unreadCount } }
 
+    val reducedMotion = rememberReducedMotionPreference()
+    var revealProgress by remember { mutableFloatStateOf(if (reducedMotion) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (!reducedMotion) {
+            val anim = Animatable(0f)
+            anim.animateTo(1f, animationSpec = tween(durationMillis = 440, easing = FastOutSlowInEasing)) {
+                revealProgress = value
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = VantafynSpacing.md),
+            .padding(horizontal = VantafynSpacing.md)
+            .graphicsLayer {
+                alpha = revealProgress
+                translationY = (1f - revealProgress) * 28.dp.toPx()
+            },
     ) {
         // Top Bar
         Row(
@@ -210,26 +263,37 @@ fun SocialScreen(
             discoverableUsers.isEmpty()
 
         if (showFullScreenLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(
-                    color = VantafynColors.Primary,
-                    modifier = Modifier.size(36.dp),
-                )
+            when (selectedTab) {
+                SocialTab.Messages -> SocialMessagesSkeleton()
+                SocialTab.Friends -> SocialFriendsSkeleton()
+                SocialTab.Requests -> SocialRequestsSkeleton()
+                SocialTab.Find -> SocialFindSkeleton()
             }
         } else {
-            Box(
+            AnimatedContent(
+                targetState = selectedTab,
+                transitionSpec = {
+                    if (reducedMotion) {
+                        fadeIn(tween(160)).togetherWith(fadeOut(tween(120))).using(SizeTransform(clip = false))
+                    } else {
+                        (
+                            fadeIn(animationSpec = tween(220, delayMillis = 20, easing = FastOutSlowInEasing)) +
+                                slideInVertically(animationSpec = tween(220, delayMillis = 20, easing = FastOutSlowInEasing)) { it / 14 }
+                        ).togetherWith(
+                            fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing))
+                        ).using(SizeTransform(clip = false))
+                    }
+                },
+                label = "socialTabContentTransition",
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f),
-            ) {
-                when (selectedTab) {
+            ) { currentTab ->
+                when (currentTab) {
                     SocialTab.Messages -> {
-                        if (conversations.isEmpty()) {
+                        if (isLoading && sortedConversations.isEmpty()) {
+                            SocialMessagesSkeleton()
+                        } else if (sortedConversations.isEmpty()) {
                             SocialEmptyView(
                                 icon = Icons.Rounded.ChatBubbleOutline,
                                 title = "No Messages Yet",
@@ -242,17 +306,22 @@ fun SocialScreen(
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                                 contentPadding = PaddingValues(bottom = 110.dp),
                             ) {
-                                items(conversations, key = { it.conversationId }) { conv ->
+                                items(sortedConversations, key = { it.conversationId }) { conv ->
+                                    val isStarred = conv.conversationId in starredConversationIds
                                     ConversationCard(
                                         conversation = conv,
+                                        isStarred = isStarred,
                                         onClick = { onOpenConversation(conv) },
+                                        onLongClick = { activeConversationActionTarget = conv },
                                     )
                                 }
                             }
                         }
                     }
                     SocialTab.Friends -> {
-                        if (friends.isEmpty()) {
+                        if (isLoading && friends.isEmpty()) {
+                            SocialFriendsSkeleton()
+                        } else if (friends.isEmpty()) {
                             SocialEmptyView(
                                 icon = Icons.Rounded.Group,
                                 title = "No Friends Added",
@@ -276,7 +345,9 @@ fun SocialScreen(
                         }
                     }
                     SocialTab.Requests -> {
-                        if (incomingRequests.isEmpty() && outgoingRequests.isEmpty()) {
+                        if (isLoading && incomingRequests.isEmpty() && outgoingRequests.isEmpty()) {
+                            SocialRequestsSkeleton()
+                        } else if (incomingRequests.isEmpty() && outgoingRequests.isEmpty()) {
                             SocialEmptyView(
                                 icon = Icons.Rounded.MailOutline,
                                 title = "No Friend Requests",
@@ -335,7 +406,9 @@ fun SocialScreen(
                         val onlineProfiles = remember(discoverableUsers) { discoverableUsers.filter { it.isOnline } }
                         val offlineProfiles = remember(discoverableUsers) { discoverableUsers.filter { !it.isOnline } }
 
-                        if (discoverableUsers.isEmpty()) {
+                        if (isLoading && discoverableUsers.isEmpty()) {
+                            SocialFindSkeleton()
+                        } else if (discoverableUsers.isEmpty()) {
                             SocialEmptyView(
                                 icon = Icons.Rounded.PersonAdd,
                                 title = "No Server Members Found",
@@ -559,6 +632,21 @@ fun SocialScreen(
         )
     }
 
+    if (activeConversationActionTarget != null) {
+        val target = activeConversationActionTarget!!
+        val isStarred = target.conversationId in starredConversationIds
+        ConversationActionBottomSheet(
+            conversation = target,
+            isStarred = isStarred,
+            onDismiss = { activeConversationActionTarget = null },
+            onToggleStar = { toggleStarConversation(target.conversationId) },
+            onOpenChat = {
+                activeConversationActionTarget = null
+                onOpenConversation(target)
+            },
+        )
+    }
+
     if (showRemoveConfirmationFor != null) {
         val friendToRemove = showRemoveConfirmationFor!!
         AlertDialog(
@@ -610,14 +698,41 @@ fun SocialScreen(
 @Composable
 private fun ConversationCard(
     conversation: JellyfinSocialConversation,
+    isStarred: Boolean = false,
     onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val haptic = LocalHapticFeedback.current
+    val interactionSource = remember { MutableInteractionSource() }
+
     VantafynGlassCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .clickable(onClick = onClick),
+            .then(
+                if (isStarred) {
+                    Modifier.border(
+                        1.dp,
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color(0xFFFFD700).copy(alpha = 0.45f),
+                                Color(0xFFFFA000).copy(alpha = 0.20f),
+                            )
+                        ),
+                        RoundedCornerShape(20.dp),
+                    )
+                } else Modifier
+            )
+            .combinedClickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            ),
         cornerRadius = 20.dp,
         contentPadding = PaddingValues(14.dp),
     ) {
@@ -657,19 +772,33 @@ private fun ConversationCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = conversation.peerName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = VantafynColors.Ink,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f, fill = false),
+                    ) {
+                        Text(
+                            text = conversation.peerName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = VantafynColors.Ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (isStarred) {
+                            Icon(
+                                imageVector = Icons.Rounded.Star,
+                                contentDescription = "Starred",
+                                tint = Color(0xFFFFD700),
+                                modifier = Modifier.size(15.dp),
+                            )
+                        }
+                    }
                     conversation.lastMessageTimestamp?.let { ts ->
                         Text(
                             text = formatConversationDate(ts),
                             style = MaterialTheme.typography.labelSmall,
-                            color = VantafynColors.Muted,
+                            color = if (isStarred) Color(0xFFFFD700).copy(alpha = 0.85f) else VantafynColors.Muted,
                         )
                     }
                 }
@@ -687,15 +816,16 @@ private fun ConversationCard(
             if (conversation.unreadCount > 0) {
                 Box(
                     modifier = Modifier
+                        .sizeIn(minWidth = 20.dp, minHeight = 20.dp)
                         .clip(CircleShape)
                         .background(Color(0xFFFF3366))
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = conversation.unreadCount.toString(),
                         style = MaterialTheme.typography.labelSmall,
-                        fontSize = 11.sp,
+                        fontSize = 10.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                     )
@@ -1587,5 +1717,360 @@ private fun formatConversationDate(isoString: String?): String {
         }
     } catch (_: Exception) {
         isoString.take(10)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConversationActionBottomSheet(
+    conversation: JellyfinSocialConversation,
+    isStarred: Boolean,
+    onDismiss: () -> Unit,
+    onToggleStar: () -> Unit,
+    onOpenChat: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.Transparent,
+        scrimColor = Color.Black.copy(alpha = 0.70f),
+        dragHandle = null,
+        modifier = modifier,
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .vantafynAnimatedModalBorder(
+                    cornerRadius = 28.dp,
+                    strokeWidth = 1.35.dp,
+                    durationMillis = 4800,
+                )
+                .clip(RoundedCornerShape(28.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF141926).copy(alpha = 0.98f),
+                            Color(0xFF0F1420).copy(alpha = 0.98f),
+                        )
+                    )
+                )
+                .padding(20.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                // Header: Avatar + Peer Name
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.BottomEnd) {
+                        AvatarCircle(
+                            avatarUrl = conversation.peerAvatarUrl,
+                            name = conversation.peerName,
+                            size = 48.dp,
+                        )
+                        if (conversation.peerIsOnline) {
+                            Box(
+                                modifier = Modifier
+                                    .size(12.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF55F0C0))
+                                    .border(1.5.dp, VantafynColors.Surface, CircleShape),
+                            )
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp), modifier = Modifier.weight(1f)) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = conversation.peerName,
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = VantafynColors.Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (isStarred) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Star,
+                                    contentDescription = "Starred",
+                                    tint = Color(0xFFFFD700),
+                                    modifier = Modifier.size(16.dp),
+                                )
+                            }
+                        }
+                        Text(
+                            text = if (isStarred) "Starred & Pinned to Top" else "Direct Message",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isStarred) Color(0xFFFFD700).copy(alpha = 0.90f) else VantafynColors.Muted,
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+
+                // Actions
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Star / Unstar
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onToggleStar()
+                                onDismiss()
+                            },
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isStarred) Color(0xFFFFD700).copy(alpha = 0.15f) else Color.White.copy(alpha = 0.08f)
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = if (isStarred) Icons.Rounded.Star else Icons.Rounded.StarBorder,
+                                    contentDescription = null,
+                                    tint = if (isStarred) Color(0xFFFFD700) else VantafynColors.Ink,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    text = if (isStarred) "Unstar Conversation" else "Star & Pin to Top",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (isStarred) Color(0xFFFFD700) else VantafynColors.Ink,
+                                )
+                                Text(
+                                    text = if (isStarred) "Remove from pinned favorites" else "Pin conversation to the top of your messages",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Muted,
+                                )
+                            }
+                        }
+                    }
+
+                    // Open Chat
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onDismiss()
+                                onOpenChat()
+                            },
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ChatBubbleOutline,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                                Text(
+                                    text = "Open Chat",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = VantafynColors.Ink,
+                                )
+                                Text(
+                                    text = "View full message history and send messages",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Muted,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialMessagesSkeleton() {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 110.dp),
+    ) {
+        repeat(4) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    VantafynSkeletonBlock(Modifier.size(50.dp), cornerRadius = 999.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            VantafynSkeletonBlock(Modifier.width(110.dp).height(16.dp), cornerRadius = 6.dp)
+                            VantafynSkeletonBlock(Modifier.width(42.dp).height(10.dp), cornerRadius = 4.dp)
+                        }
+                        VantafynSkeletonBlock(Modifier.fillMaxWidth(0.72f).height(13.dp), cornerRadius = 4.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialFriendsSkeleton() {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 110.dp),
+    ) {
+        repeat(4) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    VantafynSkeletonBlock(Modifier.size(50.dp), cornerRadius = 999.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            VantafynSkeletonBlock(Modifier.width(100.dp).height(16.dp), cornerRadius = 6.dp)
+                            VantafynSkeletonBlock(Modifier.width(60.dp).height(18.dp), cornerRadius = 999.dp)
+                        }
+                        VantafynSkeletonBlock(Modifier.width(80.dp).height(12.dp), cornerRadius = 4.dp)
+                    }
+                    VantafynSkeletonBlock(Modifier.size(40.dp), cornerRadius = 999.dp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialRequestsSkeleton() {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 110.dp),
+    ) {
+        repeat(3) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    VantafynSkeletonBlock(Modifier.size(46.dp), cornerRadius = 999.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        VantafynSkeletonBlock(Modifier.width(110.dp).height(15.dp), cornerRadius = 6.dp)
+                        VantafynSkeletonBlock(Modifier.width(80.dp).height(11.dp), cornerRadius = 4.dp)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        VantafynSkeletonBlock(Modifier.size(36.dp), cornerRadius = 999.dp)
+                        VantafynSkeletonBlock(Modifier.size(36.dp), cornerRadius = 999.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SocialFindSkeleton() {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxWidth().padding(bottom = 110.dp),
+    ) {
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 24.dp,
+            contentPadding = PaddingValues(14.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                VantafynSkeletonBlock(Modifier.width(120.dp).height(14.dp), cornerRadius = 4.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    repeat(3) {
+                        VantafynSkeletonBlock(Modifier.weight(1f).height(100.dp), cornerRadius = 18.dp)
+                    }
+                }
+            }
+        }
+        repeat(3) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                contentPadding = PaddingValues(14.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    VantafynSkeletonBlock(Modifier.size(46.dp), cornerRadius = 999.dp)
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        VantafynSkeletonBlock(Modifier.width(120.dp).height(15.dp), cornerRadius = 6.dp)
+                        VantafynSkeletonBlock(Modifier.width(70.dp).height(11.dp), cornerRadius = 4.dp)
+                    }
+                    VantafynSkeletonBlock(Modifier.width(70.dp).height(34.dp), cornerRadius = 999.dp)
+                }
+            }
+        }
     }
 }

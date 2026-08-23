@@ -1470,6 +1470,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                 } else if (isSocialScreen) {
                     loadSocialData(force = false)
+                    _state.value.socialConversations.forEach { c ->
+                        val txt = c.lastMessageText
+                        if (!txt.isNullOrBlank()) {
+                            seenMessageKeys += "${c.conversationId}_${c.lastMessageTimestamp}_$txt"
+                        }
+                    }
                 } else {
                     // Check unread summary and conversations
                     when (val convRes = socialRepository.getConversations(session)) {
@@ -1559,13 +1565,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun openChatWithFriend(friend: JellyfinFriend) {
         val session = _state.value.session ?: return
         val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == friend.userId }?.conversationId ?: friend.userId.toString()
-        _state.update {
-            it.copy(
+        _state.update { curr ->
+            val updatedConvos = curr.socialConversations.map { conv ->
+                if (conv.peerUserId == friend.userId || conv.conversationId == convId) {
+                    conv.copy(unreadCount = 0)
+                } else conv
+            }
+            val newTotalUnread = updatedConvos.sumOf { it.unreadCount }
+            curr.copy(
                 activeChatPeer = friend,
                 activeChatMessages = emptyList(),
                 chatErrorMessage = null,
                 isSocialPanelOpen = false,
                 activeSocialIslandPreview = null,
+                socialConversations = updatedConvos,
+                socialUnreadCount = newTotalUnread,
             )
         }
         navigateMobile(MobileDestination.Chat)
@@ -1574,6 +1588,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is JellyfinResult.Success -> {
                     _state.update { it.copy(activeChatMessages = res.value) }
                     socialRepository.markConversationRead(session, convId)
+                    loadSocialData(force = false)
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(chatErrorMessage = res.message) }
@@ -1594,6 +1609,34 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 isOnline = conv.peerIsOnline,
             )
         openChatWithFriend(friend)
+    }
+
+    fun shareMediaRecommendationToFriend(friend: JellyfinFriend, detail: JellyfinMediaDetail) {
+        val session = _state.value.session ?: return
+        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == friend.userId }?.conversationId ?: friend.userId.toString()
+        val cleanTitle = detail.title.replace("|", "").replace("\n", " ")
+        val cleanType = (detail.itemType ?: "Media").replace("|", "")
+        val cleanYear = detail.year?.toString() ?: ""
+        val cleanImage = (detail.imageUrl ?: detail.backdropUrl).orEmpty().replace("|", "")
+        val payload = "[media_rec|${detail.id}|$cleanTitle|$cleanType|$cleanYear|$cleanImage]"
+
+        viewModelScope.launch {
+            when (val res = socialRepository.sendMessage(session, friend.userId, convId, payload)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            mobileMessage = "Recommended \"${detail.title}\" to ${friend.displayName}",
+                        )
+                    }
+                    loadSocialData(force = false)
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(mobileMessage = "Failed to send recommendation: ${res.message}")
+                    }
+                }
+            }
+        }
     }
 
     fun sendChatMessage(text: String) {
@@ -1696,6 +1739,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun dismissSocialIslandPreview() {
+        val currentPreview = _state.value.activeSocialIslandPreview
+        if (currentPreview != null) {
+            seenMessageKeys += currentPreview.messageId
+            seenMessageKeys += "${currentPreview.conversationId}_${currentPreview.timestamp}_${currentPreview.content}"
+        }
         _state.update { it.copy(activeSocialIslandPreview = null) }
     }
 

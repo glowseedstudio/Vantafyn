@@ -3,6 +3,7 @@ package dev.vantafyn.feature.home
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -11,6 +12,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -49,6 +52,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
@@ -158,17 +162,30 @@ fun ChatScreen(
         messages.filter { parseReaction(it.content) == null }
     }
     var prevMessageCount by remember { mutableStateOf(visibleMessages.size) }
+    var isInitialLoad by remember { mutableStateOf(true) }
+
+    val reducedMotion = rememberReducedMotionPreference()
+    var revealProgress by remember { mutableFloatStateOf(if (reducedMotion) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (!reducedMotion) {
+            val anim = Animatable(0f)
+            anim.animateTo(1f, animationSpec = tween(durationMillis = 420, easing = FastOutSlowInEasing)) {
+                revealProgress = value
+            }
+        }
+    }
 
     // Auto scroll and sound cue when a new message arrives
     LaunchedEffect(visibleMessages.size) {
         if (visibleMessages.isNotEmpty()) {
             listState.animateScrollToItem(0)
-            if (visibleMessages.size > prevMessageCount) {
+            if (!isInitialLoad && visibleMessages.size > prevMessageCount) {
                 val latest = visibleMessages.lastOrNull()
                 if (latest != null && !latest.isFromSelf) {
                     dev.vantafyn.core.ui.VantafynSoundEffects.playNewMessageAlert(context)
                 }
             }
+            isInitialLoad = false
         }
         prevMessageCount = visibleMessages.size
     }
@@ -176,6 +193,10 @@ fun ChatScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .graphicsLayer {
+                alpha = revealProgress
+                translationY = (1f - revealProgress) * 24.dp.toPx()
+            }
             .background(
                 // Dark at the top, fading smoothly to transparent towards the bottom
                 Brush.verticalGradient(
@@ -232,10 +253,14 @@ fun ChatScreen(
                     .padding(horizontal = VantafynSpacing.md),
             ) {
                 if (visibleMessages.isEmpty()) {
-                    ChatEmptyState(
-                        peer = peer,
-                        modifier = Modifier.align(Alignment.Center),
-                    )
+                    if (isInitialLoad || isSending) {
+                        ChatMessageThreadSkeleton()
+                    } else {
+                        ChatEmptyState(
+                            peer = peer,
+                            modifier = Modifier.align(Alignment.Center),
+                        )
+                    }
                 } else {
                     // Grouped message rendering in reverseLayout
                     val reversedMessages = remember(visibleMessages) { visibleMessages.asReversed() }
@@ -402,23 +427,7 @@ private fun ChatHeader(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // Circular glass back button
-                Box(
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.08f))
-                        .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
-                        .clickable(onClick = onBack),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                        contentDescription = "Back",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
+                CompactBackButton(onClick = onBack)
 
                 // Avatar with presence indicator
                 Box(
@@ -661,101 +670,73 @@ private fun ChatMessageItem(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.Bottom,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        ) {
-            // Optional mini avatar for received messages (at bottom of cluster)
-            if (!isSelf) {
-                if (isLastInGroup) {
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(CircleShape)
-                            .background(Color(0xFF1E2638))
-                            .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        if (!peer.avatarUrl.isNullOrBlank()) {
-                            AsyncImage(
-                                model = peer.avatarUrl,
-                                contentDescription = null,
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop,
+        if (mediaRec != null) {
+            MediaRecommendationCard(
+                recommendation = mediaRec,
+                isSelf = isSelf,
+                timestamp = formattedTime,
+                onOpenMedia = onOpenMedia,
+                onLongPress = onLongPress,
+            )
+        } else {
+            // Standard Message Bubble with long-press support
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 290.dp)
+                    .clip(bubbleShape)
+                    .combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {},
+                        onLongClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress()
+                        },
+                    )
+                    .background(
+                        if (isSelf) {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF1B173B),
+                                    Color(0xFF2E174E),
+                                ),
                             )
                         } else {
-                            Text(
-                                text = peer.displayName.take(1).uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF0D1E2A),
+                                    Color(0xFF082632),
+                                ),
                             )
-                        }
-                    }
-                } else {
-                    Spacer(modifier = Modifier.size(28.dp))
-                }
-            }
-
-            if (mediaRec != null) {
-                MediaRecommendationCard(
-                    recommendation = mediaRec,
-                    isSelf = isSelf,
-                    timestamp = formattedTime,
-                    onOpenMedia = onOpenMedia,
-                    onLongPress = onLongPress,
-                )
-            } else {
-                // Standard Message Bubble with long-press support
-                Box(
-                    modifier = Modifier
-                        .widthIn(max = 290.dp)
-                        .clip(bubbleShape)
-                        .combinedClickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = {},
-                            onLongClick = {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onLongPress()
-                            },
-                        )
-                        .background(
-                            if (isSelf) {
-                                Brush.linearGradient(
-                                    colors = listOf(
-                                        Color(0xFF162544),
-                                        Color(0xFF261942),
-                                    ),
-                                )
-                            } else {
-                                SolidColor(Color(0xFF121624).copy(alpha = 0.92f))
-                            },
-                        )
-                        .border(
-                            width = 1.dp,
-                            brush = if (isSelf) {
-                                Brush.linearGradient(
-                                    colors = listOf(
-                                        Color(0xFF00E5FF).copy(alpha = 0.45f),
-                                        Color(0xFF7C4DFF).copy(alpha = 0.35f),
-                                    ),
-                                )
-                            } else {
-                                SolidColor(Color.White.copy(alpha = 0.10f))
-                            },
-                            shape = bubbleShape,
-                        )
-                        .padding(horizontal = 14.dp, vertical = 9.dp),
-                ) {
-                    Text(
-                        text = message.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White,
-                        lineHeight = 20.sp,
+                        },
                     )
-                }
+                    .border(
+                        width = 1.dp,
+                        brush = if (isSelf) {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF9D4EDD).copy(alpha = 0.50f),
+                                    Color(0xFF7C4DFF).copy(alpha = 0.40f),
+                                ),
+                            )
+                        } else {
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF00E5FF).copy(alpha = 0.42f),
+                                    Color(0xFF00B4D8).copy(alpha = 0.28f),
+                                ),
+                            )
+                        },
+                        shape = bubbleShape,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
+            ) {
+                Text(
+                    text = message.content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = Color.White,
+                    lineHeight = 20.sp,
+                )
             }
         }
 
@@ -767,8 +748,8 @@ private fun ChatMessageItem(
             Row(
                 modifier = Modifier
                     .padding(
-                        start = if (isSelf) 0.dp else 40.dp,
-                        end = if (isSelf) 8.dp else 0.dp,
+                        start = if (isSelf) 0.dp else 4.dp,
+                        end = if (isSelf) 4.dp else 0.dp,
                         top = 2.dp,
                     )
                     .clip(RoundedCornerShape(999.dp))
@@ -798,17 +779,45 @@ private fun ChatMessageItem(
             }
         }
 
-        // Timestamp & Read Receipt (Seen) for text bubbles
+        // Timestamp, Profile Picture & Read Receipt (Seen) under messages
         if (showTimestamp && mediaRec == null) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(
-                    start = if (isSelf) 0.dp else 40.dp,
-                    end = if (isSelf) 8.dp else 0.dp,
-                    top = 2.dp,
+                    start = if (isSelf) 0.dp else 4.dp,
+                    end = if (isSelf) 4.dp else 0.dp,
+                    top = 3.dp,
                 ),
             ) {
+                if (!isSelf && isLastInGroup) {
+                    Box(
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF1E2638))
+                            .border(1.dp, Color.White.copy(alpha = 0.20f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!peer.avatarUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = peer.avatarUrl,
+                                contentDescription = null,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Text(
+                                text = peer.displayName.take(1).uppercase(),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 8.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                            )
+                        }
+                    }
+                }
+
                 if (!formattedTime.isNullOrBlank()) {
                     Text(
                         text = formattedTime,
@@ -875,13 +884,13 @@ private fun MediaRecommendationCard(
                 Brush.verticalGradient(
                     if (isSelf) {
                         listOf(
-                            Color(0xFF162544).copy(alpha = 0.95f),
-                            Color(0xFF261942).copy(alpha = 0.95f),
+                            Color(0xFF1E173E).copy(alpha = 0.96f),
+                            Color(0xFF2C164D).copy(alpha = 0.96f),
                         )
                     } else {
                         listOf(
-                            Color(0xFF141828).copy(alpha = 0.95f),
-                            Color(0xFF0C101C).copy(alpha = 0.95f),
+                            Color(0xFF0C1D2A).copy(alpha = 0.96f),
+                            Color(0xFF07242E).copy(alpha = 0.96f),
                         )
                     },
                 ),
@@ -889,10 +898,17 @@ private fun MediaRecommendationCard(
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
-                    listOf(
-                        Color(0xFF00E5FF).copy(alpha = 0.50f),
-                        Color(0xFFA78BFA).copy(alpha = 0.40f),
-                    ),
+                    if (isSelf) {
+                        listOf(
+                            Color(0xFF9D4EDD).copy(alpha = 0.55f),
+                            Color(0xFF7C4DFF).copy(alpha = 0.45f),
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF00E5FF).copy(alpha = 0.50f),
+                            Color(0xFF00B4D8).copy(alpha = 0.35f),
+                        )
+                    },
                 ),
                 shape = RoundedCornerShape(20.dp),
             )
@@ -1772,5 +1788,47 @@ private fun formatMessageTime(isoString: String?): String? {
         }
     } catch (_: Exception) {
         isoString
+    }
+}
+
+@Composable
+private fun ChatMessageThreadSkeleton(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // Staggered incoming / outgoing bubble skeletons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+        ) {
+            VantafynSkeletonBlock(Modifier.width(180.dp).height(44.dp), cornerRadius = 18.dp)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            VantafynSkeletonBlock(Modifier.width(140.dp).height(38.dp), cornerRadius = 18.dp)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+        ) {
+            VantafynSkeletonBlock(Modifier.width(220.dp).height(56.dp), cornerRadius = 18.dp)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            VantafynSkeletonBlock(Modifier.width(190.dp).height(42.dp), cornerRadius = 18.dp)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+        ) {
+            VantafynSkeletonBlock(Modifier.width(160.dp).height(38.dp), cornerRadius = 18.dp)
+        }
     }
 }

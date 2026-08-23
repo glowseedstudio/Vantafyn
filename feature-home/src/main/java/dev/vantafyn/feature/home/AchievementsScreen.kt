@@ -2,9 +2,13 @@ package dev.vantafyn.feature.home
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -140,13 +144,28 @@ fun AchievementsScreen(
         }
     }
 
+    val reducedMotion = rememberReducedMotionPreference()
+    var revealProgress by remember { mutableFloatStateOf(if (reducedMotion) 1f else 0f) }
+    LaunchedEffect(Unit) {
+        if (!reducedMotion) {
+            val anim = Animatable(0f)
+            anim.animateTo(1f, animationSpec = tween(durationMillis = 440, easing = FastOutSlowInEasing)) {
+                revealProgress = value
+            }
+        }
+    }
+
     Box(
         modifier = modifier.fillMaxSize(),
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .graphicsLayer {
+                    alpha = revealProgress
+                    translationY = (1f - revealProgress) * 28.dp.toPx()
+                },
         ) {
             // Top action bar with chevron back button and refresh
             AchievementsHeaderBar(
