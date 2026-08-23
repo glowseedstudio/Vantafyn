@@ -34,32 +34,62 @@ class SdkJellyfinSocialRepository(
 
     override suspend fun reportPresence(session: JellyfinSession): Unit =
         withContext(ioDispatcher) {
+            val payload = JSONObject().apply {
+                put("PlayableMediaTypes", JSONArray(listOf("Video", "Audio")))
+                put("SupportedCommands", JSONArray(listOf("Play", "Pause", "Stop", "Seek", "DisplayMessage")))
+                put("SupportsMediaControl", true)
+                put("SupportsPersistentIdentifier", true)
+            }.toString()
+            val payloadBytes = payload.toByteArray(Charsets.UTF_8)
+
             runCatching {
                 val conn = session.openAuthenticatedConnection("Sessions/Capabilities/Full", "POST")
                 conn.doOutput = true
+                conn.setFixedLengthStreamingMode(payloadBytes.size)
                 conn.connectTimeout = 5000
                 conn.readTimeout = 5000
-                val payload = JSONObject().apply {
-                    put("PlayableMediaTypes", JSONArray(listOf("Video", "Audio")))
-                    put("SupportedCommands", JSONArray(listOf("Play", "Pause", "Stop", "Seek", "DisplayMessage")))
-                    put("SupportsMediaControl", true)
-                    put("SupportsPersistentIdentifier", true)
-                }.toString()
                 conn.outputStream.use { os ->
-                    os.write(payload.toByteArray(Charsets.UTF_8))
+                    os.write(payloadBytes)
                 }
                 val code = conn.responseCode
+                val err = if (code !in 200..299) conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty() else ""
                 conn.disconnect()
-                Log.d("VantafynSocial", "reportPresence [Sessions/Capabilities/Full] -> HTTP $code")
+                Log.d("VantafynSocial", "reportPresence [Sessions/Capabilities/Full] -> HTTP $code ${if (err.isNotBlank()) "err: $err" else ""}")
             }.onFailure {
-                Log.w("VantafynSocial", "reportPresence error: ${it.message}")
+                Log.w("VantafynSocial", "reportPresence Full error: ${it.message}")
             }
+
+            runCatching {
+                val conn2 = session.openAuthenticatedConnection("Sessions/Capabilities", "POST")
+                conn2.doOutput = true
+                conn2.setFixedLengthStreamingMode(payloadBytes.size)
+                conn2.connectTimeout = 5000
+                conn2.readTimeout = 5000
+                conn2.outputStream.use { os ->
+                    os.write(payloadBytes)
+                }
+                val code2 = conn2.responseCode
+                conn2.disconnect()
+                Log.d("VantafynSocial", "reportPresence [Sessions/Capabilities] -> HTTP $code2")
+            }
+
+            // Touch user profile to ensure Jellyfin AuthFilter refreshes session LastActivityDate
+            runCatching {
+                val uConn = session.openAuthenticatedConnection("Users/${session.user.id}")
+                uConn.connectTimeout = 4000
+                uConn.readTimeout = 4000
+                val uCode = uConn.responseCode
+                uConn.disconnect()
+                Log.d("VantafynSocial", "reportPresence [Users/{id}] -> HTTP $uCode")
+            }
+
             runCatching {
                 val pConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/summary")
                 pConn.connectTimeout = 4000
                 pConn.readTimeout = 4000
-                pConn.responseCode
+                val pCode = pConn.responseCode
                 pConn.disconnect()
+                Log.d("VantafynSocial", "reportPresence [AchievementBadges summary] -> HTTP $pCode")
             }
         }
 
@@ -607,7 +637,9 @@ class SdkJellyfinSocialRepository(
                     val lastActivityStr = sItem.optStringOrNull("LastActivityDate", "lastActivityDate")
                     val lastActivityTime = parseIsoOrEpochMillis(lastActivityStr)
                     val isActive = sItem.optBooleanOrNull("IsActive", "isActive") ?: true
-                    val isTrulyActive = nowPlaying != null || (isActive && (lastActivityTime == 0L || (System.currentTimeMillis() - lastActivityTime) < 5 * 60 * 1000L))
+                    val timeDiff = if (lastActivityTime > 0L) Math.abs(System.currentTimeMillis() - lastActivityTime) else 0L
+                    val isTrulyActive = nowPlaying != null || (isActive && (lastActivityTime == 0L || timeDiff < 15 * 60 * 1000L))
+                    Log.d("VantafynSocial", "Session: uId=$uId uName=$uName dev=$devName isAct=$isActive timeDiffMs=$timeDiff isTrulyAct=$isTrulyActive")
                     if (!isTrulyActive) continue
 
                     val mediaTitle = formatNowPlayingDescription(nowPlaying, nowPlaying?.optStringOrNull("Name", "name"))
@@ -621,7 +653,8 @@ class SdkJellyfinSocialRepository(
                     if (existing != null) {
                         userMap[uId] = existing.copy(
                             isOnline = true,
-                            currentlyWatching = mediaTitle ?: existing.currentlyWatching ?: "Active now",
+                            currentlyWatching = mediaTitle ?: existing.currentlyWatching ?: watchingDesc,
+                            lastSeen = "Now",
                         )
                     } else {
                         userMap[uId] = JellyfinFriend(
