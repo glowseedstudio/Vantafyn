@@ -22,9 +22,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,13 +36,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.TileMode
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -62,7 +60,9 @@ fun TvServerConfirmScreen(
     publicUsers: List<JellyfinPublicUser> = emptyList(),
     savedProfiles: List<SavedProfile> = emptyList(),
     currentSessionUser: String? = null,
+    isQuickConnectMode: Boolean = false,
     onContinue: () -> Unit,
+    onQuickConnect: (() -> Unit)? = null,
     onUseDifferentServer: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -139,42 +139,50 @@ fun TvServerConfirmScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .drawWithContent {
-                        drawContent()
-                        val alpha = borderAlpha.value
-                        if (alpha > 0f) {
-                            val r = 18.dp.toPx()
-                            val s = Offset(-size.width * borderShift, -size.height * borderShift)
-                            val e = Offset(size.width * (1f - borderShift), size.height * (1f - borderShift))
-                            drawRoundRect(
-                                brush = Brush.linearGradient(
-                                    colors = (VantafynGradients.AccentColors + VantafynGradients.AccentColors.first())
-                                        .map { it.copy(alpha = it.alpha * alpha * 0.85f) },
-                                    start = s,
-                                    end = e,
-                                    tileMode = TileMode.Repeated,
-                                ),
-                                cornerRadius = CornerRadius(r, r),
-                                style = Stroke(width = 1.5.dp.toPx()),
-                            )
+                    .drawBehind {
+                        val stroke = 1.5.dp.toPx()
+                        val shift = borderShift
+                        val colors = listOf(
+                            Color(0xFF21D8FF).copy(alpha = borderAlpha.value * 0.85f),
+                            Color(0xFF388BFF).copy(alpha = borderAlpha.value * 0.70f),
+                            Color(0xFF8B35FF).copy(alpha = borderAlpha.value * 0.75f),
+                            Color(0xFFFF36C7).copy(alpha = borderAlpha.value * 0.85f),
+                            Color(0xFF21D8FF).copy(alpha = borderAlpha.value * 0.85f),
+                        )
+                        val stops = floatArrayOf(
+                            ((0f + shift) % 1f),
+                            ((0.25f + shift) % 1f),
+                            ((0.5f + shift) % 1f),
+                            ((0.75f + shift) % 1f),
+                            ((1f + shift) % 1f),
+                        ).sortedArray()
+
+                        val sortedColors = stops.mapIndexed { idx, _ ->
+                            colors[idx % colors.size]
                         }
+
+                        drawRoundRect(
+                            brush = Brush.sweepGradient(sortedColors),
+                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(18.dp.toPx()),
+                            style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                        )
                     }
+                    .clip(shape)
+                    .background(Color(0x33121721))
+                    .border(
+                        BorderStroke(1.dp, Color(0x33FFFFFF)),
+                        shape = shape,
+                    )
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(shape)
-                        .background(Color(0xD910182A))
-                        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), shape)
-                        .padding(20.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // Admin Avatar Picture / Initials Fallback
-                    val avatarShape = RoundedCornerShape(14.dp)
                     Box(
                         modifier = Modifier
-                            .size(52.dp)
-                            .clip(avatarShape)
+                            .size(54.dp)
+                            .clip(CircleShape)
                             .background(
                                 Brush.linearGradient(
                                     listOf(Color(0xFF3D5266), Color(0xFF756A8A), Color(0xFF20252D))
@@ -227,11 +235,20 @@ fun TvServerConfirmScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 VantafynTvGlassButton(
-                    text = if (hasPublicUsers) "Choose Profile" else "Sign In",
-                    icon = Icons.AutoMirrored.Rounded.ArrowForward,
+                    text = if (isQuickConnectMode) "Quick Connect" else (if (hasPublicUsers) "Choose Profile" else "Sign In"),
+                    icon = if (isQuickConnectMode) Icons.Rounded.Bolt else Icons.AutoMirrored.Rounded.ArrowForward,
                     isPrimary = true,
                     onClick = onContinue,
                 )
+
+                if (!isQuickConnectMode && onQuickConnect != null) {
+                    VantafynTvGlassButton(
+                        text = "Quick Connect",
+                        icon = Icons.Rounded.Bolt,
+                        isPrimary = false,
+                        onClick = onQuickConnect,
+                    )
+                }
 
                 VantafynTvGlassButton(
                     text = "Different Server",

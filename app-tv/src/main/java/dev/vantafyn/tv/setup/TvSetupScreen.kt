@@ -27,7 +27,7 @@ import kotlinx.coroutines.delay
 
 private val VantafynSetupCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1f)
 
-private enum class TvInternalSetupPhase {
+enum class TvInternalSetupPhase {
     Welcome,
     ChooseMethod,
     Pairing,
@@ -46,6 +46,7 @@ fun TvSetupScreen(
 ) {
     var isChoosingMethod by remember { mutableStateOf(false) }
     var isPairing by remember { mutableStateOf(false) }
+    var isQuickConnectFlow by rememberSaveable { mutableStateOf(false) }
 
     // Initial 2-second background-only reveal on first launch of setup
     var isInitialBackgroundPaused by rememberSaveable { mutableStateOf(true) }
@@ -84,7 +85,11 @@ fun TvSetupScreen(
             }
             TvInternalSetupPhase.QuickConnect -> {
                 viewModel.cancelQuickConnect()
-                isChoosingMethod = true
+                if (state.server != null && !isChoosingMethod) {
+                    viewModel.navigateSetupBack()
+                } else {
+                    isChoosingMethod = true
+                }
             }
             TvInternalSetupPhase.ChooseMethod -> {
                 isChoosingMethod = false
@@ -163,6 +168,7 @@ fun TvSetupScreen(
                             onQuickConnect = {
                                 isPairing = false
                                 isChoosingMethod = false
+                                isQuickConnectFlow = true
                                 if (state.server != null) {
                                     viewModel.startQuickConnect()
                                 } else {
@@ -172,6 +178,7 @@ fun TvSetupScreen(
                             onManualSetup = {
                                 isPairing = false
                                 isChoosingMethod = false
+                                isQuickConnectFlow = false
                                 viewModel.continueFromWelcome()
                             },
                             onBack = {
@@ -190,6 +197,7 @@ fun TvSetupScreen(
                             onManualSetup = {
                                 isPairing = false
                                 isChoosingMethod = false
+                                isQuickConnectFlow = false
                                 viewModel.continueFromWelcome()
                             },
                             onBack = {
@@ -207,12 +215,17 @@ fun TvSetupScreen(
                             errorMessage = state.errorMessage,
                             onRefresh = { viewModel.retryQuickConnect() },
                             onManualSetup = {
+                                isQuickConnectFlow = false
                                 viewModel.cancelQuickConnect()
                                 viewModel.continueToLogin()
                             },
                             onBack = {
                                 viewModel.cancelQuickConnect()
-                                isChoosingMethod = true
+                                if (state.server != null && !isChoosingMethod) {
+                                    viewModel.navigateSetupBack()
+                                } else {
+                                    isChoosingMethod = true
+                                }
                             },
                         )
                     }
@@ -235,7 +248,17 @@ fun TvSetupScreen(
                             publicUsers = state.publicUsers,
                             savedProfiles = state.savedProfiles,
                             currentSessionUser = state.session?.user?.name,
-                            onContinue = { viewModel.continueToLogin() },
+                            isQuickConnectMode = isQuickConnectFlow,
+                            onContinue = {
+                                if (isQuickConnectFlow) {
+                                    viewModel.startQuickConnect()
+                                } else {
+                                    viewModel.continueToLogin()
+                                }
+                            },
+                            onQuickConnect = {
+                                viewModel.startQuickConnect()
+                            },
                             onUseDifferentServer = {
                                 viewModel.onServerUrlChanged("")
                                 viewModel.continueFromWelcome()

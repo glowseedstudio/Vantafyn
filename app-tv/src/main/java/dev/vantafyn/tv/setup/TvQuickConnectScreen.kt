@@ -104,19 +104,19 @@ fun TvQuickConnectScreen(
             Spacer(modifier = Modifier.height(18.dp))
 
             // Main PIN / Code Card with Animated Gradient Border
-            val cardShape = RoundedCornerShape(20.dp)
+            val cardShape = RoundedCornerShape(22.dp)
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .width(480.dp)
                     .vantafynAnimatedModalBorder(
-                        cornerRadius = 20.dp,
+                        cornerRadius = 22.dp,
                         strokeWidth = 1.5.dp,
-                        durationMillis = 4200,
+                        durationMillis = 4800,
                     )
                     .clip(cardShape)
-                    .background(VantafynGlassPalette.NavyCore.copy(alpha = 0.50f))
+                    .background(VantafynColors.Graphite.copy(alpha = 0.96f))
                     .padding(horizontal = 28.dp, vertical = 20.dp),
             ) {
                 if (errorMessage != null && !isExpired) {

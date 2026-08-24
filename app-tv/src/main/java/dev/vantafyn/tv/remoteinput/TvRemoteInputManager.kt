@@ -3,6 +3,8 @@ package dev.vantafyn.tv.remoteinput
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
+import dev.vantafyn.core.jellyfin.TvCryptoUtils
 import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
 import dev.vantafyn.core.jellyfin.TvRemoteInputPayload
 import dev.vantafyn.core.jellyfin.TvRemoteInputResponse
@@ -19,19 +21,23 @@ import java.io.InputStreamReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.security.KeyPair
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * TV Remote Input Manager.
+ * TV Remote Input Manager with End-to-End Encryption.
  *
  * Runs a lightweight ServerSocket HTTP listener and UDP discovery beacon
  * to safely receive text from paired/connected Vantafyn mobile devices on LAN.
+ * Uses ECDH (NIST P-256) key agreement and AES-256-GCM authenticated encryption.
  */
 object TvRemoteInputManager {
-    private const val DEFAULT_HTTP_PORT = 8765
-    private const val UDP_DISCOVERY_PORT = 8766
+    private const val TAG = "TvRemoteInputManager"
+    private const val DEFAULT_HTTP_PORT = 8767
+    private const val UDP_DISCOVERY_PORT = 8899
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -42,6 +48,9 @@ object TvRemoteInputManager {
     private var udpSocket: DatagramSocket? = null
     private var udpListenJob: Job? = null
     private var broadcastJob: Job? = null
+
+    // Ephemeral EC KeyPair for end-to-end encryption session
+    private var serverKeyPair: KeyPair = TvCryptoUtils.generateEcKeyPair()
 
     var assignedPort: Int = DEFAULT_HTTP_PORT
         private set
@@ -85,12 +94,18 @@ object TvRemoteInputManager {
     fun start() {
         if (isRunning.getAndSet(true)) return
 
+        // Rotate ephemeral keypair on start
+        serverKeyPair = TvCryptoUtils.generateEcKeyPair()
+
         var startedSocket: ServerSocket? = null
         var boundPort = DEFAULT_HTTP_PORT
 
-        for (port in DEFAULT_HTTP_PORT..(DEFAULT_HTTP_PORT + 10)) {
+        for (port in listOf(8767, 8768, 8769, 8770, 8765)) {
             try {
-                startedSocket = ServerSocket(port)
+                startedSocket = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(port))
+                }
                 boundPort = port
                 break
             } catch (_: Exception) {
@@ -185,6 +200,11 @@ object TvRemoteInputManager {
                 ""
             }
 
+            if (method == "OPTIONS") {
+                sendHttpResponse(socket, 200, "{\"status\":\"ok\"}")
+                return
+            }
+
             when {
                 method == "POST" && path.startsWith("/api/v1/remote-input") -> {
                     val payload = TvRemoteInputPayload.fromJsonString(body)
@@ -199,20 +219,51 @@ object TvRemoteInputManager {
                         val response = TvRemoteInputResponse(
                             success = false,
                             message = "No text field is currently focused on your TV",
+                            serverPublicKey = TvCryptoUtils.encodePublicKey(serverKeyPair.public),
                         )
                         sendHttpResponse(socket, 200, response.toJsonString())
                         return
                     }
 
+                    // Resolve decrypted text
+                    val clientPubStr = payload.clientPublicKey
+                    val ivStr = payload.iv
+                    val cipherStr = payload.ciphertext
+
+                    val resolvedText = if (payload.encrypted &&
+                        !cipherStr.isNullOrBlank() &&
+                        !ivStr.isNullOrBlank() &&
+                        !clientPubStr.isNullOrBlank()
+                    ) {
+                        try {
+                            val clientPub = TvCryptoUtils.decodePublicKey(clientPubStr)
+                            val sharedAesKey = TvCryptoUtils.deriveSharedAesKey(serverKeyPair.private, clientPub)
+                            TvCryptoUtils.decryptAesGcm(ivStr, cipherStr, sharedAesKey)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Decryption failed: ${e.message}")
+                            val response = TvRemoteInputResponse(
+                                success = false,
+                                message = "Decryption failed. Please try again.",
+                                serverPublicKey = TvCryptoUtils.encodePublicKey(serverKeyPair.public),
+                            )
+                            sendHttpResponse(socket, 400, response.toJsonString())
+                            return
+                        }
+                    } else {
+                        // Plain text fallback
+                        payload.text
+                    }
+
                     // Dispatch to focused text field on Main Looper
                     mainHandler.post {
-                        target.onTextReceived(payload.text)
+                        target.onTextReceived(resolvedText)
                     }
 
                     val response = TvRemoteInputResponse(
                         success = true,
                         fieldName = target.fieldName,
                         isSensitive = target.isSensitive,
+                        serverPublicKey = TvCryptoUtils.encodePublicKey(serverKeyPair.public),
                     )
                     sendHttpResponse(socket, 200, response.toJsonString())
                 }
@@ -223,6 +274,7 @@ object TvRemoteInputManager {
                         success = true,
                         fieldName = target?.fieldName,
                         isSensitive = target?.isSensitive == true,
+                        serverPublicKey = TvCryptoUtils.encodePublicKey(serverKeyPair.public),
                     )
                     sendHttpResponse(socket, 200, response.toJsonString())
                 }
@@ -247,6 +299,8 @@ object TvRemoteInputManager {
             }
             val headers = "HTTP/1.1 $statusCode $statusText\r\n" +
                 "Content-Type: application/json; charset=utf-8\r\n" +
+                "Access-Control-Allow-Origin: *\r\n" +
+                "Access-Control-Allow-Methods: POST, GET, OPTIONS\r\n" +
                 "Content-Length: ${bodyBytes.size}\r\n" +
                 "Connection: close\r\n\r\n"
 
@@ -261,51 +315,50 @@ object TvRemoteInputManager {
     }
 
     private fun startUdpDiscovery() {
+        // UDP Discovery Listener
         udpListenJob = scope.launch {
             try {
-                val socket = DatagramSocket(UDP_DISCOVERY_PORT)
+                val socket = DatagramSocket(null).apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(UDP_DISCOVERY_PORT))
+                }
                 udpSocket = socket
                 val buffer = ByteArray(1024)
                 while (isActive && isRunning.get()) {
                     val packet = DatagramPacket(buffer, buffer.size)
                     socket.receive(packet)
                     val message = String(packet.data, 0, packet.length).trim()
-
                     if (message.startsWith("VANTAFYN_TV_DISCOVER_REQ")) {
-                        val responseBeacon = TvDiscoveryBeacon(
-                            tvName = deviceName,
-                            httpPort = assignedPort,
-                        )
-                        val responseBytes = responseBeacon.toPacketString().toByteArray()
+                        val beacon = TvDiscoveryBeacon(tvName = deviceName, httpPort = assignedPort)
+                        val responseData = beacon.toPacketString().toByteArray()
                         val responsePacket = DatagramPacket(
-                            responseBytes,
-                            responseBytes.size,
+                            responseData,
+                            responseData.size,
                             packet.address,
                             packet.port,
                         )
                         socket.send(responsePacket)
                     }
                 }
-            } catch (_: Exception) {
-                // UDP listener stopped
-            }
+            } catch (_: Exception) {}
         }
 
+        // UDP Periodic Broadcast (every 3 seconds)
         broadcastJob = scope.launch {
+            val beacon = TvDiscoveryBeacon(tvName = deviceName, httpPort = assignedPort)
+            val packetBytes = beacon.toPacketString().toByteArray()
             while (isActive && isRunning.get()) {
                 try {
-                    val beacon = TvDiscoveryBeacon(
-                        tvName = deviceName,
-                        httpPort = assignedPort,
-                    )
-                    val bytes = beacon.toPacketString().toByteArray()
+                    val broadcastSocket = DatagramSocket()
+                    broadcastSocket.broadcast = true
                     val packet = DatagramPacket(
-                        bytes,
-                        bytes.size,
+                        packetBytes,
+                        packetBytes.size,
                         InetAddress.getByName("255.255.255.255"),
                         UDP_DISCOVERY_PORT,
                     )
-                    udpSocket?.send(packet)
+                    broadcastSocket.send(packet)
+                    broadcastSocket.close()
                 } catch (_: Exception) {}
                 delay(3_000L)
             }
