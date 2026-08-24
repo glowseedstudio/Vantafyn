@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -78,38 +79,48 @@ private fun TvAppRoot(
                 (
                     fadeIn(
                         animationSpec = tween(
-                            durationMillis = 800,
-                            delayMillis = 150,
+                            durationMillis = 1_400,
+                            delayMillis = 180,
                             easing = TvCinematicEasing,
                         ),
                     ) + slideInVertically(
                         animationSpec = tween(
-                            durationMillis = 800,
-                            delayMillis = 150,
+                            durationMillis = 1_400,
+                            delayMillis = 180,
                             easing = TvCinematicEasing,
                         ),
-                        initialOffsetY = { 24 },
+                        initialOffsetY = { 36 },
                     )
                 ).togetherWith(
                     fadeOut(
                         animationSpec = tween(
-                            durationMillis = 400,
+                            durationMillis = 600,
                             easing = TvCinematicEasing,
                         ),
                     ) + slideOutVertically(
                         animationSpec = tween(
-                            durationMillis = 400,
+                            durationMillis = 600,
                             easing = TvCinematicEasing,
                         ),
-                        targetOffsetY = { -16 },
+                        targetOffsetY = { -28 },
                     )
-                )
+                ).using(SizeTransform(clip = false))
             } else {
-                fadeIn(
-                    animationSpec = tween(durationMillis = 400, easing = TvCinematicEasing),
+                (
+                    fadeIn(
+                        animationSpec = tween(durationMillis = 800, easing = TvCinematicEasing),
+                    ) + slideInVertically(
+                        animationSpec = tween(durationMillis = 800, easing = TvCinematicEasing),
+                        initialOffsetY = { -28 },
+                    )
                 ).togetherWith(
-                    fadeOut(animationSpec = tween(durationMillis = 300, easing = TvCinematicEasing)),
-                )
+                    fadeOut(
+                        animationSpec = tween(durationMillis = 500, easing = TvCinematicEasing),
+                    ) + slideOutVertically(
+                        animationSpec = tween(durationMillis = 500, easing = TvCinematicEasing),
+                        targetOffsetY = { 28 },
+                    )
+                ).using(SizeTransform(clip = false))
             }
         },
         label = "TvRootTransition",

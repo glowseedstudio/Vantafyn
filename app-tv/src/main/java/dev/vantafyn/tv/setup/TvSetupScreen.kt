@@ -12,15 +12,18 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.vantafyn.core.ui.VantafynOnboardingBackground
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
+import kotlinx.coroutines.delay
 
 private val VantafynSetupCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1f)
 
@@ -40,6 +43,16 @@ fun TvSetupScreen(
     modifier: Modifier = Modifier,
 ) {
     var isChoosingMethod by remember { mutableStateOf(false) }
+
+    // Initial 2-second background-only reveal on first launch of setup
+    var isInitialBackgroundPaused by rememberSaveable { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        if (isInitialBackgroundPaused) {
+            delay(2_000L)
+            isInitialBackgroundPaused = false
+        }
+    }
 
     // Map ViewModel VantafynSetupStep + local method choice into TV phase
     val currentPhase = when (state.step) {
@@ -78,44 +91,45 @@ fun TvSetupScreen(
         tv = true,
         modifier = modifier.fillMaxSize(),
     ) {
-        AnimatedContent(
-            targetState = currentPhase,
-            transitionSpec = {
-                val isForward = targetState.ordinal >= initialState.ordinal
-                val enterDuration = 980
-                val exitDuration = 520
-                (
-                    fadeIn(
-                        animationSpec = tween(
-                            durationMillis = enterDuration,
-                            delayMillis = 140,
-                            easing = VantafynSetupCinematicEasing,
-                        ),
-                    ) + slideInVertically(
-                        animationSpec = tween(
-                            durationMillis = enterDuration,
-                            delayMillis = 140,
-                            easing = VantafynSetupCinematicEasing,
-                        ),
-                        initialOffsetY = { if (isForward) 32 else -32 },
-                    )
-                ).togetherWith(
-                    fadeOut(
-                        animationSpec = tween(
-                            durationMillis = exitDuration,
-                            easing = VantafynSetupCinematicEasing,
-                        ),
-                    ) + slideOutVertically(
-                        animationSpec = tween(
-                            durationMillis = exitDuration,
-                            easing = VantafynSetupCinematicEasing,
-                        ),
-                        targetOffsetY = { if (isForward) -24 else 24 },
-                    )
-                ).using(SizeTransform(clip = false))
-            },
-            label = "setupStepTransition",
-        ) { phase ->
+        if (!isInitialBackgroundPaused) {
+            AnimatedContent(
+                targetState = currentPhase,
+                transitionSpec = {
+                    val isForward = targetState.ordinal >= initialState.ordinal
+                    val enterDuration = 1_400
+                    val exitDuration = 600
+                    (
+                        fadeIn(
+                            animationSpec = tween(
+                                durationMillis = enterDuration,
+                                delayMillis = 180,
+                                easing = VantafynSetupCinematicEasing,
+                            ),
+                        ) + slideInVertically(
+                            animationSpec = tween(
+                                durationMillis = enterDuration,
+                                delayMillis = 180,
+                                easing = VantafynSetupCinematicEasing,
+                            ),
+                            initialOffsetY = { if (isForward) 36 else -36 },
+                        )
+                    ).togetherWith(
+                        fadeOut(
+                            animationSpec = tween(
+                                durationMillis = exitDuration,
+                                easing = VantafynSetupCinematicEasing,
+                            ),
+                        ) + slideOutVertically(
+                            animationSpec = tween(
+                                durationMillis = exitDuration,
+                                easing = VantafynSetupCinematicEasing,
+                            ),
+                            targetOffsetY = { if (isForward) -28 else 28 },
+                        )
+                    ).using(SizeTransform(clip = false))
+                },
+                label = "setupStepTransition",
+            ) { phase ->
             when (phase) {
                 TvInternalSetupPhase.Welcome -> {
                     TvWelcomeScreen(
@@ -203,4 +217,5 @@ fun TvSetupScreen(
             }
         }
     }
+}
 }

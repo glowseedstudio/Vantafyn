@@ -18,3 +18,5 @@ Vantafyn uses a unified design token system shared across Mobile, Automotive, an
 - Focus scaling: `1.04x` to `1.08x` with D-pad spring response.
 - `BlendMode.DstIn` vertical hardware-accelerated hero dissolution into persistent background.
 - Glass panels: `Color(0xD910182A)` with `BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))`.
+- Setup Reveal: Staggered top-to-bottom entrance using `CubicBezierEasing(0.19f, 1.0f, 0.22f, 1.0f)`.
+- Welcome Button Pulse: Breathing `#21D8FF` / `#3E63FF` / `#8B35FF` gradient aura that halts on activation.

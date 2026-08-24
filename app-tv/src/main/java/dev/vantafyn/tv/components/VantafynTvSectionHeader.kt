@@ -22,7 +22,7 @@ fun VantafynTvSectionHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 12.dp)
+            .padding(start = 36.dp, end = 48.dp, bottom = 12.dp)
     ) {
         Text(
             text = title,

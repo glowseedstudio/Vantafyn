@@ -1,8 +1,12 @@
 package dev.vantafyn.tv.setup
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,11 +35,17 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -53,9 +64,14 @@ import dev.vantafyn.core.jellyfin.JellyfinServerConfig
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
+import dev.vantafyn.tv.components.VantafynFocusGradientColors
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
-import dev.vantafyn.tv.components.vantafynTvFocusable
+
+import androidx.compose.animation.core.tween
+import dev.vantafyn.tv.components.VantafynTvSetupCinematicEasing
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 
 @Composable
 fun TvProfilePickerScreen(
@@ -69,6 +85,50 @@ fun TvProfilePickerScreen(
     modifier: Modifier = Modifier,
     onBack: (() -> Unit)? = null,
 ) {
+    var isRevealed by remember { mutableStateOf(false) }
+    val firstProfileRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        isRevealed = true
+        firstProfileRequester.requestFocus()
+    }
+
+    // 1. Top Header staggered reveal (0ms delay)
+    val headerAlpha by animateFloatAsState(
+        targetValue = if (isRevealed) 1f else 0f,
+        animationSpec = tween(durationMillis = 1_500, delayMillis = 0, easing = VantafynTvSetupCinematicEasing),
+        label = "profileHeaderAlpha",
+    )
+    val headerTranslationY by animateFloatAsState(
+        targetValue = if (isRevealed) 0f else 32f,
+        animationSpec = tween(durationMillis = 1_500, delayMillis = 0, easing = VantafynTvSetupCinematicEasing),
+        label = "profileHeaderTranslationY",
+    )
+
+    // 2. Profile Row staggered reveal (180ms delay)
+    val rowAlpha by animateFloatAsState(
+        targetValue = if (isRevealed) 1f else 0f,
+        animationSpec = tween(durationMillis = 1_500, delayMillis = 180, easing = VantafynTvSetupCinematicEasing),
+        label = "profileRowAlpha",
+    )
+    val rowTranslationY by animateFloatAsState(
+        targetValue = if (isRevealed) 0f else 28f,
+        animationSpec = tween(durationMillis = 1_500, delayMillis = 180, easing = VantafynTvSetupCinematicEasing),
+        label = "profileRowTranslationY",
+    )
+
+    // 3. Bottom Actions staggered reveal (360ms delay)
+    val actionsAlpha by animateFloatAsState(
+        targetValue = if (isRevealed) 1f else 0f,
+        animationSpec = tween(durationMillis = 1_500, delayMillis = 360, easing = VantafynTvSetupCinematicEasing),
+        label = "profileActionsAlpha",
+    )
+    val actionsTranslationY by animateFloatAsState(
+        targetValue = if (isRevealed) 0f else 20f,
+        animationSpec = tween(durationMillis = 1_500, delayMillis = 360, easing = VantafynTvSetupCinematicEasing),
+        label = "profileActionsTranslationY",
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -80,9 +140,15 @@ fun TvProfilePickerScreen(
             verticalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxWidth(),
         ) {
+            // Header Group (0ms delay)
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(horizontal = 48.dp),
+                modifier = Modifier
+                    .padding(horizontal = 48.dp)
+                    .graphicsLayer {
+                        alpha = headerAlpha
+                        translationY = headerTranslationY
+                    },
             ) {
                 VantafynLogoBadge(
                     size = 56.dp,
@@ -111,11 +177,15 @@ fun TvProfilePickerScreen(
 
             Spacer(modifier = Modifier.height(36.dp))
 
-            // Profile Cards Horizontal Scroller with Premium Edge Fade
+            // Profile Cards Horizontal Scroller with Premium Edge Fade (180ms delay)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fadingHorizontalEdges(fadeWidth = 72.dp),
+                    .fadingHorizontalEdges(fadeWidth = 72.dp)
+                    .graphicsLayer {
+                        alpha = rowAlpha
+                        translationY = rowTranslationY
+                    },
             ) {
                 LazyRow(
                     modifier = Modifier.fillMaxWidth(),
@@ -125,7 +195,7 @@ fun TvProfilePickerScreen(
                 ) {
                     // 1. Saved Profiles
                     if (savedProfiles.isNotEmpty()) {
-                        items(savedProfiles, key = { "saved_${it.id}" }) { profile ->
+                        itemsIndexed(savedProfiles, key = { _, it -> "saved_${it.id}" }) { index, profile ->
                             val avatarUrl = profile.imageUrl ?: server?.url?.let {
                                 "${it.trimEnd('/')}/Users/${profile.jellyfinUserId}/Images/Primary"
                             }
@@ -134,11 +204,12 @@ fun TvProfilePickerScreen(
                                 avatarUrl = avatarUrl,
                                 hasPassword = false,
                                 onClick = { onSelectSavedProfile(profile) },
+                                modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
                             )
                         }
                     } else if (publicUsers.isNotEmpty()) {
                         // 2. Public Users on Server
-                        items(publicUsers, key = { "public_${it.id}" }) { user ->
+                        itemsIndexed(publicUsers, key = { _, it -> "public_${it.id}" }) { index, user ->
                             val avatarUrl = user.imageUrl ?: server?.url?.let {
                                 "${it.trimEnd('/')}/Users/${user.id}/Images/Primary"
                             }
@@ -147,6 +218,7 @@ fun TvProfilePickerScreen(
                                 avatarUrl = avatarUrl,
                                 hasPassword = user.hasPassword,
                                 onClick = { onSelectPublicUser(user) },
+                                modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
                             )
                         }
                     }
@@ -157,26 +229,47 @@ fun TvProfilePickerScreen(
                         val isFocused = interactionSource.collectIsFocusedAsState().value
                         val shape = CircleShape
 
+                        val scale by animateFloatAsState(
+                            targetValue = if (isFocused) 1.08f else 1.0f,
+                            animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
+                            label = "AddProfileScale",
+                        )
+
+                        val isOnlyAddProfile = savedProfiles.isEmpty() && publicUsers.isEmpty()
+
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
                                 .width(130.dp)
+                                .then(
+                                    if (isOnlyAddProfile) Modifier.focusRequester(firstProfileRequester) else Modifier
+                                )
                                 .clickable(
                                     interactionSource = interactionSource,
                                     indication = null,
                                     onClick = onAddProfile,
                                 )
+                                .focusable(interactionSource = interactionSource)
                         ) {
                             Box(
                                 modifier = Modifier
                                     .size(108.dp)
-                                    .vantafynTvFocusable(
-                                        interactionSource = interactionSource,
-                                        shape = shape,
-                                        scaleFocused = 1.08f,
-                                    )
+                                    .scale(scale)
                                     .clip(shape)
-                                    .background(Color(0xD910182A)),
+                                    .background(Color(0xD910182A))
+                                    .then(
+                                        if (isFocused) {
+                                            Modifier.border(
+                                                BorderStroke(2.5.dp, Brush.horizontalGradient(VantafynFocusGradientColors)),
+                                                shape,
+                                            )
+                                        } else {
+                                            Modifier.border(
+                                                BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                                                shape,
+                                            )
+                                        }
+                                    ),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
@@ -205,16 +298,24 @@ fun TvProfilePickerScreen(
 
             Spacer(modifier = Modifier.height(42.dp))
 
-            // Action Buttons
+            // Action Buttons (360ms delay)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 48.dp),
+                modifier = Modifier
+                    .padding(horizontal = 48.dp)
+                    .graphicsLayer {
+                        alpha = actionsAlpha
+                        translationY = actionsTranslationY
+                    },
             ) {
                 VantafynTvGlassButton(
                     text = "Change Server",
                     icon = Icons.Rounded.Refresh,
                     isPrimary = false,
+                    modifier = Modifier.focusProperties {
+                        up = firstProfileRequester
+                    },
                     onClick = onChangeServer,
                 )
 
@@ -223,6 +324,9 @@ fun TvProfilePickerScreen(
                         text = "Back",
                         icon = Icons.AutoMirrored.Rounded.ArrowBack,
                         isPrimary = false,
+                        modifier = Modifier.focusProperties {
+                            up = firstProfileRequester
+                        },
                         onClick = onBack,
                     )
                 }
@@ -273,6 +377,12 @@ private fun ProfileCard(
     val isFocused = interactionSource.collectIsFocusedAsState().value
     val shape = CircleShape
 
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.08f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
+        label = "ProfileCardScale",
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
@@ -282,18 +392,15 @@ private fun ProfileCard(
                 indication = null,
                 onClick = onClick,
             )
+            .focusable(interactionSource = interactionSource)
     ) {
         Box(
             modifier = Modifier
                 .size(108.dp)
-                .vantafynTvFocusable(
-                    interactionSource = interactionSource,
-                    shape = shape,
-                    scaleFocused = 1.08f,
-                ),
+                .scale(scale),
             contentAlignment = Alignment.Center,
         ) {
-            // Circular Avatar Picture / Initials
+            // Circular Avatar Picture / Initials with Focus Ring
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -302,6 +409,19 @@ private fun ProfileCard(
                         Brush.linearGradient(
                             listOf(Color(0xFF3D5266), Color(0xFF756A8A), Color(0xFF20252D))
                         )
+                    )
+                    .then(
+                        if (isFocused) {
+                            Modifier.border(
+                                BorderStroke(2.5.dp, Brush.horizontalGradient(VantafynFocusGradientColors)),
+                                shape,
+                            )
+                        } else {
+                            Modifier.border(
+                                BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                                shape,
+                            )
+                        }
                     ),
                 contentAlignment = Alignment.Center,
             ) {
@@ -322,7 +442,7 @@ private fun ProfileCard(
                 }
             }
 
-            // Gradient Lock Badge (Unclipped, sitting cleanly on top)
+            // Gradient Lock Badge (Rendered ON TOP of avatar and focus ring)
             if (hasPassword) {
                 val lockShape = CircleShape
                 Box(

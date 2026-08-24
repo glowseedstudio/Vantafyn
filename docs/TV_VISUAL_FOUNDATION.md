@@ -23,5 +23,8 @@ The Vantafyn Android TV app directly derives its visual identity and design toke
 
 ---
 
-## 4. Hardware-Accelerated Hero Fade
-- `VantafynTvHero` applies `BlendMode.DstIn` on a vertical alpha gradient to dissolve the bottom 30% of the backdrop image directly into the persistent nebula background without hard rectangle edges.
+## 4. Hardware-Accelerated Effects
+- **Hero Fade**: `VantafynTvHero` applies `BlendMode.DstIn` on a vertical alpha gradient to dissolve the bottom 30% of the backdrop image directly into the persistent nebula background without hard rectangle edges.
+- **Horizontal Scroller Edge Fade**: `fadingHorizontalEdges` applies `BlendMode.DstIn` offscreen alpha gradients (72dp fade width) on both left and right edges of horizontal lists (e.g. `TvProfilePickerScreen`), smoothly dissolving items into space.
+- **Welcome Button Aura Pulse**: `VantafynTvPulsingButtonGlow` generates a gentle breathing radial aura (`#21D8FF` $\to$ `#3E63FF` $\to$ `#8B35FF`) behind the initial onboarding button.
+- **Cinematic Top-to-Bottom Transitions**: Staggered reveals and screen shifts powered by `CubicBezierEasing(0.19f, 1.0f, 0.22f, 1.0f)`.

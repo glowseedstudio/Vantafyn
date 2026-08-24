@@ -49,9 +49,9 @@ fun VantafynTvHero(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(380.dp)
+            .height(420.dp)
     ) {
-        // --- 1. HERO BACKDROP WITH HARDWARE-ACCELERATED DstIn BOTTOM FADE ---
+        // --- 1. HERO BACKDROP WITH TOP-ALIGNED ARTWORK & DstIn BOTTOM FADE ---
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -62,8 +62,8 @@ fun VantafynTvHero(
                         brush = Brush.verticalGradient(
                             colorStops = arrayOf(
                                 0.00f to Color.Black,
-                                0.45f to Color.Black,
-                                0.70f to Color.Black.copy(alpha = 0.65f),
+                                0.50f to Color.Black,
+                                0.72f to Color.Black.copy(alpha = 0.65f),
                                 0.88f to Color.Black.copy(alpha = 0.20f),
                                 1.00f to Color.Transparent,
                             ),
@@ -77,6 +77,7 @@ fun VantafynTvHero(
                     model = backdropUrl,
                     contentDescription = item.title,
                     contentScale = ContentScale.Crop,
+                    alignment = Alignment.TopCenter,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -96,25 +97,13 @@ fun VantafynTvHero(
                         )
                     )
             )
-
-            // Top subtle gradient to blend smoothly
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(100.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(VantafynColors.Graphite.copy(alpha = 0.60f), Color.Transparent)
-                        )
-                    )
-            )
         }
 
         // --- 2. HERO CONTENT OVERLAY ---
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 24.dp, end = 48.dp, bottom = 24.dp),
+                .padding(start = 36.dp, end = 48.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.Bottom,
             horizontalAlignment = Alignment.Start,
         ) {
@@ -255,7 +244,7 @@ fun VantafynTvFallbackHero(
         modifier = modifier
             .fillMaxWidth()
             .height(280.dp)
-            .padding(start = 24.dp, end = 48.dp, bottom = 16.dp),
+            .padding(start = 36.dp, end = 48.dp, bottom = 16.dp),
         contentAlignment = Alignment.BottomStart,
     ) {
         Column(

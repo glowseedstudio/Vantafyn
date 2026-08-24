@@ -165,7 +165,7 @@ fun TvHomeScreen(
                         )
                         LazyRow(
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
-                            contentPadding = PaddingValues(end = 32.dp),
+                            contentPadding = PaddingValues(start = 36.dp, end = 48.dp),
                         ) {
                             items(section.items, key = { it.id }) { item ->
                                 val imgUrl = item.imageUrl ?: item.backdropUrl
@@ -203,7 +203,7 @@ fun TvHomeScreen(
                     )
                     LazyRow(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        contentPadding = PaddingValues(end = 32.dp),
+                        contentPadding = PaddingValues(start = 36.dp, end = 48.dp),
                     ) {
                         items(libraries, key = { it.id }) { lib ->
                             val imageUrl = lib.imageUrl ?: "${session?.server?.url?.trimEnd('/')}/Items/${lib.id}/Images/Primary"
