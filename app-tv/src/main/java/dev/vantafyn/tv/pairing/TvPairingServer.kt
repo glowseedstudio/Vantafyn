@@ -1,6 +1,7 @@
 package dev.vantafyn.tv.pairing
 
 import android.os.Build
+import android.util.Log
 import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
 import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.jellyfin.TvPairingResponse
@@ -18,6 +19,7 @@ import java.io.InputStreamReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
@@ -55,10 +57,11 @@ class TvPairingServer(
         private set
 
     companion object {
+        private const val TAG = "TvPairingServer"
         const val DEFAULT_HTTP_PORT = 8765
-        const val UDP_DISCOVERY_PORT = 8766
+        const val UDP_DISCOVERY_PORT = 8899
         const val EXPIRY_DURATION_MS = 5 * 60 * 1000L // 5 minutes
-        const val MAX_FAILED_ATTEMPTS = 4
+        const val MAX_FAILED_ATTEMPTS = 6
 
         // Safe unambiguous character set for 10-foot readability
         private const val CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
@@ -92,21 +95,28 @@ class TvPairingServer(
         expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
         failedAttempts.set(0)
 
+        Log.d(TAG, "Starting TV Pairing Server with code: $currentCode")
+
         // 1. Start ServerSocket
         var startedSocket: ServerSocket? = null
         var boundPort = DEFAULT_HTTP_PORT
 
         for (port in DEFAULT_HTTP_PORT..(DEFAULT_HTTP_PORT + 10)) {
             try {
-                startedSocket = ServerSocket(port)
+                startedSocket = ServerSocket().apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(port))
+                }
                 boundPort = port
+                Log.d(TAG, "TvPairingServer HTTP bound to port $port")
                 break
-            } catch (_: Exception) {
-                // Try next port
+            } catch (e: Exception) {
+                Log.w(TAG, "Port $port unavailable: ${e.message}")
             }
         }
 
         if (startedSocket == null) {
+            Log.e(TAG, "Failed to bind TvPairingServer to any port in range")
             isRunning.set(false)
             return false
         }
@@ -132,6 +142,7 @@ class TvPairingServer(
         scope.launch {
             delay(EXPIRY_DURATION_MS)
             if (isRunning.get()) {
+                Log.d(TAG, "Pairing code expired")
                 withContext(Dispatchers.Main) {
                     onExpiredOrLimitReached()
                 }
@@ -146,6 +157,7 @@ class TvPairingServer(
         currentCode = generatePairingCode()
         expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
         failedAttempts.set(0)
+        Log.d(TAG, "Pairing code refreshed: $currentCode")
         return currentCode
     }
 
@@ -189,6 +201,13 @@ class TvPairingServer(
                 ""
             }
 
+            Log.d(TAG, "HTTP $method $path from ${socket.inetAddress.hostAddress}, bodyLen: $contentLength")
+
+            if (method == "OPTIONS") {
+                sendHttpResponse(socket, 200, TvPairingResponse.success())
+                return
+            }
+
             if (method != "POST" || !path.startsWith("/api/v1/pair")) {
                 sendHttpResponse(socket, 405, TvPairingResponse.error("METHOD_NOT_ALLOWED", "Method not allowed"))
                 return
@@ -218,6 +237,8 @@ class TvPairingServer(
             val normalizedProvided = payload.code.trim().replace("-", "").replace(" ", "").uppercase()
             val normalizedCurrent = currentCode.trim().replace("-", "").replace(" ", "").uppercase()
 
+            Log.d(TAG, "Checking code: provided='$normalizedProvided' vs current='$normalizedCurrent'")
+
             if (normalizedProvided != normalizedCurrent) {
                 val currentFails = failedAttempts.incrementAndGet()
                 if (currentFails >= MAX_FAILED_ATTEMPTS) {
@@ -230,14 +251,16 @@ class TvPairingServer(
             }
 
             // Valid code! Send success response
+            Log.d(TAG, "Pairing successful for user ${payload.userName} on server ${payload.serverName}")
             sendHttpResponse(socket, 200, TvPairingResponse.success())
 
-            // Shutdown listener and notify callback on Main dispatcher
+            // Notify callback on Main dispatcher
             scope.launch(Dispatchers.Main) {
                 stop()
                 onPairedPayload(payload)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling client socket: ${e.message}", e)
             try {
                 sendHttpResponse(socket, 500, TvPairingResponse.error("INTERNAL_ERROR", "Failed to process pairing"))
             } catch (_: Exception) {}
@@ -257,6 +280,8 @@ class TvPairingServer(
             }
             val headers = "HTTP/1.1 $statusCode $statusText\r\n" +
                 "Content-Type: application/json; charset=utf-8\r\n" +
+                "Access-Control-Allow-Origin: *\r\n" +
+                "Access-Control-Allow-Methods: POST, OPTIONS\r\n" +
                 "Content-Length: ${bodyBytes.size}\r\n" +
                 "Connection: close\r\n\r\n"
 
@@ -274,7 +299,10 @@ class TvPairingServer(
         // UDP Discovery Listener
         udpListenJob = scope.launch {
             try {
-                val socket = DatagramSocket(UDP_DISCOVERY_PORT)
+                val socket = DatagramSocket(null).apply {
+                    reuseAddress = true
+                    bind(InetSocketAddress(UDP_DISCOVERY_PORT))
+                }
                 udpSocket = socket
                 val buffer = ByteArray(1024)
                 while (isActive && isRunning.get()) {
@@ -282,7 +310,7 @@ class TvPairingServer(
                     socket.receive(packet)
                     val message = String(packet.data, 0, packet.length).trim()
                     if (message.startsWith("VANTAFYN_TV_DISCOVER_REQ")) {
-                        // Respond to discovery request directly
+                        Log.d(TAG, "Received UDP discovery request from ${packet.address.hostAddress}")
                         val beacon = TvDiscoveryBeacon(tvName = deviceName, httpPort = assignedPort)
                         val responseData = beacon.toPacketString().toByteArray()
                         val responsePacket = DatagramPacket(
@@ -294,8 +322,8 @@ class TvPairingServer(
                         socket.send(responsePacket)
                     }
                 }
-            } catch (_: Exception) {
-                // Closed or UDP port unavailable
+            } catch (e: Exception) {
+                Log.w(TAG, "UDP listener stopped: ${e.message}")
             }
         }
 
@@ -326,6 +354,8 @@ class TvPairingServer(
      */
     fun stop() {
         if (!isRunning.getAndSet(false)) return
+
+        Log.d(TAG, "Stopping TvPairingServer")
 
         try {
             broadcastJob?.cancel()

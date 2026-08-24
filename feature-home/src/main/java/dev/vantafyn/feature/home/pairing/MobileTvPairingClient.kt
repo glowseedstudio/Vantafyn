@@ -1,5 +1,6 @@
 package dev.vantafyn.feature.home.pairing
 
+import android.util.Log
 import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
 import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.jellyfin.TvPairingResponse
@@ -14,7 +15,9 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.HttpURLConnection
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.NetworkInterface
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.URL
 
@@ -30,15 +33,16 @@ sealed interface PairingClientResult {
 }
 
 object MobileTvPairingClient {
-    private const val UDP_DISCOVERY_PORT = 8766
+    private const val TAG = "MobileTvPairingClient"
+    private const val UDP_DISCOVERY_PORT = 8899
     private const val DEFAULT_HTTP_PORT = 8765
-    private const val CONNECT_TIMEOUT_MS = 3_500
-    private const val READ_TIMEOUT_MS = 4_500
+    private const val CONNECT_TIMEOUT_MS = 3_000
+    private const val READ_TIMEOUT_MS = 4_000
 
     /**
      * Broadcasts discovery request on LAN and listens for TV beacons.
      */
-    suspend fun discoverNearbyTvs(timeoutMs: Long = 2_500L): List<DiscoveredTv> =
+    suspend fun discoverNearbyTvs(timeoutMs: Long = 1_500L): List<DiscoveredTv> =
         withContext(Dispatchers.IO) {
             val discovered = mutableMapOf<String, DiscoveredTv>()
             var socket: DatagramSocket? = null
@@ -46,20 +50,33 @@ object MobileTvPairingClient {
             try {
                 socket = DatagramSocket()
                 socket.broadcast = true
-                socket.soTimeout = 400
+                socket.soTimeout = 300
 
                 val requestBytes = "VANTAFYN_TV_DISCOVER_REQ:1".toByteArray()
-                val broadcastPacket = DatagramPacket(
+
+                // Broadcast to global 255.255.255.255
+                val globalBroadcast = DatagramPacket(
                     requestBytes,
                     requestBytes.size,
                     InetAddress.getByName("255.255.255.255"),
                     UDP_DISCOVERY_PORT,
                 )
+                socket.send(globalBroadcast)
 
-                // Send 2 quick probe packets
-                socket.send(broadcastPacket)
-                delay(50L)
-                socket.send(broadcastPacket)
+                // Also broadcast on each active network interface
+                try {
+                    val interfaces = NetworkInterface.getNetworkInterfaces()
+                    if (interfaces != null) {
+                        for (intf in interfaces) {
+                            if (intf.isLoopback || !intf.isUp) continue
+                            for (interfaceAddress in intf.interfaceAddresses) {
+                                val broadcast = interfaceAddress.broadcast ?: continue
+                                val packet = DatagramPacket(requestBytes, requestBytes.size, broadcast, UDP_DISCOVERY_PORT)
+                                socket.send(packet)
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
 
                 val deadline = System.currentTimeMillis() + timeoutMs
                 val buffer = ByteArray(1024)
@@ -72,6 +89,7 @@ object MobileTvPairingClient {
                         val beacon = TvDiscoveryBeacon.fromPacketString(message)
                         if (beacon != null) {
                             val ip = packet.address.hostAddress ?: continue
+                            Log.d(TAG, "Discovered TV via UDP: $ip -> ${beacon.tvName} on port ${beacon.httpPort}")
                             discovered[ip] = DiscoveredTv(
                                 ipAddress = ip,
                                 port = beacon.httpPort,
@@ -79,15 +97,13 @@ object MobileTvPairingClient {
                             )
                         }
                     } catch (_: SocketTimeoutException) {
-                        // Loop until deadline
+                        // Keep listening until deadline
                     }
                 }
-            } catch (_: Exception) {
-                // Fallback will handle
+            } catch (e: Exception) {
+                Log.w(TAG, "UDP discovery error: ${e.message}")
             } finally {
-                try {
-                    socket?.close()
-                } catch (_: Exception) {}
+                try { socket?.close() } catch (_: Exception) {}
             }
 
             discovered.values.toList()
@@ -104,6 +120,7 @@ object MobileTvPairingClient {
         withContext(Dispatchers.IO) {
             var connection: HttpURLConnection? = null
             try {
+                Log.d(TAG, "Attempting pairing with $targetIp:$port...")
                 val url = URL("http://$targetIp:$port/api/v1/pair")
                 connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "POST"
@@ -126,6 +143,7 @@ object MobileTvPairingClient {
                     connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
                 }
 
+                Log.d(TAG, "Pairing response from $targetIp:$port: HTTP $responseCode -> $responseBody")
                 val parsedResponse = TvPairingResponse.fromJson(responseBody)
 
                 if (responseCode == 200 && parsedResponse?.status == "ok") {
@@ -141,9 +159,9 @@ object MobileTvPairingClient {
                     PairingClientResult.Failure(msg, errorCode)
                 }
             } catch (e: SocketTimeoutException) {
-                PairingClientResult.Failure("Connection timed out. Ensure your TV and phone are on the same Wi-Fi.")
+                PairingClientResult.Failure("Connection timed out reaching TV at $targetIp.", "TIMEOUT")
             } catch (e: Exception) {
-                PairingClientResult.Failure("Couldn't reach your TV. Ensure both devices are on the same local network.")
+                PairingClientResult.Failure("Couldn't connect to TV at $targetIp: ${e.message}", "CONNECT_ERROR")
             } finally {
                 connection?.disconnect()
             }
@@ -153,21 +171,21 @@ object MobileTvPairingClient {
      * High-level pairing attempt:
      * 1. Broadcast discovery on LAN.
      * 2. Try all discovered TVs with the payload.
-     * 3. If discovery yielded 0 TVs, scan local /24 subnet on port 8765 concurrently.
+     * 3. Run high-speed concurrent TCP scan across local /24 subnet on ports 8765-8768 to bypass router UDP blocking.
      */
     suspend fun pairWithCode(
         payload: TvPairingPayload,
     ): PairingClientResult =
         withContext(Dispatchers.IO) {
             // Step 1: Fast UDP Discovery
-            val discovered = discoverNearbyTvs(timeoutMs = 1_800L)
+            val discovered = discoverNearbyTvs(timeoutMs = 1_200L)
 
             for (tv in discovered) {
                 val result = sendPairingPayload(tv.ipAddress, tv.port, payload)
                 if (result is PairingClientResult.Success) {
                     return@withContext result.copy(tvName = tv.deviceName)
                 }
-                // If it failed due to invalid code or rate limit, fail fast rather than trying other targets
+                // If the TV responded with an explicit code error, return immediately
                 if (result is PairingClientResult.Failure &&
                     (result.errorCode == "INVALID_CODE" || result.errorCode == "RATE_LIMITED" || result.errorCode == "EXPIRED")
                 ) {
@@ -175,9 +193,10 @@ object MobileTvPairingClient {
                 }
             }
 
-            // Step 2: Subnet Probe Fallback (if router drops UDP broadcast between Wi-Fi clients)
+            // Step 2: Concurrent Subnet TCP Probe (bypasses Wi-Fi AP isolation or UDP drops)
             val localIps = getLocalSubnetIps()
             if (localIps.isNotEmpty()) {
+                Log.d(TAG, "Probing subnet (${localIps.size} IPs) across ports 8765..8767...")
                 val found = probeSubnetAndPair(localIps, payload)
                 if (found != null) {
                     return@withContext found
@@ -191,22 +210,36 @@ object MobileTvPairingClient {
         ips: List<String>,
         payload: TvPairingPayload,
     ): PairingClientResult? = coroutineScope {
-        // Probe in chunks to avoid overloading sockets
-        val chunks = ips.chunked(32)
+        val candidatePorts = listOf(DEFAULT_HTTP_PORT, 8766, 8767, 8775)
+
+        // Find IPs where any pairing port is open (using ultra-fast 250ms TCP probe)
+        val chunks = ips.chunked(48)
         for (chunk in chunks) {
-            val jobs = chunk.map { ip ->
+            val openTargets = chunk.map { ip ->
                 async(Dispatchers.IO) {
-                    try {
-                        val result = sendPairingPayload(ip, DEFAULT_HTTP_PORT, payload)
-                        if (result is PairingClientResult.Success) result else null
-                    } catch (_: Exception) {
-                        null
+                    for (port in candidatePorts) {
+                        try {
+                            val socket = Socket()
+                            socket.connect(InetSocketAddress(ip, port), 250)
+                            socket.close()
+                            return@async Pair(ip, port)
+                        } catch (_: Exception) {}
                     }
+                    null
+                }
+            }.awaitAll().filterNotNull()
+
+            for ((ip, port) in openTargets) {
+                val result = sendPairingPayload(ip, port, payload)
+                if (result is PairingClientResult.Success) {
+                    return@coroutineScope result
+                }
+                if (result is PairingClientResult.Failure &&
+                    (result.errorCode == "INVALID_CODE" || result.errorCode == "RATE_LIMITED" || result.errorCode == "EXPIRED")
+                ) {
+                    return@coroutineScope result
                 }
             }
-            val results = jobs.awaitAll()
-            val successful = results.filterNotNull().firstOrNull()
-            if (successful != null) return@coroutineScope successful
         }
         null
     }
@@ -217,6 +250,9 @@ object MobileTvPairingClient {
             val interfaces = NetworkInterface.getNetworkInterfaces() ?: return ips
             for (intf in interfaces) {
                 if (intf.isLoopback || !intf.isUp) continue
+                val name = intf.name.lowercase()
+                if (name.startsWith("rmnet") || name.startsWith("ccmni") || name.startsWith("pdp") || name.startsWith("dummy")) continue
+
                 for (addr in intf.inetAddresses) {
                     if (!addr.isLoopbackAddress && addr.address.size == 4) {
                         val host = addr.hostAddress ?: continue
