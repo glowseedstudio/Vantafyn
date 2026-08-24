@@ -15,14 +15,16 @@ The Android TV onboarding flow adheres to the exact visual style of Vantafyn mob
    - Staggered one-shot reveal (`VantafynTvSetupReveal`).
    - "Get Started" gradient action button featuring a soft, breathing cyan/blue/violet aura pulse (`VantafynTvPulsingButtonGlow`) that permanently stops on activation.
 3. **Setup Method Screen (`TvSetupMethodScreen`)**:
-   - Offers "Pair with mobile app" and "Sign in manually".
+   - Presents 3 first-class setup methods: **"Pair with mobile app"**, **"Quick Connect"** (inbetween), and **"Sign in manually"**.
    - Glass selection cards with focus border and remote navigation.
 4. **Mobile Pairing Screen (`TvPairingScreen`)**:
    - Generates a 6-character single-use pairing code with a live 5-minute countdown.
    - Listens on local LAN via ephemeral HTTP and UDP discovery services.
-   - Provides "Refresh Code", "Sign In Manually", and "Back" actions.
-   - Instantly transitions upon pairing completion without password entry.
-5. **Connect Server Screen (`TvConnectServerScreen`)**:
+5. **Quick Connect Screen (`TvQuickConnectScreen`)**:
+   - Creates a real Jellyfin Quick Connect code with the official animated gradient border card.
+   - Polls the server securely every 2 seconds for approval.
+   - Direct D-pad actions: "Refresh Code", "Sign In Manually", and "Back".
+6. **Connect Server Screen (`TvConnectServerScreen`)**:
    - Glass text input box with single focus-driven lift and server connection validation.
    - Clear network error messages formatted with `setupFriendlyError()`.
 6. **Server Found Screen (`TvServerConfirmScreen`)**:

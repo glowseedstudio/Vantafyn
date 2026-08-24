@@ -31,6 +31,7 @@ private enum class TvInternalSetupPhase {
     Welcome,
     ChooseMethod,
     Pairing,
+    QuickConnect,
     ConnectServer,
     ServerConfirm,
     Login,
@@ -66,6 +67,7 @@ fun TvSetupScreen(
                 else -> TvInternalSetupPhase.Welcome
             }
         }
+        VantafynSetupStep.QuickConnect -> TvInternalSetupPhase.QuickConnect
         VantafynSetupStep.ConnectServer -> TvInternalSetupPhase.ConnectServer
         VantafynSetupStep.ServerConfirm -> TvInternalSetupPhase.ServerConfirm
         VantafynSetupStep.Login -> TvInternalSetupPhase.Login
@@ -78,6 +80,10 @@ fun TvSetupScreen(
         when (currentPhase) {
             TvInternalSetupPhase.Pairing -> {
                 isPairing = false
+                isChoosingMethod = true
+            }
+            TvInternalSetupPhase.QuickConnect -> {
+                viewModel.cancelQuickConnect()
                 isChoosingMethod = true
             }
             TvInternalSetupPhase.ChooseMethod -> {
@@ -140,115 +146,145 @@ fun TvSetupScreen(
                 },
                 label = "setupStepTransition",
             ) { phase ->
-            when (phase) {
-                TvInternalSetupPhase.Welcome -> {
-                    TvWelcomeScreen(
-                        onGetStarted = {
-                            isChoosingMethod = true
-                        },
-                    )
-                }
+                when (phase) {
+                    TvInternalSetupPhase.Welcome -> {
+                        TvWelcomeScreen(
+                            onGetStarted = {
+                                isChoosingMethod = true
+                            },
+                        )
+                    }
 
-                TvInternalSetupPhase.ChooseMethod -> {
-                    TvSetupMethodScreen(
-                        onPairWithMobile = {
-                            isPairing = true
-                        },
-                        onManualSetup = {
-                            isPairing = false
-                            isChoosingMethod = false
-                            viewModel.continueFromWelcome()
-                        },
-                        onBack = {
-                            isChoosingMethod = false
-                        },
-                    )
-                }
+                    TvInternalSetupPhase.ChooseMethod -> {
+                        TvSetupMethodScreen(
+                            onPairWithMobile = {
+                                isPairing = true
+                            },
+                            onQuickConnect = {
+                                isPairing = false
+                                isChoosingMethod = false
+                                if (state.server != null) {
+                                    viewModel.startQuickConnect()
+                                } else {
+                                    viewModel.continueFromWelcome()
+                                }
+                            },
+                            onManualSetup = {
+                                isPairing = false
+                                isChoosingMethod = false
+                                viewModel.continueFromWelcome()
+                            },
+                            onBack = {
+                                isChoosingMethod = false
+                            },
+                        )
+                    }
 
-                TvInternalSetupPhase.Pairing -> {
-                    TvPairingScreen(
-                        onPairingSuccess = { payload ->
-                            isPairing = false
-                            isChoosingMethod = false
-                            viewModel.pairWithMobilePayload(payload)
-                        },
-                        onManualSetup = {
-                            isPairing = false
-                            isChoosingMethod = false
-                            viewModel.continueFromWelcome()
-                        },
-                        onBack = {
-                            isPairing = false
-                            isChoosingMethod = true
-                        },
-                    )
-                }
+                    TvInternalSetupPhase.Pairing -> {
+                        TvPairingScreen(
+                            onPairingSuccess = { payload ->
+                                isPairing = false
+                                isChoosingMethod = false
+                                viewModel.pairWithMobilePayload(payload)
+                            },
+                            onManualSetup = {
+                                isPairing = false
+                                isChoosingMethod = false
+                                viewModel.continueFromWelcome()
+                            },
+                            onBack = {
+                                isPairing = false
+                                isChoosingMethod = true
+                            },
+                        )
+                    }
 
-                TvInternalSetupPhase.ConnectServer -> {
-                    TvConnectServerScreen(
-                        serverUrl = state.serverUrl,
-                        isLoading = state.isLoading,
-                        errorMessage = state.errorMessage,
-                        onServerUrlChange = { viewModel.onServerUrlChanged(it) },
-                        onConnect = { viewModel.connectToServer() },
-                        onBack = { viewModel.navigateSetupBack() },
-                    )
-                }
+                    TvInternalSetupPhase.QuickConnect -> {
+                        TvQuickConnectScreen(
+                            session = state.quickConnectSession,
+                            statusMessage = state.quickConnectMessage,
+                            isLoading = state.isLoading,
+                            errorMessage = state.errorMessage,
+                            onRefresh = { viewModel.retryQuickConnect() },
+                            onManualSetup = {
+                                viewModel.cancelQuickConnect()
+                                viewModel.continueToLogin()
+                            },
+                            onBack = {
+                                viewModel.cancelQuickConnect()
+                                isChoosingMethod = true
+                            },
+                        )
+                    }
 
-                TvInternalSetupPhase.ServerConfirm -> {
-                    TvServerConfirmScreen(
-                        server = state.server,
-                        hasPublicUsers = state.publicUsers.isNotEmpty(),
-                        publicUsers = state.publicUsers,
-                        savedProfiles = state.savedProfiles,
-                        currentSessionUser = state.session?.user?.name,
-                        onContinue = { viewModel.continueToLogin() },
-                        onUseDifferentServer = {
-                            viewModel.onServerUrlChanged("")
-                            viewModel.continueFromWelcome()
-                        },
-                    )
-                }
+                    TvInternalSetupPhase.ConnectServer -> {
+                        TvConnectServerScreen(
+                            serverUrl = state.serverUrl,
+                            isLoading = state.isLoading,
+                            errorMessage = state.errorMessage,
+                            onServerUrlChange = { viewModel.onServerUrlChanged(it) },
+                            onConnect = { viewModel.connectToServer() },
+                            onBack = { viewModel.navigateSetupBack() },
+                        )
+                    }
 
-                TvInternalSetupPhase.Login -> {
-                    TvLoginScreen(
-                        username = state.username,
-                        password = state.password,
-                        serverName = state.server?.name,
-                        isLoading = state.isLoading,
-                        errorMessage = state.errorMessage,
-                        onUsernameChange = { viewModel.onUsernameChanged(it) },
-                        onPasswordChange = { viewModel.onPasswordChanged(it) },
-                        onLogin = { viewModel.login() },
-                        onBack = { viewModel.navigateSetupBack() },
-                    )
-                }
+                    TvInternalSetupPhase.ServerConfirm -> {
+                        TvServerConfirmScreen(
+                            server = state.server,
+                            hasPublicUsers = state.publicUsers.isNotEmpty(),
+                            publicUsers = state.publicUsers,
+                            savedProfiles = state.savedProfiles,
+                            currentSessionUser = state.session?.user?.name,
+                            onContinue = { viewModel.continueToLogin() },
+                            onUseDifferentServer = {
+                                viewModel.onServerUrlChanged("")
+                                viewModel.continueFromWelcome()
+                            },
+                        )
+                    }
 
-                TvInternalSetupPhase.ProfilePicker -> {
-                    TvProfilePickerScreen(
-                        savedProfiles = state.savedProfiles,
-                        publicUsers = state.publicUsers,
-                        server = state.server,
-                        onSelectSavedProfile = { profile ->
-                            viewModel.selectProfile(profile)
-                        },
-                        onSelectPublicUser = { user ->
-                            viewModel.selectPublicUser(user)
-                        },
-                        onAddProfile = {
-                            viewModel.addProfile()
-                        },
-                        onChangeServer = {
-                            viewModel.onServerUrlChanged("")
-                            viewModel.continueFromWelcome()
-                        },
-                        onBack = if (state.savedProfiles.isNotEmpty()) null else {
-                            { viewModel.navigateSetupBack() }
-                        },
-                    )
+                    TvInternalSetupPhase.Login -> {
+                        TvLoginScreen(
+                            username = state.username,
+                            password = state.password,
+                            serverName = state.server?.name,
+                            isLoading = state.isLoading,
+                            errorMessage = state.errorMessage,
+                            onUsernameChange = { viewModel.onUsernameChanged(it) },
+                            onPasswordChange = { viewModel.onPasswordChanged(it) },
+                            onLogin = { viewModel.login() },
+                            onBack = { viewModel.navigateSetupBack() },
+                            onQuickConnect = if (state.server != null) {
+                                { viewModel.startQuickConnect() }
+                            } else null,
+                        )
+                    }
+
+                    TvInternalSetupPhase.ProfilePicker -> {
+                        TvProfilePickerScreen(
+                            savedProfiles = state.savedProfiles,
+                            publicUsers = state.publicUsers,
+                            server = state.server,
+                            onSelectSavedProfile = { profile ->
+                                viewModel.selectProfile(profile)
+                            },
+                            onSelectPublicUser = { user ->
+                                viewModel.selectPublicUser(user)
+                            },
+                            onAddProfile = {
+                                viewModel.addProfile()
+                            },
+                            onChangeServer = {
+                                viewModel.onServerUrlChanged("")
+                                viewModel.continueFromWelcome()
+                            },
+                            onBack = if (state.savedProfiles.isNotEmpty()) null else {
+                                { viewModel.navigateSetupBack() }
+                            },
+                        )
+                    }
                 }
             }
         }
     }
-}
 }

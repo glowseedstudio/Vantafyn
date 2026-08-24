@@ -60,10 +60,12 @@ private fun TvAppRoot(
                 Lifecycle.Event.ON_START -> {
                     AppForegroundStateRepository.setForeground(true)
                     viewModel.onAppForegrounded()
+                    dev.vantafyn.tv.remoteinput.TvRemoteInputManager.start()
                 }
                 Lifecycle.Event.ON_STOP -> {
                     AppForegroundStateRepository.setForeground(false)
                     viewModel.onAppBackgrounded()
+                    dev.vantafyn.tv.remoteinput.TvRemoteInputManager.stop()
                 }
                 else -> Unit
             }

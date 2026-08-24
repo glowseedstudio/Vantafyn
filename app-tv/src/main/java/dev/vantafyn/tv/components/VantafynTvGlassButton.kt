@@ -25,9 +25,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,7 +52,7 @@ fun VantafynTvGlassButton(
         label = "TvButtonScale",
     )
 
-    val shape = RoundedCornerShape(16.dp)
+    val shape = RoundedCornerShape(18.dp)
     val accentGradient = Brush.horizontalGradient(VantafynFocusGradientColors)
 
     val backgroundBrush = if (isPrimary) {
@@ -63,7 +63,7 @@ fun VantafynTvGlassButton(
                 listOf(
                     VantafynColors.SurfaceHigh.copy(alpha = 0.7f),
                     Color(0xFF252B3D).copy(alpha = 0.7f),
-                )
+                ),
             )
         }
     } else {
@@ -71,26 +71,29 @@ fun VantafynTvGlassButton(
             listOf(
                 Color(0xCC141A2E),
                 Color(0xEE0B0F1C),
-            )
+            ),
         )
+    }
+
+    val borderStroke = if (isFocused && enabled) {
+        if (isPrimary) {
+            BorderStroke(2.dp, Color.White.copy(alpha = 0.85f))
+        } else {
+            BorderStroke(2.dp, accentGradient)
+        }
+    } else {
+        BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))
     }
 
     Box(
         modifier = modifier
-            .scale(scale)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(shape)
-            .background(backgroundBrush)
-            .then(
-                if (isFocused && enabled) {
-                    if (isPrimary) {
-                        Modifier.border(BorderStroke(2.dp, Color.White.copy(alpha = 0.65f)), shape)
-                    } else {
-                        Modifier.border(BorderStroke(2.dp, accentGradient), shape)
-                    }
-                } else {
-                    Modifier.border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), shape)
-                }
-            )
+            .background(backgroundBrush, shape)
+            .border(borderStroke, shape)
             .clickable(
                 enabled = enabled,
                 interactionSource = interactionSource,

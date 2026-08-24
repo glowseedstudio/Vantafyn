@@ -24,6 +24,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Visibility
@@ -65,6 +66,7 @@ fun TvLoginScreen(
     onPasswordChange: (String) -> Unit,
     onLogin: () -> Unit,
     onBack: () -> Unit,
+    onQuickConnect: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var isPasswordVisible by remember { mutableStateOf(false) }
@@ -226,6 +228,16 @@ fun TvLoginScreen(
                         }
                     },
                 )
+
+                if (onQuickConnect != null) {
+                    VantafynTvGlassButton(
+                        text = "Quick Connect",
+                        icon = Icons.Rounded.Bolt,
+                        isPrimary = false,
+                        enabled = !isLoading,
+                        onClick = onQuickConnect,
+                    )
+                }
 
                 VantafynTvGlassButton(
                     text = "Back",

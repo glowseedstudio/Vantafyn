@@ -3959,6 +3959,7 @@ private fun MobileShellScreen(
                             onToggleAutoLoginLastProfile = onToggleAutoLoginLastProfile,
                             onSwitchUser = onSwitchUser,
                             onAddProfile = onAddProfile,
+                            onSendTextToTv = { onNavigate(MobileDestination.TvInput) },
                             onQuickConnect = onQuickConnect,
                             onLogout = onConfirmLogout,
                             onSelectBackground = onSelectBackground,
@@ -3981,6 +3982,10 @@ private fun MobileShellScreen(
                             onBack = onNavigateBack,
                             onCodeChanged = onDeviceQuickConnectCodeChanged,
                             onAuthorize = onAuthorizeDeviceQuickConnect,
+                        )
+                        MobileDestination.TvInput -> dev.vantafyn.feature.home.remoteinput.MobileSendTextToTvScreen(
+                            state = state,
+                            onBack = onNavigateBack,
                         )
                         MobileDestination.PlaybackPreferences -> PlaybackPreferencesScreen(
                             state = state,
@@ -11477,6 +11482,8 @@ private fun ProfileSettingsScreen(
     onToggleAutoLoginLastProfile: () -> Unit,
     onSwitchUser: () -> Unit,
     onAddProfile: () -> Unit,
+    onPairTv: () -> Unit = {},
+    onSendTextToTv: () -> Unit = {},
     onQuickConnect: () -> Unit,
     onLogout: () -> Unit,
     onSelectBackground: (VantafynAppBackground) -> Unit,
@@ -11604,6 +11611,7 @@ private fun ProfileSettingsScreen(
                         )
                         SettingsRow("Add Profile", "", onAddProfile, compact = true, icon = Icons.Rounded.PersonAdd)
                         SettingsRow("Pair a TV", "", { showPairTvSheet = true }, compact = true, icon = Icons.Rounded.Tv)
+                        SettingsRow("Send text to TV", "", onSendTextToTv, compact = true, icon = Icons.Rounded.Tv)
                         SettingsRow("Quick Connect", "", onQuickConnect, compact = true, icon = Icons.Rounded.Link)
                         SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
                         SettingsRow("Log Out", "", onLogout, compact = true, destructive = true, icon = Icons.Rounded.Logout)

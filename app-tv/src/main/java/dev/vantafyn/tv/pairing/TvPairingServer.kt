@@ -1,9 +1,6 @@
 package dev.vantafyn.tv.pairing
 
 import android.os.Build
-import com.sun.net.httpserver.HttpExchange
-import com.sun.net.httpserver.HttpHandler
-import com.sun.net.httpserver.HttpServer
 import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
 import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.jellyfin.TvPairingResponse
@@ -16,18 +13,19 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.OutputStream
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
-import java.net.InetSocketAddress
+import java.net.ServerSocket
+import java.net.Socket
 import java.security.SecureRandom
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Ephemeral local-network HTTP server and UDP discovery responder for Android TV pairing.
+ * Ephemeral local-network ServerSocket HTTP server and UDP discovery responder for Android TV pairing.
  *
  * Runs ONLY while the TV Pairing screen is actively displayed.
  * Shuts down immediately upon successful pairing, user exit, or expiration.
@@ -38,7 +36,8 @@ class TvPairingServer(
     private val onExpiredOrLimitReached: () -> Unit = {},
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var httpServer: HttpServer? = null
+    private var serverSocket: ServerSocket? = null
+    private var serverJob: Job? = null
     private var udpSocket: DatagramSocket? = null
     private var broadcastJob: Job? = null
     private var udpListenJob: Job? = null
@@ -93,26 +92,37 @@ class TvPairingServer(
         expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
         failedAttempts.set(0)
 
-        // 1. Start HTTP Server
-        var serverStarted = false
+        // 1. Start ServerSocket
+        var startedSocket: ServerSocket? = null
+        var boundPort = DEFAULT_HTTP_PORT
+
         for (port in DEFAULT_HTTP_PORT..(DEFAULT_HTTP_PORT + 10)) {
             try {
-                val server = HttpServer.create(InetSocketAddress(port), 0)
-                server.executor = Executors.newSingleThreadExecutor()
-                server.createContext("/api/v1/pair", PairingHttpHandler())
-                server.start()
-                httpServer = server
-                assignedPort = port
-                serverStarted = true
+                startedSocket = ServerSocket(port)
+                boundPort = port
                 break
             } catch (_: Exception) {
                 // Try next port
             }
         }
 
-        if (!serverStarted) {
+        if (startedSocket == null) {
             isRunning.set(false)
             return false
+        }
+
+        serverSocket = startedSocket
+        assignedPort = boundPort
+
+        serverJob = scope.launch {
+            while (isActive && isRunning.get()) {
+                try {
+                    val client = startedSocket.accept()
+                    launch { handleClientSocket(client) }
+                } catch (_: Exception) {
+                    break
+                }
+            }
         }
 
         // 2. Start UDP Discovery Responder & Periodic Broadcast
@@ -137,6 +147,127 @@ class TvPairingServer(
         expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
         failedAttempts.set(0)
         return currentCode
+    }
+
+    private fun handleClientSocket(socket: Socket) {
+        try {
+            socket.soTimeout = 4000
+            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
+            val requestLine = reader.readLine() ?: run {
+                socket.close()
+                return
+            }
+
+            val parts = requestLine.split(" ")
+            if (parts.size < 2) {
+                socket.close()
+                return
+            }
+
+            val method = parts[0]
+            val path = parts[1]
+
+            var contentLength = 0
+            var line = reader.readLine()
+            while (!line.isNullOrEmpty()) {
+                if (line.startsWith("Content-Length:", ignoreCase = true)) {
+                    contentLength = line.substringAfter(":").trim().toIntOrNull() ?: 0
+                }
+                line = reader.readLine()
+            }
+
+            val body = if (contentLength > 0) {
+                val buffer = CharArray(contentLength)
+                var totalRead = 0
+                while (totalRead < contentLength) {
+                    val read = reader.read(buffer, totalRead, contentLength - totalRead)
+                    if (read == -1) break
+                    totalRead += read
+                }
+                String(buffer, 0, totalRead)
+            } else {
+                ""
+            }
+
+            if (method != "POST" || !path.startsWith("/api/v1/pair")) {
+                sendHttpResponse(socket, 405, TvPairingResponse.error("METHOD_NOT_ALLOWED", "Method not allowed"))
+                return
+            }
+
+            // Check expiry
+            if (System.currentTimeMillis() > expiresAtEpochMs) {
+                sendHttpResponse(socket, 401, TvPairingResponse.error("EXPIRED", "Pairing code has expired"))
+                scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
+                return
+            }
+
+            // Check rate limiting
+            if (failedAttempts.get() >= MAX_FAILED_ATTEMPTS) {
+                sendHttpResponse(socket, 429, TvPairingResponse.error("RATE_LIMITED", "Too many failed attempts"))
+                scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
+                return
+            }
+
+            val payload = TvPairingPayload.fromJson(body)
+            if (payload == null) {
+                sendHttpResponse(socket, 400, TvPairingResponse.error("INVALID_PAYLOAD", "Malformed pairing payload"))
+                return
+            }
+
+            // Validate code (case-insensitive and trimmed)
+            val normalizedProvided = payload.code.trim().replace("-", "").replace(" ", "").uppercase()
+            val normalizedCurrent = currentCode.trim().replace("-", "").replace(" ", "").uppercase()
+
+            if (normalizedProvided != normalizedCurrent) {
+                val currentFails = failedAttempts.incrementAndGet()
+                if (currentFails >= MAX_FAILED_ATTEMPTS) {
+                    sendHttpResponse(socket, 429, TvPairingResponse.error("RATE_LIMITED", "Too many failed attempts"))
+                    scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
+                } else {
+                    sendHttpResponse(socket, 401, TvPairingResponse.error("INVALID_CODE", "Invalid pairing code"))
+                }
+                return
+            }
+
+            // Valid code! Send success response
+            sendHttpResponse(socket, 200, TvPairingResponse.success())
+
+            // Shutdown listener and notify callback on Main dispatcher
+            scope.launch(Dispatchers.Main) {
+                stop()
+                onPairedPayload(payload)
+            }
+        } catch (_: Exception) {
+            try {
+                sendHttpResponse(socket, 500, TvPairingResponse.error("INTERNAL_ERROR", "Failed to process pairing"))
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun sendHttpResponse(socket: Socket, statusCode: Int, response: TvPairingResponse) {
+        try {
+            val bodyBytes = response.toJson().toByteArray(Charsets.UTF_8)
+            val statusText = when (statusCode) {
+                200 -> "OK"
+                400 -> "Bad Request"
+                401 -> "Unauthorized"
+                405 -> "Method Not Allowed"
+                429 -> "Too Many Requests"
+                else -> "Error"
+            }
+            val headers = "HTTP/1.1 $statusCode $statusText\r\n" +
+                "Content-Type: application/json; charset=utf-8\r\n" +
+                "Content-Length: ${bodyBytes.size}\r\n" +
+                "Connection: close\r\n\r\n"
+
+            val out = socket.getOutputStream()
+            out.write(headers.toByteArray(Charsets.UTF_8))
+            out.write(bodyBytes)
+            out.flush()
+        } catch (_: Exception) {
+        } finally {
+            try { socket.close() } catch (_: Exception) {}
+        }
     }
 
     private fun startUdpServices() {
@@ -190,77 +321,6 @@ class TvPairingServer(
         }
     }
 
-    private inner class PairingHttpHandler : HttpHandler {
-        override fun handle(exchange: HttpExchange) {
-            try {
-                if (exchange.requestMethod != "POST") {
-                    sendJsonResponse(exchange, 405, TvPairingResponse.error("METHOD_NOT_ALLOWED", "Method not allowed"))
-                    return
-                }
-
-                // Check expiry
-                if (System.currentTimeMillis() > expiresAtEpochMs) {
-                    sendJsonResponse(exchange, 401, TvPairingResponse.error("EXPIRED", "Pairing code has expired"))
-                    scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
-                    return
-                }
-
-                // Check rate limiting
-                if (failedAttempts.get() >= MAX_FAILED_ATTEMPTS) {
-                    sendJsonResponse(exchange, 429, TvPairingResponse.error("RATE_LIMITED", "Too many failed attempts"))
-                    scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
-                    return
-                }
-
-                val body = exchange.requestBody.bufferedReader().use { it.readText() }
-                val payload = TvPairingPayload.fromJson(body)
-
-                if (payload == null) {
-                    sendJsonResponse(exchange, 400, TvPairingResponse.error("INVALID_PAYLOAD", "Malformed pairing payload"))
-                    return
-                }
-
-                // Validate code (case-insensitive and trimmed)
-                val normalizedProvided = payload.code.trim().replace("-", "").replace(" ", "").uppercase()
-                val normalizedCurrent = currentCode.trim().replace("-", "").replace(" ", "").uppercase()
-
-                if (normalizedProvided != normalizedCurrent) {
-                    val currentFails = failedAttempts.incrementAndGet()
-                    if (currentFails >= MAX_FAILED_ATTEMPTS) {
-                        sendJsonResponse(exchange, 429, TvPairingResponse.error("RATE_LIMITED", "Too many failed attempts"))
-                        scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
-                    } else {
-                        sendJsonResponse(exchange, 401, TvPairingResponse.error("INVALID_CODE", "Invalid pairing code"))
-                    }
-                    return
-                }
-
-                // Valid code! Send success response
-                sendJsonResponse(exchange, 200, TvPairingResponse.success())
-
-                // Shutdown listener and notify callback on Main dispatcher
-                scope.launch(Dispatchers.Main) {
-                    stop()
-                    onPairedPayload(payload)
-                }
-            } catch (_: Exception) {
-                try {
-                    sendJsonResponse(exchange, 500, TvPairingResponse.error("INTERNAL_ERROR", "Failed to process pairing"))
-                } catch (_: Exception) {}
-            }
-        }
-
-        private fun sendJsonResponse(exchange: HttpExchange, statusCode: Int, response: TvPairingResponse) {
-            val bytes = response.toJson().toByteArray(Charsets.UTF_8)
-            exchange.responseHeaders.set("Content-Type", "application/json; charset=utf-8")
-            exchange.sendResponseHeaders(statusCode, bytes.size.toLong())
-            exchange.responseBody.use { os: OutputStream ->
-                os.write(bytes)
-                os.flush()
-            }
-        }
-    }
-
     /**
      * Completely shuts down the HTTP server, UDP sockets, and background jobs.
      */
@@ -275,8 +335,9 @@ class TvPairingServer(
         } catch (_: Exception) {}
 
         try {
-            httpServer?.stop(0)
-            httpServer = null
+            serverJob?.cancel()
+            serverSocket?.close()
+            serverSocket = null
         } catch (_: Exception) {}
 
         scope.cancel()

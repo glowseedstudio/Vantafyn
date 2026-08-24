@@ -2413,7 +2413,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Downloads -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
             MobileDestination.PlaybackPreferences,
-            MobileDestination.DiscoverVantafyn -> navigateMobile(MobileDestination.Profile)
+            MobileDestination.DiscoverVantafyn,
+            MobileDestination.TvInput -> navigateMobile(MobileDestination.Profile)
             MobileDestination.DeviceQuickConnect -> closeDeviceQuickConnect()
             MobileDestination.AdminUserSettings -> closeAdminUser()
             MobileDestination.Chat -> navigateMobile(MobileDestination.Social)
@@ -5808,6 +5809,7 @@ enum class MobileDestination {
     Achievements,
     Social,
     Chat,
+    TvInput,
 }
 
 private fun MobileDestination.isRootDestination(): Boolean =
@@ -5832,7 +5834,8 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.DiscoverVantafyn,
         MobileDestination.Achievements,
         MobileDestination.Social,
-        MobileDestination.Chat -> false
+        MobileDestination.Chat,
+        MobileDestination.TvInput -> false
     }
 
 private fun MobileDestination.rootDestination(): MobileDestination =

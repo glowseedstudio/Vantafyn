@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.Icon
@@ -32,13 +33,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -52,58 +53,27 @@ import dev.vantafyn.core.ui.VantafynGlassPalette
 import dev.vantafyn.tv.components.VantafynFocusGradientColors
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
-import dev.vantafyn.tv.components.VantafynTvSetupCinematicEasing
 
 @Composable
 fun TvSetupMethodScreen(
     onPairWithMobile: () -> Unit,
+    onQuickConnect: () -> Unit,
     onManualSetup: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var isRevealed by remember { mutableStateOf(false) }
+    val quickConnectFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        isRevealed = true
+        try {
+            quickConnectFocusRequester.requestFocus()
+        } catch (_: Exception) {}
     }
-
-    val headerAlpha by animateFloatAsState(
-        targetValue = if (isRevealed) 1f else 0f,
-        animationSpec = tween(durationMillis = 1_200, delayMillis = 0, easing = VantafynTvSetupCinematicEasing),
-        label = "methodHeaderAlpha",
-    )
-    val headerTranslationY by animateFloatAsState(
-        targetValue = if (isRevealed) 0f else 28f,
-        animationSpec = tween(durationMillis = 1_200, delayMillis = 0, easing = VantafynTvSetupCinematicEasing),
-        label = "methodHeaderTranslationY",
-    )
-
-    val cardsAlpha by animateFloatAsState(
-        targetValue = if (isRevealed) 1f else 0f,
-        animationSpec = tween(durationMillis = 1_200, delayMillis = 160, easing = VantafynTvSetupCinematicEasing),
-        label = "methodCardsAlpha",
-    )
-    val cardsTranslationY by animateFloatAsState(
-        targetValue = if (isRevealed) 0f else 24f,
-        animationSpec = tween(durationMillis = 1_200, delayMillis = 160, easing = VantafynTvSetupCinematicEasing),
-        label = "methodCardsTranslationY",
-    )
-
-    val actionsAlpha by animateFloatAsState(
-        targetValue = if (isRevealed) 1f else 0f,
-        animationSpec = tween(durationMillis = 1_200, delayMillis = 320, easing = VantafynTvSetupCinematicEasing),
-        label = "methodActionsAlpha",
-    )
-    val actionsTranslationY by animateFloatAsState(
-        targetValue = if (isRevealed) 0f else 18f,
-        animationSpec = tween(durationMillis = 1_200, delayMillis = 320, easing = VantafynTvSetupCinematicEasing),
-        label = "methodActionsTranslationY",
-    )
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .padding(horizontal = 48.dp, vertical = 24.dp),
+            .padding(horizontal = 48.dp, vertical = 20.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -113,81 +83,77 @@ fun TvSetupMethodScreen(
             // Header Section
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.graphicsLayer {
-                    alpha = headerAlpha
-                    translationY = headerTranslationY
-                },
             ) {
                 VantafynLogoBadge(
-                    size = 56.dp,
-                    shape = RoundedCornerShape(16.dp),
+                    size = 52.dp,
+                    shape = RoundedCornerShape(14.dp),
                 )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
                     text = "Set up Vantafyn",
                     color = VantafynColors.Ink,
-                    fontSize = 34.sp,
+                    fontSize = 32.sp,
                     fontWeight = FontWeight.ExtraBold,
                     textAlign = TextAlign.Center,
                 )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
                     text = "Choose how you'd like to connect this TV to your Jellyfin server",
                     color = VantafynColors.Muted,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
                     textAlign = TextAlign.Center,
                 )
             }
 
-            Spacer(modifier = Modifier.height(36.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
-            // Options Row (Centered Cards with Translucent Glass)
+            // Options Row (3 Centered Cards with Custom Gradient Accent Colors & Ambient Glow)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(28.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.graphicsLayer {
-                    alpha = cardsAlpha
-                    translationY = cardsTranslationY
-                },
             ) {
+                // 1. Mobile Pairing (Cyan Theme)
                 SetupOptionCard(
                     title = "Pair with mobile app",
                     subtitle = "Use your phone to connect this TV seamlessly.",
                     icon = Icons.Rounded.Smartphone,
+                    accentColor = Color(0xFF21D8FF), // Electric Cyan
                     onClick = onPairWithMobile,
                 )
 
+                // 2. Quick Connect (Purple Theme - Initial Default Focus)
+                SetupOptionCard(
+                    title = "Quick Connect",
+                    subtitle = "Approve this TV from another Jellyfin app.",
+                    icon = Icons.Rounded.Bolt,
+                    accentColor = Color(0xFFA855F7), // Vibrant Gradient Purple / Violet
+                    focusRequester = quickConnectFocusRequester,
+                    onClick = onQuickConnect,
+                )
+
+                // 3. Manual Setup (Pink Theme)
                 SetupOptionCard(
                     title = "Sign in manually",
                     subtitle = "Enter your Jellyfin server address and credentials.",
                     icon = Icons.Rounded.Key,
+                    accentColor = Color(0xFFFF36C7), // Hot Magenta / Pink
                     onClick = onManualSetup,
                 )
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(28.dp))
 
             // Back Button
-            Box(
-                modifier = Modifier.graphicsLayer {
-                    alpha = actionsAlpha
-                    translationY = actionsTranslationY
-                },
-            ) {
-                VantafynTvGlassButton(
-                    text = "Back",
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    isPrimary = false,
-                    onClick = onBack,
-                )
-            }
-
-            // Bottom clearance for scaled button focus borders
-            Spacer(modifier = Modifier.height(36.dp))
+            VantafynTvGlassButton(
+                text = "Back",
+                icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                isPrimary = false,
+                onClick = onBack,
+            )
         }
     }
 }
@@ -197,15 +163,17 @@ private fun SetupOptionCard(
     title: String,
     subtitle: String,
     icon: ImageVector,
+    accentColor: Color,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
     onClick: () -> Unit = {},
 ) {
-    val shape = RoundedCornerShape(22.dp)
+    val shape = RoundedCornerShape(20.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.05f else 1.0f,
+        targetValue = if (isFocused) 1.04f else 1.0f,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
         label = "SetupOptionCardScale",
     )
@@ -222,27 +190,30 @@ private fun SetupOptionCard(
 
     val accentGradient = Brush.horizontalGradient(VantafynFocusGradientColors)
 
+    val borderStroke = if (isFocused) {
+        BorderStroke(2.dp, accentGradient)
+    } else {
+        BorderStroke(1.dp, Color.White.copy(alpha = 0.14f))
+    }
+
     Box(
         modifier = modifier
-            .width(310.dp)
-            .height(230.dp)
-            .scale(scale)
-            .clip(shape)
-            .background(containerColor)
-            .then(
-                if (isFocused) {
-                    Modifier.border(BorderStroke(2.dp, accentGradient), shape)
-                } else {
-                    Modifier.border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), shape)
-                }
-            )
+            .width(250.dp)
+            .height(195.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .background(containerColor, shape)
+            .border(borderStroke, shape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick,
             )
+            .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .focusable(interactionSource = interactionSource)
-            .padding(horizontal = 24.dp, vertical = 22.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         contentAlignment = Alignment.Center,
     ) {
         Column(
@@ -250,60 +221,75 @@ private fun SetupOptionCard(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
-            // Centered Premium Icon Badge with Gradient Glow
+            // Centered Premium Icon Badge with Soft Ambient Glow of its Color
             Box(
                 modifier = Modifier
-                    .size(56.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .size(48.dp)
+                    .drawBehind {
+                        val glowRadius = 30.dp.toPx()
+                        drawCircle(
+                            brush = Brush.radialGradient(
+                                colors = listOf(
+                                    accentColor.copy(alpha = if (isFocused) 0.55f else 0.35f),
+                                    accentColor.copy(alpha = if (isFocused) 0.22f else 0.12f),
+                                    Color.Transparent,
+                                ),
+                                center = center,
+                                radius = glowRadius,
+                            ),
+                            radius = glowRadius,
+                        )
+                    }
+                    .clip(RoundedCornerShape(14.dp))
                     .background(
                         Brush.linearGradient(
                             listOf(
-                                Color(0x338EA2FF),
-                                Color(0x1821D8FF),
-                            )
-                        )
+                                accentColor.copy(alpha = 0.22f),
+                                accentColor.copy(alpha = 0.08f),
+                            ),
+                        ),
                     )
                     .border(
                         BorderStroke(
                             1.dp,
                             Brush.linearGradient(
                                 listOf(
-                                    Color.White.copy(alpha = 0.25f),
-                                    Color(0xFF21D8FF).copy(alpha = 0.35f),
-                                )
+                                    Color.White.copy(alpha = 0.30f),
+                                    accentColor.copy(alpha = 0.50f),
+                                ),
                             ),
                         ),
-                        RoundedCornerShape(16.dp),
+                        RoundedCornerShape(14.dp),
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (isFocused) Color.White else VantafynColors.Primary,
-                    modifier = Modifier.size(28.dp),
+                    tint = if (isFocused) Color.White else accentColor,
+                    modifier = Modifier.size(24.dp),
                 )
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Centered Title
             Text(
                 text = title,
                 color = if (isFocused) VantafynColors.Ink else Color(0xFFE2E8F0),
-                fontSize = 18.sp,
+                fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
             // Centered Subtitle
             Text(
                 text = subtitle,
                 color = VantafynColors.Muted,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
+                fontSize = 12.sp,
+                lineHeight = 16.sp,
                 textAlign = TextAlign.Center,
             )
         }

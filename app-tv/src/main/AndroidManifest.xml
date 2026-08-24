@@ -21,6 +21,9 @@
         android:usesCleartextTraffic="true">
         <activity
             android:name=".TvMainActivity"
+            android:banner="@drawable/tv_banner"
+            android:icon="@drawable/tv_banner"
+            android:logo="@drawable/tv_banner"
             android:exported="true"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>

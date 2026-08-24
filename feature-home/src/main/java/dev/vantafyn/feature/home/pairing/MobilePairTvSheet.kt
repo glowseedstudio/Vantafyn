@@ -1,10 +1,12 @@
 package dev.vantafyn.feature.home.pairing
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
@@ -33,16 +36,13 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Person
-import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +62,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -70,15 +73,22 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil3.compose.AsyncImage
+import dev.vantafyn.core.jellyfin.JellyfinPublicUser
+import dev.vantafyn.core.jellyfin.SavedProfile
+import dev.vantafyn.core.ui.R as CoreUiR
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
-import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+private val VantafynModalCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1f)
+
 @Composable
 fun MobilePairTvSheet(
     state: VantafynHomeUiState,
@@ -86,16 +96,46 @@ fun MobilePairTvSheet(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val scope = rememberCoroutineScope()
+    var isVisible by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        isVisible = true
+    }
+
+    val animProgress by animateFloatAsState(
+        targetValue = if (isVisible) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = 380,
+            easing = VantafynModalCinematicEasing,
+        ),
+        label = "pairTvSheetProgress",
+    )
+
+    fun dismissWithAnimation() {
+        if (!isVisible) return
+        isVisible = false
+        scope.launch {
+            delay(380L)
+            onDismiss()
+        }
+    }
 
     var code by remember { mutableStateOf("") }
-    val selectedProfile by remember(state.savedProfiles, state.selectedProfileId) {
-        mutableStateOf(
-            state.savedProfiles.firstOrNull { it.id == state.selectedProfileId }
-                ?: state.savedProfiles.firstOrNull(),
-        )
+    val selectedProfile = remember(state.savedProfiles, state.selectedProfileId) {
+        state.savedProfiles.firstOrNull { it.id == state.selectedProfileId }
+            ?: state.savedProfiles.firstOrNull()
     }
+
+    // Resolve user avatar image URL
+    val userImageUrl = selectedProfile?.imageUrl
+        ?: state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }?.imageUrl
+        ?: state.publicUsers.firstOrNull { it.displayName == (selectedProfile?.displayName ?: state.username) }?.imageUrl
+
+    // Resolve server administrator avatar image URL
+    val serverAdminImageUrl = state.publicUsers.firstOrNull { it.isAdministrator && it.imageUrl != null }?.imageUrl
+        ?: state.savedProfiles.firstOrNull { it.serverUrl == state.server?.url && it.imageUrl != null }?.imageUrl
+        ?: state.publicUsers.firstOrNull { it.imageUrl != null }?.imageUrl
 
     var isPairing by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -132,112 +172,88 @@ fun MobilePairTvSheet(
         }
     }
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = Color.Transparent,
-        scrimColor = Color.Black.copy(alpha = 0.70f),
-        dragHandle = null,
-        modifier = modifier,
+    Dialog(
+        onDismissRequest = { dismissWithAnimation() },
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false,
+        ),
     ) {
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp)
-                .windowInsetsPadding(WindowInsets.navigationBars)
-                .vantafynAnimatedModalBorder(
-                    cornerRadius = 28.dp,
-                    strokeWidth = 1.35.dp,
-                    durationMillis = 4800,
-                )
-                .clip(RoundedCornerShape(28.dp))
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            Color(0xFF141926).copy(alpha = 0.98f),
-                            Color(0xFF0F1420).copy(alpha = 0.98f),
-                            Color(0xFF080B12).copy(alpha = 0.98f),
-                        ),
-                    ),
-                )
-                .drawBehind {
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF00E5FF).copy(alpha = 0.08f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * 0.2f, size.height * 0.15f),
-                            radius = size.width * 0.6f,
-                        ),
-                    )
-                    drawCircle(
-                        brush = Brush.radialGradient(
-                            colors = listOf(
-                                Color(0xFF7C4DFF).copy(alpha = 0.08f),
-                                Color.Transparent,
-                            ),
-                            center = Offset(size.width * 0.85f, size.height * 0.75f),
-                            radius = size.width * 0.6f,
-                        ),
-                    )
-                }
-                .padding(horizontal = 20.dp, vertical = 14.dp),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.70f * animProgress))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { dismissWithAnimation() },
+                ),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+            // Dark glass surface with 100% symmetric entrance & exit slide
+            Box(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        translationY = (1f - animProgress) * 500f
+                        alpha = animProgress
+                    }
+                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}, // Consume click so scrim isn't triggered
+                    )
+                    .vantafynAnimatedModalBorder(
+                        cornerRadius = 28.dp,
+                        strokeWidth = 1.35.dp,
+                        durationMillis = 4800,
+                    )
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(VantafynColors.Graphite.copy(alpha = 0.96f))
+                    .padding(horizontal = 20.dp, vertical = 14.dp),
             ) {
-                // Drag Handle
-                Box(
-                    modifier = Modifier
-                        .size(width = 38.dp, height = 4.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.25f))
-                        .align(Alignment.CenterHorizontally),
-                )
-
-                // Top Header Row
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    // Drag Handle
+                    Box(
+                        modifier = Modifier
+                            .size(width = 38.dp, height = 4.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.25f))
+                            .align(Alignment.CenterHorizontally),
+                    )
+
+                    // Top Header Row with official branded Vantafyn logo
                     Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(13.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        listOf(
-                                            Color(0x338EA2FF),
-                                            Color(0x1821D8FF),
-                                        ),
-                                    ),
-                                )
-                                .border(
-                                    BorderStroke(
-                                        1.dp,
-                                        Brush.linearGradient(
-                                            listOf(
-                                                Color.White.copy(alpha = 0.25f),
-                                                Color(0xFF21D8FF).copy(alpha = 0.35f),
-                                            ),
-                                        ),
-                                    ),
-                                    RoundedCornerShape(13.dp),
-                                ),
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.Black)
+                                    .border(
+                                        BorderStroke(1.dp, Color.White.copy(alpha = 0.18f)),
+                                        RoundedCornerShape(12.dp),
+                                    )
+                                    .padding(6.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Tv,
-                                contentDescription = null,
-                                tint = Color(0xFF21D8FF),
-                                modifier = Modifier.size(22.dp),
+                            Image(
+                                painter = painterResource(id = CoreUiR.drawable.vantafyn_logo),
+                                contentDescription = "Vantafyn",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Fit,
                             )
                         }
 
@@ -257,7 +273,7 @@ fun MobilePairTvSheet(
                     }
 
                     IconButton(
-                        onClick = onDismiss,
+                        onClick = { dismissWithAnimation() },
                         modifier = Modifier
                             .size(34.dp)
                             .clip(CircleShape)
@@ -323,7 +339,7 @@ fun MobilePairTvSheet(
                             text = "Done",
                             enabled = true,
                             isLoading = false,
-                            onClick = onDismiss,
+                            onClick = { dismissWithAnimation() },
                         )
                     }
                 } else {
@@ -452,7 +468,7 @@ fun MobilePairTvSheet(
                         }
                     }
 
-                    // 2. Profile & Server Section
+                    // 2. Profile & Server Section with Avatars
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(
                             text = "SERVER & PROFILE TO SHARE",
@@ -470,29 +486,45 @@ fun MobilePairTvSheet(
                                 .background(Color.White.copy(alpha = 0.05f))
                                 .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
                                 .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
+                            // Server Row with Admin Profile Picture
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0x228EA2FF)),
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(Color(0xFF3D5266), Color(0xFF756A8A), Color(0xFF20252D)),
+                                            ),
+                                        )
+                                        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)), CircleShape),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Dns,
-                                        contentDescription = null,
-                                        tint = VantafynColors.Primary,
-                                        modifier = Modifier.size(16.dp),
-                                    )
+                                    if (serverAdminImageUrl != null) {
+                                        AsyncImage(
+                                            model = serverAdminImageUrl,
+                                            contentDescription = "Server Admin",
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                    } else {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Dns,
+                                            contentDescription = null,
+                                            tint = VantafynColors.Primary,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
                                 }
+
                                 Column {
                                     Text(
-                                        text = state.server?.name ?: "Current Server",
+                                        text = state.server?.name ?: "Jellyfin Server",
                                         color = VantafynColors.Ink,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.SemiBold,
@@ -505,26 +537,44 @@ fun MobilePairTvSheet(
                                 }
                             }
 
+                            // User Profile Row with Active Profile Picture
+                            val profileDisplayName = selectedProfile?.displayName ?: state.username
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0x2221D8FF)),
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            Brush.linearGradient(
+                                                listOf(Color(0xFF21D8FF).copy(alpha = 0.35f), Color(0xFF8B35FF).copy(alpha = 0.35f)),
+                                            ),
+                                        )
+                                        .border(BorderStroke(1.dp, Color(0xFF21D8FF).copy(alpha = 0.40f)), CircleShape),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Person,
-                                        contentDescription = null,
-                                        tint = Color(0xFF21D8FF),
-                                        modifier = Modifier.size(16.dp),
-                                    )
+                                    if (userImageUrl != null) {
+                                        AsyncImage(
+                                            model = userImageUrl,
+                                            contentDescription = profileDisplayName,
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentScale = ContentScale.Crop,
+                                        )
+                                    } else {
+                                        val initial = profileDisplayName.firstOrNull()?.uppercase() ?: "U"
+                                        Text(
+                                            text = initial,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                        )
+                                    }
                                 }
+
                                 Text(
-                                    text = "Connecting as ${selectedProfile?.displayName ?: state.username}",
+                                    text = "Connecting as $profileDisplayName",
                                     color = Color(0xFFCBD5E1),
                                     fontSize = 13.sp,
                                     fontWeight = FontWeight.Medium,
@@ -574,6 +624,7 @@ fun MobilePairTvSheet(
             }
         }
     }
+}
 }
 
 @Composable
