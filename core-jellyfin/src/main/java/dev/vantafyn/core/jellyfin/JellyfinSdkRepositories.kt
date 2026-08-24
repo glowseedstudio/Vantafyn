@@ -315,6 +315,49 @@ class SdkJellyfinAuthRepository(
             session
         }
 
+    override suspend fun createPairingPayload(code: String, profileId: String?): TvPairingPayload? =
+        withContext(ioDispatcher) {
+            val targetId = profileId ?: storage.read()?.profileId ?: return@withContext null
+            val stored = storage.read(targetId) ?: return@withContext null
+            TvPairingPayload(
+                code = code,
+                serverUrl = stored.serverUrl,
+                localServerUrl = stored.localServerUrl,
+                remoteServerUrl = stored.remoteServerUrl,
+                serverName = stored.serverName,
+                serverVersion = stored.serverVersion,
+                serverId = stored.serverId,
+                userId = stored.userId,
+                userName = stored.userName,
+                userImageTag = stored.userImageTag,
+                accessToken = stored.accessToken,
+                profileId = stored.profileId,
+                profileDisplayName = stored.userName,
+                profileImageUrl = userImageUrl(jellyfin, stored),
+                hasPassword = false,
+            )
+        }
+
+    override suspend fun importPairedSession(payload: TvPairingPayload): JellyfinResult<JellyfinSession> =
+        runCatchingRestoreResult {
+            val stored = StoredJellyfinSession(
+                profileId = payload.profileId,
+                serverUrl = payload.serverUrl,
+                localServerUrl = payload.localServerUrl,
+                remoteServerUrl = payload.remoteServerUrl,
+                serverName = payload.serverName,
+                serverVersion = payload.serverVersion,
+                serverId = payload.serverId,
+                userId = payload.userId,
+                userName = payload.userName,
+                userImageTag = payload.userImageTag,
+                accessToken = payload.accessToken,
+                lastUsedAt = System.currentTimeMillis(),
+            )
+            storage.write(stored)
+            restoreStoredSession(stored)
+        }
+
     override suspend fun removeProfile(profileId: String) {
         storage.remove(profileId)
     }

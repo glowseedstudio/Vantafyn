@@ -1067,6 +1067,8 @@ interface JellyfinAuthRepository {
     suspend fun publicUsers(server: JellyfinServerConfig): JellyfinResult<List<JellyfinPublicUser>>
     suspend fun login(serverUrl: String, username: String, password: String): JellyfinResult<JellyfinSession>
     suspend fun login(localUrl: String?, remoteUrl: String?, username: String, password: String): JellyfinResult<JellyfinSession>
+    suspend fun createPairingPayload(code: String, profileId: String? = null): TvPairingPayload?
+    suspend fun importPairedSession(payload: TvPairingPayload): JellyfinResult<JellyfinSession>
     suspend fun removeProfile(profileId: String)
     suspend fun logout()
 }

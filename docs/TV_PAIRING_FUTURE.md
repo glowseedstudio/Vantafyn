@@ -1,32 +1,22 @@
-# Vantafyn TV Mobile Pairing Architecture (Future Roadmap)
+# Vantafyn TV Mobile Pairing Roadmap & Status
 
-## 1. Concept
-To streamline initial TV onboarding, a future update will introduce a secure local/cloud pairing channel between the Vantafyn Mobile app and Vantafyn Android TV.
-
-```mermaid
-sequenceDiagram
-    participant TV as Android TV App
-    participant Companion as Jellyfin Companion Plugin / Signal Server
-    participant Mobile as Vantafyn Mobile App
-
-    TV->>Companion: Request New Pairing Session (Generates 6-Digit Code & QR)
-    Companion-->>TV: Returns Session ID + Public Encryption Key
-    TV->>TV: Displays 6-Digit Code & QR Code on TV Screen
-    Mobile->>Mobile: User taps "Pair Android TV" & Scans QR or Types Code
-    Mobile->>Companion: Submits Server URL + Encrypted User Token
-    Companion-->>TV: Pushes Encrypted Credentials via WebSocket / SSE
-    TV->>TV: Decrypts Token with Session Private Key
-    TV->>TV: Validates Session & Transitions to TV Home
-```
+## 1. Active Implementation (Local-Network Pairing)
+Vantafyn now includes a fully functional, zero-cloud local network pairing channel:
+- **Android TV**: Runs an ephemeral `HttpServer` (`port 8765`) + UDP Discovery Beacon (`port 8766`).
+- **Mobile**: Scans LAN via UDP and sends session payload via HTTP POST with 6-character single-use code verification.
+- See complete architecture in [`docs/TV_MOBILE_PAIRING_ARCHITECTURE.md`](file:///home/glowseed/Documents/coding%20projects/Vantafyn/docs/TV_MOBILE_PAIRING_ARCHITECTURE.md).
 
 ---
 
-## 2. Security Requirements
-1. **End-to-End Cryptography**: Ephemeral Diffie-Hellman / ECDH key exchange between TV and phone to prevent credential interception over local networks.
-2. **Session Expiry**: Pairing codes must expire within 120 seconds.
-3. **Explicit Confirmation**: Mobile user must confirm the target TV device name before sending access tokens.
+## 2. Future Enhancements
 
----
+### A. Mobile Camera QR Code Scanning
+- Android TV displays a dynamic QR code alongside the 6-character code.
+- Vantafyn Mobile includes a built-in camera barcode scanner to automatically parse the code and TV IP, eliminating any manual typing.
 
-## 3. Current Implementation Status
-Because this protocol requires companion plugin support and cryptographic session negotiation, **no mock or fake pairing codes** are displayed in the current production build. Selecting "Pair with mobile app" directs users to manual sign-in with an informational notice.
+### B. Remote / Cloud Companion Relay
+- For setups where TV and mobile are on isolated VLANs or WAN without LAN connectivity:
+- A Jellyfin companion plugin or lightweight relay negotiates ephemeral ECDH keys and proxies the encrypted payload over WebSockets.
+
+### C. Multi-Profile Bulk Provisioning
+- Allows pairing multiple profiles in a single operation, automatically provisioning family accounts onto the shared living room TV.

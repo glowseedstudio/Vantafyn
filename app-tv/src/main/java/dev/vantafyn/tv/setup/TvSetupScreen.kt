@@ -30,6 +30,7 @@ private val VantafynSetupCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1
 private enum class TvInternalSetupPhase {
     Welcome,
     ChooseMethod,
+    Pairing,
     ConnectServer,
     ServerConfirm,
     Login,
@@ -43,6 +44,7 @@ fun TvSetupScreen(
     modifier: Modifier = Modifier,
 ) {
     var isChoosingMethod by remember { mutableStateOf(false) }
+    var isPairing by remember { mutableStateOf(false) }
 
     // Initial 2-second background-only reveal on first launch of setup
     var isInitialBackgroundPaused by rememberSaveable { mutableStateOf(true) }
@@ -58,7 +60,11 @@ fun TvSetupScreen(
     val currentPhase = when (state.step) {
         VantafynSetupStep.Splash,
         VantafynSetupStep.Welcome -> {
-            if (isChoosingMethod) TvInternalSetupPhase.ChooseMethod else TvInternalSetupPhase.Welcome
+            when {
+                isPairing -> TvInternalSetupPhase.Pairing
+                isChoosingMethod -> TvInternalSetupPhase.ChooseMethod
+                else -> TvInternalSetupPhase.Welcome
+            }
         }
         VantafynSetupStep.ConnectServer -> TvInternalSetupPhase.ConnectServer
         VantafynSetupStep.ServerConfirm -> TvInternalSetupPhase.ServerConfirm
@@ -70,6 +76,10 @@ fun TvSetupScreen(
     // Hardware / D-pad Back Button handling
     BackHandler(enabled = true) {
         when (currentPhase) {
+            TvInternalSetupPhase.Pairing -> {
+                isPairing = false
+                isChoosingMethod = true
+            }
             TvInternalSetupPhase.ChooseMethod -> {
                 isChoosingMethod = false
             }
@@ -134,19 +144,42 @@ fun TvSetupScreen(
                 TvInternalSetupPhase.Welcome -> {
                     TvWelcomeScreen(
                         onGetStarted = {
-                            viewModel.continueFromWelcome()
+                            isChoosingMethod = true
                         },
                     )
                 }
 
                 TvInternalSetupPhase.ChooseMethod -> {
                     TvSetupMethodScreen(
+                        onPairWithMobile = {
+                            isPairing = true
+                        },
                         onManualSetup = {
+                            isPairing = false
                             isChoosingMethod = false
                             viewModel.continueFromWelcome()
                         },
                         onBack = {
                             isChoosingMethod = false
+                        },
+                    )
+                }
+
+                TvInternalSetupPhase.Pairing -> {
+                    TvPairingScreen(
+                        onPairingSuccess = { payload ->
+                            isPairing = false
+                            isChoosingMethod = false
+                            viewModel.pairWithMobilePayload(payload)
+                        },
+                        onManualSetup = {
+                            isPairing = false
+                            isChoosingMethod = false
+                            viewModel.continueFromWelcome()
+                        },
+                        onBack = {
+                            isPairing = false
+                            isChoosingMethod = true
                         },
                     )
                 }

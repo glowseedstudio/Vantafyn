@@ -1,0 +1,284 @@
+package dev.vantafyn.tv.pairing
+
+import android.os.Build
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpHandler
+import com.sun.net.httpserver.HttpServer
+import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
+import dev.vantafyn.core.jellyfin.TvPairingPayload
+import dev.vantafyn.core.jellyfin.TvPairingResponse
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.OutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.security.SecureRandom
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+
+/**
+ * Ephemeral local-network HTTP server and UDP discovery responder for Android TV pairing.
+ *
+ * Runs ONLY while the TV Pairing screen is actively displayed.
+ * Shuts down immediately upon successful pairing, user exit, or expiration.
+ */
+class TvPairingServer(
+    val deviceName: String = defaultTvDeviceName(),
+    private val onPairedPayload: (TvPairingPayload) -> Unit,
+    private val onExpiredOrLimitReached: () -> Unit = {},
+) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var httpServer: HttpServer? = null
+    private var udpSocket: DatagramSocket? = null
+    private var broadcastJob: Job? = null
+    private var udpListenJob: Job? = null
+
+    private val isRunning = AtomicBoolean(false)
+    private val failedAttempts = AtomicInteger(0)
+
+    var currentCode: String = ""
+        private set
+
+    var expiresAtEpochMs: Long = 0L
+        private set
+
+    var assignedPort: Int = DEFAULT_HTTP_PORT
+        private set
+
+    companion object {
+        const val DEFAULT_HTTP_PORT = 8765
+        const val UDP_DISCOVERY_PORT = 8766
+        const val EXPIRY_DURATION_MS = 5 * 60 * 1000L // 5 minutes
+        const val MAX_FAILED_ATTEMPTS = 4
+
+        // Safe unambiguous character set for 10-foot readability
+        private const val CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+        private val random = SecureRandom()
+
+        fun generatePairingCode(): String {
+            val sb = StringBuilder(6)
+            for (i in 0 until 6) {
+                sb.append(CODE_CHARS[random.nextInt(CODE_CHARS.length)])
+            }
+            return sb.toString()
+        }
+
+        private fun defaultTvDeviceName(): String {
+            val model = Build.MODEL ?: "Android TV"
+            return if (model.contains("TV", ignoreCase = true) || model.contains("Shield", ignoreCase = true)) {
+                model
+            } else {
+                "$model TV"
+            }
+        }
+    }
+
+    /**
+     * Starts the pairing server and UDP discovery beacon.
+     */
+    fun start(): Boolean {
+        if (isRunning.getAndSet(true)) return true
+
+        currentCode = generatePairingCode()
+        expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
+        failedAttempts.set(0)
+
+        // 1. Start HTTP Server
+        var serverStarted = false
+        for (port in DEFAULT_HTTP_PORT..(DEFAULT_HTTP_PORT + 10)) {
+            try {
+                val server = HttpServer.create(InetSocketAddress(port), 0)
+                server.executor = Executors.newSingleThreadExecutor()
+                server.createContext("/api/v1/pair", PairingHttpHandler())
+                server.start()
+                httpServer = server
+                assignedPort = port
+                serverStarted = true
+                break
+            } catch (_: Exception) {
+                // Try next port
+            }
+        }
+
+        if (!serverStarted) {
+            isRunning.set(false)
+            return false
+        }
+
+        // 2. Start UDP Discovery Responder & Periodic Broadcast
+        startUdpServices()
+
+        // 3. Start Expiration Timer
+        scope.launch {
+            delay(EXPIRY_DURATION_MS)
+            if (isRunning.get()) {
+                withContext(Dispatchers.Main) {
+                    onExpiredOrLimitReached()
+                }
+                stop()
+            }
+        }
+
+        return true
+    }
+
+    fun refreshCode(): String {
+        currentCode = generatePairingCode()
+        expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
+        failedAttempts.set(0)
+        return currentCode
+    }
+
+    private fun startUdpServices() {
+        // UDP Discovery Listener
+        udpListenJob = scope.launch {
+            try {
+                val socket = DatagramSocket(UDP_DISCOVERY_PORT)
+                udpSocket = socket
+                val buffer = ByteArray(1024)
+                while (isActive && isRunning.get()) {
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    socket.receive(packet)
+                    val message = String(packet.data, 0, packet.length).trim()
+                    if (message.startsWith("VANTAFYN_TV_DISCOVER_REQ")) {
+                        // Respond to discovery request directly
+                        val beacon = TvDiscoveryBeacon(tvName = deviceName, httpPort = assignedPort)
+                        val responseData = beacon.toPacketString().toByteArray()
+                        val responsePacket = DatagramPacket(
+                            responseData,
+                            responseData.size,
+                            packet.address,
+                            packet.port,
+                        )
+                        socket.send(responsePacket)
+                    }
+                }
+            } catch (_: Exception) {
+                // Closed or UDP port unavailable
+            }
+        }
+
+        // UDP Periodic Broadcast (every 2.5 seconds on LAN subnet broadcast)
+        broadcastJob = scope.launch {
+            val beacon = TvDiscoveryBeacon(tvName = deviceName, httpPort = assignedPort)
+            val packetBytes = beacon.toPacketString().toByteArray()
+            while (isActive && isRunning.get()) {
+                try {
+                    val broadcastSocket = DatagramSocket()
+                    broadcastSocket.broadcast = true
+                    val packet = DatagramPacket(
+                        packetBytes,
+                        packetBytes.size,
+                        InetAddress.getByName("255.255.255.255"),
+                        UDP_DISCOVERY_PORT,
+                    )
+                    broadcastSocket.send(packet)
+                    broadcastSocket.close()
+                } catch (_: Exception) {}
+                delay(2_500L)
+            }
+        }
+    }
+
+    private inner class PairingHttpHandler : HttpHandler {
+        override fun handle(exchange: HttpExchange) {
+            try {
+                if (exchange.requestMethod != "POST") {
+                    sendJsonResponse(exchange, 405, TvPairingResponse.error("METHOD_NOT_ALLOWED", "Method not allowed"))
+                    return
+                }
+
+                // Check expiry
+                if (System.currentTimeMillis() > expiresAtEpochMs) {
+                    sendJsonResponse(exchange, 401, TvPairingResponse.error("EXPIRED", "Pairing code has expired"))
+                    scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
+                    return
+                }
+
+                // Check rate limiting
+                if (failedAttempts.get() >= MAX_FAILED_ATTEMPTS) {
+                    sendJsonResponse(exchange, 429, TvPairingResponse.error("RATE_LIMITED", "Too many failed attempts"))
+                    scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
+                    return
+                }
+
+                val body = exchange.requestBody.bufferedReader().use { it.readText() }
+                val payload = TvPairingPayload.fromJson(body)
+
+                if (payload == null) {
+                    sendJsonResponse(exchange, 400, TvPairingResponse.error("INVALID_PAYLOAD", "Malformed pairing payload"))
+                    return
+                }
+
+                // Validate code (case-insensitive and trimmed)
+                val normalizedProvided = payload.code.trim().replace("-", "").replace(" ", "").uppercase()
+                val normalizedCurrent = currentCode.trim().replace("-", "").replace(" ", "").uppercase()
+
+                if (normalizedProvided != normalizedCurrent) {
+                    val currentFails = failedAttempts.incrementAndGet()
+                    if (currentFails >= MAX_FAILED_ATTEMPTS) {
+                        sendJsonResponse(exchange, 429, TvPairingResponse.error("RATE_LIMITED", "Too many failed attempts"))
+                        scope.launch(Dispatchers.Main) { onExpiredOrLimitReached() }
+                    } else {
+                        sendJsonResponse(exchange, 401, TvPairingResponse.error("INVALID_CODE", "Invalid pairing code"))
+                    }
+                    return
+                }
+
+                // Valid code! Send success response
+                sendJsonResponse(exchange, 200, TvPairingResponse.success())
+
+                // Shutdown listener and notify callback on Main dispatcher
+                scope.launch(Dispatchers.Main) {
+                    stop()
+                    onPairedPayload(payload)
+                }
+            } catch (_: Exception) {
+                try {
+                    sendJsonResponse(exchange, 500, TvPairingResponse.error("INTERNAL_ERROR", "Failed to process pairing"))
+                } catch (_: Exception) {}
+            }
+        }
+
+        private fun sendJsonResponse(exchange: HttpExchange, statusCode: Int, response: TvPairingResponse) {
+            val bytes = response.toJson().toByteArray(Charsets.UTF_8)
+            exchange.responseHeaders.set("Content-Type", "application/json; charset=utf-8")
+            exchange.sendResponseHeaders(statusCode, bytes.size.toLong())
+            exchange.responseBody.use { os: OutputStream ->
+                os.write(bytes)
+                os.flush()
+            }
+        }
+    }
+
+    /**
+     * Completely shuts down the HTTP server, UDP sockets, and background jobs.
+     */
+    fun stop() {
+        if (!isRunning.getAndSet(false)) return
+
+        try {
+            broadcastJob?.cancel()
+            udpListenJob?.cancel()
+            udpSocket?.close()
+            udpSocket = null
+        } catch (_: Exception) {}
+
+        try {
+            httpServer?.stop(0)
+            httpServer = null
+        } catch (_: Exception) {}
+
+        scope.cancel()
+    }
+}

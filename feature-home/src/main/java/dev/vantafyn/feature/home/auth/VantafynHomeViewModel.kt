@@ -75,6 +75,7 @@ import dev.vantafyn.core.jellyfin.JellyfinWatchPartyRepository
 import dev.vantafyn.core.jellyfin.SavedProfile
 import dev.vantafyn.core.jellyfin.SyncPlayConnectionState
 import dev.vantafyn.core.jellyfin.SyncPlayCommand
+import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.jellyfin.WatchPartyCandidate
 import dev.vantafyn.core.jellyfin.WatchPartyInvite
 import dev.vantafyn.core.jellyfin.WatchPartyInviteEventMapper
@@ -828,6 +829,64 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         }
+    }
+
+    fun pairWithMobilePayload(payload: TvPairingPayload) {
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    isLoading = true,
+                    errorMessage = null,
+                )
+            }
+            when (val result = authRepository.importPairedSession(payload)) {
+                is JellyfinResult.Success -> {
+                    val session = result.value
+                    markSetupCompleted()
+                    _state.update {
+                        it.copy(
+                            step = VantafynSetupStep.Home,
+                            selectedProfileId = session.profileId,
+                            isLoading = false,
+                            isStartupResolved = true,
+                            session = session,
+                            server = session.server,
+                            serverUrl = session.server.url,
+                            localServerUrl = session.server.localUrl.orEmpty(),
+                            remoteServerUrl = session.server.remoteUrl.orEmpty(),
+                            username = session.user.name,
+                            password = "",
+                            homeLayout = readHomeLayout(session.profileId),
+                            mobileDestination = MobileDestination.Home,
+                            libraries = emptyList(),
+                            home = null,
+                            homeErrorMessage = null,
+                            isLibrariesLoading = true,
+                            isHomeLoading = true,
+                            savedProfiles = authRepository.savedProfiles(),
+                        )
+                    }
+                    refreshSavedProfiles()
+                    loadLibraries(session)
+                    loadFavorites(session)
+                    refreshOmbiRequestsAvailability(forceCompanionCheck = true)
+                    refreshAchievementsAvailability(force = true)
+                    refreshSocialAvailability(force = true)
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            errorMessage = result.message ?: "Failed to import paired session",
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    suspend fun createPairingPayload(code: String, profileId: String? = null): TvPairingPayload? {
+        return authRepository.createPairingPayload(code, profileId)
     }
 
     fun retryFailedRestore() {

@@ -46,143 +46,76 @@ import dev.vantafyn.tv.components.vantafynTvFocusable
 
 @Composable
 fun TvSetupMethodScreen(
+    onPairWithMobile: () -> Unit,
     onManualSetup: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var showPairingInfo by remember { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 48.dp, vertical = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        if (showPairingInfo) {
-            val shape = RoundedCornerShape(22.dp)
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth(0.55f)
-                    .clip(shape)
-                    .background(Color(0xD910182A))
-                    .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), shape)
-                    .padding(36.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            VantafynLogoBadge(
+                size = 56.dp,
+                shape = RoundedCornerShape(16.dp),
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "Set up Vantafyn",
+                color = VantafynColors.Ink,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.ExtraBold,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Choose how you'd like to connect this TV to your Jellyfin server",
+                color = VantafynColors.Muted,
+                fontSize = 15.sp,
+            )
+
+            Spacer(modifier = Modifier.height(36.dp))
+
+            // Options Row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(24.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(56.dp)
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0x228EA2FF)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Info,
-                        contentDescription = null,
-                        tint = VantafynColors.Primary,
-                        modifier = Modifier.size(28.dp),
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    text = "Mobile Pairing",
-                    color = VantafynColors.Ink,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
+                SetupOptionCard(
+                    title = "Pair with mobile app",
+                    subtitle = "Use your phone to connect this TV.",
+                    icon = Icons.Rounded.Phonelink,
+                    onClick = onPairWithMobile,
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Text(
-                    text = "Seamless phone-to-TV QR pairing is coming in a future update.\n\nFor now, please sign in manually on this TV.",
-                    color = VantafynColors.Muted,
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                    textAlign = TextAlign.Center,
+                SetupOptionCard(
+                    title = "Sign in manually",
+                    subtitle = "Enter your Jellyfin server address and credentials.",
+                    icon = Icons.Rounded.Tune,
+                    onClick = onManualSetup,
                 )
-
-                Spacer(modifier = Modifier.height(28.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                    VantafynTvGlassButton(
-                        text = "Sign In Manually",
-                        isPrimary = true,
-                        onClick = onManualSetup,
-                    )
-                    VantafynTvGlassButton(
-                        text = "Back",
-                        isPrimary = false,
-                        onClick = { showPairingInfo = false },
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
             }
-        } else {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                VantafynLogoBadge(
-                    size = 56.dp,
-                    shape = RoundedCornerShape(16.dp),
-                )
 
-                Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
-                Text(
-                    text = "Set up Vantafyn",
-                    color = VantafynColors.Ink,
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                )
+            VantafynTvGlassButton(
+                text = "Back",
+                icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                isPrimary = false,
+                onClick = onBack,
+            )
 
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Choose how you'd like to connect this TV to your Jellyfin server",
-                    color = VantafynColors.Muted,
-                    fontSize = 15.sp,
-                )
-
-                Spacer(modifier = Modifier.height(36.dp))
-
-                // Options Row
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    SetupOptionCard(
-                        title = "Pair with mobile app",
-                        subtitle = "Use your phone to connect this TV.",
-                        badge = "Future",
-                        icon = Icons.Rounded.Phonelink,
-                        onClick = { showPairingInfo = true },
-                    )
-
-                    SetupOptionCard(
-                        title = "Sign in manually",
-                        subtitle = "Enter your Jellyfin server address and credentials.",
-                        icon = Icons.Rounded.Tune,
-                        onClick = onManualSetup,
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(32.dp))
-
-                VantafynTvGlassButton(
-                    text = "Back",
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    isPrimary = false,
-                    onClick = onBack,
-                )
-
-                // Bottom clearance for scaled button focus borders
-                Spacer(modifier = Modifier.height(36.dp))
-            }
+            // Bottom clearance for scaled button focus borders
+            Spacer(modifier = Modifier.height(36.dp))
         }
     }
 }

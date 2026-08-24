@@ -15,17 +15,22 @@ The Android TV onboarding flow adheres to the exact visual style of Vantafyn mob
    - Staggered one-shot reveal (`VantafynTvSetupReveal`).
    - "Get Started" gradient action button featuring a soft, breathing cyan/blue/violet aura pulse (`VantafynTvPulsingButtonGlow`) that permanently stops on activation.
 3. **Setup Method Screen (`TvSetupMethodScreen`)**:
-   - "Pair with mobile app" (honest info modal) & "Sign in manually".
-   - Glass selection cards with `VantafynGradients.accentHorizontal()` focus border.
-4. **Connect Server Screen (`TvConnectServerScreen`)**:
+   - Offers "Pair with mobile app" and "Sign in manually".
+   - Glass selection cards with focus border and remote navigation.
+4. **Mobile Pairing Screen (`TvPairingScreen`)**:
+   - Generates a 6-character single-use pairing code with a live 5-minute countdown.
+   - Listens on local LAN via ephemeral HTTP and UDP discovery services.
+   - Provides "Refresh Code", "Sign In Manually", and "Back" actions.
+   - Instantly transitions upon pairing completion without password entry.
+5. **Connect Server Screen (`TvConnectServerScreen`)**:
    - Glass text input box with single focus-driven lift and server connection validation.
    - Clear network error messages formatted with `setupFriendlyError()`.
-5. **Server Found Screen (`TvServerConfirmScreen`)**:
+6. **Server Found Screen (`TvServerConfirmScreen`)**:
    - Verified server details on obsidian glass card featuring the server administrator's profile picture or styled initials fallback.
-6. **Sign In Screen (`TvLoginScreen`)**:
+7. **Sign In Screen (`TvLoginScreen`)**:
    - D-pad friendly username & password fields with single focus lift and password reveal toggle.
    - Smart focus: automatically lands on the **Password** field if the user profile is pre-filled, or **Username** if blank.
-7. **Who's Watching Screen (`TvProfilePickerScreen`)**:
+8. **Who's Watching Screen (`TvProfilePickerScreen`)**:
    - Circular profile avatars and "Add Profile" card with `1.08x` focus scaling, gradient borders, unclipped gradient password badges, and cinematic horizontal edge fades.
 
 ---

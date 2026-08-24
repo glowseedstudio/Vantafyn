@@ -11493,6 +11493,7 @@ private fun ProfileSettingsScreen(
     onToggleSocialEnabled: () -> Unit = {},
     onToggleSocialDockEnabled: () -> Unit = {},
     onDiscoverVantafyn: () -> Unit,
+    viewModel: VantafynHomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     var soundEffectsOn by remember {
@@ -11501,6 +11502,7 @@ private fun ProfileSettingsScreen(
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
     var showWhatsNew by remember { mutableStateOf(false) }
+    var showPairTvSheet by remember { mutableStateOf(false) }
     var permissionDetail by remember { mutableStateOf<PermissionDetail?>(null) }
     var revealActive by remember(state.session?.profileId) { mutableStateOf(true) }
     LaunchedEffect(state.session?.profileId) {
@@ -11601,6 +11603,7 @@ private fun ProfileSettingsScreen(
                             icon = Icons.Rounded.Person,
                         )
                         SettingsRow("Add Profile", "", onAddProfile, compact = true, icon = Icons.Rounded.PersonAdd)
+                        SettingsRow("Pair a TV", "", { showPairTvSheet = true }, compact = true, icon = Icons.Rounded.Tv)
                         SettingsRow("Quick Connect", "", onQuickConnect, compact = true, icon = Icons.Rounded.Link)
                         SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
                         SettingsRow("Log Out", "", onLogout, compact = true, destructive = true, icon = Icons.Rounded.Logout)
@@ -11707,6 +11710,13 @@ private fun ProfileSettingsScreen(
                 onMarkWhatsNewSeen()
                 onOpenMedia(id)
             },
+        )
+    }
+    if (showPairTvSheet) {
+        dev.vantafyn.feature.home.pairing.MobilePairTvSheet(
+            state = state,
+            viewModel = viewModel,
+            onDismiss = { showPairTvSheet = false },
         )
     }
     avatarPicker.Content()
