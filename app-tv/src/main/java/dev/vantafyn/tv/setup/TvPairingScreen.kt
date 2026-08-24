@@ -49,6 +49,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGlassPalette
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
@@ -225,7 +226,7 @@ fun TvPairingScreen(
                         modifier = Modifier
                             .width(460.dp)
                             .clip(cardShape)
-                            .background(Color(0xD910182A))
+                            .background(VantafynGlassPalette.NavyCore.copy(alpha = 0.45f))
                             .border(BorderStroke(1.dp, Color(0xFF21D8FF).copy(alpha = 0.50f)), cardShape)
                             .padding(horizontal = 36.dp, vertical = 32.dp),
                     ) {
@@ -262,7 +263,7 @@ fun TvPairingScreen(
                         modifier = Modifier
                             .width(520.dp)
                             .clip(cardShape)
-                            .background(Color(0xD910182A))
+                            .background(VantafynGlassPalette.NavyCore.copy(alpha = 0.45f))
                             .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), cardShape)
                             .padding(horizontal = 36.dp, vertical = 26.dp),
                     ) {
