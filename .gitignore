@@ -11,3 +11,4 @@ _reference/Findroid/
 companion-plugin/**/bin/
 companion-plugin/**/obj/
 companion-plugin/artifacts/
+.kotlin/

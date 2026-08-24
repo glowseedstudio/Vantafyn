@@ -119,3 +119,6 @@ Current admin data includes:
 If a server/plugin does not expose a metric, the UI should show a premium unavailable/empty state rather than fake numbers.
 
 
+
+## TV Setup & 10-Foot Onboarding Architecture
+`app-tv` implements a dedicated 10-foot onboarding and setup flow without sharing phone-constrained UI code or mobile bottom navigation bars. The TV setup architecture (`TvSetupScreen`, `TvWelcomeScreen`, `TvSetupMethodScreen`, `TvConnectServerScreen`, `TvServerConfirmScreen`, `TvLoginScreen`, and `TvProfilePickerScreen`) reuses the core `JellyfinAuthRepository` and `JellyfinSessionRepository` models while delivering D-pad remote-safe ergonomics and high-contrast typography. For detailed state machine documentation, refer to [TV_SETUP_FLOW.md](./TV_SETUP_FLOW.md).

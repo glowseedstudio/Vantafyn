@@ -6,20 +6,16 @@
                 android:height="180dp" />
             <gradient
                 android:angle="135"
-                android:startColor="#101723"
-                android:centerColor="#1A2340"
-                android:endColor="#080A10"
+                android:startColor="#0E1320"
+                android:centerColor="#070A12"
+                android:endColor="#050810"
                 android:type="linear" />
             <corners android:radius="0dp" />
         </shape>
     </item>
     <item
-        android:bottom="38dp"
-        android:left="38dp"
-        android:right="38dp"
-        android:top="38dp">
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/ic_launcher" />
-    </item>
+        android:gravity="center"
+        android:width="120dp"
+        android:height="120dp"
+        android:drawable="@drawable/vantafyn_logo" />
 </layer-list>

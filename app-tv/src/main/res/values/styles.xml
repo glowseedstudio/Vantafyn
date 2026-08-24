@@ -2,7 +2,7 @@
     <style name="VantafynTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowNoTitle">true</item>
         <item name="android:windowActionBar">false</item>
-        <item name="android:windowBackground">#0D0F12</item>
-        <item name="android:colorAccent">#C7A76C</item>
+        <item name="android:windowBackground">#070A12</item>
+        <item name="android:colorAccent">#21D8FF</item>
     </style>
 </resources>
