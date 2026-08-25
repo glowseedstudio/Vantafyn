@@ -53,6 +53,7 @@ import dev.vantafyn.core.ui.VantafynGlassPalette
 import dev.vantafyn.tv.components.VantafynFocusGradientColors
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
+import kotlinx.coroutines.delay
 
 @Composable
 fun TvSetupMethodScreen(
@@ -65,6 +66,7 @@ fun TvSetupMethodScreen(
     val quickConnectFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
+        delay(120)
         try {
             quickConnectFocusRequester.requestFocus()
         } catch (_: Exception) {}

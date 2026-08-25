@@ -29,6 +29,7 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
 import dev.vantafyn.tv.components.VantafynTvPulsingButtonGlow
+import kotlinx.coroutines.delay
 
 @Composable
 fun TvWelcomeScreen(
@@ -39,6 +40,7 @@ fun TvWelcomeScreen(
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
+        delay(120)
         try {
             focusRequester.requestFocus()
         } catch (_: Exception) {}

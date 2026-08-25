@@ -117,22 +117,22 @@ fun TvSetupScreen(
                 targetState = currentPhase,
                 transitionSpec = {
                     val isForward = targetState.ordinal >= initialState.ordinal
-                    val enterDuration = 1_400
-                    val exitDuration = 600
+                    val enterDuration = 900
+                    val exitDuration = 420
                     (
                         fadeIn(
                             animationSpec = tween(
                                 durationMillis = enterDuration,
-                                delayMillis = 180,
+                                delayMillis = 90,
                                 easing = VantafynSetupCinematicEasing,
                             ),
                         ) + slideInVertically(
                             animationSpec = tween(
                                 durationMillis = enterDuration,
-                                delayMillis = 180,
+                                delayMillis = 90,
                                 easing = VantafynSetupCinematicEasing,
                             ),
-                            initialOffsetY = { if (isForward) 36 else -36 },
+                            initialOffsetY = { if (isForward) 22 else -22 },
                         )
                     ).togetherWith(
                         fadeOut(
@@ -145,7 +145,7 @@ fun TvSetupScreen(
                                 durationMillis = exitDuration,
                                 easing = VantafynSetupCinematicEasing,
                             ),
-                            targetOffsetY = { if (isForward) -28 else 28 },
+                            targetOffsetY = { if (isForward) -16 else 16 },
                         )
                     ).using(SizeTransform(clip = false))
                 },

@@ -54,6 +54,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -621,7 +622,7 @@ fun Modifier.vantafynAnimatedModalBorder(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val shift by if (isResumed) {
+    val shiftState = if (isResumed) {
         val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
         transition.animateFloat(
             initialValue = 0f,
@@ -638,6 +639,7 @@ fun Modifier.vantafynAnimatedModalBorder(
     val shape = RoundedCornerShape(cornerRadius)
     return this.clip(shape).drawWithContent {
         drawContent()
+        val shift = shiftState.value
         val radius = cornerRadius.toPx()
         val start = Offset(-size.width * shift, -size.height * shift)
         val end = Offset(size.width * (1f - shift), size.height * (1f - shift))
@@ -722,20 +724,19 @@ fun VantafynOnboardingBackground(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = bgLifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val driftX = if (reduceMotion || !isResumed) {
-        0f
+    val driftXState = if (reduceMotion || !isResumed) {
+        rememberUpdatedState(0f)
     } else {
         val infiniteTransition = rememberInfiniteTransition(label = "bgDrift")
-        val driftOffset by infiniteTransition.animateFloat(
+        infiniteTransition.animateFloat(
             initialValue = -0.02f,
             targetValue = 0.02f,
             animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 25_000, easing = LinearEasing),
+                animation = tween(durationMillis = 34_000, easing = LinearEasing),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "bgDriftX",
         )
-        driftOffset
     }
     Box(modifier = modifier.fillMaxSize()) {
         Crossfade(targetState = backgroundResId, animationSpec = tween(durationMillis = 420), label = "vantafynBackground") { resId ->
@@ -747,7 +748,7 @@ fun VantafynOnboardingBackground(
                     .graphicsLayer {
                         scaleX = 1.04f
                         scaleY = 1.04f
-                        translationX = size.width * driftX
+                        translationX = size.width * driftXState.value
                     },
                 contentScale = ContentScale.Crop,
             )

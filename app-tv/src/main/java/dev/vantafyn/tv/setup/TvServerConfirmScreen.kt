@@ -109,7 +109,7 @@ fun TvServerConfirmScreen(
             // Glass Server Card with Animated Gradient Border Sweep
             val borderAlpha = remember { Animatable(0f) }
             val infiniteTransition = rememberInfiniteTransition(label = "serverBorderSweep")
-            val borderShift by infiniteTransition.animateFloat(
+            val borderShiftState = infiniteTransition.animateFloat(
                 initialValue = 0f,
                 targetValue = 1f,
                 animationSpec = infiniteRepeatable(
@@ -145,7 +145,7 @@ fun TvServerConfirmScreen(
                     .fillMaxWidth()
                     .drawBehind {
                         val stroke = 1.5.dp.toPx()
-                        val shift = borderShift
+                        val shift = borderShiftState.value
                         val colors = listOf(
                             Color(0xFF21D8FF).copy(alpha = borderAlpha.value * 0.85f),
                             Color(0xFF388BFF).copy(alpha = borderAlpha.value * 0.70f),

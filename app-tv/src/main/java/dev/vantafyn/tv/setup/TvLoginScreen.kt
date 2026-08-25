@@ -1,6 +1,6 @@
 package dev.vantafyn.tv.setup
 
-import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -41,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -54,6 +54,7 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
 import dev.vantafyn.tv.components.VantafynTvTextField
+import kotlinx.coroutines.delay
 
 @Composable
 fun TvLoginScreen(
@@ -79,15 +80,18 @@ fun TvLoginScreen(
     val passwordFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
-        if (username.isNotBlank()) {
-            passwordFocusRequester.requestFocus()
-        } else {
-            usernameFocusRequester.requestFocus()
-        }
+        delay(120)
+        try {
+            if (username.isNotBlank()) {
+                passwordFocusRequester.requestFocus()
+            } else {
+                usernameFocusRequester.requestFocus()
+            }
+        } catch (_: Exception) {}
     }
 
-    val verticalOffset by animateDpAsState(
-        targetValue = if (isAnyFieldFocused) (-68).dp else 0.dp,
+    val verticalOffsetPx by animateFloatAsState(
+        targetValue = if (isAnyFieldFocused) -68f else 0f,
         animationSpec = spring(dampingRatio = 0.85f, stiffness = 380f),
         label = "TvLoginLift",
     )
@@ -101,7 +105,9 @@ fun TvLoginScreen(
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.6f)
-                .offset(y = verticalOffset)
+                .graphicsLayer {
+                    translationY = verticalOffsetPx.dp.toPx()
+                }
                 .verticalScroll(scrollState),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,

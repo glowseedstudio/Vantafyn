@@ -2,6 +2,7 @@ package dev.vantafyn.tv.setup
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,7 +38,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -67,11 +70,8 @@ import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.tv.components.VantafynFocusGradientColors
 import dev.vantafyn.tv.components.VantafynLogoBadge
 import dev.vantafyn.tv.components.VantafynTvGlassButton
-
-import androidx.compose.animation.core.tween
 import dev.vantafyn.tv.components.VantafynTvSetupCinematicEasing
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 
 @Composable
 fun TvProfilePickerScreen(
@@ -90,7 +90,10 @@ fun TvProfilePickerScreen(
 
     LaunchedEffect(Unit) {
         isRevealed = true
-        firstProfileRequester.requestFocus()
+        delay(120)
+        try {
+            firstProfileRequester.requestFocus()
+        } catch (_: Exception) {}
     }
 
     // 1. Top Header staggered reveal (0ms delay)
