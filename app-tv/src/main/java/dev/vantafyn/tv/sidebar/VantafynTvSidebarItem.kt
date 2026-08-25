@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -29,10 +30,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -68,17 +68,18 @@ fun VantafynTvSidebarItem(
         label = "SidebarItemScale",
     )
 
+    // Pure transparent dark glass - zero blue wash
     val backgroundBrush = when {
         isFocused -> Brush.horizontalGradient(
             listOf(
-                Color(0x358EA2FF),
-                Color(0x20C05CFF),
+                Color.White.copy(alpha = 0.16f),
+                Color.White.copy(alpha = 0.10f),
             )
         )
         isSelected -> Brush.horizontalGradient(
             listOf(
-                Color(0x248EA2FF),
-                Color(0x0A8EA2FF),
+                Color.White.copy(alpha = 0.08f),
+                Color.White.copy(alpha = 0.04f),
             )
         )
         else -> Brush.horizontalGradient(
@@ -91,8 +92,8 @@ fun VantafynTvSidebarItem(
 
     val contentColor = when {
         isFocused -> VantafynColors.Ink
-        isSelected -> VantafynColors.Primary
-        else -> VantafynColors.Muted
+        isSelected -> VantafynColors.Ink
+        else -> Color(0xFFCBD5E1)
     }
 
     val accentGradient = VantafynGradients.accentHorizontal()
@@ -100,7 +101,11 @@ fun VantafynTvSidebarItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .scale(scale)
+            .height(46.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .then(
                 if (isFocused) {
                     Modifier.border(
@@ -109,8 +114,7 @@ fun VantafynTvSidebarItem(
                     )
                 } else if (isSelected) {
                     Modifier.border(
-                        width = 1.dp,
-                        color = Color(0x338EA2FF),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
                         shape = shape,
                     )
                 } else {
@@ -125,7 +129,7 @@ fun VantafynTvSidebarItem(
                 onClick = onClick,
             )
             .focusable(interactionSource = interactionSource)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
     ) {
@@ -140,20 +144,17 @@ fun VantafynTvSidebarItem(
                 tint = contentColor,
                 modifier = Modifier.size(22.dp),
             )
-
-            // Small badge dot on collapsed state if badgeCount > 0
-            if (!isExpanded && badgeCount > 0) {
+            if (badgeCount > 0 && !isExpanded) {
                 Box(
                     modifier = Modifier
-                        .size(8.dp)
+                        .size(7.dp)
                         .align(Alignment.TopEnd)
                         .clip(CircleShape)
-                        .background(VantafynColors.Primary)
+                        .background(Color(0xFFFF9500))
                 )
             }
         }
 
-        // Label (visible when expanded)
         AnimatedVisibility(
             visible = isExpanded,
             enter = fadeIn(animationSpec = spring(stiffness = 600f)),
@@ -161,8 +162,8 @@ fun VantafynTvSidebarItem(
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 14.dp),
+                    .padding(start = 14.dp)
+                    .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -170,7 +171,7 @@ fun VantafynTvSidebarItem(
                     text = label,
                     color = contentColor,
                     fontSize = 14.sp,
-                    fontWeight = if (isSelected || isFocused) FontWeight.Bold else FontWeight.Medium,
+                    fontWeight = if (isFocused || isSelected) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -179,18 +180,115 @@ fun VantafynTvSidebarItem(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x338EA2FF))
+                            .background(Color(0xFFFF9500))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = badgeCount.toString(),
-                            color = VantafynColors.Primary,
+                            color = Color.White,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                         )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+fun VantafynTvSidebarIconButton(
+    icon: ImageVector,
+    label: String,
+    isSelected: Boolean,
+    modifier: Modifier = Modifier,
+    badgeCount: Int = 0,
+    onFocused: () -> Unit = {},
+    onClick: () -> Unit = {},
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused by interactionSource.collectIsFocusedAsState()
+
+    LaunchedEffect(isFocused) {
+        if (isFocused) onFocused()
+    }
+
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.12f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 450f),
+        label = "SidebarIconScale",
+    )
+
+    val shape = RoundedCornerShape(12.dp)
+    val accentGradient = VantafynGradients.accentHorizontal()
+
+    val backgroundBrush = when {
+        isFocused -> Brush.horizontalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.16f),
+                Color.White.copy(alpha = 0.12f),
+            )
+        )
+        isSelected -> Brush.horizontalGradient(
+            listOf(
+                Color.White.copy(alpha = 0.08f),
+                Color.White.copy(alpha = 0.04f),
+            )
+        )
+        else -> Brush.verticalGradient(
+            listOf(
+                Color.Transparent,
+                Color.Transparent,
+            )
+        )
+    }
+
+    val borderStroke = when {
+        isFocused -> BorderStroke(1.5.dp, accentGradient)
+        isSelected -> BorderStroke(1.dp, Color.White.copy(alpha = 0.20f))
+        else -> BorderStroke(1.dp, Color.Transparent)
+    }
+
+    val contentColor = when {
+        isFocused -> VantafynColors.Ink
+        isSelected -> VantafynColors.Ink
+        else -> VantafynColors.Muted
+    }
+
+    Box(
+        modifier = modifier
+            .size(46.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(shape)
+            .background(backgroundBrush, shape)
+            .border(borderStroke, shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .focusable(interactionSource = interactionSource),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = contentColor,
+            modifier = Modifier.size(22.dp),
+        )
+
+        if (badgeCount > 0) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(top = 2.dp, end = 2.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFF9500))
+            )
         }
     }
 }

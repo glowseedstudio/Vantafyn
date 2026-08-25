@@ -22,22 +22,22 @@ fun VantafynTvSectionHeader(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 36.dp, end = 48.dp, bottom = 12.dp)
+            .padding(start = 36.dp, end = 48.dp, bottom = 6.dp)
     ) {
         Text(
             text = title,
             color = VantafynColors.Ink,
-            fontSize = 20.sp,
+            fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.3.sp,
+            letterSpacing = 0.2.sp,
         )
 
         if (!subtitle.isNullOrBlank()) {
-            Spacer(modifier = Modifier.height(3.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = subtitle,
                 color = VantafynColors.Muted,
-                fontSize = 13.sp,
+                fontSize = 11.sp,
             )
         }
     }

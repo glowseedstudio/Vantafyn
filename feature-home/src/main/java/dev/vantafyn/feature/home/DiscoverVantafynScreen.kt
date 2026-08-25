@@ -372,6 +372,8 @@ private fun DiscoverFeatureCard(
                                         "open_social" -> "Open Social Hub"
                                         "open_achievements" -> "Open Achievements"
                                         "open_admin" -> "Open Admin"
+                                        "open_send_text_to_tv" -> "Send Text to TV"
+                                        "open_pair_tv" -> "Pair a TV"
                                         else -> "Open"
                                     },
                                     color = VantafynColors.Primary,

@@ -34,17 +34,19 @@ fun TvLibraryScreen(
     state: VantafynHomeUiState,
     session: JellyfinSession?,
     modifier: Modifier = Modifier,
+    initialLibraryId: UUID? = null,
+    title: String = "Library",
     onOpenMedia: (UUID) -> Unit = {},
 ) {
-    var selectedLibraryId by remember(state.libraries) {
-        mutableStateOf(state.libraries.firstOrNull()?.id)
+    var selectedLibraryId by remember(state.libraries, initialLibraryId) {
+        mutableStateOf(initialLibraryId ?: state.libraries.firstOrNull()?.id)
     }
 
     VantafynTvScreenScaffold(modifier = modifier) {
         Column(modifier = Modifier.fillMaxSize()) {
             VantafynTvSectionHeader(
-                title = "Library",
-                subtitle = "Browse movies, TV shows, and server collections",
+                title = title,
+                subtitle = "Browse your Jellyfin media libraries",
             )
 
             // Library Filter Tabs

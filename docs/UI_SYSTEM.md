@@ -1,5 +1,10 @@
 # Vantafyn UI System
 
+**Document**: `docs/UI_SYSTEM.md`  
+**Status**: Active  
+
+---
+
 ## 1. Unified Design Tokens (`core-ui`)
 Vantafyn uses a unified design token system shared across Mobile, Automotive, and Android TV:
 
@@ -15,8 +20,8 @@ Vantafyn uses a unified design token system shared across Mobile, Automotive, an
 ---
 
 ## 2. 10-Foot Television Adaptation
-- Focus scaling: `1.04x` to `1.08x` with D-pad spring response.
-- `BlendMode.DstIn` vertical hardware-accelerated hero dissolution into persistent background.
-- Glass panels: `Color(0xD910182A)` with `BorderStroke(1.dp, Color.White.copy(alpha = 0.16f))`.
-- Setup Reveal: Staggered top-to-bottom entrance using `CubicBezierEasing(0.19f, 1.0f, 0.22f, 1.0f)`.
-- Welcome Button Pulse: Breathing `#21D8FF` / `#3E63FF` / `#8B35FF` gradient aura that halts on activation.
+- **Translucent Navigation Rail**: `Color(0xCC060A14)` to `Color(0x990D1527)` dark glass with a `1.dp` specular border (`Color.White.copy(alpha = 0.08f)`).
+- **Focus Scaling**: `1.04x` to `1.08x` with D-pad spring response (`dampingRatio = 0.82f, stiffness = 380f`).
+- **Focus Highlighting**: Glowing cyan-to-violet gradient stroke (`BorderStroke(1.5.dp, VantafynGradients.accentHorizontal())`) with atmospheric glow.
+- **Hero Fade**: `BlendMode.DstIn` vertical hardware-accelerated hero dissolution into persistent background.
+- **Pinned Bottom Actions**: Fixed utility dock for Search, Notifications, Settings, and safe App Exit.

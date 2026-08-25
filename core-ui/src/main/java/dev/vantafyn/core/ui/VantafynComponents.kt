@@ -39,6 +39,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.Icon
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -994,7 +995,11 @@ fun VantafynTextField(
             focusedContainerColor = VantafynGlassPalette.NavyLift.copy(alpha = 0.72f),
             unfocusedContainerColor = VantafynGlassPalette.NavyCore.copy(alpha = 0.58f),
             disabledContainerColor = VantafynGlassPalette.NavyCore.copy(alpha = 0.36f),
-            cursorColor = VantafynGlassPalette.CyanSpecular,
+            cursorColor = Color(0xFF21D8FF),
+            selectionColors = TextSelectionColors(
+                handleColor = Color(0xFF21D8FF),
+                backgroundColor = Color(0xFF8B35FF).copy(alpha = 0.35f),
+            ),
             focusedBorderColor = Color.Transparent,
             unfocusedBorderColor = Color.White.copy(alpha = 0.13f),
             disabledBorderColor = Color.White.copy(alpha = 0.065f),

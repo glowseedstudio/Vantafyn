@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -73,7 +74,9 @@ fun TvServerConfirmScreen(
         contentAlignment = Alignment.Center,
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth(0.6f),
+            modifier = Modifier
+                .widthIn(max = 840.dp)
+                .fillMaxWidth(0.85f),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
@@ -138,6 +141,7 @@ fun TvServerConfirmScreen(
             val shape = RoundedCornerShape(18.dp)
             Box(
                 modifier = Modifier
+                    .widthIn(max = 580.dp)
                     .fillMaxWidth()
                     .drawBehind {
                         val stroke = 1.5.dp.toPx()

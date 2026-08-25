@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,15 +39,22 @@ fun VantafynTvPosterCard(
     title: String,
     imageUrl: String?,
     modifier: Modifier = Modifier,
-    width: Dp = 148.dp,
+    width: Dp = 118.dp,
     subtitle: String? = null,
     progressPercentage: Float? = null,
     badgeText: String? = null,
     onClick: () -> Unit = {},
+    onFocus: () -> Unit = {},
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(10.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused = interactionSource.collectIsFocusedAsState().value
+
+    LaunchedEffect(isFocused) {
+        if (isFocused) {
+            onFocus()
+        }
+    }
 
     Column(
         modifier = modifier

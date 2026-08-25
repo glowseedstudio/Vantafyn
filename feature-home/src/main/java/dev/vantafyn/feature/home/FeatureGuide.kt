@@ -58,16 +58,56 @@ data class DiscoverFeature(
 
 enum class DiscoverCategory(val label: String, val order: Int) {
     MakeItYours("Make it yours", 0),
-    Social("Social & Friends", 1),
-    Achievements("Achievements", 2),
-    Watching("Watching", 3),
-    Music("Music", 4),
-    YourLibrary("Your library", 5),
-    Requests("Requests", 6),
-    AdminTools("Admin tools", 7),
+    LivingRoomTv("TV & Living Room", 1),
+    Social("Social & Friends", 2),
+    Achievements("Achievements", 3),
+    Watching("Watching", 4),
+    Music("Music", 5),
+    YourLibrary("Your library", 6),
+    Requests("Requests", 7),
+    AdminTools("Admin tools", 8),
 }
 
 fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
+    // ----------------------------------------------------
+    // TV & Living Room
+    // ----------------------------------------------------
+    DiscoverFeature(
+        id = "send_text_to_tv",
+        title = "Send text to TV",
+        shortDescription = "Type effortlessly from your phone directly into your Android TV.",
+        category = DiscoverCategory.LivingRoomTv,
+        icon = Icons.Rounded.Send,
+        isNew = true,
+        detailedDescription = "Never struggle with on-screen D-pad keyboards again. Discover your Android TV over local Wi-Fi and send search queries, server URLs, usernames, or passwords with instant ECDH + AES-256-GCM end-to-end encryption.",
+        steps = listOf(
+            "Focus any text box on your Android TV",
+            "Open Profile & Settings \u2192 Send text to TV",
+            "Type your search query or password",
+            "Tap Send to TV for instant encrypted transfer",
+        ),
+        deepLinkAction = "open_send_text_to_tv",
+    ),
+    DiscoverFeature(
+        id = "pair_a_tv",
+        title = "Pair a TV",
+        shortDescription = "Connect your Android TV to your Jellyfin server using a 6-digit code.",
+        category = DiscoverCategory.LivingRoomTv,
+        icon = Icons.Rounded.Tv,
+        isNew = true,
+        detailedDescription = "Skip tedious manual server URL and password entry on your TV. Launch Vantafyn on your TV to generate a 6-digit code, then enter it on your phone to transfer your server and login credentials securely over LAN in seconds.",
+        steps = listOf(
+            "Open Vantafyn on TV \u2192 Choose 'Pair with mobile app'",
+            "Open Profile & Settings \u2192 Pair a TV on your phone",
+            "Enter the 6-digit code shown on your TV",
+            "Confirm your server & profile to sign in instantly",
+        ),
+        deepLinkAction = "open_pair_tv",
+    ),
+
+    // ----------------------------------------------------
+    // Make it yours
+    // ----------------------------------------------------
     DiscoverFeature(
         id = "themes",
         title = "Themes",

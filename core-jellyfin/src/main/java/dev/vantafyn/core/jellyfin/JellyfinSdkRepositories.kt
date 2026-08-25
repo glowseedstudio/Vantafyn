@@ -3218,13 +3218,13 @@ class SdkJellyfinHomeRepository(
                         shape = JellyfinMediaCardShape.Library,
                     )
                 }
-                val heroSeed = System.currentTimeMillis() / 3_600_000L
+                val heroSeed = System.currentTimeMillis()
                 val heroItems = (resumeItems + latestMovies + nextUpItems + latestTv)
                     .distinctBy { it.heroDedupeKey() }
                     .shuffled(kotlin.random.Random(heroSeed))
                     .map { it.toHero(api) }
                     .filter { it.backdropUrl != null || it.posterUrl != null }
-                    .take(8)
+                    .take(10)
                 val sections = buildList {
                     val continueItems = (resumeItems + nextUpItems)
                         .distinctBy { it.id }
@@ -4328,21 +4328,23 @@ private fun SearchHint.toSearchResult(api: ApiClient): JellyfinSearchResult? {
     )
 }
 
-private fun BaseItemDto.toHero(api: ApiClient): JellyfinHeroMediaItem =
-    JellyfinHeroMediaItem(
-        id = id,
+private fun BaseItemDto.toHero(api: ApiClient): JellyfinHeroMediaItem {
+    val targetId = if (type == BaseItemKind.EPISODE && seriesId != null) seriesId!! else id
+    return JellyfinHeroMediaItem(
+        id = targetId,
         title = displayTitle(),
-        subtitle = subtitle(),
+        subtitle = if (type == BaseItemKind.EPISODE) null else subtitle(),
         overview = overview,
         year = productionYear,
         runtimeMinutes = runTimeTicks?.let { (it / 600_000_000L).toInt() },
         officialRating = officialRating,
         communityRating = communityRating,
         genres = genres.orEmpty().take(3),
-        backdropUrl = backdropImageUrl(api, 1100),
-        logoUrl = logoImageUrl(api, 520),
-        posterUrl = primaryImageUrl(api, 420),
+        backdropUrl = backdropImageUrl(api, 1920),
+        logoUrl = logoImageUrl(api, 800),
+        posterUrl = primaryImageUrl(api, 600),
     )
+}
 
 private fun String.withAccessToken(accessToken: String): String =
     if (contains("api_key=") || accessToken.isBlank()) {

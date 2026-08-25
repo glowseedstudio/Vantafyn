@@ -16,10 +16,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
@@ -313,36 +316,47 @@ fun VantafynTheme(content: @Composable () -> Unit) {
         onSurface = tokens.ink,
         onPrimary = Color(0xFF071024),
     )
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = MaterialTheme.typography.copy(
-            displayLarge = TextStyle(
-                fontFamily = FontFamily.SansSerif,
-                fontSize = 44.sp,
-                lineHeight = 52.sp,
-                fontWeight = FontWeight.SemiBold,
+    val vantafynTextSelectionColors = remember {
+        TextSelectionColors(
+            handleColor = Color(0xFF21D8FF), // Electric Cyan
+            backgroundColor = Color(0xFF8B35FF).copy(alpha = 0.35f), // Soft gradient violet highlight
+        )
+    }
+
+    CompositionLocalProvider(
+        LocalTextSelectionColors provides vantafynTextSelectionColors,
+    ) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = MaterialTheme.typography.copy(
+                displayLarge = TextStyle(
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 44.sp,
+                    lineHeight = 52.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                headlineMedium = TextStyle(
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 28.sp,
+                    lineHeight = 36.sp,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+                titleLarge = TextStyle(
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 20.sp,
+                    lineHeight = 28.sp,
+                    fontWeight = FontWeight.Medium,
+                ),
+                bodyLarge = TextStyle(
+                    fontFamily = FontFamily.SansSerif,
+                    fontSize = 16.sp,
+                    lineHeight = 24.sp,
+                    fontWeight = FontWeight.Normal,
+                ),
             ),
-            headlineMedium = TextStyle(
-                fontFamily = FontFamily.SansSerif,
-                fontSize = 28.sp,
-                lineHeight = 36.sp,
-                fontWeight = FontWeight.SemiBold,
-            ),
-            titleLarge = TextStyle(
-                fontFamily = FontFamily.SansSerif,
-                fontSize = 20.sp,
-                lineHeight = 28.sp,
-                fontWeight = FontWeight.Medium,
-            ),
-            bodyLarge = TextStyle(
-                fontFamily = FontFamily.SansSerif,
-                fontSize = 16.sp,
-                lineHeight = 24.sp,
-                fontWeight = FontWeight.Normal,
-            ),
-        ),
-        content = content,
-    )
+            content = content,
+        )
+    }
 }
 
 @Composable

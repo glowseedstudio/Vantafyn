@@ -124,6 +124,8 @@ fun VantafynTvGlassButton(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.2.sp,
+                maxLines = 1,
+                softWrap = false,
             )
         }
     }

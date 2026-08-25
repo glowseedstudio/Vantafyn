@@ -4039,6 +4039,8 @@ private fun MobileShellScreen(
                                     "open_social" -> onNavigate(MobileDestination.Social)
                                     "open_achievements" -> onNavigate(MobileDestination.Achievements)
                                     "open_admin" -> onNavigate(MobileDestination.Admin)
+                                    "open_send_text_to_tv" -> onNavigate(MobileDestination.TvInput)
+                                    "open_pair_tv" -> onNavigate(MobileDestination.Profile)
                                     else -> Unit
                                 }
                             },
@@ -11611,7 +11613,7 @@ private fun ProfileSettingsScreen(
                         )
                         SettingsRow("Add Profile", "", onAddProfile, compact = true, icon = Icons.Rounded.PersonAdd)
                         SettingsRow("Pair a TV", "", { showPairTvSheet = true }, compact = true, icon = Icons.Rounded.Tv)
-                        SettingsRow("Send text to TV", "", onSendTextToTv, compact = true, icon = Icons.Rounded.Tv)
+                        SettingsRow("Send text to TV", "", onSendTextToTv, compact = true, icon = Icons.Rounded.Send)
                         SettingsRow("Quick Connect", "", onQuickConnect, compact = true, icon = Icons.Rounded.Link)
                         SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
                         SettingsRow("Log Out", "", onLogout, compact = true, destructive = true, icon = Icons.Rounded.Logout)

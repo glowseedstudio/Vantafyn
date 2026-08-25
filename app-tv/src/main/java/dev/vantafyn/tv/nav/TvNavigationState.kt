@@ -20,9 +20,35 @@ class TvNavigationState(
     private val backStack = ArrayDeque<TvRoute>()
 
     fun navigateTo(route: TvRoute) {
-        if (currentRoute == route) return
+        if (currentRoute == route) {
+            isSidebarExpanded = false
+            return
+        }
         backStack.addLast(currentRoute)
         currentRoute = route
+        isSidebarExpanded = false
+    }
+
+    /**
+     * Navigates to a top-level route from the sidebar drawer.
+     * Resets the backstack to Home so pressing Back from any top-level destination returns directly to Home.
+     */
+    fun navigateToFromDrawer(route: TvRoute) {
+        if (currentRoute == route) {
+            isSidebarExpanded = false
+            return
+        }
+        backStack.clear()
+        if (route != TvRoute.Home) {
+            backStack.addLast(TvRoute.Home)
+        }
+        currentRoute = route
+        isSidebarExpanded = false
+    }
+
+    fun goToHome() {
+        backStack.clear()
+        currentRoute = TvRoute.Home
         isSidebarExpanded = false
     }
 

@@ -21,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,15 +42,22 @@ fun VantafynTvWideCard(
     title: String,
     imageUrl: String?,
     modifier: Modifier = Modifier,
-    width: Dp = 250.dp,
+    width: Dp = 192.dp,
     subtitle: String? = null,
     progressPercentage: Float? = null,
     badgeText: String? = null,
     onClick: () -> Unit = {},
+    onFocus: () -> Unit = {},
 ) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(10.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused = interactionSource.collectIsFocusedAsState().value
+
+    LaunchedEffect(isFocused) {
+        if (isFocused) {
+            onFocus()
+        }
+    }
 
     Column(
         modifier = modifier
