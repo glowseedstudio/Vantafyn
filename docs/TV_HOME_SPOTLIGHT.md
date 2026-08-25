@@ -13,12 +13,13 @@ Vantafyn TV implements a Wholphin/Netflix-style pinned top spotlight on TV Home.
 +--------------------------------------------------------------------------------+
 | Layer 2: Pinned Top Spotlight Backdrop Layer (Clipped to top 360dp, DstIn)     |
 +--------------------------------------------------------------------------------+
-| Layer 3: Foreground Content Scroller (LazyColumn starting below hero)          |
-|          - Item 0: Spotlight Text Overlay (Title/Logo, Rating, Synopsis, Action)|
-|          - Item 1: Media Libraries Rail ("Your Libraries", width 170dp)        |
-|          - Items 2+: Dynamic Content Rails (Continue Watching, Recently Added)  |
+| Layer 3: Fixed Spotlight Text Overlay (Title/Logo, Rating, Synopsis, Actions) |
 +--------------------------------------------------------------------------------+
-| Layer 4: Transparent Dark Glass Sidebar Rail (Zero blue tint, overlay)        |
+| Layer 4: Foreground Content Scroller (LazyColumn starting below hero overlay)  |
+|          - Item 0: Media Libraries Rail ("Your Libraries", width 170dp)        |
+|          - Items 1+: Dynamic Content Rails (Continue Watching, Recently Added) |
++--------------------------------------------------------------------------------+
+| Layer 5: Transparent Dark Glass Sidebar Rail (Zero blue tint, overlay)        |
 +--------------------------------------------------------------------------------+
 ```
 
@@ -34,3 +35,11 @@ To provide an elegant 10-foot TV experience where multiple content rails are imm
 - **Row Spacing**: `12dp` horizontal card spacing, `16dp` vertical section spacing.
 - **Section Headers**: Compact `16sp` typography with `6dp` bottom margin.
 - **Result**: On a 1080p TV display, the top spotlight, the Your Libraries rail, and the Continue Watching rail are immediately visible on screen.
+
+## 4. Spotlight Transitions
+
+Focused row cards update the shared spotlight item. The backdrop crossfades by high-resolution backdrop URL and the hero copy/actions crossfade by spotlight item inside a fixed-size overlay. The transition uses fade only and does not animate layout size, which prevents artwork or text jumps during D-pad navigation.
+
+## 5. Library Rail Clean-Up
+
+The `Your Libraries` row uses image labels on the cards and disables the generic under-card title/subtitle text. Normal media rows still show useful title/year/episode metadata below cards.

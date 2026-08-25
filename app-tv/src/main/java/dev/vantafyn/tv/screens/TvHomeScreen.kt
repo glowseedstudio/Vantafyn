@@ -4,9 +4,12 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -32,7 +35,12 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,9 +51,11 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -60,12 +70,15 @@ import dev.vantafyn.tv.components.VantafynTvSectionHeader
 import dev.vantafyn.tv.components.VantafynTvWideCard
 import dev.vantafyn.tv.media.TvArtworkResolver
 import java.util.UUID
+import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvHomeScreen(
     state: VantafynHomeUiState,
     session: JellyfinSession?,
     modifier: Modifier = Modifier,
+    sidebarContentOffset: Dp = 0.dp,
     onOpenMedia: (UUID) -> Unit = {},
     onPlayMediaId: (UUID) -> Unit = {},
     onExploreLibraries: () -> Unit = {},
@@ -147,14 +160,37 @@ fun TvHomeScreen(
 
     val heroItems = state.home?.heroItems.orEmpty()
     val sections = state.home?.sections.orEmpty()
-    val libraries = state.libraries
+    val orderedSections = remember(sections) {
+        val myMedia = sections.firstOrNull { it.title.equals("My Media", ignoreCase = true) }
+        if (myMedia == null) {
+            sections
+        } else {
+            listOf(myMedia) + sections.filterNot { it === myMedia }
+        }
+    }
     val serverUrl = session?.server?.url
     val initialHero = heroItems.firstOrNull()?.toSpotlight(serverUrl)
 
     val spotlightState = rememberTvHomeSpotlightState(initialHero)
+    var spotlightPinnedByFocus by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialHero) {
         spotlightState.updateIfNull(initialHero)
+    }
+
+    LaunchedEffect(heroItems, serverUrl, spotlightPinnedByFocus) {
+        if (spotlightPinnedByFocus || heroItems.size <= 1) return@LaunchedEffect
+
+        var index = heroItems.indexOfFirst { it.id == spotlightState.currentItem?.id }
+            .takeIf { it >= 0 }
+            ?: 0
+
+        while (true) {
+            delay(9_000)
+            if (heroItems.isEmpty()) continue
+            index = (index + 1) % heroItems.size
+            spotlightState.update(heroItems[index].toSpotlight(serverUrl))
+        }
     }
 
     val activeSpotlight = spotlightState.currentItem ?: initialHero
@@ -222,19 +258,25 @@ fun TvHomeScreen(
             }
         }
 
-        // --- 2. FOREGROUND CONTENT SCROLLER (WHOLPHIN / NETFLIX DENSITY) ---
-        LazyColumn(
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(top = 0.dp, bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+        // --- 2. FIXED SPOTLIGHT COPY / ACTION LAYER (NEVER PARTICIPATES IN ROW SCROLLING) ---
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(TvHomeHeroContentHeight)
+                .align(Alignment.TopStart),
         ) {
-            // --- SPOTLIGHT TEXT OVERLAY & ACTION BUTTONS ---
-            item(key = "spotlight_content_overlay") {
-                if (activeSpotlight != null) {
+            Crossfade(
+                targetState = activeSpotlight,
+                animationSpec = tween(durationMillis = 320, easing = FastOutSlowInEasing),
+                label = "spotlight_content_crossfade",
+                modifier = Modifier.fillMaxSize(),
+            ) { spotlight ->
+                if (spotlight != null) {
                     TvHomeSpotlightOverlay(
-                        item = activeSpotlight,
-                        onPlay = { onPlayMediaId(activeSpotlight.id) },
-                        onDetails = { onOpenMedia(activeSpotlight.id) },
+                        item = spotlight,
+                        contentStartPadding = TvHomeContentStartPadding + sidebarContentOffset,
+                        onPlay = { onPlayMediaId(spotlight.id) },
+                        onDetails = { onOpenMedia(spotlight.id) },
                     )
                 } else {
                     VantafynTvFallbackHero(
@@ -243,75 +285,114 @@ fun TvHomeScreen(
                     )
                 }
             }
+        }
 
-            // --- RAIL 1: MEDIA LIBRARIES / MY MEDIA (IMMEDIATELY BELOW SPOTLIGHT) ---
-            if (libraries.isNotEmpty()) {
-                item(key = "row_libraries") {
-                    Column {
-                        VantafynTvSectionHeader(
-                            title = "Your Libraries",
-                        )
-                        LazyRow(
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            contentPadding = PaddingValues(start = 36.dp, end = 48.dp),
-                        ) {
-                            items(libraries, key = { it.id }) { lib ->
-                                val imageUrl = lib.imageUrl ?: if (serverUrl != null) TvArtworkResolver.buildPrimaryUrl(serverUrl, lib.id, width = 400) else null
-                                val subtitle = lib.collectionType?.replaceFirstChar { it.uppercase() } ?: "Media"
-                                VantafynTvWideCard(
-                                    title = lib.name,
-                                    imageUrl = imageUrl,
-                                    subtitle = subtitle,
-                                    width = 170.dp,
-                                    onClick = { onOpenMedia(lib.id) },
-                                    onFocus = {
-                                        spotlightState.update(lib.toSpotlight(serverUrl))
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // --- RAILS 2+: DYNAMIC HOME CAROUSELS (CONTINUE WATCHING, RECENTLY ADDED, ETC.) ---
-            sections.forEachIndexed { index, section ->
-                if (section.items.isNotEmpty()) {
-                    item(key = "section_${section.title}_$index") {
-                        Column {
-                            VantafynTvSectionHeader(
-                                title = section.title,
-                            )
-                            LazyRow(
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                contentPadding = PaddingValues(start = 36.dp, end = 48.dp),
-                            ) {
-                                items(section.items, key = { it.id }) { item ->
-                                    val onCardFocus = {
-                                        val heroMatch = heroItems.firstOrNull { h -> h.id == item.id }
-                                        spotlightState.update(item.toSpotlight(serverUrl, heroMatch))
-                                    }
-
-                                    if (item.shape == JellyfinMediaCardShape.Wide) {
-                                        val wideImg = item.thumbUrl ?: item.backdropUrl ?: item.imageUrl ?: if (serverUrl != null) TvArtworkResolver.buildThumbUrl(serverUrl, item.id) else null
-                                        VantafynTvWideCard(
-                                            title = item.title,
-                                            imageUrl = wideImg,
-                                            subtitle = item.subtitle ?: item.year?.toString(),
-                                            progressPercentage = item.progress?.times(100f),
-                                            onClick = { onOpenMedia(item.id) },
-                                            onFocus = onCardFocus,
+        // --- 3. FOREGROUND CONTENT SCROLLER (WHOLPHIN / NETFLIX DENSITY) ---
+        val density = LocalDensity.current
+        val defaultBringIntoViewSpec = LocalBringIntoViewSpec.current
+        val railBringIntoViewSpec = remember(density) {
+            TvHomeRailBringIntoViewSpec(
+                with(density) { TvHomeRailFocusTopInset.toPx() },
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = TvHomeRailsTopPadding)
+                .clipToBounds()
+                .graphicsLayer { alpha = 0.99f }
+                .drawWithContent {
+                    drawContent()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Transparent,
+                                0.045f to Color.Black,
+                                0.92f to Color.Black,
+                                1.00f to Color.Transparent,
+                            ),
+                        ),
+                        blendMode = BlendMode.DstIn,
+                    )
+                },
+        ) {
+            CompositionLocalProvider(LocalBringIntoViewSpec provides railBringIntoViewSpec) {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(top = TvHomeRailViewportTopPadding, bottom = 56.dp),
+                    verticalArrangement = Arrangement.spacedBy(TvHomeRailSpacing),
+                ) {
+                    // --- DYNAMIC HOME CAROUSELS. My Media is provided by the shared home model and pinned first for TV. ---
+                    orderedSections.forEachIndexed { index, section ->
+                        if (section.items.isNotEmpty()) {
+                            item(key = "section_${section.title}_$index") {
+                                CompositionLocalProvider(LocalBringIntoViewSpec provides defaultBringIntoViewSpec) {
+                                    val railStartPadding = TvHomeContentStartPadding + sidebarContentOffset
+                                    Column {
+                                        VantafynTvSectionHeader(
+                                            title = section.title,
+                                            startPadding = railStartPadding,
                                         )
-                                    } else {
-                                        val posterImg = item.imageUrl ?: if (serverUrl != null) TvArtworkResolver.buildPrimaryUrl(serverUrl, item.id) else null
-                                        VantafynTvPosterCard(
-                                            title = item.title,
-                                            imageUrl = posterImg,
-                                            subtitle = item.subtitle ?: item.year?.toString(),
-                                            progressPercentage = item.progress?.times(100f),
-                                            onClick = { onOpenMedia(item.id) },
-                                            onFocus = onCardFocus,
-                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(start = railStartPadding)
+                                                .clipToBounds()
+                                                .graphicsLayer { alpha = 0.99f }
+                                                .drawWithContent {
+                                                    drawContent()
+                                                    drawRect(
+                                                        brush = Brush.horizontalGradient(
+                                                            colorStops = arrayOf(
+                                                                0.00f to Color.Transparent,
+                                                                0.035f to Color.Black,
+                                                                0.96f to Color.Black,
+                                                                1.00f to Color.Transparent,
+                                                            ),
+                                                        ),
+                                                        blendMode = BlendMode.DstIn,
+                                                    )
+                                                },
+                                        ) {
+                                            LazyRow(
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                contentPadding = PaddingValues(start = 2.dp, end = 48.dp),
+                                            ) {
+                                                items(section.items, key = { it.id }) { item ->
+                                                    val onCardFocus = {
+                                                        val heroMatch = heroItems.firstOrNull { h -> h.id == item.id }
+                                                        spotlightPinnedByFocus = true
+                                                        spotlightState.update(item.toSpotlight(serverUrl, heroMatch))
+                                                    }
+
+                                                    val isWideCard = item.shape == JellyfinMediaCardShape.Wide ||
+                                                        item.shape == JellyfinMediaCardShape.Library
+                                                    if (isWideCard) {
+                                                        val wideImg = item.thumbUrl ?: item.backdropUrl ?: item.imageUrl ?: if (serverUrl != null) TvArtworkResolver.buildThumbUrl(serverUrl, item.id) else null
+                                                        VantafynTvWideCard(
+                                                            title = item.title,
+                                                            imageUrl = wideImg,
+                                                            subtitle = if (item.shape == JellyfinMediaCardShape.Library) null else item.subtitle ?: item.year?.toString(),
+                                                            width = TvHomeWideCardWidth,
+                                                            progressPercentage = item.progress?.times(100f),
+                                                            onClick = { onOpenMedia(item.id) },
+                                                            onFocus = onCardFocus,
+                                                        )
+                                                    } else {
+                                                        val posterImg = item.imageUrl ?: if (serverUrl != null) TvArtworkResolver.buildPrimaryUrl(serverUrl, item.id) else null
+                                                        VantafynTvPosterCard(
+                                                            title = item.title,
+                                                            imageUrl = posterImg,
+                                                            subtitle = item.subtitle ?: item.year?.toString(),
+                                                            width = TvHomePosterCardWidth,
+                                                            progressPercentage = item.progress?.times(100f),
+                                                            onClick = { onOpenMedia(item.id) },
+                                                            onFocus = onCardFocus,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -323,43 +404,74 @@ fun TvHomeScreen(
     }
 }
 
+private val TvHomeHeroContentHeight: Dp = 310.dp
+private val TvHomeHeroContentTopPadding: Dp = 56.dp
+private val TvHomeContentStartPadding: Dp = 108.dp
+private val TvHomeRailsTopPadding: Dp = 280.dp
+private val TvHomeRailViewportTopPadding: Dp = 24.dp
+private val TvHomeRailFocusTopInset: Dp = 30.dp
+private val TvHomeRailSpacing: Dp = 8.dp
+private val TvHomeWideCardWidth: Dp = 144.dp
+private val TvHomePosterCardWidth: Dp = 88.dp
+private val TvHomeLogoSlotHeight: Dp = 82.dp
+
+@OptIn(ExperimentalFoundationApi::class)
+private class TvHomeRailBringIntoViewSpec(
+    private val spaceAbovePx: Float,
+) : BringIntoViewSpec {
+    override fun calculateScrollDistance(
+        offset: Float,
+        size: Float,
+        containerSize: Float,
+    ): Float = offset - spaceAbovePx
+}
+
 @Composable
 private fun TvHomeSpotlightOverlay(
     item: TvHomeSpotlightItem,
     onPlay: () -> Unit,
     onDetails: () -> Unit,
     modifier: Modifier = Modifier,
+    contentStartPadding: Dp = TvHomeContentStartPadding,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 36.dp, end = 48.dp, top = 28.dp, bottom = 8.dp),
+            .padding(start = contentStartPadding, end = 48.dp, top = TvHomeHeroContentTopPadding, bottom = 8.dp),
         verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.Start,
     ) {
-        // Logo Artwork or Bold Title
-        if (!item.logoUrl.isNullOrBlank()) {
-            AsyncImage(
-                model = item.logoUrl,
-                contentDescription = item.title,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .heightIn(max = 56.dp)
-                    .fillMaxWidth(0.42f),
-                alignment = Alignment.CenterStart,
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        } else {
-            Text(
-                text = item.title,
-                color = VantafynColors.Ink,
-                fontSize = 28.sp,
-                fontWeight = FontWeight.Black,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
+        // Reserve a stable logo/title slot so late-loaded logo artwork never pushes metadata/actions down.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.50f)
+                .height(TvHomeLogoSlotHeight),
+            contentAlignment = Alignment.BottomStart,
+        ) {
+            if (!item.logoUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = item.logoUrl,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .heightIn(max = 76.dp)
+                        .fillMaxWidth(),
+                    alignment = Alignment.BottomStart,
+                )
+            } else {
+                Text(
+                    text = item.title,
+                    color = VantafynColors.Ink,
+                    fontSize = 28.sp,
+                    lineHeight = 31.sp,
+                    fontWeight = FontWeight.Black,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(0.92f),
+                )
+            }
         }
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Metadata Row with Golden Star Rating
         Row(
@@ -450,6 +562,7 @@ private fun TvHomeSpotlightOverlay(
                 text = "Play",
                 icon = Icons.Rounded.PlayArrow,
                 isPrimary = true,
+                compact = true,
                 onClick = onPlay,
             )
 
@@ -457,6 +570,7 @@ private fun TvHomeSpotlightOverlay(
                 text = "Details",
                 icon = Icons.Rounded.Info,
                 isPrimary = false,
+                compact = true,
                 onClick = onDetails,
             )
         }

@@ -29,3 +29,4 @@ When D-pad cursor focus changes across any card in content rows:
   `${serverUrl}/Items/${card.id}/Images/Backdrop/0?maxWidth=1920&quality=90&format=WEBP`
 - It never stretches or reuses the low-resolution 360px primary thumbnail.
 - Image loaders utilize local disk and memory caching to prevent redundant network fetches on rapid D-pad traversal.
+- Backdrop changes crossfade from the previous high-resolution image to the next image, avoiding hard pops while preserving the same `TvArtworkResolver` URL policy.

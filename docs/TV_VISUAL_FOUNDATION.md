@@ -12,3 +12,5 @@
 3. **Pure Transparent Dark Glass**: Sidebar uses ultra-clean neutral dark glass (`Color(0x38000000)` to `Color(0x18000000)`), avoiding blue/navy color pollution.
 4. **Seamless Backdrop Extension**: Backdrops extend to `x = 0` beneath the glass sidebar rail.
 5. **Golden Star Ratings**: High-contrast `#FFD700` star badges displaying community review metrics across TV and mobile parity.
+6. **Stable Focus Motion**: TV focus scale is rendered through `graphicsLayer` and fixed-size containers so focus treatment adds depth without changing measured layout.
+7. **Compact TV Actions**: Hero Play/Details buttons use the same glass language with slightly smaller padding, icon size and focus scale for a denser 10-foot layout.

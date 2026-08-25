@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradients
 
 @Composable
 fun VantafynTvPosterCard(
@@ -49,6 +49,9 @@ fun VantafynTvPosterCard(
     val shape = RoundedCornerShape(10.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused = interactionSource.collectIsFocusedAsState().value
+    val progressBrush = Brush.horizontalGradient(
+        VantafynGradients.AccentColors.map { it.copy(alpha = 0.78f) },
+    )
 
     LaunchedEffect(isFocused) {
         if (isFocused) {
@@ -115,14 +118,12 @@ fun VantafynTvPosterCard(
 
             // Progress indicator if item was partially watched
             if (progressPercentage != null && progressPercentage > 0f) {
-                LinearProgressIndicator(
-                    progress = { (progressPercentage / 100f).coerceIn(0f, 1f) },
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
                         .height(4.dp)
-                        .align(Alignment.BottomCenter),
-                    color = VantafynColors.Primary,
-                    trackColor = Color(0x40FFFFFF),
+                        .fillMaxWidth((progressPercentage / 100f).coerceIn(0f, 1f))
+                        .align(Alignment.BottomStart)
+                        .background(progressBrush),
                 )
             }
 

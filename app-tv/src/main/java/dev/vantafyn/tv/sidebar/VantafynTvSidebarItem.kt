@@ -63,7 +63,7 @@ fun VantafynTvSidebarItem(
     }
 
     val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.04f else 1.0f,
+        targetValue = if (isFocused) 1.02f else 1.0f,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 450f),
         label = "SidebarItemScale",
     )
@@ -101,7 +101,7 @@ fun VantafynTvSidebarItem(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(48.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale

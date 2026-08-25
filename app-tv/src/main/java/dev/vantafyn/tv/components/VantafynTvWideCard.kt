@@ -18,7 +18,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.Icon
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradients
 
 @Composable
 fun VantafynTvWideCard(
@@ -46,12 +46,16 @@ fun VantafynTvWideCard(
     subtitle: String? = null,
     progressPercentage: Float? = null,
     badgeText: String? = null,
+    showTextBelow: Boolean = true,
     onClick: () -> Unit = {},
     onFocus: () -> Unit = {},
 ) {
     val shape = RoundedCornerShape(10.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused = interactionSource.collectIsFocusedAsState().value
+    val progressBrush = Brush.horizontalGradient(
+        VantafynGradients.AccentColors.map { it.copy(alpha = 0.78f) },
+    )
 
     LaunchedEffect(isFocused) {
         if (isFocused) {
@@ -116,16 +120,28 @@ fun VantafynTvWideCard(
                     )
             )
 
+            if (!showTextBelow) {
+                Text(
+                    text = title,
+                    color = VantafynColors.Ink,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                )
+            }
+
             // Progress indicator
             if (progressPercentage != null && progressPercentage > 0f) {
-                LinearProgressIndicator(
-                    progress = { (progressPercentage / 100f).coerceIn(0f, 1f) },
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
                         .height(4.dp)
-                        .align(Alignment.BottomCenter),
-                    color = VantafynColors.Primary,
-                    trackColor = Color(0x40FFFFFF),
+                        .fillMaxWidth((progressPercentage / 100f).coerceIn(0f, 1f))
+                        .align(Alignment.BottomStart)
+                        .background(progressBrush),
                 )
             }
 
@@ -150,25 +166,27 @@ fun VantafynTvWideCard(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        if (showTextBelow) {
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = title,
-            color = if (isFocused) VantafynColors.Ink else Color(0xFFD4DBEE),
-            fontSize = 13.sp,
-            fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
-
-        if (!subtitle.isNullOrBlank()) {
             Text(
-                text = subtitle,
-                color = VantafynColors.Muted,
-                fontSize = 11.sp,
+                text = title,
+                color = if (isFocused) VantafynColors.Ink else Color(0xFFD4DBEE),
+                fontSize = 13.sp,
+                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
     }
 }

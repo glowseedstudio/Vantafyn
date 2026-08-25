@@ -153,11 +153,11 @@ data class TvNavigationItem(
             val type = lib.collectionType?.lowercase().orEmpty()
             val name = lib.name.trim()
             val icon = when {
+                type == "livetv" || name.contains("live tv", ignoreCase = true) || name.contains("live", ignoreCase = true) -> Icons.Rounded.LiveTv
                 type == "movies" || name.contains("movie", ignoreCase = true) -> Icons.Rounded.Movie
                 type == "tvshows" || type == "series" || name.contains("show", ignoreCase = true) || name.contains("tv", ignoreCase = true) -> Icons.Rounded.Tv
                 type == "boxsets" || name.contains("collection", ignoreCase = true) -> Icons.Rounded.VideoLibrary
                 type == "music" || name.contains("music", ignoreCase = true) -> Icons.Rounded.MusicNote
-                type == "livetv" || name.contains("live", ignoreCase = true) -> Icons.Rounded.LiveTv
                 else -> Icons.Rounded.Folder
             }
             return Pair(icon, name)

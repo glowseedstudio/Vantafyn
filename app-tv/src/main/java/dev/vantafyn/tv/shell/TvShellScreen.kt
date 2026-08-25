@@ -3,6 +3,8 @@ package dev.vantafyn.tv.shell
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -33,9 +35,11 @@ import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,15 +52,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentBehavior
+import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
+import dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences
 import dev.vantafyn.core.jellyfin.SavedProfile
+import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynThemePreset
+import dev.vantafyn.feature.home.auth.BottomRailAccent
+import dev.vantafyn.feature.home.auth.ThemeMusicVolume
+import dev.vantafyn.feature.home.auth.VantafynAppBackground
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
+import dev.vantafyn.feature.home.auth.VantafynVideoPlayerPreference
 import dev.vantafyn.tv.components.VantafynTvBackground
 import dev.vantafyn.tv.components.VantafynTvGlassButton
 import dev.vantafyn.tv.nav.TvNavigationItem
 import dev.vantafyn.tv.nav.TvNavigationState
 import dev.vantafyn.tv.nav.TvRoute
+import dev.vantafyn.tv.nav.TvSettingsCategory
 import dev.vantafyn.tv.nav.rememberTvNavigationState
+import dev.vantafyn.tv.nav.toNavigationItem
 import dev.vantafyn.tv.screens.TvDetailScreen
 import dev.vantafyn.tv.screens.TvHomeScreen
 import dev.vantafyn.tv.screens.TvLibraryScreen
@@ -65,6 +80,7 @@ import dev.vantafyn.tv.screens.TvSearchScreen
 import dev.vantafyn.tv.screens.TvSettingsScreen
 import dev.vantafyn.tv.sidebar.VantafynTvSidebar
 import java.util.UUID
+import dev.vantafyn.core.ui.R as CoreUiR
 
 @Composable
 fun TvShellScreen(
@@ -80,6 +96,31 @@ fun TvShellScreen(
     onSelectProfile: (SavedProfile) -> Unit = {},
     onRefreshHome: () -> Unit = {},
     onLogout: () -> Unit = {},
+    onSelectTheme: (VantafynThemePreset) -> Unit = {},
+    onSelectBackground: (VantafynAppBackground) -> Unit = {},
+    onToggleThemeMusic: () -> Unit = {},
+    onSelectThemeMusicVolume: (ThemeMusicVolume) -> Unit = {},
+    onSetBottomRailAccent: (BottomRailAccent) -> Unit = {},
+    onToggleSoundEffects: () -> Unit = {},
+    onToggleAutoLoginLastProfile: () -> Unit = {},
+    onToggleWhatsNew: () -> Unit = {},
+    onToggleAchievementsEnabled: () -> Unit = {},
+    onToggleSocialEnabled: () -> Unit = {},
+    onToggleSocialDockEnabled: () -> Unit = {},
+    onSetDownloadWifiOnlyDefault: (Boolean) -> Unit = {},
+    onToggleWatchPartyEnabled: () -> Unit = {},
+    onToggleWatchPartyInvitesEnabled: () -> Unit = {},
+    onToggleWatchPartyInviteAnimationEnabled: () -> Unit = {},
+    onSetWatchPartyInviteExpirySeconds: (Int) -> Unit = {},
+    onEditPlaybackPreferences: ((JellyfinUserPlaybackPreferences) -> JellyfinUserPlaybackPreferences) -> Unit = {},
+    onSavePlaybackPreferences: () -> Unit = {},
+    onSetAutoplayCountdownSeconds: (Int) -> Unit = {},
+    onSetUpNextDisplayMode: (UpNextDisplayMode) -> Unit = {},
+    onTogglePassoutProtection: () -> Unit = {},
+    onSetPassoutProtectionLimitMinutes: (Int) -> Unit = {},
+    onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit = {},
+    onSetMaxStreamingBitrateMbps: (Int?) -> Unit = {},
+    onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit = { _, _ -> },
 ) {
     // Back navigation handler
     BackHandler(enabled = true) {
@@ -91,6 +132,21 @@ fun TvShellScreen(
     val isAdmin = session?.user?.isAdministrator == true
     val hasRequests = state.ombiConfigured || state.ombiRequestsEnabledForUsers
     var showExitDialog by remember { mutableStateOf(false) }
+    var settingsCategory by rememberSaveable { mutableStateOf(TvSettingsCategory.Appearance) }
+
+    LaunchedEffect(session?.user?.id) {
+        if (session != null) {
+            navState.collapseSidebar()
+        }
+    }
+
+    val sidebarExpandedContentOffset by animateDpAsState(
+        targetValue = if (navState.isSidebarExpanded) 144.dp else 0.dp,
+        animationSpec = spring(dampingRatio = 0.88f, stiffness = 300f),
+        label = "TvSidebarContentOffset",
+    )
+    val scaffoldSidebarInset = 80.dp + sidebarExpandedContentOffset
+    val fullBleedContentStartPadding = 108.dp + sidebarExpandedContentOffset
 
     val mainNavItems = remember(state.libraries, state.favorites, isAdmin, hasRequests) {
         TvNavigationItem.buildMainItems(
@@ -107,32 +163,18 @@ fun TvShellScreen(
             onExitApp = { showExitDialog = true },
         )
     }
+    val settingsNavItems = remember { TvSettingsCategory.entries.map { it.toNavigationItem() } }
 
-    VantafynTvBackground(modifier = modifier) {
-        Row(modifier = Modifier.fillMaxSize()) {
-            // --- EXPANDING SIDEBAR ---
-            VantafynTvSidebar(
-                mainItems = mainNavItems,
-                bottomItems = bottomNavItems,
-                currentRoute = navState.currentRoute,
-                isExpanded = navState.isSidebarExpanded,
-                session = session,
-                onExpand = { navState.expandSidebar() },
-                onCollapse = { navState.collapseSidebar() },
-                onRouteSelected = { route ->
-                    navState.navigateToFromDrawer(route)
-                },
-                onProfileClicked = {
-                    navState.navigateToFromDrawer(TvRoute.Settings)
-                },
-            )
-
-            // --- MAIN CONTENT VIEWPORT ---
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            ) {
+    VantafynTvBackground(
+        modifier = modifier,
+        backgroundResId = state.selectedBackground.tvDrawableResId(),
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            // --- MAIN CONTENT CANVAS ---
+            // The active screen draws full-bleed behind the translucent sidebar. Individual screens
+            // keep their own safe content inset so artwork can pass underneath the rail without
+            // putting focusable controls beneath it.
+            Box(modifier = Modifier.fillMaxSize()) {
                 AnimatedContent(
                     targetState = navState.currentRoute,
                     transitionSpec = {
@@ -145,6 +187,7 @@ fun TvShellScreen(
                             TvHomeScreen(
                                 state = state,
                                 session = session,
+                                sidebarContentOffset = sidebarExpandedContentOffset,
                                 onOpenMedia = { id ->
                                     onOpenMediaDetails(id)
                                     navState.navigateTo(TvRoute.Details(id))
@@ -164,6 +207,7 @@ fun TvShellScreen(
                                 title = "Favorites & My List",
                                 description = "Your favorite movies, series, and music on this Jellyfin server.",
                                 icon = Icons.Rounded.Favorite,
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -177,6 +221,7 @@ fun TvShellScreen(
                                     onOpenMediaDetails(id)
                                     navState.navigateTo(TvRoute.Details(id))
                                 },
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -189,6 +234,7 @@ fun TvShellScreen(
                                     onOpenMediaDetails(id)
                                     navState.navigateTo(TvRoute.Details(id))
                                 },
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -197,6 +243,7 @@ fun TvShellScreen(
                                 title = "Music for Android TV",
                                 description = "Full background music player, playlists, and lossless streaming are currently being optimized for TV.",
                                 icon = Icons.Rounded.MusicNote,
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -210,6 +257,7 @@ fun TvShellScreen(
                                 },
                                 icon = Icons.AutoMirrored.Rounded.Send,
                                 hintText = if (state.ombiConfigured) "10-foot request browsing interface coming soon." else "Use the Vantafyn mobile app to configure Ombi.",
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -218,6 +266,7 @@ fun TvShellScreen(
                                 title = "Admin Dashboard",
                                 description = "Server performance stats, active transcoding streams, and activity logs.",
                                 icon = Icons.Rounded.AdminPanelSettings,
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -226,6 +275,7 @@ fun TvShellScreen(
                                 title = "What's New & Updates",
                                 description = "Explore the newest features, enhancements, and releases across Vantafyn.",
                                 icon = Icons.Rounded.Notifications,
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -233,8 +283,35 @@ fun TvShellScreen(
                             TvSettingsScreen(
                                 state = state,
                                 session = session,
+                                category = settingsCategory,
                                 onSelectProfile = onSelectProfile,
                                 onLogout = onLogout,
+                                onSelectTheme = onSelectTheme,
+                                onSelectBackground = onSelectBackground,
+                                onToggleThemeMusic = onToggleThemeMusic,
+                                onSelectThemeMusicVolume = onSelectThemeMusicVolume,
+                                onSetBottomRailAccent = onSetBottomRailAccent,
+                                onToggleSoundEffects = onToggleSoundEffects,
+                                onToggleAutoLoginLastProfile = onToggleAutoLoginLastProfile,
+                                onToggleWhatsNew = onToggleWhatsNew,
+                                onToggleAchievementsEnabled = onToggleAchievementsEnabled,
+                                onToggleSocialEnabled = onToggleSocialEnabled,
+                                onToggleSocialDockEnabled = onToggleSocialDockEnabled,
+                                onSetDownloadWifiOnlyDefault = onSetDownloadWifiOnlyDefault,
+                                onToggleWatchPartyEnabled = onToggleWatchPartyEnabled,
+                                onToggleWatchPartyInvitesEnabled = onToggleWatchPartyInvitesEnabled,
+                                onToggleWatchPartyInviteAnimationEnabled = onToggleWatchPartyInviteAnimationEnabled,
+                                onSetWatchPartyInviteExpirySeconds = onSetWatchPartyInviteExpirySeconds,
+                                onEditPlaybackPreferences = onEditPlaybackPreferences,
+                                onSavePlaybackPreferences = onSavePlaybackPreferences,
+                                onSetAutoplayCountdownSeconds = onSetAutoplayCountdownSeconds,
+                                onSetUpNextDisplayMode = onSetUpNextDisplayMode,
+                                onTogglePassoutProtection = onTogglePassoutProtection,
+                                onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
+                                onSelectVideoPlayerPreference = onSelectVideoPlayerPreference,
+                                onSetMaxStreamingBitrateMbps = onSetMaxStreamingBitrateMbps,
+                                onSetMediaSegmentBehavior = onSetMediaSegmentBehavior,
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
                         }
 
@@ -242,6 +319,7 @@ fun TvShellScreen(
                             TvDetailScreen(
                                 detail = state.mediaDetail,
                                 session = session,
+                                contentStartPadding = fullBleedContentStartPadding,
                                 onPlay = onStartPlayback,
                                 onPlayFromStart = onStartPlaybackFromBeginning,
                                 onToggleFavorite = {
@@ -256,6 +334,29 @@ fun TvShellScreen(
                     }
                 }
             }
+
+            // --- EXPANDING SIDEBAR OVERLAY ---
+            VantafynTvSidebar(
+                mainItems = mainNavItems,
+                bottomItems = bottomNavItems,
+                currentRoute = navState.currentRoute,
+                isExpanded = navState.isSidebarExpanded,
+                accentMode = state.bottomRailAccent,
+                session = session,
+                modifier = Modifier.align(Alignment.CenterStart),
+                settingsMode = navState.currentRoute == TvRoute.Settings,
+                settingsItems = settingsNavItems,
+                selectedSettingsCategory = settingsCategory,
+                onSettingsCategorySelected = { settingsCategory = it },
+                onExpand = { navState.expandSidebar() },
+                onCollapse = { navState.collapseSidebar() },
+                onRouteSelected = { route ->
+                    navState.navigateToFromDrawer(route)
+                },
+                onProfileClicked = {
+                    navState.navigateToFromDrawer(TvRoute.Settings)
+                },
+            )
         }
     }
 
@@ -325,3 +426,11 @@ fun TvShellScreen(
     }
 }
 
+private fun VantafynAppBackground.tvDrawableResId(): Int =
+    when (this) {
+        VantafynAppBackground.Nebula -> CoreUiR.drawable.vantafyn_onboarding_background
+        VantafynAppBackground.Background1 -> CoreUiR.drawable.vantafyn_background_1
+        VantafynAppBackground.Background2 -> CoreUiR.drawable.vantafyn_background_2
+        VantafynAppBackground.Background3 -> CoreUiR.drawable.vantafyn_background_3
+        VantafynAppBackground.Background4 -> CoreUiR.drawable.vantafyn_background_4
+    }

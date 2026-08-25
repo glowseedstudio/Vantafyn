@@ -156,6 +156,81 @@ private fun TvAppRoot(
                 onLogout = {
                     viewModel.logoutCurrentProfile()
                 },
+                onSelectTheme = { theme ->
+                    viewModel.selectTheme(theme)
+                },
+                onSelectBackground = { background ->
+                    viewModel.selectBackground(background)
+                },
+                onToggleThemeMusic = {
+                    viewModel.toggleThemeMusic()
+                },
+                onSelectThemeMusicVolume = { volume ->
+                    viewModel.selectThemeMusicVolume(volume)
+                },
+                onSetBottomRailAccent = { accent ->
+                    viewModel.setBottomRailAccent(accent)
+                },
+                onToggleSoundEffects = {
+                    viewModel.toggleSoundEffects()
+                },
+                onToggleAutoLoginLastProfile = {
+                    viewModel.toggleAutoLoginLastProfile()
+                },
+                onToggleWhatsNew = {
+                    viewModel.toggleWhatsNew()
+                },
+                onToggleAchievementsEnabled = {
+                    viewModel.toggleAchievementsEnabled()
+                },
+                onToggleSocialEnabled = {
+                    viewModel.toggleSocialEnabled()
+                },
+                onToggleSocialDockEnabled = {
+                    viewModel.toggleSocialDockEnabled()
+                },
+                onSetDownloadWifiOnlyDefault = { enabled ->
+                    viewModel.setDownloadWifiOnlyDefault(enabled)
+                },
+                onToggleWatchPartyEnabled = {
+                    viewModel.toggleWatchPartyEnabled()
+                },
+                onToggleWatchPartyInvitesEnabled = {
+                    viewModel.toggleWatchPartyInvitesEnabled()
+                },
+                onToggleWatchPartyInviteAnimationEnabled = {
+                    viewModel.toggleWatchPartyInviteAnimationEnabled()
+                },
+                onSetWatchPartyInviteExpirySeconds = { seconds ->
+                    viewModel.setWatchPartyInviteExpirySeconds(seconds)
+                },
+                onEditPlaybackPreferences = { transform ->
+                    viewModel.editPlaybackPreferences(transform)
+                },
+                onSavePlaybackPreferences = {
+                    viewModel.savePlaybackPreferences()
+                },
+                onSetAutoplayCountdownSeconds = { seconds ->
+                    viewModel.setAutoplayCountdownSeconds(seconds)
+                },
+                onSetUpNextDisplayMode = { mode ->
+                    viewModel.setUpNextDisplayMode(mode)
+                },
+                onTogglePassoutProtection = {
+                    viewModel.togglePassoutProtection()
+                },
+                onSetPassoutProtectionLimitMinutes = { minutes ->
+                    viewModel.setPassoutProtectionLimitMinutes(minutes)
+                },
+                onSelectVideoPlayerPreference = { preference ->
+                    viewModel.selectVideoPlayerPreference(preference)
+                },
+                onSetMaxStreamingBitrateMbps = { mbps ->
+                    viewModel.setMaxStreamingBitrateMbps(mbps)
+                },
+                onSetMediaSegmentBehavior = { type, behavior ->
+                    viewModel.setMediaSegmentBehavior(type, behavior)
+                },
             )
         } else {
             TvSetupScreen(

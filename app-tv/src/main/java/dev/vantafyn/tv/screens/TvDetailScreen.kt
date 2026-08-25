@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -44,6 +45,7 @@ fun TvDetailScreen(
     detail: JellyfinMediaDetail?,
     session: JellyfinSession?,
     modifier: Modifier = Modifier,
+    contentStartPadding: Dp = 48.dp,
     onPlay: () -> Unit = {},
     onPlayFromStart: () -> Unit = {},
     onToggleFavorite: () -> Unit = {},
@@ -121,7 +123,7 @@ fun TvDetailScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 48.dp, vertical = 32.dp)
+                .padding(start = contentStartPadding, top = 32.dp, end = 48.dp, bottom = 32.dp)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.Bottom,
         ) {

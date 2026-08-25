@@ -164,133 +164,104 @@ fun TvProfilePickerScreen(
                     fontWeight = FontWeight.ExtraBold,
                     textAlign = TextAlign.Center,
                 )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Select your profile on ${server?.name?.ifBlank { "Jellyfin" } ?: "Jellyfin"}",
-                    color = VantafynColors.Muted,
-                    fontSize = 15.sp,
-                    textAlign = TextAlign.Center,
-                )
             }
 
             Spacer(modifier = Modifier.height(36.dp))
 
-            // Profile Cards Horizontal Scroller with Premium Edge Fade (180ms delay)
+            // Profile cards stay centred for small households and scroll only when needed.
+            val profileCount = (if (savedProfiles.isNotEmpty()) savedProfiles.size else publicUsers.size) + 1
+            val useCenteredProfiles = profileCount <= 4
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .fadingHorizontalEdges(fadeWidth = 72.dp)
+                    .then(if (useCenteredProfiles) Modifier else Modifier.fadingHorizontalEdges(fadeWidth = 72.dp))
                     .graphicsLayer {
                         alpha = rowAlpha
                         translationY = rowTranslationY
                     },
+                contentAlignment = Alignment.Center,
             ) {
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(24.dp),
-                    contentPadding = PaddingValues(horizontal = 64.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 1. Saved Profiles
-                    if (savedProfiles.isNotEmpty()) {
-                        itemsIndexed(savedProfiles, key = { _, it -> "saved_${it.id}" }) { index, profile ->
-                            val avatarUrl = profile.imageUrl ?: server?.url?.let {
-                                "${it.trimEnd('/')}/Users/${profile.jellyfinUserId}/Images/Primary"
+                if (useCenteredProfiles) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 64.dp, vertical = 6.dp),
+                    ) {
+                        if (savedProfiles.isNotEmpty()) {
+                            savedProfiles.forEachIndexed { index, profile ->
+                                val avatarUrl = profile.imageUrl ?: server?.url?.let {
+                                    "${it.trimEnd('/')}/Users/${profile.jellyfinUserId}/Images/Primary"
+                                }
+                                ProfileCard(
+                                    displayName = profile.displayName,
+                                    avatarUrl = avatarUrl,
+                                    hasPassword = false,
+                                    onClick = { onSelectSavedProfile(profile) },
+                                    modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
+                                )
                             }
-                            ProfileCard(
-                                displayName = profile.displayName,
-                                avatarUrl = avatarUrl,
-                                hasPassword = false,
-                                onClick = { onSelectSavedProfile(profile) },
-                                modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
-                            )
-                        }
-                    } else if (publicUsers.isNotEmpty()) {
-                        // 2. Public Users on Server
-                        itemsIndexed(publicUsers, key = { _, it -> "public_${it.id}" }) { index, user ->
-                            val avatarUrl = user.imageUrl ?: server?.url?.let {
-                                "${it.trimEnd('/')}/Users/${user.id}/Images/Primary"
+                        } else if (publicUsers.isNotEmpty()) {
+                            publicUsers.forEachIndexed { index, user ->
+                                val avatarUrl = user.imageUrl ?: server?.url?.let {
+                                    "${it.trimEnd('/')}/Users/${user.id}/Images/Primary"
+                                }
+                                ProfileCard(
+                                    displayName = user.displayName,
+                                    avatarUrl = avatarUrl,
+                                    hasPassword = user.hasPassword,
+                                    onClick = { onSelectPublicUser(user) },
+                                    modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
+                                )
                             }
-                            ProfileCard(
-                                displayName = user.displayName,
-                                avatarUrl = avatarUrl,
-                                hasPassword = user.hasPassword,
-                                onClick = { onSelectPublicUser(user) },
-                                modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
-                            )
                         }
-                    }
-
-                    // 3. Add Profile Card
-                    item(key = "add_profile") {
-                        val interactionSource = remember { MutableInteractionSource() }
-                        val isFocused = interactionSource.collectIsFocusedAsState().value
-                        val shape = CircleShape
-
-                        val scale by animateFloatAsState(
-                            targetValue = if (isFocused) 1.08f else 1.0f,
-                            animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
-                            label = "AddProfileScale",
+                        AddProfileCard(
+                            onClick = onAddProfile,
+                            modifier = if (savedProfiles.isEmpty() && publicUsers.isEmpty()) {
+                                Modifier.focusRequester(firstProfileRequester)
+                            } else {
+                                Modifier
+                            },
                         )
-
-                        val isOnlyAddProfile = savedProfiles.isEmpty() && publicUsers.isEmpty()
-
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .width(130.dp)
-                                .then(
-                                    if (isOnlyAddProfile) Modifier.focusRequester(firstProfileRequester) else Modifier
-                                )
-                                .clickable(
-                                    interactionSource = interactionSource,
-                                    indication = null,
-                                    onClick = onAddProfile,
-                                )
-                                .focusable(interactionSource = interactionSource)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(108.dp)
-                                    .scale(scale)
-                                    .clip(shape)
-                                    .background(Color(0xD910182A))
-                                    .then(
-                                        if (isFocused) {
-                                            Modifier.border(
-                                                BorderStroke(2.5.dp, Brush.horizontalGradient(VantafynFocusGradientColors)),
-                                                shape,
-                                            )
-                                        } else {
-                                            Modifier.border(
-                                                BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
-                                                shape,
-                                            )
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Add,
-                                    contentDescription = "Add Profile",
-                                    tint = VantafynColors.Primary,
-                                    modifier = Modifier.size(36.dp),
+                    }
+                } else {
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        contentPadding = PaddingValues(horizontal = 64.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (savedProfiles.isNotEmpty()) {
+                            itemsIndexed(savedProfiles, key = { _, it -> "saved_${it.id}" }) { index, profile ->
+                                val avatarUrl = profile.imageUrl ?: server?.url?.let {
+                                    "${it.trimEnd('/')}/Users/${profile.jellyfinUserId}/Images/Primary"
+                                }
+                                ProfileCard(
+                                    displayName = profile.displayName,
+                                    avatarUrl = avatarUrl,
+                                    hasPassword = false,
+                                    onClick = { onSelectSavedProfile(profile) },
+                                    modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
                                 )
                             }
+                        } else if (publicUsers.isNotEmpty()) {
+                            itemsIndexed(publicUsers, key = { _, it -> "public_${it.id}" }) { index, user ->
+                                val avatarUrl = user.imageUrl ?: server?.url?.let {
+                                    "${it.trimEnd('/')}/Users/${user.id}/Images/Primary"
+                                }
+                                ProfileCard(
+                                    displayName = user.displayName,
+                                    avatarUrl = avatarUrl,
+                                    hasPassword = user.hasPassword,
+                                    onClick = { onSelectPublicUser(user) },
+                                    modifier = if (index == 0) Modifier.focusRequester(firstProfileRequester) else Modifier,
+                                )
+                            }
+                        }
 
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            Text(
-                                text = "Add Profile",
-                                color = if (isFocused) VantafynColors.Ink else Color(0xFFD4DBEE),
-                                fontSize = 14.sp,
-                                fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center,
-                            )
+                        item(key = "add_profile") {
+                            AddProfileCard(onClick = onAddProfile)
                         }
                     }
                 }
@@ -364,6 +335,75 @@ private fun Modifier.fadingHorizontalEdges(
             blendMode = BlendMode.DstIn,
         )
     }
+
+@Composable
+private fun AddProfileCard(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isFocused = interactionSource.collectIsFocusedAsState().value
+    val shape = CircleShape
+
+    val scale by animateFloatAsState(
+        targetValue = if (isFocused) 1.08f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
+        label = "AddProfileScale",
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .width(130.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
+            .focusable(interactionSource = interactionSource),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(108.dp)
+                .scale(scale)
+                .clip(shape)
+                .background(Color(0xD910182A))
+                .then(
+                    if (isFocused) {
+                        Modifier.border(
+                            BorderStroke(2.5.dp, Brush.horizontalGradient(VantafynFocusGradientColors)),
+                            shape,
+                        )
+                    } else {
+                        Modifier.border(
+                            BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                            shape,
+                        )
+                    },
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "Add Profile",
+                tint = VantafynColors.Primary,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Text(
+            text = "Add Profile",
+            color = if (isFocused) VantafynColors.Ink else Color(0xFFD4DBEE),
+            fontSize = 14.sp,
+            fontWeight = if (isFocused) FontWeight.Bold else FontWeight.Medium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
 
 @Composable
 private fun ProfileCard(

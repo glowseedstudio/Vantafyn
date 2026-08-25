@@ -9,6 +9,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.vantafyn.core.ui.VantafynColors
@@ -18,11 +19,13 @@ fun VantafynTvSectionHeader(
     title: String,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
+    startPadding: Dp = 36.dp,
+    endPadding: Dp = 48.dp,
 ) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 36.dp, end = 48.dp, bottom = 6.dp)
+            .padding(start = startPadding, end = endPadding, bottom = 6.dp)
     ) {
         Text(
             text = title,

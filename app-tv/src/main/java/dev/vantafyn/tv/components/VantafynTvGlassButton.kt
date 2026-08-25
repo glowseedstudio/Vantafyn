@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -42,18 +43,24 @@ fun VantafynTvGlassButton(
     icon: ImageVector? = null,
     isPrimary: Boolean = false,
     enabled: Boolean = true,
+    compact: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     val scale by animateFloatAsState(
-        targetValue = if (isFocused && enabled) 1.06f else 1.0f,
+        targetValue = if (isFocused && enabled) 1.04f else 1.0f,
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
         label = "TvButtonScale",
     )
 
-    val shape = RoundedCornerShape(18.dp)
+    val shape = RoundedCornerShape(if (compact) 15.dp else 18.dp)
     val accentGradient = Brush.horizontalGradient(VantafynFocusGradientColors)
+    val horizontalPadding = if (compact) 15.dp else 24.dp
+    val verticalPadding = if (compact) 6.dp else 13.dp
+    val iconSize = if (compact) 14.dp else 20.dp
+    val iconGap = if (compact) 6.dp else 10.dp
+    val textSize = if (compact) 12.sp else 15.sp
 
     val backgroundBrush = if (isPrimary) {
         if (enabled) {
@@ -87,6 +94,7 @@ fun VantafynTvGlassButton(
 
     Box(
         modifier = modifier
+            .defaultMinSize(minHeight = if (compact) 34.dp else 48.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -101,7 +109,7 @@ fun VantafynTvGlassButton(
                 onClick = onClick,
             )
             .focusable(interactionSource = interactionSource, enabled = enabled)
-            .padding(horizontal = 24.dp, vertical = 13.dp),
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         contentAlignment = Alignment.Center,
     ) {
         Row(
@@ -113,15 +121,15 @@ fun VantafynTvGlassButton(
                     imageVector = icon,
                     contentDescription = null,
                     tint = if (enabled) VantafynColors.Ink else VantafynColors.Muted,
-                    modifier = Modifier.size(20.dp),
+                    modifier = Modifier.size(iconSize),
                 )
-                Spacer(modifier = Modifier.width(10.dp))
+                Spacer(modifier = Modifier.width(iconGap))
             }
 
             Text(
                 text = text,
                 color = if (enabled) VantafynColors.Ink else VantafynColors.Muted,
-                fontSize = 15.sp,
+                fontSize = textSize,
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.2.sp,
                 maxLines = 1,

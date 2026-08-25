@@ -16,7 +16,8 @@ The Vantafyn Android TV sidebar is engineered as a lightweight, transparent dark
 - **Focus Mechanics**:
   - Automatically expands whenever any child inside the sidebar gains D-pad focus.
   - Automatically collapses whenever focus leaves the sidebar to the right (into content rows or hero buttons).
-  - Navigating to the currently active route safely collapses the sidebar and restores focus to content.
+- Navigating to the currently active route safely collapses the sidebar and restores focus to content.
+- TV Home hero actions are fixed overlay controls rather than `LazyColumn` items, so focusing Play/Details does not trigger row-scroller bring-into-view movement.
 
 ---
 

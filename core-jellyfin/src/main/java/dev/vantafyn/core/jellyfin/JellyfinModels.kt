@@ -68,6 +68,11 @@ data class JellyfinMediaCard(
     val isFavorite: Boolean = false,
     val isPlayed: Boolean = false,
     val unplayedItemCount: Int = 0,
+    val overview: String? = null,
+    val runtimeMinutes: Int? = null,
+    val officialRating: String? = null,
+    val communityRating: Float? = null,
+    val genres: List<String> = emptyList(),
 )
 
 data class JellyfinHeroMediaItem(

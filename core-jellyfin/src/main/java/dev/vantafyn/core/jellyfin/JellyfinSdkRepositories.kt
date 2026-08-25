@@ -3900,6 +3900,11 @@ private fun BaseItemDto.toCard(api: ApiClient, shape: JellyfinMediaCardShape): J
         isFavorite = userData?.isFavorite == true,
         isPlayed = userData?.played == true,
         unplayedItemCount = userData?.unplayedItemCount ?: 0,
+        overview = overview,
+        runtimeMinutes = runTimeTicks?.let { (it / 600_000_000L).toInt() },
+        officialRating = officialRating,
+        communityRating = communityRating,
+        genres = genres.orEmpty(),
     )
 
 private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShape): JellyfinMediaItem =
