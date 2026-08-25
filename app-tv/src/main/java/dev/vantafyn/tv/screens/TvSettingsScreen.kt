@@ -218,47 +218,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.appearanceItems(
     onToggleSoundEffects: () -> Unit,
 ) {
     item {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        TvSettingsPanel(
+            title = "Theme",
+            icon = Icons.Rounded.AutoAwesome,
         ) {
-            TvSettingsPanel(
-                title = "Theme",
-                icon = Icons.Rounded.AutoAwesome,
-                modifier = Modifier.weight(1.25f),
-            ) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    items(VantafynThemePreset.entries, key = { it.id }) { preset ->
-                        TvThemeCard(
-                            preset = preset,
-                            selected = state.selectedTheme == preset,
-                            onClick = { onSelectTheme(preset) },
-                        )
-                    }
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                items(VantafynThemePreset.entries, key = { it.id }) { preset ->
+                    TvThemeCard(
+                        preset = preset,
+                        selected = state.selectedTheme == preset,
+                        onClick = { onSelectTheme(preset) },
+                    )
                 }
-            }
-            TvSettingsPanel(
-                title = "Sound & side rail",
-                icon = Icons.AutoMirrored.Rounded.VolumeUp,
-                modifier = Modifier.weight(0.85f),
-            ) {
-                TvToggleRow("Theme music", state.themeMusicEnabled, onToggleThemeMusic)
-                TvSegmentedSelector(
-                    title = "Volume",
-                    entries = ThemeMusicVolume.entries,
-                    label = { it.label },
-                    selected = state.themeMusicVolume,
-                    enabled = state.themeMusicEnabled,
-                    onSelect = onSelectThemeMusicVolume,
-                )
-                TvToggleRow("Interface sounds", state.soundEffectsEnabled, onToggleSoundEffects)
-                TvSegmentedSelector(
-                    title = "Side rail accent",
-                    entries = BottomRailAccent.entries,
-                    label = { it.label },
-                    selected = state.bottomRailAccent,
-                    onSelect = onSetBottomRailAccent,
-                )
             }
         }
     }
@@ -270,6 +241,43 @@ private fun androidx.compose.foundation.lazy.LazyListScope.appearanceItems(
                         background = background,
                         selected = state.selectedBackground == background,
                         onClick = { onSelectBackground(background) },
+                    )
+                }
+            }
+        }
+    }
+    item {
+        TvSettingsPanel(title = "Sound & side rail", icon = Icons.AutoMirrored.Rounded.VolumeUp) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Column(
+                    modifier = Modifier.weight(0.9f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TvToggleRow("Theme music", state.themeMusicEnabled, onToggleThemeMusic)
+                    TvToggleRow("Interface sounds", state.soundEffectsEnabled, onToggleSoundEffects)
+                }
+                Column(
+                    modifier = Modifier.weight(1.1f),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    TvSegmentedSelector(
+                        title = "Volume",
+                        entries = ThemeMusicVolume.entries,
+                        label = { it.label },
+                        selected = state.themeMusicVolume,
+                        enabled = state.themeMusicEnabled,
+                        onSelect = onSelectThemeMusicVolume,
+                    )
+                    TvSegmentedSelector(
+                        title = "Side rail accent",
+                        entries = BottomRailAccent.entries,
+                        label = { it.label },
+                        selected = state.bottomRailAccent,
+                        onSelect = onSetBottomRailAccent,
                     )
                 }
             }

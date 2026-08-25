@@ -3,6 +3,8 @@ package dev.vantafyn.tv.sidebar
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -38,7 +40,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -46,8 +48,10 @@ import androidx.compose.material.icons.rounded.AccountCircle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -70,10 +74,14 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.ui.VantafynColors
@@ -102,6 +110,22 @@ fun VantafynTvSidebar(
     onRouteSelected: (TvRoute) -> Unit = {},
     onProfileClicked: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val reduceMotion = remember {
+        val am = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
+        am != null && am.isTouchExplorationEnabled
+    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+
     val sidebarWidth by animateDpAsState(
         targetValue = if (isExpanded) 240.dp else 72.dp,
         animationSpec = spring(dampingRatio = 0.82f, stiffness = 380f),
@@ -123,19 +147,41 @@ fun VantafynTvSidebar(
 
     val shape = RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp)
     val accentGradient = VantafynGradients.accentHorizontal()
+    val accentColors = VantafynGradients.AccentColors
     val ambientTransition = rememberInfiniteTransition(label = "tvSideRailAccent")
     val breathingAlpha by ambientTransition.animateFloat(
-        initialValue = 0.10f,
-        targetValue = 0.26f,
-        animationSpec = infiniteRepeatable(tween(5_800, easing = LinearEasing), RepeatMode.Reverse),
+        initialValue = 0.11f,
+        targetValue = 0.18f,
+        animationSpec = infiniteRepeatable(tween(7_800, easing = LinearEasing), RepeatMode.Reverse),
         label = "tvSideRailBreathingAlpha",
     )
-    val sideRailAccentAlpha = when (accentMode) {
-        BottomRailAccent.Off -> 0f
-        BottomRailAccent.StillGlow -> 0.16f
-        BottomRailAccent.Breathing -> breathingAlpha
-        BottomRailAccent.TouchRipple -> if (isExpanded) 0.22f else 0.13f
+    var focusedRailSlot by remember { mutableIntStateOf(2) }
+    var interactionPulseTrigger by remember { mutableIntStateOf(0) }
+    val interactionBloom = remember { Animatable(0f) }
+    LaunchedEffect(interactionPulseTrigger, accentMode, isResumed, reduceMotion) {
+        if (accentMode == BottomRailAccent.TouchRipple && interactionPulseTrigger > 0 && isResumed && !reduceMotion) {
+            interactionBloom.snapTo(0f)
+            interactionBloom.animateTo(1f, animationSpec = tween(220, easing = FastOutSlowInEasing))
+            interactionBloom.animateTo(0f, animationSpec = tween(760, easing = LinearEasing))
+        } else {
+            interactionBloom.snapTo(0f)
+        }
     }
+    val focusedRailSlotAnimated by animateFloatAsState(
+        targetValue = focusedRailSlot.toFloat(),
+        animationSpec = tween(360, easing = FastOutSlowInEasing),
+        label = "tvSideRailFocusedGlowSlot",
+    )
+    val sideRailAccentAlpha by animateFloatAsState(
+        targetValue = when (accentMode) {
+            BottomRailAccent.Off -> 0f
+            BottomRailAccent.StillGlow -> 0.105f
+            BottomRailAccent.Breathing -> if (reduceMotion || !isResumed) 0.12f else breathingAlpha
+            BottomRailAccent.TouchRipple -> 0.115f + if (reduceMotion || !isResumed) 0f else interactionBloom.value * 0.085f
+        },
+        animationSpec = tween(420, easing = FastOutSlowInEasing),
+        label = "tvSideRailAccentAlpha",
+    )
     val homeFocusRequester = remember { FocusRequester() }
     var initialHomeFocusRequested by remember { mutableStateOf(false) }
 
@@ -153,19 +199,49 @@ fun VantafynTvSidebar(
             .fillMaxHeight()
             .drawBehind {
                 if (sideRailAccentAlpha > 0f) {
+                    val railRadius = 28.dp.toPx()
+                    val glowCenterY = (40.dp.toPx() + focusedRailSlotAnimated * 54.dp.toPx())
+                        .coerceIn(44.dp.toPx(), size.height - 44.dp.toPx())
                     drawRoundRect(
-                        brush = accentGradient,
+                        brush = Brush.horizontalGradient(
+                            colorStops = arrayOf(
+                                0.00f to accentColors.first().copy(alpha = 0.00f),
+                                0.22f to accentColors.first().copy(alpha = 0.24f),
+                                0.66f to accentColors.getOrElse(1) { accentColors.first() }.copy(alpha = 0.12f),
+                                1.00f to Color.Transparent,
+                            ),
+                        ),
                         alpha = sideRailAccentAlpha,
-                        topLeft = Offset(-18.dp.toPx(), 10.dp.toPx()),
-                        size = Size(size.width + 34.dp.toPx(), size.height - 20.dp.toPx()),
-                        cornerRadius = CornerRadius(28.dp.toPx(), 28.dp.toPx()),
+                        topLeft = Offset(-42.dp.toPx(), 18.dp.toPx()),
+                        size = Size(size.width + 74.dp.toPx(), size.height - 36.dp.toPx()),
+                        cornerRadius = CornerRadius(railRadius, railRadius),
                     )
                     drawRoundRect(
-                        brush = accentGradient,
-                        alpha = sideRailAccentAlpha * 0.32f,
-                        topLeft = Offset(size.width - 2.dp.toPx(), 24.dp.toPx()),
-                        size = Size(6.dp.toPx(), size.height - 48.dp.toPx()),
+                        brush = Brush.horizontalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color.Transparent,
+                                0.40f to accentColors.getOrElse(1) { accentColors.first() }.copy(alpha = 0.10f),
+                                1.00f to accentColors.last().copy(alpha = 0.18f),
+                            ),
+                        ),
+                        alpha = sideRailAccentAlpha * 0.72f,
+                        topLeft = Offset(size.width - 10.dp.toPx(), 32.dp.toPx()),
+                        size = Size(24.dp.toPx(), size.height - 64.dp.toPx()),
                         cornerRadius = CornerRadius(999.dp.toPx(), 999.dp.toPx()),
+                    )
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                accentColors.getOrElse(1) { accentColors.first() }.copy(alpha = 0.30f),
+                                accentColors.last().copy(alpha = 0.10f),
+                                Color.Transparent,
+                            ),
+                            center = Offset(size.width * 0.50f, glowCenterY),
+                            radius = 92.dp.toPx() + interactionBloom.value * 34.dp.toPx(),
+                        ),
+                        alpha = sideRailAccentAlpha * (0.72f + interactionBloom.value * 0.28f),
+                        radius = 92.dp.toPx() + interactionBloom.value * 34.dp.toPx(),
+                        center = Offset(size.width * 0.50f, glowCenterY),
                     )
                 }
             }
@@ -232,6 +308,13 @@ fun VantafynTvSidebar(
                         ?: session.user.serverName
                         ?: if (session.user.isAdministrator) "Administrator" else "Member"
 
+                    LaunchedEffect(isProfileFocused) {
+                        if (isProfileFocused) {
+                            focusedRailSlot = 0
+                            interactionPulseTrigger++
+                        }
+                    }
+
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -247,7 +330,10 @@ fun VantafynTvSidebar(
                             .clickable(
                                 interactionSource = profileInteractionSource,
                                 indication = null,
-                                onClick = onProfileClicked,
+                                onClick = {
+                                    interactionPulseTrigger++
+                                    onProfileClicked()
+                                },
                             )
                             .focusable(interactionSource = profileInteractionSource)
                             .padding(horizontal = 6.dp, vertical = 8.dp),
@@ -316,7 +402,7 @@ fun VantafynTvSidebar(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        bottomItems.forEach { item ->
+                        bottomItems.forEachIndexed { index, item ->
                             val isSelected = when (item.route) {
                                 TvRoute.Search -> currentRoute == TvRoute.Search
                                 TvRoute.Notifications -> currentRoute == TvRoute.Notifications
@@ -329,8 +415,12 @@ fun VantafynTvSidebar(
                                 label = item.label,
                                 isSelected = isSelected,
                                 badgeCount = item.badgeCount,
-                                onFocused = {},
+                                onFocused = {
+                                    focusedRailSlot = index + 1
+                                    interactionPulseTrigger++
+                                },
                                 onClick = {
+                                    interactionPulseTrigger++
                                     if (item.onClick != null) item.onClick.invoke()
                                     else onRouteSelected(item.route)
                                 },
@@ -346,8 +436,12 @@ fun VantafynTvSidebar(
                         isSelected = currentRoute == TvRoute.Search,
                         isExpanded = false,
                         badgeCount = searchItem.badgeCount,
-                        onFocused = {},
+                        onFocused = {
+                            focusedRailSlot = 1
+                            interactionPulseTrigger++
+                        },
                         onClick = {
+                            interactionPulseTrigger++
                             if (searchItem.onClick != null) searchItem.onClick.invoke()
                             else onRouteSelected(searchItem.route)
                         },
@@ -391,7 +485,7 @@ fun VantafynTvSidebar(
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 4.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        items(visibleMainItems, key = { item -> "${isSettingsMode}_${item.route}_${item.label}" }) { item ->
+                        itemsIndexed(visibleMainItems, key = { _, item -> "${isSettingsMode}_${item.route}_${item.label}" }) { index, item ->
                             val category = TvSettingsCategory.entries.firstOrNull { it.label == item.label }
                             val isSelected = if (isSettingsMode) {
                                 category == selectedSettingsCategory
@@ -417,8 +511,12 @@ fun VantafynTvSidebar(
                                 isExpanded = isExpanded,
                                 badgeCount = item.badgeCount,
                                 modifier = if (item.route == TvRoute.Home) Modifier.focusRequester(homeFocusRequester) else Modifier,
-                                onFocused = {},
+                                onFocused = {
+                                    focusedRailSlot = index + 3
+                                    interactionPulseTrigger++
+                                },
                                 onClick = {
+                                    interactionPulseTrigger++
                                     if (isSettingsMode && category != null) {
                                         onSettingsCategorySelected(category)
                                     } else if (item.onClick != null) {
