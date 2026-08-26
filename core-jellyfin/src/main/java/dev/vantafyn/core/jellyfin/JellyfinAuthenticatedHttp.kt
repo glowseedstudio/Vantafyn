@@ -11,7 +11,7 @@ fun JellyfinSession.openAuthenticatedConnection(pathAndQuery: String, method: St
         requestMethod = method
         connectTimeout = 8_000
         readTimeout = 12_000
-        val authHeader = "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"$profileId\", Version=\"0.9.2\", Token=\"$accessToken\""
+        val authHeader = "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"$profileId\", Version=\"0.9.3\", Token=\"$accessToken\""
         setRequestProperty("Accept", "application/json")
         setRequestProperty("Content-Type", "application/json")
         setRequestProperty("X-Emby-Token", accessToken)

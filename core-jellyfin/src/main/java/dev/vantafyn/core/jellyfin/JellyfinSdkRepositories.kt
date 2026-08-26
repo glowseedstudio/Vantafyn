@@ -119,7 +119,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.2",
+            version = "0.9.3",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,

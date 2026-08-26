@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
-  <img src="https://img.shields.io/badge/Version-0.9.2-blueviolet.svg" alt="Version 0.9.2" />
+  <img src="https://img.shields.io/badge/Version-0.9.3-blueviolet.svg" alt="Version 0.9.3" />
   <a href="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml"><img src="https://github.com/glowseedstudio/Vantafyn/actions/workflows/build.yml/badge.svg" alt="Build & Verify" /></a>
   <a href="https://kotlinlang.org/"><img src="https://img.shields.io/badge/Kotlin-2.0+-7F52FF.svg?logo=kotlin&logoColor=white" alt="Kotlin" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?logo=android&logoColor=white" alt="Jetpack Compose" /></a>
@@ -262,8 +262,8 @@ Vantafyn stands on the shoulders of fantastic open-source projects and talented 
 | :--- | :---: | :--- |
 | **Android Phone App** | 🟢 **~95% Complete** | Core UI, video playback (Movies, TV, Live TV + Cast), offline downloads, music player, social hub, achievements, and server admin tools are fully functional and daily-driver ready. |
 | **Media Types** | 🟢 **Movies, TV, Music, Live TV**<br>🟡 **Audiobooks & E-Books (Planned)** | Movies, TV Shows, Music, and Live TV are fully supported with Google Cast. Dedicated audiobook listening and e-book reader interfaces are coming next. |
-| **Native Social & Messaging** | 🟢 **Complete (v0.9.2)** | Real-time 1-to-1 chat, media recommendations, touch-and-hold emoji reactions, contextual bottom rail, and kinetic floating social dock. |
-| **Achievements & Badges** | 🟢 **Complete (v0.9.2)** | Gamified achievements, rank tier progression (Bronze to Mythic), animated modal gradient borders, and unlock celebrations. |
+| **Native Social & Messaging** | 🟢 **Complete (v0.9.3)** | Real-time 1-to-1 chat, media recommendations, touch-and-hold emoji reactions, contextual bottom rail, and kinetic floating social dock. |
+| **Achievements & Badges** | 🟢 **Complete (v0.9.3)** | Gamified achievements, rank tier progression (Bronze to Mythic), animated modal gradient borders, and unlock celebrations. |
 | **Server Statistics** | 🟢 **Complete** | Rich viewing analytics, trend graphs, and Most Watched media breakdown with full-bleed background artwork. Requires **Playback Reporting**. |
 | **Android TV App** | 🟡 **In Development** | TV architecture and module build correctly. Dedicated 10-foot TV UI is being built using the proven mobile architecture foundations. |
 | **Companion Server Plugin** | 🟡 **In Development** | The `companion-plugin` for Jellyfin is currently being built to provide enhanced multi-user sync and deeper Ombi integration. |
@@ -336,5 +336,4 @@ adb install -r app-tv/build/outputs/apk/debug/app-tv-debug.apk
 ## ⚖️ License
 
 This project is open-source software licensed under the [GNU General Public License v3.0](LICENSE).
-
 

@@ -19465,7 +19465,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.2"
+private const val VANTAFYN_APP_VERSION = "0.9.3"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

@@ -1011,4 +1011,4 @@ private fun String.subtitleModeDisplayLabel(): String =
         else -> this
     }
 
-private const val VANTAFYN_TV_APP_VERSION = "0.9.2"
+private const val VANTAFYN_TV_APP_VERSION = "0.9.3"
