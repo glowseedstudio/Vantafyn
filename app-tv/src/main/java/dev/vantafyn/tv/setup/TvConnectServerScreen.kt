@@ -22,7 +22,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -194,6 +194,7 @@ fun TvConnectServerScreen(
                     text = if (isLoading) "Testing..." else "Connect",
                     icon = Icons.Rounded.Check,
                     isPrimary = true,
+                    illuminatedPrimary = true,
                     enabled = serverUrl.isNotBlank() && !isLoading,
                     onClick = {
                         if (serverUrl.isNotBlank() && !isLoading) {
@@ -204,8 +205,9 @@ fun TvConnectServerScreen(
 
                 VantafynTvGlassButton(
                     text = "Back",
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    isPrimary = false,
+                    icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onBack,
                 )
             }

@@ -49,6 +49,7 @@ fun VantafynTvWideCard(
     showTextBelow: Boolean = true,
     onClick: () -> Unit = {},
     onFocus: () -> Unit = {},
+    onFocusChanged: (Boolean) -> Unit = {},
 ) {
     val shape = RoundedCornerShape(10.dp)
     val interactionSource = remember { MutableInteractionSource() }
@@ -61,6 +62,7 @@ fun VantafynTvWideCard(
         if (isFocused) {
             onFocus()
         }
+        onFocusChanged(isFocused)
     }
 
     Column(

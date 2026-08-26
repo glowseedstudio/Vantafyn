@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Smartphone
@@ -104,7 +104,7 @@ fun TvSetupMethodScreen(
                 Spacer(modifier = Modifier.height(6.dp))
 
                 Text(
-                    text = "Choose how you'd like to connect this TV to your Jellyfin server",
+                    text = "Choose how you'd like to connect Vantafyn to your Jellyfin server.",
                     color = VantafynColors.Muted,
                     fontSize = 14.sp,
                     textAlign = TextAlign.Center,
@@ -120,8 +120,8 @@ fun TvSetupMethodScreen(
             ) {
                 // 1. Mobile Pairing (Cyan Theme)
                 SetupOptionCard(
-                    title = "Pair with mobile app",
-                    subtitle = "Use your phone to connect this TV seamlessly.",
+                    title = "Pair with Vantafyn mobile app",
+                    subtitle = "Use your phone to connect this TV quickly and securely.",
                     icon = Icons.Rounded.Smartphone,
                     accentColor = Color(0xFF21D8FF), // Electric Cyan
                     onClick = onPairWithMobile,
@@ -139,8 +139,8 @@ fun TvSetupMethodScreen(
 
                 // 3. Manual Setup (Pink Theme)
                 SetupOptionCard(
-                    title = "Sign in manually",
-                    subtitle = "Enter your Jellyfin server address and credentials.",
+                    title = "Connect manually",
+                    subtitle = "Enter your Jellyfin server address and sign-in details.",
                     icon = Icons.Rounded.Key,
                     accentColor = Color(0xFFFF36C7), // Hot Magenta / Pink
                     onClick = onManualSetup,
@@ -152,8 +152,9 @@ fun TvSetupMethodScreen(
             // Back Button
             VantafynTvGlassButton(
                 text = "Back",
-                icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                isPrimary = false,
+                icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                isPrimary = true,
+                illuminatedPrimary = true,
                 onClick = onBack,
             )
         }

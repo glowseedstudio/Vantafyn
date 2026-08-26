@@ -9,7 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -72,23 +72,15 @@ fun TvWelcomeScreen(
                 textAlign = TextAlign.Center,
             )
 
-            Spacer(modifier = Modifier.height(10.dp))
-
-            Text(
-                text = "Your Jellyfin library, built for the living room.",
-                color = VantafynColors.Muted,
-                fontSize = 17.sp,
-                textAlign = TextAlign.Center,
-            )
-
             Spacer(modifier = Modifier.height(36.dp))
 
             // Action Group with soft breathing pulse glow
             VantafynTvPulsingButtonGlow(enabled = isPulseActive) {
                 VantafynTvGlassButton(
                     text = "Get Started",
-                    icon = Icons.AutoMirrored.Rounded.ArrowForward,
+                    icon = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                     isPrimary = true,
+                    illuminatedPrimary = true,
                     modifier = Modifier.focusRequester(focusRequester),
                     onClick = {
                         isPulseActive = false

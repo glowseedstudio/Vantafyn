@@ -22,7 +22,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.ErrorOutline
@@ -227,6 +227,7 @@ fun TvLoginScreen(
                     text = if (isLoading) "Signing in..." else "Sign In",
                     icon = Icons.Rounded.Check,
                     isPrimary = true,
+                    illuminatedPrimary = true,
                     enabled = username.isNotBlank() && !isLoading,
                     onClick = {
                         if (username.isNotBlank() && !isLoading) {
@@ -239,7 +240,8 @@ fun TvLoginScreen(
                     VantafynTvGlassButton(
                         text = "Quick Connect",
                         icon = Icons.Rounded.Bolt,
-                        isPrimary = false,
+                        isPrimary = true,
+                        illuminatedPrimary = true,
                         enabled = !isLoading,
                         onClick = onQuickConnect,
                     )
@@ -247,8 +249,9 @@ fun TvLoginScreen(
 
                 VantafynTvGlassButton(
                     text = "Back",
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    isPrimary = false,
+                    icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onBack,
                 )
             }

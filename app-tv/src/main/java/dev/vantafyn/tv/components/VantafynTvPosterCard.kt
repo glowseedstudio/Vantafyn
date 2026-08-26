@@ -45,6 +45,7 @@ fun VantafynTvPosterCard(
     badgeText: String? = null,
     onClick: () -> Unit = {},
     onFocus: () -> Unit = {},
+    onFocusChanged: (Boolean) -> Unit = {},
 ) {
     val shape = RoundedCornerShape(10.dp)
     val interactionSource = remember { MutableInteractionSource() }
@@ -57,6 +58,7 @@ fun VantafynTvPosterCard(
         if (isFocused) {
             onFocus()
         }
+        onFocusChanged(isFocused)
     }
 
     Column(

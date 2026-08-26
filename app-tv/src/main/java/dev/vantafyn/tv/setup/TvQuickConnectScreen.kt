@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Key
@@ -192,7 +192,8 @@ fun TvQuickConnectScreen(
                 VantafynTvGlassButton(
                     text = "Refresh Code",
                     icon = Icons.Rounded.Refresh,
-                    isPrimary = isExpired || errorMessage != null,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     enabled = !isLoading,
                     onClick = onRefresh,
                 )
@@ -200,14 +201,16 @@ fun TvQuickConnectScreen(
                 VantafynTvGlassButton(
                     text = "Sign In Manually",
                     icon = Icons.Rounded.Key,
-                    isPrimary = false,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onManualSetup,
                 )
 
                 VantafynTvGlassButton(
                     text = "Back",
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    isPrimary = false,
+                    icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onBack,
                 )
             }

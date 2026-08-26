@@ -29,7 +29,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Refresh
@@ -286,7 +286,8 @@ fun TvProfilePickerScreen(
                 VantafynTvGlassButton(
                     text = "Change Server",
                     icon = Icons.Rounded.Refresh,
-                    isPrimary = false,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     modifier = Modifier.focusProperties {
                         up = firstProfileRequester
                     },
@@ -296,8 +297,9 @@ fun TvProfilePickerScreen(
                 if (onBack != null) {
                     VantafynTvGlassButton(
                         text = "Back",
-                        icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                        isPrimary = false,
+                        icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                        isPrimary = true,
+                        illuminatedPrimary = true,
                         modifier = Modifier.focusProperties {
                             up = firstProfileRequester
                         },

@@ -26,7 +26,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.Text
@@ -240,8 +240,9 @@ fun TvServerConfirmScreen(
             ) {
                 VantafynTvGlassButton(
                     text = if (isQuickConnectMode) "Quick Connect" else (if (hasPublicUsers) "Choose Profile" else "Sign In"),
-                    icon = if (isQuickConnectMode) Icons.Rounded.Bolt else Icons.AutoMirrored.Rounded.ArrowForward,
+                    icon = if (isQuickConnectMode) Icons.Rounded.Bolt else Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                     isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onContinue,
                 )
 
@@ -249,7 +250,8 @@ fun TvServerConfirmScreen(
                     VantafynTvGlassButton(
                         text = "Quick Connect",
                         icon = Icons.Rounded.Bolt,
-                        isPrimary = false,
+                        isPrimary = true,
+                        illuminatedPrimary = true,
                         onClick = onQuickConnect,
                     )
                 }
@@ -257,7 +259,8 @@ fun TvServerConfirmScreen(
                 VantafynTvGlassButton(
                     text = "Different Server",
                     icon = Icons.Rounded.Refresh,
-                    isPrimary = false,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onUseDifferentServer,
                 )
             }

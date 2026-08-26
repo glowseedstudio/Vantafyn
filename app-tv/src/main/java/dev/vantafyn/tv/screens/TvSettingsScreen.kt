@@ -218,67 +218,91 @@ private fun androidx.compose.foundation.lazy.LazyListScope.appearanceItems(
     onToggleSoundEffects: () -> Unit,
 ) {
     item {
-        TvSettingsPanel(
-            title = "Theme",
-            icon = Icons.Rounded.AutoAwesome,
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                items(VantafynThemePreset.entries, key = { it.id }) { preset ->
-                    TvThemeCard(
-                        preset = preset,
-                        selected = state.selectedTheme == preset,
-                        onClick = { onSelectTheme(preset) },
-                    )
+            TvSettingsPanel(
+                title = "Theme",
+                icon = Icons.Rounded.AutoAwesome,
+                compact = true,
+            ) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(VantafynThemePreset.entries, key = { it.id }) { preset ->
+                        TvThemeCard(
+                            preset = preset,
+                            selected = state.selectedTheme == preset,
+                            compact = true,
+                            onClick = { onSelectTheme(preset) },
+                        )
+                    }
                 }
             }
-        }
-    }
-    item {
-        TvSettingsPanel(title = "Background", icon = Icons.Rounded.Language) {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                items(VantafynAppBackground.entries, key = { it.name }) { background ->
-                    TvBackgroundTile(
-                        background = background,
-                        selected = state.selectedBackground == background,
-                        onClick = { onSelectBackground(background) },
-                    )
-                }
-            }
-        }
-    }
-    item {
-        TvSettingsPanel(title = "Sound & side rail", icon = Icons.AutoMirrored.Rounded.VolumeUp) {
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(18.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Top,
             ) {
-                Column(
-                    modifier = Modifier.weight(0.9f),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                TvSettingsPanel(
+                    title = "Background",
+                    icon = Icons.Rounded.Language,
+                    modifier = Modifier.weight(1.08f),
+                    compact = true,
                 ) {
-                    TvToggleRow("Theme music", state.themeMusicEnabled, onToggleThemeMusic)
-                    TvToggleRow("Interface sounds", state.soundEffectsEnabled, onToggleSoundEffects)
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(VantafynAppBackground.entries, key = { it.name }) { background ->
+                            TvBackgroundTile(
+                                background = background,
+                                selected = state.selectedBackground == background,
+                                compact = true,
+                                onClick = { onSelectBackground(background) },
+                            )
+                        }
+                    }
                 }
-                Column(
-                    modifier = Modifier.weight(1.1f),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
+
+                TvSettingsPanel(
+                    title = "Sound & side rail",
+                    icon = Icons.AutoMirrored.Rounded.VolumeUp,
+                    modifier = Modifier.weight(0.92f),
+                    compact = true,
                 ) {
-                    TvSegmentedSelector(
-                        title = "Volume",
-                        entries = ThemeMusicVolume.entries,
-                        label = { it.label },
-                        selected = state.themeMusicVolume,
-                        enabled = state.themeMusicEnabled,
-                        onSelect = onSelectThemeMusicVolume,
-                    )
-                    TvSegmentedSelector(
-                        title = "Side rail accent",
-                        entries = BottomRailAccent.entries,
-                        label = { it.label },
-                        selected = state.bottomRailAccent,
-                        onSelect = onSetBottomRailAccent,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(0.85f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            TvToggleRow("Theme music", state.themeMusicEnabled, onToggleThemeMusic, compact = true)
+                            TvToggleRow("Interface sounds", state.soundEffectsEnabled, onToggleSoundEffects, compact = true)
+                        }
+                        Column(
+                            modifier = Modifier.weight(1.15f),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            TvSegmentedSelector(
+                                title = "Volume",
+                                entries = ThemeMusicVolume.entries,
+                                label = { it.label },
+                                selected = state.themeMusicVolume,
+                                enabled = state.themeMusicEnabled,
+                                compact = true,
+                                onSelect = onSelectThemeMusicVolume,
+                            )
+                            TvSegmentedSelector(
+                                title = "Side rail accent",
+                                entries = BottomRailAccent.entries,
+                                label = { it.label },
+                                selected = state.bottomRailAccent,
+                                compact = true,
+                                onSelect = onSetBottomRailAccent,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -401,9 +425,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playbackItems(
                     icon = Icons.Rounded.Speed,
                     modifier = Modifier.weight(1f),
                 ) {
-                    TvToggleRow("Autoplay next episode", preferences.enableNextEpisodeAutoPlay) {
+                    TvToggleRow("Autoplay next episode", preferences.enableNextEpisodeAutoPlay, onClick = {
                         onEditPlaybackPreferences { it.copy(enableNextEpisodeAutoPlay = !it.enableNextEpisodeAutoPlay) }
-                    }
+                    })
                     TvSegmentedSelector(
                         title = "Show Up Next",
                         entries = UpNextDisplayMode.entries,
@@ -446,12 +470,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playbackItems(
                     icon = Icons.Rounded.GraphicEq,
                     modifier = Modifier.weight(1f),
                 ) {
-                    TvToggleRow("Play default audio track", preferences.playDefaultAudioTrack) {
+                    TvToggleRow("Play default audio track", preferences.playDefaultAudioTrack, onClick = {
                         onEditPlaybackPreferences { it.copy(playDefaultAudioTrack = !it.playDefaultAudioTrack) }
-                    }
-                    TvToggleRow("Remember audio selections", preferences.rememberAudioSelections) {
+                    })
+                    TvToggleRow("Remember audio selections", preferences.rememberAudioSelections, onClick = {
                         onEditPlaybackPreferences { it.copy(rememberAudioSelections = !it.rememberAudioSelections) }
-                    }
+                    })
                     TvInfoRow(Icons.Rounded.Language, "Audio language", preferences.audioLanguagePreference.orEmpty().ifBlank { "Jellyfin default" })
                 }
                 TvSettingsPanel(
@@ -459,9 +483,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.playbackItems(
                     icon = Icons.Rounded.Subtitles,
                     modifier = Modifier.weight(1f),
                 ) {
-                    TvToggleRow("Remember subtitle selections", preferences.rememberSubtitleSelections) {
+                    TvToggleRow("Remember subtitle selections", preferences.rememberSubtitleSelections, onClick = {
                         onEditPlaybackPreferences { it.copy(rememberSubtitleSelections = !it.rememberSubtitleSelections) }
-                    }
+                    })
                     TvInfoRow(Icons.Rounded.Subtitles, "Subtitle mode", preferences.subtitleMode.orEmpty().subtitleModeDisplayLabel().ifBlank { "Jellyfin default" })
                     TvInfoRow(Icons.Rounded.Language, "Subtitle language", preferences.subtitleLanguagePreference.orEmpty().ifBlank { "Jellyfin default" })
                 }
@@ -567,9 +591,9 @@ private fun androidx.compose.foundation.lazy.LazyListScope.vantafynItems(
                 icon = Icons.Rounded.Download,
                 modifier = Modifier.weight(0.86f),
             ) {
-                TvToggleRow("Wi-Fi only by default", state.downloadWifiOnlyDefault) {
+                TvToggleRow("Wi-Fi only by default", state.downloadWifiOnlyDefault, onClick = {
                     onSetDownloadWifiOnlyDefault(!state.downloadWifiOnlyDefault)
-                }
+                })
                 TvInfoRow(
                     Icons.Rounded.CloudDownload,
                     "Offline library",
@@ -700,6 +724,7 @@ private fun TvSettingsPanel(
 private fun TvThemeCard(
     preset: VantafynThemePreset,
     selected: Boolean,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val tokens = remember(preset) { tokensFor(preset) }
@@ -713,7 +738,7 @@ private fun TvThemeCard(
     )
     Column(
         modifier = Modifier
-            .width(210.dp)
+            .width(if (compact) 178.dp else 210.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -723,22 +748,22 @@ private fun TvThemeCard(
             .background(Color(0xDD111827))
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .focusable(interactionSource = interactionSource)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+            .padding(if (compact) 11.dp else 14.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 12.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(82.dp)
-                .clip(RoundedCornerShape(18.dp))
+                .height(if (compact) 54.dp else 82.dp)
+                .clip(RoundedCornerShape(if (compact) 15.dp else 18.dp))
                 .background(Brush.linearGradient(tokens.backgroundGradient))
-                .border(BorderStroke(1.dp, Brush.horizontalGradient(tokens.accentColors)), RoundedCornerShape(18.dp)),
+                .border(BorderStroke(1.dp, Brush.horizontalGradient(tokens.accentColors)), RoundedCornerShape(if (compact) 15.dp else 18.dp)),
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(preset.label, color = VantafynColors.Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
-            if (selected) Icon(Icons.Rounded.CheckCircle, contentDescription = "Selected", tint = VantafynColors.Secondary, modifier = Modifier.size(22.dp))
+            Text(preset.label, color = VantafynColors.Ink, fontSize = if (compact) 16.sp else 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1)
+            if (selected) Icon(Icons.Rounded.CheckCircle, contentDescription = "Selected", tint = VantafynColors.Secondary, modifier = Modifier.size(if (compact) 19.dp else 22.dp))
         }
-        Text(if (selected) "Active now" else preset.description, color = if (selected) VantafynColors.Secondary else VantafynColors.Muted, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(if (selected) "Active now" else preset.description, color = if (selected) VantafynColors.Secondary else VantafynColors.Muted, fontSize = if (compact) 12.sp else 13.sp, maxLines = if (compact) 1 else 2, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -746,6 +771,7 @@ private fun TvThemeCard(
 private fun TvBackgroundTile(
     background: VantafynAppBackground,
     selected: Boolean,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -753,27 +779,27 @@ private fun TvBackgroundTile(
     val shape = RoundedCornerShape(20.dp)
     Column(
         modifier = Modifier
-            .width(238.dp)
+            .width(if (compact) 174.dp else 238.dp)
             .vantafynTvFocusable(interactionSource, shape = shape, scaleFocused = 1.03f)
             .clip(shape)
             .background(Color(0xD90B0F1C))
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .focusable(interactionSource = interactionSource)
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(if (compact) 8.dp else 10.dp),
+        verticalArrangement = Arrangement.spacedBy(if (compact) 8.dp else 10.dp),
     ) {
         Image(
             painter = painterResource(background.drawableResId()),
             contentDescription = background.label,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(120.dp)
-                .clip(RoundedCornerShape(16.dp)),
+                .height(if (compact) 74.dp else 120.dp)
+                .clip(RoundedCornerShape(if (compact) 14.dp else 16.dp)),
             contentScale = ContentScale.Crop,
         )
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(background.label, color = VantafynColors.Ink, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
-            if (selected || isFocused) Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = VantafynColors.Secondary, modifier = Modifier.size(19.dp))
+            Text(background.label, color = VantafynColors.Ink, fontSize = if (compact) 13.sp else 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1)
+            if (selected || isFocused) Icon(Icons.Rounded.CheckCircle, contentDescription = null, tint = VantafynColors.Secondary, modifier = Modifier.size(if (compact) 17.dp else 19.dp))
         }
     }
 }
@@ -825,6 +851,7 @@ private fun TvToggleRow(
     title: String,
     checked: Boolean,
     onClick: () -> Unit,
+    compact: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(18.dp)
@@ -836,29 +863,29 @@ private fun TvToggleRow(
             .background(Color.White.copy(alpha = 0.055f))
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .focusable(interactionSource = interactionSource)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = if (compact) 13.dp else 16.dp, vertical = if (compact) 9.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Text(title, color = VantafynColors.Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        TvSwitchVisual(checked)
+        Text(title, color = VantafynColors.Ink, fontSize = if (compact) 14.sp else 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        TvSwitchVisual(checked, compact = compact)
     }
 }
 
 @Composable
-private fun TvSwitchVisual(checked: Boolean) {
+private fun TvSwitchVisual(checked: Boolean, compact: Boolean = false) {
     Box(
         modifier = Modifier
-            .width(54.dp)
-            .height(30.dp)
+            .width(if (compact) 46.dp else 54.dp)
+            .height(if (compact) 26.dp else 30.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(if (checked) VantafynGradients.accentHorizontal() else Brush.horizontalGradient(listOf(Color.White.copy(alpha = 0.14f), Color.White.copy(alpha = 0.10f))))
-            .padding(4.dp),
+            .padding(if (compact) 3.dp else 4.dp),
         contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
     ) {
         Box(
             modifier = Modifier
-                .size(22.dp)
+                .size(if (compact) 20.dp else 22.dp)
                 .clip(CircleShape)
                 .background(Color.White.copy(alpha = 0.95f)),
         )
@@ -873,16 +900,18 @@ private fun <T> TvSegmentedSelector(
     label: (T) -> String,
     selected: T,
     enabled: Boolean = true,
+    compact: Boolean = false,
     onSelect: (T) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-        Text(title, color = VantafynColors.Muted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 9.dp)) {
+        Text(title, color = VantafynColors.Muted, fontSize = if (compact) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(7.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             entries.forEach { entry ->
                 TvChoicePill(
                     text = label(entry),
                     selected = entry == selected,
                     enabled = enabled,
+                    compact = compact,
                     onClick = { onSelect(entry) },
                 )
             }
@@ -895,13 +924,14 @@ private fun TvChoicePill(
     text: String,
     selected: Boolean,
     enabled: Boolean = true,
+    compact: Boolean = false,
     onClick: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val shape = RoundedCornerShape(999.dp)
     Box(
         modifier = Modifier
-            .widthIn(min = 96.dp)
+            .widthIn(min = if (compact) 80.dp else 96.dp)
             .vantafynTvFocusable(interactionSource, shape = shape, scaleFocused = 1.04f, borderWidth = if (selected) 2.dp else 1.5.dp)
             .clip(shape)
             .background(if (selected) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.055f))
@@ -914,7 +944,7 @@ private fun TvChoicePill(
             )
             .clickable(enabled = enabled, interactionSource = interactionSource, indication = null, onClick = onClick)
             .focusable(enabled = enabled, interactionSource = interactionSource)
-            .padding(horizontal = 18.dp, vertical = 10.dp),
+            .padding(horizontal = if (compact) 14.dp else 18.dp, vertical = if (compact) 8.dp else 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -924,7 +954,7 @@ private fun TvChoicePill(
                 selected -> VantafynColors.Ink
                 else -> VantafynColors.Muted
             },
-            fontSize = 14.sp,
+            fontSize = if (compact) 12.sp else 14.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.SemiBold,
             maxLines = 1,
         )

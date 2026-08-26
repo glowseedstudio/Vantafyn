@@ -44,14 +44,25 @@ fun VantafynTvGlassButton(
     isPrimary: Boolean = false,
     enabled: Boolean = true,
     compact: Boolean = false,
+    illuminatedPrimary: Boolean = false,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
 
     val scale by animateFloatAsState(
-        targetValue = if (isFocused && enabled) 1.04f else 1.0f,
+        targetValue = if (isFocused && enabled) {
+            if (illuminatedPrimary) 1.025f else 1.04f
+        } else {
+            1.0f
+        },
         animationSpec = spring(dampingRatio = 0.8f, stiffness = 420f),
         label = "TvButtonScale",
+    )
+
+    val glowAlpha by animateFloatAsState(
+        targetValue = if (isFocused && enabled) 1f else 0.62f,
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = 360f),
+        label = "TvButtonGlow",
     )
 
     val shape = RoundedCornerShape(if (compact) 15.dp else 18.dp)
@@ -62,7 +73,18 @@ fun VantafynTvGlassButton(
     val iconGap = if (compact) 6.dp else 10.dp
     val textSize = if (compact) 12.sp else 15.sp
 
-    val backgroundBrush = if (isPrimary) {
+    val useIlluminatedGlass = isPrimary && illuminatedPrimary
+    val backgroundBrush = if (useIlluminatedGlass) {
+        Brush.horizontalGradient(
+            listOf(
+                Color(0xEE132840),
+                Color(0xF2182032),
+                Color(0xF40A1020),
+                Color(0xF2181A34),
+                Color(0xEE2C143E),
+            ),
+        )
+    } else if (isPrimary) {
         if (enabled) {
             accentGradient
         } else {
@@ -83,7 +105,9 @@ fun VantafynTvGlassButton(
     }
 
     val borderStroke = if (isFocused && enabled) {
-        if (isPrimary) {
+        if (useIlluminatedGlass) {
+            BorderStroke(1.4.dp, Brush.horizontalGradient(VantafynFocusGradientColors.map { it.copy(alpha = 0.88f) }))
+        } else if (isPrimary) {
             BorderStroke(2.dp, Color.White.copy(alpha = 0.85f))
         } else {
             BorderStroke(2.dp, accentGradient)
@@ -115,6 +139,22 @@ fun VantafynTvGlassButton(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
+            modifier = if (useIlluminatedGlass && enabled) {
+                Modifier
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color(0xFF34D8F4).copy(alpha = 0.10f * glowAlpha),
+                                Color.Transparent,
+                                Color(0xFFFF4FD8).copy(alpha = 0.10f * glowAlpha),
+                            ),
+                        ),
+                        shape,
+                    )
+                    .padding(horizontal = 2.dp, vertical = 1.dp)
+            } else {
+                Modifier
+            },
         ) {
             if (icon != null) {
                 Icon(

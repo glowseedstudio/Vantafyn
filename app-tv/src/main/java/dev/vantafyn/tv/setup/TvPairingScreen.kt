@@ -17,7 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowLeft
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Refresh
@@ -326,7 +326,8 @@ fun TvPairingScreen(
                 VantafynTvGlassButton(
                     text = "Refresh Code",
                     icon = Icons.Rounded.Refresh,
-                    isPrimary = isExpired,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     modifier = Modifier.focusRequester(refreshFocusRequester),
                     onClick = {
                         pairingCode = pairingServer.refreshCode()
@@ -338,14 +339,16 @@ fun TvPairingScreen(
                 VantafynTvGlassButton(
                     text = "Sign In Manually",
                     icon = Icons.Rounded.Tune,
-                    isPrimary = false,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onManualSetup,
                 )
 
                 VantafynTvGlassButton(
                     text = "Back",
-                    icon = Icons.AutoMirrored.Rounded.ArrowBack,
-                    isPrimary = false,
+                    icon = Icons.AutoMirrored.Rounded.KeyboardArrowLeft,
+                    isPrimary = true,
+                    illuminatedPrimary = true,
                     onClick = onBack,
                 )
             }

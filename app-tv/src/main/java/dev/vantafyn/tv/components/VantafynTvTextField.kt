@@ -14,6 +14,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -48,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -57,6 +59,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
@@ -92,7 +100,17 @@ fun VantafynTvTextField(
     onFocusChange: ((Boolean) -> Unit)? = null,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
+    val isInteractionFocused by interactionSource.collectIsFocusedAsState()
+    val editFocusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var hasFieldFocus by remember { mutableStateOf(false) }
+    var isEditing by remember { mutableStateOf(false) }
+    val isFocused = hasFieldFocus || isInteractionFocused
+    fun beginEditing() {
+        if (enabled) {
+            isEditing = true
+        }
+    }
 
     val fieldId = remember { UUID.randomUUID().toString() }
     val isSensitive = visualTransformation != VisualTransformation.None
@@ -146,8 +164,15 @@ fun VantafynTvTextField(
         }
     }
 
-    LaunchedEffect(isFocused) {
+    LaunchedEffect(hasFieldFocus) {
         onFocusChange?.invoke(isFocused)
+    }
+
+    LaunchedEffect(isEditing, enabled) {
+        if (isEditing && enabled) {
+            editFocusRequester.requestFocus()
+            keyboardController?.show()
+        }
     }
 
     val scale by animateFloatAsState(
@@ -173,6 +198,32 @@ fun VantafynTvTextField(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                .onFocusChanged { focusState ->
+                    hasFieldFocus = focusState.hasFocus
+                    if (!focusState.hasFocus) {
+                        isEditing = false
+                    }
+                }
+                .focusable(enabled = enabled, interactionSource = interactionSource)
+                .onPreviewKeyEvent { event ->
+                    val isSelect = event.key == Key.DirectionCenter ||
+                        event.key == Key.Enter ||
+                        event.key == Key.NumPadEnter
+                    if (enabled && !isEditing && isSelect && event.type == KeyEventType.KeyDown) {
+                        beginEditing()
+                        true
+                    } else {
+                        false
+                    }
+                }
+                .clickable(
+                    enabled = enabled,
+                    interactionSource = interactionSource,
+                    indication = null,
+                ) {
+                    beginEditing()
+                }
                 .scale(scale)
                 .clip(shape)
                 .background(containerColor)
@@ -257,7 +308,7 @@ fun VantafynTvTextField(
                     onValueChange = onValueChange,
                     modifier = Modifier
                         .weight(1f)
-                        .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier),
+                        .focusRequester(editFocusRequester),
                     textStyle = TextStyle(
                         color = VantafynColors.Ink,
                         fontSize = 16.sp,
@@ -265,7 +316,7 @@ fun VantafynTvTextField(
                     ),
                     cursorBrush = SolidColor(Color(0xFF21D8FF)),
                     singleLine = true,
-                    enabled = enabled,
+                    enabled = enabled && isEditing,
                     visualTransformation = visualTransformation,
                     keyboardOptions = keyboardOptions,
                     keyboardActions = keyboardActions,
