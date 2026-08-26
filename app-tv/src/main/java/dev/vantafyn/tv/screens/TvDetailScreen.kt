@@ -15,7 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Favorite
-import androidx.compose.material.icons.rounded.FavoriteBorder
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material3.Text
@@ -247,8 +247,8 @@ fun TvDetailScreen(
                 }
 
                 VantafynTvGlassButton(
-                    text = if (detail.isFavorite) "Favorited" else "Favorite",
-                    icon = if (detail.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                    text = if (detail.isFavorite) "In My List" else "+ My List",
+                    icon = if (detail.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.Add,
                     isPrimary = false,
                     onClick = onToggleFavorite,
                 )

@@ -204,8 +204,8 @@ fun TvShellScreen(
 
                         TvRoute.Favorites -> {
                             TvPlaceholderScreen(
-                                title = "Favorites & My List",
-                                description = "Your favorite movies, series, and music on this Jellyfin server.",
+                                title = "My List",
+                                description = "Movies, series, and music you've added from this Jellyfin server.",
                                 icon = Icons.Rounded.Favorite,
                                 modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )

@@ -45,12 +45,12 @@ data class TvNavigationItem(
                 )
             )
 
-            // 2. Favorites / My List
+            // 2. My List
             if (hasFavorites) {
                 list.add(
                     TvNavigationItem(
                         route = TvRoute.Favorites,
-                        label = "Favorites",
+                        label = "My List",
                         icon = Icons.Rounded.Favorite,
                     )
                 )
