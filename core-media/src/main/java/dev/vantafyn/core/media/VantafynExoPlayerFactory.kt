@@ -19,10 +19,10 @@ object VantafynExoPlayerFactory {
     fun musicLoadControl(): DefaultLoadControl =
         DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                /* minBufferMs = */ 60_000,
-                /* maxBufferMs = */ 300_000,
-                /* bufferForPlaybackMs = */ 1_000,
-                /* bufferForPlaybackAfterRebufferMs = */ 2_000,
+                /* minBufferMs = */ 30_000,
+                /* maxBufferMs = */ 120_000,
+                /* bufferForPlaybackMs = */ 500,
+                /* bufferForPlaybackAfterRebufferMs = */ 1_000,
             )
             .setBackBuffer(
                 /* backBufferDurationMs = */ 30_000,
@@ -30,9 +30,15 @@ object VantafynExoPlayerFactory {
             )
             .build()
 
-    fun musicBuilder(context: Context): ExoPlayer.Builder =
-        ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+    @OptIn(UnstableApi::class)
+    fun musicBuilder(context: Context): ExoPlayer.Builder {
+        val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+            VantafynMediaCache.getCacheDataSourceFactory(context),
+        )
+        return ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+            .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(musicLoadControl())
+    }
 
     fun builder(context: Context): ExoPlayer.Builder =
         ExoPlayer.Builder(context.applicationContext, renderersFactory(context))

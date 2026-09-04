@@ -53,7 +53,7 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
         if (bridgeJob != null) return
         bridgeJob = scope.launch {
             castTarget.state.collectLatest { castState ->
-                _state.update { it.copy(castState = castState) }
+                _state.update { current -> current.copy(castState = castState) }
                 if (castState.connectionState == RemoteConnectionState.Connected) {
                     transferCurrentMusicIfNeeded(musicController.state.value, castState)
                 } else if (castState.connectionState == RemoteConnectionState.Disconnected) {
@@ -67,8 +67,7 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
                 val outputState = _state.value
                 if (
                     localState.isPlaying &&
-                    outputState.castState.connectionState == RemoteConnectionState.Connected &&
-                    outputState.activeOutput != PlaybackOutputType.GoogleCast
+                    outputState.castState.connectionState == RemoteConnectionState.Connected
                 ) {
                     transferCurrentMusicIfNeeded(localState, outputState.castState)
                 }
@@ -94,6 +93,7 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
     fun playPause() {
         scope.launch {
             runCatching {
+                requireActiveCastMedia()
                 if (castTarget.state.value.isPlaying) castTarget.pause() else castTarget.play()
             }.onFailure { setError(it) }
         }
@@ -101,13 +101,17 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
 
     fun seekTo(positionMs: Long) {
         scope.launch {
-            runCatching { castTarget.seek(positionMs) }.onFailure { setError(it) }
+            runCatching {
+                requireActiveCastMedia()
+                castTarget.seek(positionMs)
+            }.onFailure { setError(it) }
         }
     }
 
     fun selectCastSubtitle(trackId: Long?) {
         scope.launch {
             runCatching {
+                requireActiveCastMedia()
                 castTarget.selectSubtitleTrack(trackId)
                 _state.update { it.copy(lastErrorMessage = null) }
             }.onFailure {
@@ -118,13 +122,19 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
 
     fun next() {
         scope.launch {
-            runCatching { castTarget.skipNext() }.onFailure { setError(it) }
+            runCatching {
+                requireActiveCastMedia()
+                castTarget.skipNext()
+            }.onFailure { setError(it) }
         }
     }
 
     fun previous() {
         scope.launch {
-            runCatching { castTarget.skipPrevious() }.onFailure { setError(it) }
+            runCatching {
+                requireActiveCastMedia()
+                castTarget.skipPrevious()
+            }.onFailure { setError(it) }
         }
     }
 
@@ -140,7 +150,21 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
                 val remoteItem = item.toVideoRemoteQueueItem(artworkUrl, backdropUrl)
                 castTarget.load(RemotePlaybackRequest(remoteItem, startPositionMs, autoplay = true))
                 loadedSessionId = "video:${item.itemId}"
-                _state.update { it.copy(activeOutput = PlaybackOutputType.GoogleCast, lastErrorMessage = null) }
+                _state.update {
+                    it.copy(
+                        activeOutput = PlaybackOutputType.GoogleCast,
+                        castState = it.castState.copy(
+                            currentItemId = item.itemId,
+                            positionMs = startPositionMs.coerceAtLeast(0L),
+                            durationMs = item.durationMs ?: it.castState.durationMs,
+                            isPlaying = true,
+                            subtitleTracks = remoteItem.castSubtitleTracks,
+                            activeSubtitleTrackId = remoteItem.activeSubtitleTrackId,
+                            audioTracks = remoteItem.castAudioTracks,
+                        ),
+                        lastErrorMessage = null,
+                    )
+                }
             }.onFailure { error ->
                 _state.update { it.copy(activeOutput = PlaybackOutputType.Local) }
                 setError(error)
@@ -156,24 +180,87 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
         }
     }
 
+    fun playQueueIndex(index: Int) {
+        scope.launch {
+            runCatching {
+                requireActiveCastMedia()
+                castTarget.playQueueIndex(index)
+            }.onFailure { setError(it) }
+        }
+    }
+
+    fun loadMusicQueue(tracks: List<VantafynMusicTrack>, startIndex: Int, startPositionMs: Long) {
+        scope.launch {
+            if (tracks.isEmpty()) return@launch
+            val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
+            val track = tracks[safeIndex]
+            val sessionId = "${track.id}:$safeIndex:${tracks.size}"
+            val queue = tracks.map { it.toRemoteQueueItem() }
+            val position = startPositionMs.coerceAtLeast(0L)
+            // Immediately suspend local phone audio hardware to avoid speaker bleed
+            musicController.suspendLocalPlaybackForCast(position)
+            runCatching {
+                castTarget.replaceQueue(queue, safeIndex, position)
+                loadedSessionId = sessionId
+                _state.update {
+                    it.copy(
+                        activeOutput = PlaybackOutputType.GoogleCast,
+                        castState = it.castState.copy(
+                            currentItemId = track.id.toString(),
+                            currentQueueIndex = safeIndex,
+                            positionMs = position,
+                            durationMs = track.durationMs ?: it.castState.durationMs,
+                            isPlaying = true,
+                        ),
+                        lastErrorMessage = null,
+                    )
+                }
+            }.onFailure { error ->
+                loadedSessionId = null
+                _state.update { it.copy(activeOutput = PlaybackOutputType.Local) }
+                setError(error)
+            }
+        }
+    }
+
     private suspend fun transferCurrentMusicIfNeeded(localState: VantafynMusicPlaybackState, castState: RemotePlaybackState) {
         val track = localState.currentTrack ?: return
         val sessionId = "${track.id}:${localState.queueIndex}:${localState.queue.size}"
-        if (loadedSessionId == sessionId || castState.currentItemId == track.id.toString()) return
+        if (loadedSessionId == sessionId) {
+            musicController.suspendLocalPlaybackForCast(localState.positionMs)
+            return
+        }
         val queue = localState.queue.map { it.toRemoteQueueItem() }
         val position = localState.positionMs
+        // Suspend local phone audio before loading remote queue to avoid dual playback
+        musicController.suspendLocalPlaybackForCast(position)
         runCatching {
             castTarget.replaceQueue(queue, localState.queueIndex, position)
-            if (localState.repeatMode != VantafynMusicRepeatMode.Off || localState.shuffleEnabled) {
-                // Default receiver support varies; local flags are represented in state but queue-load is conservative.
-            }
             loadedSessionId = sessionId
-            musicController.stop(clearQueue = false, reason = VantafynMusicStopReason.Background)
-            _state.update { it.copy(activeOutput = PlaybackOutputType.GoogleCast, lastErrorMessage = null) }
+            _state.update {
+                it.copy(
+                    activeOutput = PlaybackOutputType.GoogleCast,
+                    castState = it.castState.copy(
+                        currentItemId = track.id.toString(),
+                        currentQueueIndex = localState.queueIndex,
+                        positionMs = position.coerceAtLeast(0L),
+                        durationMs = track.durationMs ?: it.castState.durationMs,
+                        isPlaying = true,
+                    ),
+                    lastErrorMessage = null,
+                )
+            }
         }.onFailure { error ->
             loadedSessionId = null
             _state.update { it.copy(activeOutput = PlaybackOutputType.Local) }
             setError(error)
+        }
+    }
+
+    private fun requireActiveCastMedia() {
+        val output = _state.value
+        if (output.activeOutput != PlaybackOutputType.GoogleCast || output.castState.currentItemId.isNullOrBlank()) {
+            throw CastCommandException(CastError.NoCompatibleMediaSource)
         }
     }
 
@@ -218,24 +305,35 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
         )
     }
 
-    private fun contentTypeFor(url: String): String =
-        when (url.substringBefore('?').substringAfterLast('.', "").lowercase()) {
-            "m4a", "aac" -> "audio/aac"
-            "flac" -> "audio/flac"
-            "opus" -> "audio/ogg"
-            "ogg" -> "audio/ogg"
-            "mp4", "m4b" -> "audio/mp4"
+    private fun contentTypeFor(url: String): String {
+        val lower = url.lowercase()
+        val path = url.substringBefore('?').lowercase()
+        val formatParam = url.substringAfter('?', "").split("&")
+            .firstOrNull { it.startsWith("format=", ignoreCase = true) }
+            ?.substringAfter("=")?.lowercase()
+        return when {
+            formatParam in setOf("flac") || path.endsWith(".flac") || lower.contains(".flac") -> "audio/flac"
+            formatParam in setOf("aac", "m4a") || path.endsWith(".m4a") || path.endsWith(".aac") -> "audio/aac"
+            formatParam in setOf("opus") || path.endsWith(".opus") || lower.contains(".opus") -> "audio/ogg"
+            formatParam in setOf("ogg", "vorbis") || path.endsWith(".ogg") || lower.contains(".ogg") -> "audio/ogg"
+            formatParam in setOf("wav") || path.endsWith(".wav") || lower.contains(".wav") -> "audio/wav"
             else -> "audio/mpeg"
         }
+    }
 
-    private fun videoContentTypeFor(url: String, isLive: Boolean): String =
-        when {
+    private fun videoContentTypeFor(url: String, isLive: Boolean): String {
+        val lower = url.lowercase()
+        val path = url.substringBefore('?').lowercase()
+        return when {
             isLive -> "application/x-mpegURL"
-            url.substringBefore('?').endsWith(".m3u8", ignoreCase = true) -> "application/x-mpegURL"
-            url.substringBefore('?').substringAfterLast('.', "").lowercase() in setOf("mp4", "m4v", "mov") -> "video/mp4"
-            url.substringBefore('?').substringAfterLast('.', "").lowercase() == "webm" -> "video/webm"
+            path.endsWith(".m3u8") || lower.contains(".m3u8") || lower.contains("/hls/") || lower.contains("protocol=hls") -> "application/x-mpegURL"
+            path.endsWith(".mpd") || lower.contains(".mpd") || lower.contains("/dash/") -> "application/dash+xml"
+            path.endsWith(".webm") || lower.contains(".webm") -> "video/webm"
+            path.endsWith(".mkv") || lower.contains(".mkv") -> "video/x-matroska"
+            path.endsWith(".mp4") || path.endsWith(".m4v") || path.endsWith(".mov") -> "video/mp4"
             else -> "video/mp4"
         }
+    }
 
     private fun setError(error: Throwable) {
         val message = when ((error as? CastCommandException)?.error) {

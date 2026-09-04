@@ -77,6 +77,8 @@ data class VantafynPlaybackItem(
     val previousCandidate: UpNextCandidate? = null,
     val upNextCandidate: UpNextCandidate? = null,
     val autoplaySettings: AutoplaySettings = AutoplaySettings(),
+    val posterUrl: String? = null,
+    val backdropUrl: String? = null,
     val mediaSegments: List<JellyfinMediaSegment> = emptyList(),
     val mediaSegmentBehaviors: Map<JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior> = emptyMap(),
     val continuousPlaybackStartedAtMs: Long = System.currentTimeMillis(),

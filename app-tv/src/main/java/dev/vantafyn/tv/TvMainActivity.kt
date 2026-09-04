@@ -134,6 +134,13 @@ private fun TvAppRoot(
                 onOpenMediaDetails = { id ->
                     viewModel.openMedia(id)
                 },
+                onPreviewMediaDetails = { id ->
+                    val hasCurrentDetail = state.mediaDetail?.id == id
+                    val isLoadingCurrentDetail = state.selectedMediaId == id && state.isMediaDetailLoading
+                    if (!hasCurrentDetail && !isLoadingCurrentDetail) {
+                        viewModel.openMedia(id)
+                    }
+                },
                 onPlayMediaId = { id ->
                     viewModel.openMedia(id)
                     viewModel.startPlayback()
@@ -143,6 +150,9 @@ private fun TvAppRoot(
                 },
                 onStartPlaybackFromBeginning = {
                     viewModel.startPlaybackFromBeginning()
+                },
+                onToggleMediaFavorite = {
+                    viewModel.toggleMediaFavorite()
                 },
                 onSearchQueryChange = { query ->
                     viewModel.onSearchQueryChanged(query)

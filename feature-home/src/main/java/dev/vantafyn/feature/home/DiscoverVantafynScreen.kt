@@ -374,6 +374,7 @@ private fun DiscoverFeatureCard(
                                         "open_admin" -> "Open Admin"
                                         "open_send_text_to_tv" -> "Send Text to TV"
                                         "open_pair_tv" -> "Pair a TV"
+                                        "open_ambient_preview" -> "Preview Ambient Display"
                                         else -> "Open"
                                     },
                                     color = VantafynColors.Primary,

@@ -14,9 +14,13 @@ import java.util.TimeZone
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
@@ -431,26 +435,66 @@ class SdkJellyfinAuthRepository(
         expectedServerId: String?,
     ): JellyfinServerConfig {
         val endpoints = serverEndpointCandidates(localUrl, remoteUrl)
-        var lastFailure: Throwable? = null
-        endpoints.forEach { endpoint ->
-            endpoint.candidates.forEach { normalizedUrl ->
-                try {
-                    val api = jellyfin.createApi(baseUrl = normalizedUrl)
-                    val systemInfo = withTimeout(CONNECTION_TIMEOUT_MS) {
-                        getPublicSystemInfo(api, JellyfinServerConfig(normalizedUrl))
-                    }
-                    validateSameServer(expectedServerId, systemInfo.id)
-                    return JellyfinServerConfig(
-                        url = normalizedUrl,
-                        name = systemInfo.name,
-                        version = systemInfo.version,
-                        serverId = systemInfo.id,
-                        localUrl = endpoint.normalizedLocal,
-                        remoteUrl = endpoint.normalizedRemote,
-                    )
-                } catch (throwable: Throwable) {
-                    lastFailure = throwable
+        if (endpoints.size == 1) {
+            return probeEndpoint(endpoints[0], expectedServerId)
+        }
+
+        return coroutineScope {
+            val localDeferred = async { runCatching { probeEndpoint(endpoints[0], expectedServerId) } }
+            val remoteDeferred = async { runCatching { probeEndpoint(endpoints[1], expectedServerId) } }
+
+            val firstResult = select<Result<JellyfinServerConfig>> {
+                localDeferred.onAwait { it }
+                remoteDeferred.onAwait { it }
+            }
+
+            if (firstResult.isSuccess) {
+                val winner = firstResult.getOrThrow()
+                if (winner.url in endpoints[0].candidates) {
+                    remoteDeferred.cancel()
+                    return@coroutineScope winner
                 }
+                // Remote won first. If local responds within a quick grace period, prefer local
+                val localQuick = withTimeoutOrNull(200L) { localDeferred.await() }
+                if (localQuick?.isSuccess == true) {
+                    return@coroutineScope localQuick.getOrThrow()
+                }
+                localDeferred.cancel()
+                return@coroutineScope winner
+            }
+
+            // First completed candidate failed, wait for second
+            val secondResult = if (localDeferred.isCompleted) remoteDeferred.await() else localDeferred.await()
+            if (secondResult.isSuccess) {
+                return@coroutineScope secondResult.getOrThrow()
+            }
+            throw secondResult.exceptionOrNull() ?: firstResult.exceptionOrNull()
+                ?: IllegalArgumentException("Enter a local or remote Jellyfin server address")
+        }
+    }
+
+    private suspend fun probeEndpoint(
+        endpoint: ServerEndpointCandidate,
+        expectedServerId: String?,
+    ): JellyfinServerConfig {
+        var lastFailure: Throwable? = null
+        for (normalizedUrl in endpoint.candidates) {
+            try {
+                val api = jellyfin.createApi(baseUrl = normalizedUrl)
+                val systemInfo = withTimeout(CONNECTION_TIMEOUT_MS) {
+                    getPublicSystemInfo(api, JellyfinServerConfig(normalizedUrl))
+                }
+                validateSameServer(expectedServerId, systemInfo.id)
+                return JellyfinServerConfig(
+                    url = normalizedUrl,
+                    name = systemInfo.name,
+                    version = systemInfo.version,
+                    serverId = systemInfo.id,
+                    localUrl = endpoint.normalizedLocal,
+                    remoteUrl = endpoint.normalizedRemote,
+                )
+            } catch (throwable: Throwable) {
+                lastFailure = throwable
             }
         }
         throw lastFailure ?: IllegalArgumentException("Enter a local or remote Jellyfin server address")
@@ -1821,6 +1865,17 @@ class SdkJellyfinMusicRepository(
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
                 api.playlistsApi.removeItemFromPlaylist(playlistId.toString(), playlistItemIds)
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun movePlaylistItem(session: JellyfinSession, playlistId: java.util.UUID, playlistItemId: String, newIndex: Int): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.playlistsApi.moveItem(playlistId.toString(), playlistItemId, newIndex)
                 JellyfinResult.Success(Unit)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -3957,18 +4012,19 @@ private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): 
         album = album,
         albumId = albumId,
         durationMs = runTimeTicks?.let { it / 10_000L },
+        genres = genres.orEmpty(),
         artworkUrl = primaryImageUrl(api, 520),
         hasLyrics = hasLyrics == true,
         streamUrl = api.universalAudioApi.getUniversalAudioStreamUrl(
             itemId = id,
-            container = listOf("mp3", "aac", "flac", "opus", "vorbis", "m4a"),
+            container = listOf("flac", "alac", "wav", "m4a", "aac", "mp3", "opus", "ogg", "webma", "webm"),
             mediaSourceId = null,
             deviceId = null,
             userId = session.user.id,
-            audioCodec = "aac,mp3,flac,opus,vorbis",
+            audioCodec = "flac,alac,wav,aac,mp3,opus,vorbis",
             maxAudioChannels = 2,
             transcodingAudioChannels = null,
-            maxStreamingBitrate = 384_000,
+            maxStreamingBitrate = null,
             audioBitRate = null,
             startTimeTicks = null,
             transcodingContainer = "mp3",
@@ -4553,20 +4609,20 @@ private fun googleCastDeviceProfile(): DeviceProfile =
     DeviceProfile(
         name = "Vantafyn Google Cast",
         id = null,
-        maxStreamingBitrate = 20_000_000,
-        maxStaticBitrate = 40_000_000,
+        maxStreamingBitrate = 40_000_000,
+        maxStaticBitrate = 60_000_000,
         musicStreamingTranscodingBitrate = 320_000,
-        maxStaticMusicBitrate = 1_000_000,
+        maxStaticMusicBitrate = 2_000_000,
         directPlayProfiles = listOf(
             DirectPlayProfile(
                 container = "mp4,m4v,webm",
-                audioCodec = "aac,mp3,ac3,eac3,opus,vorbis",
-                videoCodec = "h264,vp8,vp9",
+                audioCodec = "aac,mp3,ac3,eac3,opus,vorbis,flac",
+                videoCodec = "h264,hevc,h265,vp8,vp9,av1",
                 type = DlnaProfileType.VIDEO,
             ),
             DirectPlayProfile(
-                container = "mp3,aac,m4a,webma,webm,ogg",
-                audioCodec = "aac,mp3,opus,vorbis",
+                container = "mp3,aac,m4a,flac,webma,webm,ogg,wav",
+                audioCodec = "aac,mp3,flac,opus,vorbis,pcm,wav",
                 videoCodec = null,
                 type = DlnaProfileType.AUDIO,
             ),
@@ -4588,6 +4644,25 @@ private fun googleCastDeviceProfile(): DeviceProfile =
                 minSegments = 2,
                 segmentLength = 6,
                 breakOnNonKeyFrames = true,
+                conditions = emptyList(),
+                enableAudioVbrEncoding = true,
+            ),
+            TranscodingProfile(
+                container = "mp3",
+                type = DlnaProfileType.AUDIO,
+                videoCodec = "",
+                audioCodec = "mp3",
+                protocol = MediaStreamProtocol.HTTP,
+                estimateContentLength = false,
+                enableMpegtsM2TsMode = false,
+                transcodeSeekInfo = TranscodeSeekInfo.AUTO,
+                copyTimestamps = false,
+                context = EncodingContext.STREAMING,
+                enableSubtitlesInManifest = false,
+                maxAudioChannels = "2",
+                minSegments = 0,
+                segmentLength = 0,
+                breakOnNonKeyFrames = false,
                 conditions = emptyList(),
                 enableAudioVbrEncoding = true,
             ),

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,7 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.AdminPanelSettings
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PowerSettingsNew
@@ -44,8 +44,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -75,11 +79,16 @@ import dev.vantafyn.tv.nav.toNavigationItem
 import dev.vantafyn.tv.screens.TvDetailScreen
 import dev.vantafyn.tv.screens.TvHomeScreen
 import dev.vantafyn.tv.screens.TvLibraryScreen
+import dev.vantafyn.tv.screens.TvMyListScreen
 import dev.vantafyn.tv.screens.TvPlaceholderScreen
 import dev.vantafyn.tv.screens.TvSearchScreen
 import dev.vantafyn.tv.screens.TvSettingsScreen
 import dev.vantafyn.tv.sidebar.VantafynTvSidebar
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import java.util.UUID
+import kotlinx.coroutines.delay
 import dev.vantafyn.core.ui.R as CoreUiR
 
 @Composable
@@ -89,9 +98,11 @@ fun TvShellScreen(
     modifier: Modifier = Modifier,
     navState: TvNavigationState = rememberTvNavigationState(),
     onOpenMediaDetails: (UUID) -> Unit = {},
+    onPreviewMediaDetails: (UUID) -> Unit = {},
     onPlayMediaId: (UUID) -> Unit = {},
     onStartPlayback: () -> Unit = {},
     onStartPlaybackFromBeginning: () -> Unit = {},
+    onToggleMediaFavorite: () -> Unit = {},
     onSearchQueryChange: (String) -> Unit = {},
     onSelectProfile: (SavedProfile) -> Unit = {},
     onRefreshHome: () -> Unit = {},
@@ -203,11 +214,20 @@ fun TvShellScreen(
                         }
 
                         TvRoute.Favorites -> {
-                            TvPlaceholderScreen(
-                                title = "My List",
-                                description = "Movies, series, and music you've added from this Jellyfin server.",
-                                icon = Icons.Rounded.Favorite,
-                                modifier = Modifier.padding(start = scaffoldSidebarInset),
+                            TvMyListScreen(
+                                state = state,
+                                session = session,
+                                sidebarContentOffset = sidebarExpandedContentOffset,
+                                onOpenMedia = { id ->
+                                    onOpenMediaDetails(id)
+                                    navState.navigateTo(TvRoute.Details(id))
+                                },
+                                onPlayMediaId = { id ->
+                                    onPlayMediaId(id)
+                                },
+                                onPreviewMedia = { id ->
+                                    onPreviewMediaDetails(id)
+                                },
                             )
                         }
 
@@ -322,8 +342,10 @@ fun TvShellScreen(
                                 contentStartPadding = fullBleedContentStartPadding,
                                 onPlay = onStartPlayback,
                                 onPlayFromStart = onStartPlaybackFromBeginning,
-                                onToggleFavorite = {
-                                    // Handled via ViewModel
+                                onToggleFavorite = onToggleMediaFavorite,
+                                onOpenMedia = { id ->
+                                    onOpenMediaDetails(id)
+                                    navState.navigateTo(TvRoute.Details(id))
                                 },
                             )
                         }
@@ -356,6 +378,10 @@ fun TvShellScreen(
                 onProfileClicked = {
                     navState.navigateToFromDrawer(TvRoute.Settings)
                 },
+            )
+
+            TvTopClockOverlay(
+                modifier = Modifier.align(Alignment.TopEnd),
             )
         }
     }
@@ -425,6 +451,71 @@ fun TvShellScreen(
         }
     }
 }
+
+@Composable
+private fun TvTopClockOverlay(
+    modifier: Modifier = Modifier,
+) {
+    var minuteTick by remember { mutableStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val now = System.currentTimeMillis()
+            delay(60_000L - (now % 60_000L))
+            minuteTick = System.currentTimeMillis()
+        }
+    }
+
+    val timeText = remember(minuteTick) {
+        LocalTime.now().format(TvClockFormatter)
+            .lowercase(Locale.getDefault())
+            .replace("am", "AM")
+            .replace("pm", "PM")
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(88.dp)
+            .background(
+                Brush.verticalGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color(0xA0060A12),
+                        0.42f to Color(0x52060A12),
+                        0.74f to Color(0x18060A12),
+                        1.00f to Color.Transparent,
+                    ),
+                ),
+            ),
+    ) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 18.dp, end = 32.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color(0x66060A12))
+                .padding(horizontal = 14.dp, vertical = 6.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = timeText,
+                color = VantafynColors.Ink.copy(alpha = 0.90f),
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.sp,
+                style = TextStyle(
+                    shadow = Shadow(
+                        color = Color.Black.copy(alpha = 0.55f),
+                        offset = Offset(0f, 1.5f),
+                        blurRadius = 8f,
+                    ),
+                ),
+            )
+        }
+    }
+}
+
+private val TvClockFormatter: DateTimeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
 
 private fun VantafynAppBackground.tvDrawableResId(): Int =
     when (this) {

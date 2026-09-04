@@ -1,6 +1,6 @@
 package dev.vantafyn.core.cast
 
-import java.net.URI
+import android.net.Uri
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 
@@ -41,9 +41,13 @@ object CastUrlSecurity {
     }
 
     fun isCastReachableServerAddress(url: String): Boolean {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return false
-        val host = uri.host?.lowercase() ?: return false
-        if (uri.scheme?.lowercase() !in setOf("http", "https")) return false
+        if (url.isBlank()) return false
+        val scheme = url.substringBefore("://", "").lowercase()
+        if (scheme !in setOf("http", "https")) return false
+        val afterScheme = url.substringAfter("://", "")
+        val hostAndPort = afterScheme.substringBefore('/').substringBefore('?').substringBefore('#')
+        val host = hostAndPort.substringBefore(':').lowercase().trim()
+        if (host.isBlank()) return false
         return host !in loopbackHosts &&
             !host.endsWith(".localhost") &&
             !host.contains("10.0.2.2")

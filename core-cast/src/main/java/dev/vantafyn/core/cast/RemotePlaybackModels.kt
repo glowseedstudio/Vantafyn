@@ -84,6 +84,7 @@ data class RemotePlaybackState(
     val connectionState: RemoteConnectionState = RemoteConnectionState.Disconnected,
     val receiverName: String? = null,
     val receiverId: String? = null,
+    val hasActiveMedia: Boolean = false,
     val currentItemId: String? = null,
     val currentQueueIndex: Int = 0,
     val positionMs: Long = 0L,

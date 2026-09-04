@@ -15,6 +15,9 @@ import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
 
@@ -23,6 +26,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     private val repositories = JellyfinRepositoryProvider(appContext)
     private var session: JellyfinSession? = null
     private var home: JellyfinMusicHome? = null
+    private val sessionMutex = Mutex()
     private val albumTracks = mutableMapOf<UUID, List<JellyfinMusicTrack>>()
     private val artistAlbums = mutableMapOf<UUID, List<JellyfinMusicAlbum>>()
     private val playlistTracks = mutableMapOf<UUID, List<JellyfinMusicTrack>>()
@@ -36,22 +40,80 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
         )
 
-    fun getChildren(parentId: String): List<MediaItem> =
-        runBlocking(Dispatchers.IO) {
+    fun rootChildren(): List<MediaItem> =
+        listOf(
+            browsableItem(RECENT_ID, "Recently added", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
+            browsableItem(ALBUMS_ID, "Albums", null, MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
+            browsableItem(ARTISTS_ID, "Artists", null, MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS),
+            browsableItem(PLAYLISTS_ID, "Playlists", null, MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
+            browsableItem(SONGS_ID, "Songs", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
+            browsableItem(QUEUE_ID, "Now playing queue", null, MediaMetadata.MEDIA_TYPE_PLAYLIST),
+        )
+
+    suspend fun getChildrenAsync(parentId: String): List<MediaItem> =
+        withContext(Dispatchers.IO) {
             when {
-                !ensureReady() -> listOf(signInItem())
                 parentId == ROOT_ID -> rootChildren()
+                parentId == QUEUE_ID -> MusicPlaybackController.get(appContext).state.value.queue.map { it.toMediaItemForBrowse(QUEUE_ID) }
+                !ensureReady() -> listOf(signInItem())
                 parentId == RECENT_ID -> home.orEmpty().recentlyAdded.map { it.toPlayableMediaItem(RECENT_ID) }
                 parentId == SONGS_ID -> home.orEmpty().songs.map { it.toPlayableMediaItem(SONGS_ID) }
                 parentId == ALBUMS_ID -> home.orEmpty().albums.map { it.toAlbumItem() }
                 parentId == ARTISTS_ID -> home.orEmpty().artists.map { it.toArtistItem() }
                 parentId == PLAYLISTS_ID -> home.orEmpty().playlists.map { it.toPlaylistItem() }
-                parentId == QUEUE_ID -> MusicPlaybackController.get(appContext).state.value.queue.map { it.toMediaItemForBrowse(QUEUE_ID) }
                 parentId.startsWith(ALBUM_PREFIX) -> tracksForAlbum(parentId.removePrefix(ALBUM_PREFIX)).map { it.toPlayableMediaItem(parentId) }
                 parentId.startsWith(ARTIST_PREFIX) -> albumsForArtist(parentId.removePrefix(ARTIST_PREFIX)).map { it.toAlbumItem() }
                 parentId.startsWith(PLAYLIST_PREFIX) -> tracksForPlaylist(parentId.removePrefix(PLAYLIST_PREFIX)).map { it.toPlayableMediaItem(parentId) }
                 parentId.startsWith(SEARCH_PREFIX) -> searchResults[parentId.removePrefix(SEARCH_PREFIX).lowercase()].orEmpty().map { it.toPlayableMediaItem(parentId) }
                 else -> emptyList()
+            }
+        }
+
+    fun getChildren(parentId: String): List<MediaItem> =
+        if (parentId == ROOT_ID) {
+            rootChildren()
+        } else if (parentId == QUEUE_ID) {
+            MusicPlaybackController.get(appContext).state.value.queue.map { it.toMediaItemForBrowse(QUEUE_ID) }
+        } else {
+            runBlocking(Dispatchers.IO) { getChildrenAsync(parentId) }
+        }
+
+    suspend fun getItemAsync(mediaId: String): MediaItem? =
+        withContext(Dispatchers.IO) {
+            when {
+                mediaId == ROOT_ID -> rootItem()
+                mediaId == RECENT_ID -> browsableItem(RECENT_ID, "Recently added", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                mediaId == ALBUMS_ID -> browsableItem(ALBUMS_ID, "Albums", null, MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS)
+                mediaId == ARTISTS_ID -> browsableItem(ARTISTS_ID, "Artists", null, MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS)
+                mediaId == PLAYLISTS_ID -> browsableItem(PLAYLISTS_ID, "Playlists", null, MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS)
+                mediaId == SONGS_ID -> browsableItem(SONGS_ID, "Songs", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
+                mediaId == QUEUE_ID -> browsableItem(QUEUE_ID, "Now playing queue", null, MediaMetadata.MEDIA_TYPE_PLAYLIST)
+                mediaId.startsWith(TRACK_PREFIX) -> {
+                    val resolved = resolveQueueAsync(mediaId)
+                    resolved.tracks.getOrNull(resolved.startIndex)?.toPlayableMediaItem(resolved.containerId)
+                }
+                mediaId.startsWith(ALBUM_PREFIX) -> {
+                    val albumId = mediaId.removePrefix(ALBUM_PREFIX).toUuidOrNull()
+                    if (albumId != null) {
+                        ensureReady()
+                        home?.albums?.firstOrNull { it.id == albumId }?.toAlbumItem()
+                    } else null
+                }
+                mediaId.startsWith(ARTIST_PREFIX) -> {
+                    val artistId = mediaId.removePrefix(ARTIST_PREFIX).toUuidOrNull()
+                    if (artistId != null) {
+                        ensureReady()
+                        home?.artists?.firstOrNull { it.id == artistId }?.toArtistItem()
+                    } else null
+                }
+                mediaId.startsWith(PLAYLIST_PREFIX) -> {
+                    val playlistId = mediaId.removePrefix(PLAYLIST_PREFIX).toUuidOrNull()
+                    if (playlistId != null) {
+                        ensureReady()
+                        home?.playlists?.firstOrNull { it.id == playlistId }?.toPlaylistItem()
+                    } else null
+                }
+                else -> null
             }
         }
 
@@ -64,18 +126,14 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             mediaId == PLAYLISTS_ID -> browsableItem(PLAYLISTS_ID, "Playlists", null, MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS)
             mediaId == SONGS_ID -> browsableItem(SONGS_ID, "Songs", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED)
             mediaId == QUEUE_ID -> browsableItem(QUEUE_ID, "Now playing queue", null, MediaMetadata.MEDIA_TYPE_PLAYLIST)
-            mediaId.startsWith(TRACK_PREFIX) -> {
-                val resolved = resolveQueue(mediaId)
-                resolved.tracks.getOrNull(resolved.startIndex)?.toPlayableMediaItem(resolved.containerId)
-            }
-            else -> null
+            else -> runBlocking(Dispatchers.IO) { getItemAsync(mediaId) }
         }
 
-    fun search(query: String): Int =
-        runBlocking(Dispatchers.IO) {
+    suspend fun searchAsync(query: String): Int =
+        withContext(Dispatchers.IO) {
             val clean = query.trim()
-            if (clean.length < 2 || !ensureReady()) return@runBlocking 0
-            val activeSession = session ?: return@runBlocking 0
+            if (clean.length < 2 || !ensureReady()) return@withContext 0
+            val activeSession = session ?: return@withContext 0
             val results = when (val result = repositories.musicRepository.searchMusic(activeSession, clean, 50)) {
                 is JellyfinResult.Success -> result.value
                 is JellyfinResult.Failure -> emptyList()
@@ -84,17 +142,21 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             results.size
         }
 
+    fun search(query: String): Int =
+        runBlocking(Dispatchers.IO) { searchAsync(query) }
+
     fun searchChildren(query: String): List<MediaItem> {
         val clean = query.trim().lowercase()
         return searchResults[clean].orEmpty().map { it.toPlayableMediaItem("$SEARCH_PREFIX$clean") }
     }
 
-    fun resolveQueue(mediaId: String): ResolvedMusicQueue {
-        val parts = mediaId.split("|", limit = 3)
-        val containerId = parts.getOrNull(1).orEmpty().ifBlank { SONGS_ID }
-        val trackId = parts.getOrNull(2).orEmpty()
-        val tracks = runBlocking(Dispatchers.IO) {
-            when {
+    suspend fun resolveQueueAsync(mediaId: String): ResolvedMusicQueue =
+        withContext(Dispatchers.IO) {
+            val parts = mediaId.split("|", limit = 3)
+            val containerId = parts.getOrNull(1).orEmpty().ifBlank { SONGS_ID }
+            val trackId = parts.getOrNull(2).orEmpty()
+            ensureReady()
+            val tracks = when {
                 containerId == RECENT_ID -> home.orEmpty().recentlyAdded
                 containerId == SONGS_ID -> home.orEmpty().songs
                 containerId == QUEUE_ID -> MusicPlaybackController.get(appContext).state.value.queue.map { it.toJellyfinTrack() }
@@ -103,47 +165,40 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                 containerId.startsWith(SEARCH_PREFIX) -> searchResults[containerId.removePrefix(SEARCH_PREFIX).lowercase()].orEmpty()
                 else -> home.orEmpty().songs
             }
+            val startIndex = tracks.indexOfFirst { it.id.toString() == trackId }.coerceAtLeast(0)
+            ResolvedMusicQueue(containerId = containerId, tracks = tracks, startIndex = startIndex)
         }
-        val startIndex = tracks.indexOfFirst { it.id.toString() == trackId }.coerceAtLeast(0)
-        return ResolvedMusicQueue(containerId = containerId, tracks = tracks, startIndex = startIndex)
-    }
+
+    fun resolveQueue(mediaId: String): ResolvedMusicQueue =
+        runBlocking(Dispatchers.IO) { resolveQueueAsync(mediaId) }
 
     private suspend fun ensureReady(): Boolean {
         if (session != null && home != null) return true
-        return withTimeoutOrNull(12_000L) {
-            val profiles = repositories.authRepository.savedProfiles()
-            if (profiles.isEmpty()) return@withTimeoutOrNull false
-            profiles
-                .sortedByDescending { it.lastUsedAt }
-                .firstNotNullOfOrNull { profile ->
-                    val restored = when (val result = repositories.authRepository.restoreSession(profile.id)) {
-                        is JellyfinResult.Success -> result.value
-                        is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+        return sessionMutex.withLock {
+            if (session != null && home != null) return@withLock true
+            withTimeoutOrNull(12_000L) {
+                val profiles = repositories.authRepository.savedProfiles()
+                if (profiles.isEmpty()) return@withTimeoutOrNull false
+                profiles
+                    .sortedByDescending { it.lastUsedAt }
+                    .firstNotNullOfOrNull { profile ->
+                        val restored = when (val result = repositories.authRepository.restoreSession(profile.id)) {
+                            is JellyfinResult.Success -> result.value
+                            is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+                        }
+                        val loadedHome = when (val result = repositories.musicRepository.getMusicHome(restored)) {
+                            is JellyfinResult.Success -> result.value
+                            is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+                        }
+                        restored to loadedHome
                     }
-                    val loadedHome = when (val result = repositories.musicRepository.getMusicHome(restored)) {
-                        is JellyfinResult.Success -> result.value
-                        is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
-                    }
-                    restored to loadedHome
-                }
-                ?.let { (restored, loadedHome) ->
-                    session = restored
-                    home = loadedHome
-                    true
-                } ?: false
-        } == true
-    }
-
-    private fun rootChildren(): List<MediaItem> {
-        val snapshot = home.orEmpty()
-        return listOf(
-            browsableItem(RECENT_ID, "Recently added", "${snapshot.recentlyAdded.size} tracks", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
-            browsableItem(ALBUMS_ID, "Albums", "${snapshot.albums.size} albums", MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS),
-            browsableItem(ARTISTS_ID, "Artists", "${snapshot.artists.size} artists", MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS),
-            browsableItem(PLAYLISTS_ID, "Playlists", "${snapshot.playlists.size} playlists", MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS),
-            browsableItem(SONGS_ID, "Songs", "${snapshot.songs.size} tracks", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED),
-            browsableItem(QUEUE_ID, "Now playing queue", "${MusicPlaybackController.get(appContext).state.value.queue.size} tracks", MediaMetadata.MEDIA_TYPE_PLAYLIST),
-        )
+                    ?.let { (restored, loadedHome) ->
+                        session = restored
+                        home = loadedHome
+                        true
+                    } ?: false
+            } == true
+        }
     }
 
     private suspend fun tracksForAlbum(rawId: String): List<JellyfinMusicTrack> {
@@ -193,6 +248,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             album = album,
             albumId = albumId,
             durationMs = durationMs,
+            genres = genres,
             streamUrl = streamUrl,
             artworkUrl = artworkUrl,
             isFavorite = isFavorite,
@@ -206,6 +262,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             album = album,
             albumId = albumId,
             durationMs = durationMs,
+            genres = genres,
             artworkUrl = artworkUrl,
             hasLyrics = false,
             streamUrl = streamUrl,

@@ -5,9 +5,14 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.os.BatteryManager
+import dev.vantafyn.core.media.ambient.AmbientAutoLaunchMode
+import dev.vantafyn.core.media.ambient.AmbientDisplayPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -20,6 +25,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
@@ -27,8 +33,10 @@ import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaStyleNotificationHelper
+import android.net.Uri
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
+import com.google.common.util.concurrent.SettableFuture
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,11 +65,92 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > MAX_ARTWORK_CACHE_SIZE
     }
     private val appIconBitmap: Bitmap by lazy { createFallbackNotificationArtwork() }
+    private val screenOffReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != Intent.ACTION_SCREEN_OFF) return
+            val appContext = context?.applicationContext ?: return
+            val mode = AmbientDisplayPreferences.getMode(appContext)
+            if (mode == AmbientAutoLaunchMode.Off) return
+
+            val state = MusicPlaybackController.get(appContext).state.value
+            if (!state.isPlaying || state.currentTrack == null) return
+
+            if (mode == AmbientAutoLaunchMode.ChargingOnly) {
+                val batteryFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
+                val batteryIntent = appContext.registerReceiver(null, batteryFilter)
+                val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                    status == BatteryManager.BATTERY_STATUS_FULL
+                if (!isCharging) return
+            }
+
+            val displayManager = appContext.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+            val displays = displayManager?.displays ?: emptyArray()
+            val externalDisplay = displays.firstOrNull { it.displayId != android.view.Display.DEFAULT_DISPLAY }
+
+            val targetDisplayId = if (externalDisplay != null && externalDisplay.state == android.view.Display.STATE_ON) {
+                externalDisplay.displayId
+            } else {
+                null
+            }
+
+            launchAmbientActivity(targetDisplayId)
+        }
+    }
+
+    private fun launchAmbientActivity(targetDisplayId: Int?) {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
+            @Suppress("DEPRECATION")
+            val wakeLock = powerManager?.newWakeLock(
+                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    android.os.PowerManager.ON_AFTER_RELEASE,
+                "Vantafyn:AmbientLockWakeLock",
+            )
+            wakeLock?.acquire(3000L)
+
+            val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                android.app.ActivityOptions.makeBasic().apply {
+                    setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
+                    if (targetDisplayId != null && targetDisplayId != android.view.Display.DEFAULT_DISPLAY) {
+                        setLaunchDisplayId(targetDisplayId)
+                    }
+                }.toBundle()
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && targetDisplayId != null && targetDisplayId != android.view.Display.DEFAULT_DISPLAY) {
+                android.app.ActivityOptions.makeBasic().apply {
+                    setLaunchDisplayId(targetDisplayId)
+                }.toBundle()
+            } else {
+                null
+            }
+
+            val ambientIntent = Intent(this, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity")).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                9999,
+                ambientIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            try {
+                pendingIntent.send(this, 0, null, null, null, null, options)
+            } catch (e: Exception) {
+                startActivity(ambientIntent, options)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not launch AmbientNowPlayingActivity: ${e.message}")
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Music service created")
         createMusicPlaybackChannel()
+        val screenFilter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        registerReceiver(screenOffReceiver, screenFilter)
 
         playbackController = MusicPlaybackController.get(this)
         mediaLibraryProvider = VantafynMusicMediaLibraryProvider(this)
@@ -72,7 +161,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 .setChannelName(R.string.vantafyn_music_playback_channel)
                 .build()
                 .apply {
-                    setSmallIcon(android.R.drawable.ic_media_play)
+                    setSmallIcon(R.drawable.vantafyn_logo)
                 },
         )
 
@@ -107,7 +196,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         mediaSession = MediaLibrarySession.Builder(
             this,
             playbackController.sessionPlayer,
-            LibraryCallback(playbackController) { mediaLibraryProvider ?: VantafynMusicMediaLibraryProvider(this).also { mediaLibraryProvider = it } },
+            LibraryCallback(
+                serviceScope = serviceScope,
+                mainExecutor = ContextCompat.getMainExecutor(this),
+                playbackController = playbackController,
+            ) { mediaLibraryProvider ?: VantafynMusicMediaLibraryProvider(this).also { mediaLibraryProvider = it } },
         )
             .setBitmapLoader(bitmapLoader)
             .setSessionActivity(createLaunchPendingIntent())
@@ -194,6 +287,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         Log.d(TAG, "Music service destroyed")
         LongRunningTaskRegistry.stop(MUSIC_SERVICE_TASK_ID, "service destroyed")
+        runCatching { unregisterReceiver(screenOffReceiver) }
         isForegroundService = false
         serviceScope.cancel()
         mediaSession?.release()
@@ -262,7 +356,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             .joinToString(" - ")
             .ifBlank { "Music controls" }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.vantafyn_logo)
             .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "Vantafyn Music")
             .setContentText(subtitle)
             .setLargeIcon(appIconBitmap)
@@ -303,7 +397,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             .joinToString(" - ")
             .ifBlank { "Music controls" }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.vantafyn_logo)
             .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "Vantafyn Music")
             .setContentText(subtitle)
             .setSubText(track?.album?.takeIf { it.isNotBlank() })
@@ -363,7 +457,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             .joinToString(" - ")
             .ifBlank { "Music controls" }
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setSmallIcon(R.drawable.vantafyn_logo)
             .setContentTitle(track?.title?.takeIf { it.isNotBlank() } ?: "Vantafyn Music")
             .setContentText(subtitle)
             .setSubText(track?.album?.takeIf { it.isNotBlank() })
@@ -418,7 +512,13 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         cachedLargeIcon(artworkUrl)?.let { return it }
         return withContext(Dispatchers.IO) {
             runCatching {
-                URL(artworkUrl).openStream().use { stream ->
+                val connection = (URL(artworkUrl).openConnection() as? java.net.HttpURLConnection)?.apply {
+                    connectTimeout = 8_000
+                    readTimeout = 12_000
+                    instanceFollowRedirects = true
+                } ?: return@runCatching null
+
+                connection.inputStream.use { stream ->
                     BitmapFactory.decodeStream(stream)
                 }?.let { bitmap ->
                     val scaled = scaleNotificationArtwork(bitmap)
@@ -546,9 +646,29 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     }
 
     private class LibraryCallback(
+        private val serviceScope: CoroutineScope,
+        private val mainExecutor: java.util.concurrent.Executor,
         private val playbackController: MusicPlaybackController,
         private val provider: () -> VantafynMusicMediaLibraryProvider,
     ) : MediaLibrarySession.Callback {
+
+        private fun <T> future(block: suspend () -> T): ListenableFuture<T> {
+            val settable = SettableFuture.create<T>()
+            val job = serviceScope.launch {
+                try {
+                    settable.set(block())
+                } catch (t: Throwable) {
+                    settable.setException(t)
+                }
+            }
+            settable.addListener({
+                if (settable.isCancelled) {
+                    job.cancel()
+                }
+            }, mainExecutor)
+            return settable
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
@@ -561,9 +681,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> =
-            provider().getItem(mediaId)
-                ?.let { Futures.immediateFuture(LibraryResult.ofItem(it, null)) }
-                ?: Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE, null))
+            future {
+                val item = provider().getItemAsync(mediaId)
+                if (item != null) {
+                    LibraryResult.ofItem(item, null)
+                } else {
+                    LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE, null)
+                }
+            }
 
         override fun onGetChildren(
             session: MediaLibrarySession,
@@ -573,8 +698,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             pageSize: Int,
             params: LibraryParams?,
         ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
-            val items = provider().getChildren(parentId).paged(page, pageSize)
-            return Futures.immediateFuture(LibraryResult.ofItemList(items, params))
+            if (parentId == VantafynMusicMediaLibraryProvider.ROOT_ID) {
+                val items = provider().rootChildren().paged(page, pageSize)
+                return Futures.immediateFuture(LibraryResult.ofItemList(items, params))
+            }
+            return future {
+                val items = provider().getChildrenAsync(parentId).paged(page, pageSize)
+                LibraryResult.ofItemList(items, params)
+            }
         }
 
         override fun onSearch(
@@ -582,11 +713,12 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             query: String,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<Void>> {
-            val count = provider().search(query)
-            session.notifySearchResultChanged(browser, query, count, params)
-            return Futures.immediateFuture(LibraryResult.ofVoid(params))
-        }
+        ): ListenableFuture<LibraryResult<Void>> =
+            future {
+                val count = provider().searchAsync(query)
+                session.notifySearchResultChanged(browser, query, count, params)
+                LibraryResult.ofVoid(params)
+            }
 
         override fun onGetSearchResult(
             session: MediaLibrarySession,
@@ -595,10 +727,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             page: Int,
             pageSize: Int,
             params: LibraryParams?,
-        ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
-            val items = provider().searchChildren(query).paged(page, pageSize)
-            return Futures.immediateFuture(LibraryResult.ofItemList(items, params))
-        }
+        ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> =
+            future {
+                val items = provider().searchChildren(query).paged(page, pageSize)
+                LibraryResult.ofItemList(items, params)
+            }
 
         override fun onSetMediaItems(
             mediaSession: MediaSession,
@@ -606,47 +739,79 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             mediaItems: List<MediaItem>,
             startIndex: Int,
             startPositionMs: Long,
-        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-            val first = mediaItems.getOrNull(startIndex.coerceAtLeast(0)) ?: mediaItems.firstOrNull()
-            val mediaId = first?.mediaId.orEmpty()
-            val resolved = when {
-                mediaId.startsWith(VantafynMusicMediaLibraryProvider.TRACK_PREFIX) -> provider().resolveQueue(mediaId)
-                mediaId == VantafynMusicMediaLibraryProvider.RECENT_ID ||
-                    mediaId == VantafynMusicMediaLibraryProvider.SONGS_ID ||
-                    mediaId == VantafynMusicMediaLibraryProvider.QUEUE_ID ||
-                    mediaId.startsWith(VantafynMusicMediaLibraryProvider.ALBUM_PREFIX) ||
-                    mediaId.startsWith(VantafynMusicMediaLibraryProvider.PLAYLIST_PREFIX) ||
-                    mediaId.startsWith(VantafynMusicMediaLibraryProvider.SEARCH_PREFIX) -> {
-                    val children = provider().getChildren(mediaId)
-                    val trackId = children.firstOrNull()?.mediaId.orEmpty()
-                    provider().resolveQueue(trackId)
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> =
+            future {
+                val first = mediaItems.getOrNull(startIndex.coerceAtLeast(0)) ?: mediaItems.firstOrNull()
+                val mediaId = first?.mediaId.orEmpty()
+                val resolved = when {
+                    mediaId.startsWith(VantafynMusicMediaLibraryProvider.TRACK_PREFIX) -> provider().resolveQueueAsync(mediaId)
+                    mediaId == VantafynMusicMediaLibraryProvider.RECENT_ID ||
+                        mediaId == VantafynMusicMediaLibraryProvider.SONGS_ID ||
+                        mediaId == VantafynMusicMediaLibraryProvider.QUEUE_ID ||
+                        mediaId.startsWith(VantafynMusicMediaLibraryProvider.ALBUM_PREFIX) ||
+                        mediaId.startsWith(VantafynMusicMediaLibraryProvider.PLAYLIST_PREFIX) ||
+                        mediaId.startsWith(VantafynMusicMediaLibraryProvider.SEARCH_PREFIX) -> {
+                        val children = provider().getChildrenAsync(mediaId)
+                        val trackId = children.firstOrNull()?.mediaId.orEmpty()
+                        provider().resolveQueueAsync(trackId)
+                    }
+                    else -> null
                 }
-                else -> null
+                val queue = resolved?.tracks.orEmpty().map {
+                    VantafynMusicTrack(
+                        id = it.id,
+                        title = it.title,
+                        artist = it.artist,
+                        album = it.album,
+                        albumId = it.albumId,
+                        durationMs = it.durationMs,
+                        genres = it.genres,
+                        streamUrl = it.streamUrl,
+                        artworkUrl = it.artworkUrl,
+                        isFavorite = it.isFavorite,
+                    )
+                }
+                if (queue.isEmpty()) {
+                    MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs)
+                } else {
+                    val resolvedItems = playbackController.adoptSystemQueue(queue, resolved?.startIndex ?: startIndex, startPositionMs)
+                    MediaSession.MediaItemsWithStartPosition(
+                        resolvedItems,
+                        resolved?.startIndex ?: startIndex.coerceIn(0, resolvedItems.lastIndex),
+                        startPositionMs.coerceAtLeast(0L),
+                    )
+                }
             }
-            val queue = resolved?.tracks.orEmpty().map {
-                VantafynMusicTrack(
-                    id = it.id,
-                    title = it.title,
-                    artist = it.artist,
-                    album = it.album,
-                    albumId = it.albumId,
-                    durationMs = it.durationMs,
-                    streamUrl = it.streamUrl,
-                    artworkUrl = it.artworkUrl,
-                    isFavorite = it.isFavorite,
+
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val currentState = playbackController.state.value
+            val queue = currentState.queue
+            if (queue.isNotEmpty()) {
+                val items = queue.map { track ->
+                    MediaItem.Builder()
+                        .setUri(track.streamUrl)
+                        .setMediaId(track.id.toString())
+                        .setMediaMetadata(
+                            MediaMetadata.Builder()
+                                .setTitle(track.title)
+                                .setArtist(track.artist)
+                                .setAlbumTitle(track.album)
+                                .setArtworkUri(track.artworkUrl?.let(Uri::parse))
+                                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                                .setIsPlayable(true)
+                                .build(),
+                        )
+                        .build()
+                }
+                val index = currentState.queueIndex.coerceIn(0, items.lastIndex)
+                return Futures.immediateFuture(
+                    MediaSession.MediaItemsWithStartPosition(items, index, currentState.positionMs.coerceAtLeast(0L)),
                 )
             }
-            if (queue.isEmpty()) {
-                return Futures.immediateFuture(MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs))
-            }
-            val resolvedItems = playbackController.adoptSystemQueue(queue, resolved?.startIndex ?: startIndex, startPositionMs)
-            return Futures.immediateFuture(
-                MediaSession.MediaItemsWithStartPosition(
-                    resolvedItems,
-                    resolved?.startIndex ?: startIndex.coerceIn(0, resolvedItems.lastIndex),
-                    startPositionMs.coerceAtLeast(0L),
-                ),
-            )
+            return super.onPlaybackResumption(mediaSession, controller)
         }
 
         private fun List<MediaItem>.paged(page: Int, pageSize: Int): List<MediaItem> {

@@ -40,6 +40,12 @@ class TvHomeSpotlightState(
         currentItem = item
     }
 
+    fun replace(item: TvHomeSpotlightItem?) {
+        if (item != null) {
+            currentItem = item
+        }
+    }
+
     fun updateIfNull(item: TvHomeSpotlightItem?) {
         if (currentItem == null && item != null) {
             currentItem = item

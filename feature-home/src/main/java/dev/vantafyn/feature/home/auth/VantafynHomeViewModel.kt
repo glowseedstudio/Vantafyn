@@ -19,6 +19,11 @@ import dev.vantafyn.core.downloads.OfflineSyncScheduler
 import dev.vantafyn.core.downloads.PendingUserDataMutation
 import dev.vantafyn.core.downloads.SqliteDownloadRepository
 import dev.vantafyn.core.downloads.parseDownloadOfflineManifest
+import dev.vantafyn.core.experience.ExperienceMode
+import dev.vantafyn.core.experience.ExperiencePreferences
+import dev.vantafyn.core.experience.MusicBackendType
+import dev.vantafyn.core.subsonic.SubsonicClient
+import dev.vantafyn.core.subsonic.SubsonicCredentials
 import dev.vantafyn.core.jellyfin.JellyfinAchievement
 import dev.vantafyn.core.jellyfin.JellyfinAchievementRepository
 import dev.vantafyn.core.jellyfin.JellyfinAchievementSummary
@@ -41,6 +46,7 @@ import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.LibraryViewMode
 import dev.vantafyn.core.jellyfin.LibrariesViewMode
 import dev.vantafyn.core.jellyfin.JellyfinMediaCard
+import dev.vantafyn.core.jellyfin.JellyfinMediaCardShape
 import dev.vantafyn.core.jellyfin.JellyfinMediaDetail
 import dev.vantafyn.core.jellyfin.JellyfinMediaItem
 import dev.vantafyn.core.jellyfin.JellyfinMediaSegment
@@ -161,6 +167,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var displayMessageDismissJob: Job? = null
     private var libraryItemsJob: Job? = null
     private var socialPollingJob: Job? = null
+    private var achievementPollingJob: Job? = null
     private var isAppForeground = false
     private var lastCompanionAvailabilityProfileId: String? = null
     private var lastCompanionAvailabilityCheckAt: Long = 0L
@@ -172,6 +179,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     private val _state = MutableStateFlow(
         VantafynHomeUiState(
+            experienceMode = ExperiencePreferences.getExperienceMode(application),
+            musicBackendType = ExperiencePreferences.getMusicBackendType(application),
+            mobileDestination = if (ExperiencePreferences.getExperienceMode(application) == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
             autoplayCountdownSeconds = appPreferences.getInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, 10)
                 .takeIf { value -> value in AUTOPLAY_COUNTDOWN_OPTIONS }
                 ?: 10,
@@ -203,10 +213,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             when (event) {
                 Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
                     _state.update { it.copy(isAppForeground = true) }
+                    startAchievementPolling()
                     startSocialPolling()
                 }
                 Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_PAUSE -> {
                     _state.update { it.copy(isAppForeground = false) }
+                    stopAchievementPolling()
                     stopSocialPolling()
                 }
                 else -> {}
@@ -217,6 +229,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     override fun onCleared() {
         stopWatchPartyRealtime()
+        stopAchievementPolling()
         stopSocialPolling()
         watchPartyInviteExpiryJob?.cancel()
         super.onCleared()
@@ -261,8 +274,116 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update { it.copy(password = value, errorMessage = null) }
     }
 
-    fun continueFromWelcome() {
-        _state.update { it.copy(step = VantafynSetupStep.ConnectServer, errorMessage = null) }
+    fun continueFromWelcome(tv: Boolean = false) {
+        _state.update {
+            if (tv) {
+                it.copy(step = VantafynSetupStep.ConnectServer, errorMessage = null)
+            } else {
+                it.copy(step = VantafynSetupStep.SelectExperience, errorMessage = null)
+            }
+        }
+    }
+
+    fun selectExperienceMode(mode: ExperienceMode) {
+        ExperiencePreferences.setExperienceMode(getApplication(), mode)
+        _state.update {
+            it.copy(
+                experienceMode = mode,
+                mobileDestination = if (mode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                step = if (mode == ExperienceMode.FullMedia) {
+                    VantafynSetupStep.ConnectServer
+                } else {
+                    VantafynSetupStep.SelectMusicBackend
+                },
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun selectMusicBackend(backend: MusicBackendType) {
+        ExperiencePreferences.setMusicBackendType(getApplication(), backend)
+        _state.update {
+            it.copy(
+                musicBackendType = backend,
+                step = if (backend == MusicBackendType.Jellyfin) {
+                    VantafynSetupStep.ConnectServer
+                } else {
+                    VantafynSetupStep.ConnectSubsonic
+                },
+                errorMessage = null,
+            )
+        }
+    }
+
+    fun onSubsonicServerUrlChanged(url: String) {
+        _state.update { it.copy(subsonicServerUrl = url, subsonicErrorMessage = null) }
+    }
+
+    fun onSubsonicUsernameChanged(username: String) {
+        _state.update { it.copy(subsonicUsername = username, subsonicErrorMessage = null) }
+    }
+
+    fun onSubsonicPasswordChanged(password: String) {
+        _state.update { it.copy(subsonicPassword = password, subsonicErrorMessage = null) }
+    }
+
+    fun connectSubsonic() {
+        val url = _state.value.subsonicServerUrl.trim()
+        val user = _state.value.subsonicUsername.trim()
+        val pass = _state.value.subsonicPassword
+        if (url.isBlank() || user.isBlank() || pass.isBlank()) {
+            _state.update { it.copy(subsonicErrorMessage = "Please enter server URL, username, and password") }
+            return
+        }
+        viewModelScope.launch {
+            _state.update { it.copy(isSubsonicConnecting = true, subsonicErrorMessage = null) }
+            val client = SubsonicClient(
+                SubsonicCredentials(serverUrl = url, username = user, passwordOrToken = pass)
+            )
+            val success = client.ping()
+            if (success) {
+                val prefs = getApplication<Application>().getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
+                prefs.edit()
+                    .putString("subsonic_url", url)
+                    .putString("subsonic_username", user)
+                    .putString("subsonic_password", pass)
+                    .apply()
+                markSetupCompleted()
+                _state.update {
+                    it.copy(
+                        isSubsonicConnecting = false,
+                        isStartupResolved = true,
+                        experienceMode = ExperienceMode.MusicOnly,
+                        step = VantafynSetupStep.Home,
+                        mobileDestination = MobileDestination.Music,
+                    )
+                }
+            } else {
+                _state.update {
+                    it.copy(
+                        isSubsonicConnecting = false,
+                        subsonicErrorMessage = "Could not connect to Subsonic server. Please check the URL and credentials.",
+                    )
+                }
+            }
+        }
+    }
+
+    fun switchExperienceModeFromSettings(mode: ExperienceMode) {
+        ExperiencePreferences.setExperienceMode(getApplication(), mode)
+        _state.update {
+            it.copy(
+                experienceMode = mode,
+                mobileDestination = if (mode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+            )
+        }
+    }
+
+    fun switchMusicBackendFromSettings(backend: MusicBackendType) {
+        ExperiencePreferences.setMusicBackendType(getApplication(), backend)
+        _state.update {
+            it.copy(musicBackendType = backend)
+        }
     }
 
     fun navigateSetupBack() {
@@ -285,9 +406,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                 }
+                VantafynSetupStep.SelectExperience -> state.copy(
+                    step = VantafynSetupStep.Welcome,
+                    errorMessage = null,
+                    isLoading = false,
+                )
+                VantafynSetupStep.SelectMusicBackend -> state.copy(
+                    step = VantafynSetupStep.SelectExperience,
+                    errorMessage = null,
+                    isLoading = false,
+                )
+                VantafynSetupStep.ConnectSubsonic -> state.copy(
+                    step = VantafynSetupStep.SelectMusicBackend,
+                    errorMessage = null,
+                    isLoading = false,
+                )
                 VantafynSetupStep.ConnectServer -> {
-                    if (state.savedProfiles.isEmpty()) {
-                        state.copy(step = VantafynSetupStep.Welcome, errorMessage = null, isLoading = false)
+                    if (state.experienceMode == ExperienceMode.MusicOnly) {
+                        state.copy(step = VantafynSetupStep.SelectMusicBackend, errorMessage = null, isLoading = false)
+                    } else if (state.savedProfiles.isEmpty()) {
+                        state.copy(step = VantafynSetupStep.SelectExperience, errorMessage = null, isLoading = false)
                     } else {
                         state.copy(
                             step = VantafynSetupStep.ProfilePicker,
@@ -496,6 +634,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             ) {
                 is JellyfinResult.Success -> {
                     markSetupCompleted()
+                    val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
                     _state.update {
                         it.copy(
                             isLoading = false,
@@ -507,7 +646,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             localServerUrl = result.value.server.localUrl.orEmpty(),
                             remoteServerUrl = result.value.server.remoteUrl.orEmpty(),
                             step = VantafynSetupStep.Home,
-                            mobileDestination = MobileDestination.Home,
+                            experienceMode = currentMode,
+                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                             libraries = emptyList(),
                             home = null,
                             homeErrorMessage = null,
@@ -707,7 +847,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             authRepository.logout()
             appPreferences.edit().putBoolean(KEY_SETUP_COMPLETED, false).apply()
             delay(LOGOUT_TRANSITION_DELAY_MS)
-            _state.value = VantafynHomeUiState(step = VantafynSetupStep.Welcome, isStartupResolved = true)
+            val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
+            val currentBackend = ExperiencePreferences.getMusicBackendType(getApplication())
+            _state.value = VantafynHomeUiState(
+                step = VantafynSetupStep.Welcome,
+                isStartupResolved = true,
+                experienceMode = currentMode,
+                musicBackendType = currentBackend,
+                mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+            )
         }
     }
 
@@ -734,10 +882,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             delay(LOGOUT_TRANSITION_DELAY_MS)
             lastAchievementAvailabilityProfileId = null
             lastAchievementAvailabilityCheckAt = 0L
+            val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
+            val currentBackend = ExperiencePreferences.getMusicBackendType(getApplication())
             _state.value = VantafynHomeUiState(
                 step = if (profiles.isEmpty()) VantafynSetupStep.Welcome else VantafynSetupStep.ProfilePicker,
                 isStartupResolved = true,
                 savedProfiles = profiles,
+                experienceMode = currentMode,
+                musicBackendType = currentBackend,
+                mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
             )
         }
     }
@@ -755,6 +908,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             when (val result = authRepository.restoreSession(profile.id)) {
                 is JellyfinResult.Success -> {
                     markSetupCompleted()
+                    val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
                     _state.update {
                         it.copy(
                             step = VantafynSetupStep.Home,
@@ -769,7 +923,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             username = result.value.user.name,
                             password = "",
                             homeLayout = readHomeLayout(result.value.profileId),
-                            mobileDestination = MobileDestination.Home,
+                            experienceMode = currentMode,
+                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                             libraries = emptyList(),
                             home = null,
                             homeErrorMessage = null,
@@ -843,6 +998,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is JellyfinResult.Success -> {
                     val session = result.value
                     markSetupCompleted()
+                    val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
                     _state.update {
                         it.copy(
                             step = VantafynSetupStep.Home,
@@ -857,7 +1013,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             username = session.user.name,
                             password = "",
                             homeLayout = readHomeLayout(session.profileId),
-                            mobileDestination = MobileDestination.Home,
+                            experienceMode = currentMode,
+                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                             libraries = emptyList(),
                             home = null,
                             homeErrorMessage = null,
@@ -908,6 +1065,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             ) {
                 is JellyfinResult.Success -> {
                     markSetupCompleted()
+                    val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
                     _state.update {
                         it.copy(
                             step = VantafynSetupStep.Home,
@@ -925,11 +1083,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             restoreFailureReason = null,
                             restoreFailureMessage = null,
                             failedProfileIds = it.failedProfileIds - profile.id,
-                            mobileDestination = MobileDestination.Home,
-                            libraries = emptyList(),
-                            home = null,
-                            homeErrorMessage = null,
-                            isLibrariesLoading = true,
+                            experienceMode = currentMode,
+                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                             isHomeLoading = true,
                             homeLayout = readHomeLayout(result.value.profileId),
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
@@ -1163,15 +1318,22 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun navigateMobile(destination: MobileDestination) {
         refreshOmbiRequestsAvailability()
+        if (destination != MobileDestination.Search) {
+            searchJob?.cancel()
+        }
         _state.update {
             val previous = if (destination.isRootDestination()) {
                 it.previousMobileDestination
             } else {
-                it.mobileDestination.rootDestination()
+                it.mobileDestination.rootDestination(it.experienceMode)
             }
             it.copy(
                 mobileDestination = destination,
                 previousMobileDestination = previous,
+                searchQuery = if (destination == MobileDestination.Search) it.searchQuery else "",
+                searchResults = if (destination == MobileDestination.Search) it.searchResults else emptyList(),
+                searchError = if (destination == MobileDestination.Search) it.searchError else null,
+                isSearchLoading = if (destination == MobileDestination.Search) it.isSearchLoading else false,
                 selectedLibrary = if (destination == MobileDestination.LibraryDetail) it.selectedLibrary else null,
                 selectedMediaId = if (destination == MobileDestination.MediaDetail) it.selectedMediaId else null,
                 mediaDetail = if (destination == MobileDestination.MediaDetail) it.mediaDetail else null,
@@ -1246,6 +1408,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
         if (enabled) {
             refreshAchievementsAvailability(force = true)
+        } else {
+            stopAchievementPolling()
         }
     }
 
@@ -1268,7 +1432,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             val available = achievementRepository.checkAvailability(session)
             _state.update { it.copy(isAchievementsAvailable = available) }
             if (available) {
-                pollAchievementUnlocks()
+                startAchievementPolling()
+            } else {
+                stopAchievementPolling()
             }
         }
     }
@@ -1305,33 +1471,62 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val session = _state.value.session ?: return
         if (!_state.value.isAchievementsAvailable) return
         val deviceId = resolveDeviceId()
+        viewModelScope.launch {
+            pollAchievementUnlocksOnce(session, deviceId)
+        }
+    }
+
+    fun startAchievementPolling() {
+        if (!_state.value.achievementsEnabled || !_state.value.isAchievementsAvailable) return
+        if (achievementPollingJob?.isActive == true) return
+        achievementPollingJob = viewModelScope.launch {
+            while (isActive) {
+                val session = _state.value.session
+                if (
+                    session == null ||
+                    !_state.value.isAppForeground ||
+                    !_state.value.achievementsEnabled ||
+                    !_state.value.isAchievementsAvailable
+                ) {
+                    break
+                }
+                pollAchievementUnlocksOnce(session, resolveDeviceId())
+                delay(ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    fun stopAchievementPolling() {
+        achievementPollingJob?.cancel()
+        achievementPollingJob = null
+    }
+
+    private suspend fun pollAchievementUnlocksOnce(session: JellyfinSession, deviceId: String) {
         val checkpointKey = "last_checkpoint_${session.server.url.trimEnd('/')}_${session.user.id}_$deviceId"
         val seenKey = "seen_unlocks_${session.server.url.trimEnd('/')}_${session.user.id}"
         val lastCheckpoint = achievementPrefs.getString(checkpointKey, null)
-        viewModelScope.launch {
-            when (val result = achievementRepository.getUnlocksSince(session, lastCheckpoint, deviceId)) {
-                is JellyfinResult.Success -> {
-                    val seenSet = achievementPrefs.getStringSet(seenKey, emptySet()) ?: emptySet()
-                    val newUnlocks = result.value.filter { it.id !in seenSet }
-                    if (newUnlocks.isNotEmpty()) {
-                        val latest = newUnlocks.first()
-                        val updatedSeen = seenSet + newUnlocks.map { it.id }
-                        achievementPrefs.edit().putStringSet(seenKey, updatedSeen).apply()
-                        _state.update {
-                            it.copy(
-                                hasUnseenAchievements = true,
-                                activeAchievementUnlock = latest,
-                            )
-                        }
+        when (val result = achievementRepository.getUnlocksSince(session, lastCheckpoint, deviceId)) {
+            is JellyfinResult.Success -> {
+                val seenSet = achievementPrefs.getStringSet(seenKey, emptySet()) ?: emptySet()
+                val newUnlocks = result.value.filter { it.id !in seenSet }
+                if (newUnlocks.isNotEmpty()) {
+                    val latest = newUnlocks.first()
+                    val updatedSeen = seenSet + newUnlocks.map { it.id }
+                    achievementPrefs.edit().putStringSet(seenKey, updatedSeen).apply()
+                    _state.update {
+                        it.copy(
+                            hasUnseenAchievements = true,
+                            activeAchievementUnlock = latest,
+                        )
                     }
-                    val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
-                        timeZone = TimeZone.getTimeZone("UTC")
-                    }.format(Date())
-                    achievementPrefs.edit().putString(checkpointKey, nowIso).apply()
                 }
-                is JellyfinResult.Failure -> {
-                    // Do not advance checkpoint on failure
-                }
+                val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                }.format(Date())
+                achievementPrefs.edit().putString(checkpointKey, nowIso).apply()
+            }
+            is JellyfinResult.Failure -> {
+                // Do not advance checkpoint on failure
             }
         }
     }
@@ -1568,16 +1763,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     break
                 }
 
-                // Keep session presence active on Jellyfin server every 45 seconds (low battery, lightweight ping)
+                // Keep session presence active on Jellyfin server every 90 seconds (low battery, lightweight ping)
                 val now = System.currentTimeMillis()
-                if (now - lastPresenceReportTime >= 45_000L) {
+                if (now - lastPresenceReportTime >= 90_000L) {
                     lastPresenceReportTime = now
                     launch { socialRepository.reportPresence(session) }
                 }
 
-                // Suppress background network polling completely during full-screen media playback
-                if (_state.value.mobileDestination == MobileDestination.Player) {
-                    delay(15_000L)
+                // Suppress background network polling completely during full-screen media playback, music listening, downloads, or preferences
+                val currentDest = _state.value.mobileDestination
+                if (currentDest in setOf(MobileDestination.Player, MobileDestination.Music, MobileDestination.Downloads, MobileDestination.Profile, MobileDestination.PlaybackPreferences)) {
+                    delay(90_000L)
                     continue
                 }
 
@@ -1620,7 +1816,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         }
                     }
                 } else {
-                    // Check unread summary and conversations periodically (relaxed interval)
+                    // Check unread summary and conversations periodically (relaxed 90s interval)
                     when (val convRes = socialRepository.getConversations(session)) {
                         is JellyfinResult.Success -> {
                             val newConvos = convRes.value
@@ -1678,7 +1874,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 val interval = when {
                     nextIsChatting -> 8_000L
                     nextIsSocialScreen -> 15_000L
-                    else -> 45_000L
+                    else -> 90_000L
                 }
                 delay(interval)
             }
@@ -2426,7 +2622,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Requests,
             MobileDestination.Admin,
             MobileDestination.Achievements,
-            MobileDestination.Profile -> navigateMobile(MobileDestination.Home)
+            MobileDestination.Profile -> navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
             else -> Unit
         }
     }
@@ -2500,6 +2696,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { state ->
                         state.copy(mediaDetail = state.mediaDetail?.copy(isPlayed = result.value))
                     }
+                    pollAchievementUnlocks()
                 }
                 is JellyfinResult.Failure -> {
                     _state.update {
@@ -2525,10 +2722,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     loadLibraries(session)
+                    pollAchievementUnlocks()
                 }
                 is JellyfinResult.Failure -> _state.update { it.copy(mobileMessage = result.message) }
             }
         }
+    }
+
+    private fun getSubsonicCredentials(): dev.vantafyn.core.subsonic.SubsonicCredentials? {
+        val prefs = getApplication<Application>().getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
+        val url = prefs.getString("subsonic_url", null) ?: return null
+        val user = prefs.getString("subsonic_username", null) ?: return null
+        val pass = prefs.getString("subsonic_password", null) ?: return null
+        if (url.isBlank() || user.isBlank() || pass.isBlank()) return null
+        return dev.vantafyn.core.subsonic.SubsonicCredentials(serverUrl = url, username = user, passwordOrToken = pass)
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -2545,13 +2752,86 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             _state.update { it.copy(isSearchLoading = false, searchResults = emptyList()) }
             return
         }
+        val isMusicOnly = _state.value.experienceMode == ExperienceMode.MusicOnly
+        val isSubsonic = isMusicOnly && _state.value.musicBackendType == MusicBackendType.OpenSubsonic
+        if (isSubsonic) {
+            val creds = getSubsonicCredentials()
+            if (creds != null) {
+                searchJob = viewModelScope.launch {
+                    delay(400)
+                    _state.update { it.copy(isSearchLoading = true, searchError = null) }
+                    val provider = dev.vantafyn.core.subsonic.SubsonicMusicDataProvider(dev.vantafyn.core.subsonic.SubsonicClient(creds))
+                    when (val result = provider.searchMusic(trimmed)) {
+                        is dev.vantafyn.core.media.music.MusicResult.Success -> {
+                            val data = result.value
+                            val mapped = buildList {
+                                data.tracks.forEach { track ->
+                                    add(
+                                        JellyfinSearchResult(
+                                            id = track.id,
+                                            title = track.title,
+                                            subtitle = listOfNotNull(track.artist, track.album).joinToString(" · "),
+                                            year = null,
+                                            itemType = "Audio",
+                                            imageUrl = track.artworkUrl,
+                                            backdropUrl = null,
+                                            shape = JellyfinMediaCardShape.Poster,
+                                            isFavorite = track.isFavorite,
+                                        )
+                                    )
+                                }
+                                data.albums.forEach { album ->
+                                    add(
+                                        JellyfinSearchResult(
+                                            id = album.id,
+                                            title = album.title,
+                                            subtitle = album.artist,
+                                            year = album.year,
+                                            itemType = "MusicAlbum",
+                                            imageUrl = album.coverUrl,
+                                            backdropUrl = null,
+                                            shape = JellyfinMediaCardShape.Poster,
+                                        )
+                                    )
+                                }
+                                data.artists.forEach { artist ->
+                                    add(
+                                        JellyfinSearchResult(
+                                            id = artist.id,
+                                            title = artist.name,
+                                            subtitle = "Artist",
+                                            year = null,
+                                            itemType = "MusicArtist",
+                                            imageUrl = artist.imageUrl,
+                                            backdropUrl = null,
+                                            shape = JellyfinMediaCardShape.Poster,
+                                        )
+                                    )
+                                }
+                            }
+                            _state.update { it.copy(isSearchLoading = false, searchResults = mapped) }
+                        }
+                        is dev.vantafyn.core.media.music.MusicResult.Failure -> {
+                            _state.update { it.copy(isSearchLoading = false, searchError = result.message) }
+                        }
+                    }
+                }
+                return
+            }
+        }
         val session = _state.value.session ?: return
         searchJob = viewModelScope.launch {
             delay(400)
             _state.update { it.copy(isSearchLoading = true, searchError = null) }
             when (val result = searchRepository.search(session, query)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(isSearchLoading = false, searchResults = result.value) }
+                    val filtered = if (isMusicOnly) {
+                        val musicTypes = setOf("Audio", "MusicTrack", "Song", "MusicAlbum", "MusicArtist", "Playlist")
+                        result.value.filter { it.itemType in musicTypes }
+                    } else {
+                        result.value
+                    }
+                    _state.update { it.copy(isSearchLoading = false, searchResults = filtered) }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isSearchLoading = false, searchError = result.message) }
@@ -2561,16 +2841,59 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun loadFavorites() {
-        val session = _state.value.session ?: return
+        val session = _state.value.session
         loadFavorites(session)
     }
 
-    private fun loadFavorites(session: JellyfinSession) {
+    private fun loadFavorites(session: JellyfinSession?) {
+        val isMusicOnly = _state.value.experienceMode == ExperienceMode.MusicOnly
+        val isSubsonic = isMusicOnly && _state.value.musicBackendType == MusicBackendType.OpenSubsonic
+        if (isSubsonic) {
+            val creds = getSubsonicCredentials()
+            if (creds != null) {
+                viewModelScope.launch {
+                    _state.update { it.copy(isFavoritesLoading = true, favoritesError = null) }
+                    val provider = dev.vantafyn.core.subsonic.SubsonicMusicDataProvider(dev.vantafyn.core.subsonic.SubsonicClient(creds))
+                    when (val result = provider.getStarredSongs()) {
+                        is dev.vantafyn.core.media.music.MusicResult.Success -> {
+                            val items = result.value.map { track ->
+                                JellyfinMediaItem(
+                                    id = track.id,
+                                    title = track.title,
+                                    subtitle = listOfNotNull(track.artist, track.album).joinToString(" · "),
+                                    year = null,
+                                    itemType = "Audio",
+                                    imageUrl = track.artworkUrl,
+                                    backdropUrl = null,
+                                    thumbUrl = null,
+                                    logoUrl = null,
+                                    progress = null,
+                                    shape = JellyfinMediaCardShape.Poster,
+                                    isFavorite = true,
+                                )
+                            }
+                            _state.update { it.copy(isFavoritesLoading = false, favorites = items) }
+                        }
+                        is dev.vantafyn.core.media.music.MusicResult.Failure -> {
+                            _state.update { it.copy(isFavoritesLoading = false, favoritesError = result.message) }
+                        }
+                    }
+                }
+                return
+            }
+        }
+        if (session == null) return
         viewModelScope.launch {
             _state.update { it.copy(isFavoritesLoading = true, favoritesError = null) }
             when (val result = favoritesRepository.getFavorites(session)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(isFavoritesLoading = false, favorites = result.value) }
+                    val filtered = if (isMusicOnly) {
+                        val musicTypes = setOf("Audio", "MusicTrack", "Song", "MusicAlbum", "MusicArtist", "Playlist")
+                        result.value.filter { it.itemType in musicTypes }
+                    } else {
+                        result.value
+                    }
+                    _state.update { it.copy(isFavoritesLoading = false, favorites = filtered) }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isFavoritesLoading = false, favoritesError = result.message) }
@@ -3930,12 +4253,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppForegrounded() {
         isAppForeground = true
+        _state.update { it.copy(isAppForeground = true) }
         val session = _state.value.session
         if (session != null) {
             offlineSyncScheduler.schedule()
             refreshAchievementsAvailability()
             if (_state.value.isAchievementsAvailable) {
-                pollAchievementUnlocks()
+                startAchievementPolling()
             }
             if (_state.value.socialEnabled) {
                 viewModelScope.launch { socialRepository.reportPresence(session) }
@@ -3952,6 +4276,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppBackgrounded() {
         isAppForeground = false
+        _state.update { it.copy(isAppForeground = false) }
+        stopAchievementPolling()
         stopSocialPolling()
         if (_state.value.activeWatchParty == null) {
             stopWatchPartyRealtime(clearInvites = false)
@@ -4613,7 +4939,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    fun prepareCastPlayback(positionMs: Long) {
+    fun prepareCastPlayback(
+        positionMs: Long,
+        audioStreamIndex: Int? = _state.value.playbackInfo?.audioStreamIndex,
+        subtitleStreamIndex: Int? = _state.value.playbackInfo?.subtitleStreamIndex,
+    ) {
         val snapshot = _state.value
         val session = snapshot.session ?: return
         val target = snapshot.activePlaybackTarget ?: return
@@ -4632,8 +4962,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     subtitle = target.subtitle,
                     startPositionTicks = positionTicks,
                     forceTranscode = false,
-                    audioStreamIndex = snapshot.playbackInfo?.audioStreamIndex,
-                    subtitleStreamIndex = snapshot.playbackInfo?.subtitleStreamIndex,
+                    audioStreamIndex = audioStreamIndex,
+                    subtitleStreamIndex = subtitleStreamIndex,
                     isLiveTv = target.isLiveTv,
                 )
             ) {
@@ -4695,6 +5025,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     snapshot.selectedMediaId?.let { openMedia(it) }
                 }
                 loadLibraries(session)
+                pollAchievementUnlocks()
             }
         }
     }
@@ -5224,6 +5555,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             val profiles = authRepository.savedProfiles()
             val autoLogin = readAutoLoginLastProfile()
+            val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
+            val currentBackend = ExperiencePreferences.getMusicBackendType(getApplication())
             if (autoLogin) {
                 val lastProfile = profiles.maxByOrNull { it.lastUsedAt }
                 if (lastProfile != null) {
@@ -5231,6 +5564,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         it.copy(
                             savedProfiles = profiles,
                             autoLoginLastProfile = true,
+                            experienceMode = currentMode,
+                            musicBackendType = currentBackend,
+                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                             selectedBackground = readSelectedBackground(null),
                             videoPlayerPreference = readVideoPlayerPreference(null),
                             mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
@@ -5248,6 +5584,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     isLoading = false,
                     savedProfiles = profiles,
                     autoLoginLastProfile = autoLogin,
+                    experienceMode = currentMode,
+                    musicBackendType = currentBackend,
+                    mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                     selectedBackground = readSelectedBackground(null),
                     videoPlayerPreference = readVideoPlayerPreference(null),
                     mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
@@ -5338,6 +5677,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         val jellyfinSession = result.value
                         if (jellyfinSession != null) {
                             markSetupCompleted()
+                            val currentMode = ExperiencePreferences.getExperienceMode(getApplication())
                             _state.update {
                                 it.copy(
                                     isLoading = false,
@@ -5351,7 +5691,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     username = jellyfinSession.user.name,
                                     password = "",
                                     step = VantafynSetupStep.Home,
-                                    mobileDestination = MobileDestination.Home,
+                                    experienceMode = currentMode,
+                                    mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
                                     libraries = emptyList(),
                                     home = null,
                                     homeErrorMessage = null,
@@ -5398,6 +5739,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
 data class VantafynHomeUiState(
     val step: VantafynSetupStep = VantafynSetupStep.Splash,
+    val experienceMode: ExperienceMode = ExperienceMode.FullMedia,
+    val musicBackendType: MusicBackendType = MusicBackendType.OpenSubsonic,
+    val subsonicServerUrl: String = "",
+    val subsonicUsername: String = "",
+    val subsonicPassword: String = "",
+    val isSubsonicConnecting: Boolean = false,
+    val subsonicErrorMessage: String? = null,
     val isStartupResolved: Boolean = false,
     val isAppForeground: Boolean = true,
     val isLoading: Boolean = false,
@@ -5838,8 +6186,8 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.TvInput -> false
     }
 
-private fun MobileDestination.rootDestination(): MobileDestination =
-    if (isRootDestination()) this else MobileDestination.Home
+private fun MobileDestination.rootDestination(experienceMode: ExperienceMode = ExperienceMode.FullMedia): MobileDestination =
+    if (isRootDestination()) this else if (experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home
 
 private data class DownloadScope(
     val serverId: String,
@@ -5862,6 +6210,8 @@ data class PlaybackTarget(
     val seriesName: String? = null,
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
+    val posterUrl: String? = null,
+    val backdropUrl: String? = null,
 )
 
 private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): PlaybackTarget? =
@@ -5878,6 +6228,8 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
                 seriesName = title,
                 seasonNumber = it.seasonIndexNumber,
                 episodeNumber = it.indexNumber,
+                posterUrl = it.imageUrl ?: imageUrl ?: backdropUrl,
+                backdropUrl = backdropUrl ?: it.imageUrl ?: imageUrl,
             )
         }
     } else if (itemType.equals("BoxSet", ignoreCase = true)) {
@@ -5888,6 +6240,8 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
                 subtitle = listOfNotNull(title, item.subtitle).joinToString(" · ").ifBlank { null },
                 startTicks = 0L,
                 itemType = item.itemType,
+                posterUrl = item.imageUrl ?: imageUrl ?: backdropUrl,
+                backdropUrl = backdropUrl ?: item.imageUrl ?: imageUrl,
             )
         }
     } else {
@@ -5904,6 +6258,8 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
             seriesName = seriesName,
             seasonNumber = seasonIndexNumber,
             episodeNumber = episodeIndexNumber,
+            posterUrl = imageUrl ?: backdropUrl,
+            backdropUrl = backdropUrl ?: imageUrl,
         )
     }
 
@@ -5924,6 +6280,8 @@ private fun JellyfinMediaDetail.beginningPlaybackTarget(selectedEpisodes: List<J
             seriesName = episode.seriesName ?: title,
             seasonNumber = episode.seasonIndexNumber,
             episodeNumber = episode.indexNumber,
+            posterUrl = episode.imageUrl ?: imageUrl ?: backdropUrl,
+            backdropUrl = backdropUrl ?: episode.imageUrl ?: imageUrl,
         )
     } else if (itemType.equals("BoxSet", ignoreCase = true)) {
         collectionItems.firstOrNull()?.let { item ->
@@ -5933,6 +6291,8 @@ private fun JellyfinMediaDetail.beginningPlaybackTarget(selectedEpisodes: List<J
                 subtitle = listOfNotNull(title, item.subtitle).joinToString(" · ").ifBlank { null },
                 startTicks = 0L,
                 itemType = item.itemType,
+                posterUrl = item.imageUrl ?: imageUrl ?: backdropUrl,
+                backdropUrl = backdropUrl ?: item.imageUrl ?: imageUrl,
             )
         }
     } else {
@@ -5947,6 +6307,8 @@ private fun JellyfinMediaDetail.beginningPlaybackTarget(selectedEpisodes: List<J
             seriesName = seriesName,
             seasonNumber = seasonIndexNumber,
             episodeNumber = episodeIndexNumber,
+            posterUrl = imageUrl ?: backdropUrl,
+            backdropUrl = backdropUrl ?: imageUrl,
         )
     }
 
@@ -6006,6 +6368,8 @@ private fun JellyfinPlaybackInfo.toPlaybackItem(
         previousCandidate = previousCandidate,
         upNextCandidate = upNextCandidate,
         autoplaySettings = autoplaySettings,
+        posterUrl = target.posterUrl,
+        backdropUrl = target.backdropUrl,
         continuousPlaybackStartedAtMs = continuousPlaybackStartedAtMs,
         mediaSegments = mediaSegments,
         mediaSegmentBehaviors = mediaSegmentBehaviors,
@@ -6281,12 +6645,16 @@ private const val KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS = "watch_party_invite_ex
 private const val KEY_ADMIN_SPEED_LIMIT_MBPS = "admin_speed_limit_mbps"
 private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
 private const val LibraryScanStartGraceMs = 20_000L
+private const val ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS = 120_000L
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 60
 
 enum class VantafynSetupStep {
     Splash,
     Welcome,
+    SelectExperience,
+    SelectMusicBackend,
+    ConnectSubsonic,
     ConnectServer,
     ServerConfirm,
     Login,

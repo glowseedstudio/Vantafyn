@@ -611,6 +611,7 @@ fun Modifier.vantafynAnimatedModalBorder(
     strokeWidth: Dp = 2.dp,
     durationMillis: Int = 5200,
     alpha: Float = 1f,
+    animate: Boolean = false,
 ): Modifier {
     val lifecycleOwner = LocalLifecycleOwner.current
     var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
@@ -622,7 +623,7 @@ fun Modifier.vantafynAnimatedModalBorder(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val shiftState = if (isResumed) {
+    val shift = if (animate && isResumed) {
         val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
         transition.animateFloat(
             initialValue = 0f,
@@ -632,14 +633,13 @@ fun Modifier.vantafynAnimatedModalBorder(
                 repeatMode = RepeatMode.Restart,
             ),
             label = "vantafynModalBorderShift",
-        )
+        ).value
     } else {
-        remember { mutableFloatStateOf(0f) }
+        0f
     }
     val shape = RoundedCornerShape(cornerRadius)
     return this.clip(shape).drawWithContent {
         drawContent()
-        val shift = shiftState.value
         val radius = cornerRadius.toPx()
         val start = Offset(-size.width * shift, -size.height * shift)
         val end = Offset(size.width * (1f - shift), size.height * (1f - shift))
@@ -709,35 +709,7 @@ fun VantafynOnboardingBackground(
         tv -> 0.68f
         else -> 0.72f
     }
-    val context = LocalContext.current
-    val reduceMotion = remember {
-        val am = context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
-        am != null && am.isTouchExplorationEnabled
-    }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var bgLifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            bgLifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = bgLifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val driftXState = if (reduceMotion || !isResumed) {
-        rememberUpdatedState(0f)
-    } else {
-        val infiniteTransition = rememberInfiniteTransition(label = "bgDrift")
-        infiniteTransition.animateFloat(
-            initialValue = -0.02f,
-            targetValue = 0.02f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 34_000, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "bgDriftX",
-        )
-    }
+    val driftXState = rememberUpdatedState(0f)
     Box(modifier = modifier.fillMaxSize()) {
         Crossfade(targetState = backgroundResId, animationSpec = tween(durationMillis = 420), label = "vantafynBackground") { resId ->
             Image(
@@ -877,6 +849,7 @@ fun VantafynTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     tvKeyboardRequiresClick: Boolean = false,
+    trailingIcon: (@Composable () -> Unit)? = null,
 ) {
     var editing by remember { mutableStateOf(!tvKeyboardRequiresClick) }
     var focused by remember { mutableStateOf(false) }
@@ -983,6 +956,7 @@ fun VantafynTextField(
         onValueChange = onValueChange,
         modifier = textFieldModifier,
         placeholder = { Text(placeholder ?: label) },
+        trailingIcon = trailingIcon,
         singleLine = true,
         enabled = enabled,
         readOnly = tvKeyboardRequiresClick && !editing,

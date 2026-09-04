@@ -164,6 +164,12 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
         val result = client.load(loadRequest).awaitResult()
         if (!result.status.isSuccess) throw CastCommandException(CastError.ReceiverLoadFailed)
         pendingQueue = listOf(request.item)
+        publishAcceptedMediaState(
+            item = request.item,
+            queueIndex = 0,
+            positionMs = request.startPositionMs,
+            isPlaying = request.autoplay,
+        )
         syncRemoteState()
     }
 
@@ -224,7 +230,27 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
             .awaitResult()
         if (!result.status.isSuccess) throw CastCommandException(CastError.ReceiverLoadFailed)
         pendingQueue = queue
+        publishAcceptedMediaState(
+            item = queue[safeIndex],
+            queueIndex = safeIndex,
+            positionMs = startPositionMs,
+            isPlaying = true,
+        )
         syncRemoteState()
+    }
+
+    suspend fun playQueueIndex(index: Int) {
+        val client = remoteClient ?: throw CastCommandException(CastError.SessionLost)
+        val status = client.mediaStatus
+        val queueItems = status?.queueItems.orEmpty()
+        if (index in queueItems.indices) {
+            val targetItemId = queueItems[index].itemId
+            val result = client.queueJumpToItem(targetItemId, null).awaitResult()
+            if (!result.status.isSuccess) throw CastCommandException(CastError.RemoteCommandFailed)
+            syncRemoteState()
+        } else if (pendingQueue.isNotEmpty() && index in pendingQueue.indices) {
+            replaceQueue(pendingQueue, index, 0L)
+        }
     }
 
     private fun updateSession(session: CastSession, state: RemoteConnectionState) {
@@ -257,11 +283,28 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
         val status = client.mediaStatus
         val queueItem = status?.getQueueItemById(status.currentItemId)
         val mediaInfo = queueItem?.media ?: status?.mediaInfo
+        val receiverIdle = status?.playerState == MediaStatus.PLAYER_STATE_IDLE
+        val hasActiveMedia = mediaInfo != null || (!receiverIdle && _state.value.hasActiveMedia && pendingQueue.isNotEmpty())
         val customData = mediaInfo?.customData
         val queueItems = status?.queueItems.orEmpty()
         val activeTrackIds = status?.activeTrackIds?.toSet().orEmpty()
         val currentJellyfinItemId = customData?.optString("jellyfinItemId")?.takeIf(String::isNotBlank)
-        val pendingItem = pendingQueue.firstOrNull { it.itemId.toString() == currentJellyfinItemId }
+        val reportedQueueIndex = queueItems.indexOfFirst { item -> item.itemId == status?.currentItemId }
+        val currentQueueIndex = if (reportedQueueIndex >= 0) {
+            reportedQueueIndex
+        } else {
+            _state.value.currentQueueIndex.coerceIn(0, pendingQueue.lastIndex.coerceAtLeast(0))
+        }
+        val currentPendingItem = pendingQueue.getOrNull(currentQueueIndex)
+        val resolvedJellyfinItemId = if (hasActiveMedia) {
+            currentJellyfinItemId
+                ?: currentPendingItem?.itemId?.toString()
+                ?: pendingQueue.singleOrNull()?.itemId?.toString()
+                ?: _state.value.currentItemId
+        } else {
+            null
+        }
+        val pendingItem = pendingQueue.firstOrNull { it.itemId.toString() == resolvedJellyfinItemId }
         val textTracks = pendingItem?.castSubtitleTracks ?: mediaInfo?.mediaTracks.orEmpty()
             .filter { it.type == com.google.android.gms.cast.MediaTrack.TYPE_TEXT }
             .map {
@@ -279,8 +322,9 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
             }
         _state.update {
             it.copy(
-                currentItemId = currentJellyfinItemId ?: it.currentItemId,
-                currentQueueIndex = queueItems.indexOfFirst { item -> item.itemId == status?.currentItemId }.coerceAtLeast(0),
+                hasActiveMedia = hasActiveMedia,
+                currentItemId = resolvedJellyfinItemId,
+                currentQueueIndex = currentQueueIndex,
                 positionMs = client.approximateStreamPosition.coerceAtLeast(0L),
                 durationMs = client.streamDuration.coerceAtLeast(0L),
                 isPlaying = client.isPlaying,
@@ -288,15 +332,40 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
                 canSkipPrevious = queueItems.size > 1,
                 repeatMode = status?.queueRepeatMode.toVantafynRepeatMode(),
                 subtitleTracks = textTracks,
-                activeSubtitleTrackId = activeTrackIds.firstOrNull { id -> textTracks.any { it.castTrackId == id } },
-                audioTracks = pendingItem?.castAudioTracks ?: it.audioTracks,
+                activeSubtitleTrackId = if (hasActiveMedia) {
+                    activeTrackIds.firstOrNull { id -> textTracks.any { it.castTrackId == id } }
+                } else {
+                    null
+                },
+                audioTracks = if (hasActiveMedia) pendingItem?.castAudioTracks ?: it.audioTracks else emptyList(),
                 audioSwitchingSupported = false,
             )
         }
-        if (client.mediaStatus?.mediaInfo != null) {
+        if (hasActiveMedia) {
             startPositionTicker()
         } else {
             stopPositionTicker("cast idle")
+        }
+    }
+
+    private fun publishAcceptedMediaState(
+        item: RemoteQueueItem,
+        queueIndex: Int,
+        positionMs: Long,
+        isPlaying: Boolean,
+    ) {
+        _state.update {
+            it.copy(
+                hasActiveMedia = true,
+                currentItemId = item.itemId.toString(),
+                currentQueueIndex = queueIndex,
+                positionMs = positionMs.coerceAtLeast(0L),
+                durationMs = item.durationMs ?: it.durationMs,
+                isPlaying = isPlaying,
+                subtitleTracks = item.castSubtitleTracks,
+                activeSubtitleTrackId = item.activeSubtitleTrackId,
+                audioTracks = item.castAudioTracks,
+            )
         }
     }
 
@@ -333,16 +402,6 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
         if (!CastUrlSecurity.isCastReachableServerAddress(item.streamUrl)) {
             throw CastCommandException(CastError.ServerAddressUnreachable)
         }
-        item.artworkUrl?.let {
-            if (!CastUrlSecurity.isCastReachableServerAddress(it)) {
-                throw CastCommandException(CastError.ServerAddressUnreachable)
-            }
-        }
-        item.castSubtitleTracks.forEach {
-            if (!CastUrlSecurity.isCastReachableServerAddress(it.contentUrl)) {
-                throw CastCommandException(CastError.ServerAddressUnreachable)
-            }
-        }
     }
 
     private fun RemoteQueueItem.toMediaInfo(): MediaInfo {
@@ -366,19 +425,25 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
             overview?.let { putString(MediaMetadata.KEY_STUDIO, it.take(120)) }
             listOfNotNull(artworkUrl, backdropUrl)
                 .distinct()
-                .forEach { addImage(com.google.android.gms.common.images.WebImage(android.net.Uri.parse(it))) }
+                .filter { CastUrlSecurity.isCastReachableServerAddress(it) }
+                .forEach { imageUrl ->
+                    runCatching {
+                        addImage(com.google.android.gms.common.images.WebImage(android.net.Uri.parse(imageUrl)))
+                    }
+                }
         }
         val customData = JSONObject()
             .put("jellyfinItemId", itemId.toString())
             .put("queueId", queueId)
             .put("mediaKind", mediaKind.name)
+        val validSubtitleTracks = castSubtitleTracks.filter { CastUrlSecurity.isCastReachableServerAddress(it.contentUrl) }
         return MediaInfo.Builder(streamUrl)
             .setStreamType(if (isLive) MediaInfo.STREAM_TYPE_LIVE else MediaInfo.STREAM_TYPE_BUFFERED)
             .setContentType(contentType)
             .setMetadata(metadata)
             .setStreamDuration(if (isLive) 0L else durationMs ?: 0L)
             .setCustomData(customData)
-            .setMediaTracks(castSubtitleTracks.map(CastTrackMapper::toMediaTrack))
+            .setMediaTracks(validSubtitleTracks.map(CastTrackMapper::toMediaTrack))
             .build()
     }
 

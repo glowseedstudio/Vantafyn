@@ -30,8 +30,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
+import dev.vantafyn.core.ui.VantafynNavSelectedBrush
 
 @Composable
 fun VantafynTvSidebarItem(
@@ -138,11 +142,11 @@ fun VantafynTvSidebarItem(
             modifier = Modifier.size(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(
-                imageVector = icon,
+            VantafynTvSidebarIcon(
+                icon = icon,
                 contentDescription = label,
                 tint = contentColor,
-                modifier = Modifier.size(22.dp),
+                selected = isSelected,
             )
             if (badgeCount > 0 && !isExpanded) {
                 Box(
@@ -273,11 +277,11 @@ fun VantafynTvSidebarIconButton(
             .focusable(interactionSource = interactionSource),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(
-            imageVector = icon,
+        VantafynTvSidebarIcon(
+            icon = icon,
             contentDescription = label,
             tint = contentColor,
-            modifier = Modifier.size(22.dp),
+            selected = isSelected,
         )
 
         if (badgeCount > 0) {
@@ -291,4 +295,34 @@ fun VantafynTvSidebarIconButton(
             )
         }
     }
+}
+
+@Composable
+private fun VantafynTvSidebarIcon(
+    icon: ImageVector,
+    contentDescription: String,
+    tint: Color,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val selectedBrush = VantafynNavSelectedBrush()
+    Icon(
+        imageVector = icon,
+        contentDescription = contentDescription,
+        tint = if (selected) Color.White else tint,
+        modifier = modifier
+            .size(22.dp)
+            .then(
+                if (selected) {
+                    Modifier
+                        .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(brush = selectedBrush, blendMode = BlendMode.SrcIn)
+                        }
+                } else {
+                    Modifier
+                },
+            ),
+    )
 }

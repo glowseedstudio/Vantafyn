@@ -37,6 +37,7 @@ data class VantafynMusicTrack(
     val album: String?,
     val albumId: UUID?,
     val durationMs: Long?,
+    val genres: List<String> = emptyList(),
     val streamUrl: String,
     val artworkUrl: String?,
     val isFavorite: Boolean = false,
@@ -60,6 +61,12 @@ enum class VantafynMusicRepeatMode {
     All,
 }
 
+enum class SleepTimerMode {
+    Duration,
+    EndOfTrack,
+    EndOfQueue,
+}
+
 data class VantafynMusicPlaybackState(
     val queue: List<VantafynMusicTrack> = emptyList(),
     val queueIndex: Int = 0,
@@ -69,6 +76,8 @@ data class VantafynMusicPlaybackState(
     val shuffleEnabled: Boolean = false,
     val repeatMode: VantafynMusicRepeatMode = VantafynMusicRepeatMode.Off,
     val errorMessage: String? = null,
+    val sleepTimerRemainingSeconds: Long? = null,
+    val sleepTimerMode: SleepTimerMode? = null,
 ) {
     val currentTrack: VantafynMusicTrack?
         get() = queue.getOrNull(queueIndex)
@@ -91,6 +100,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var tickerJob: Job? = null
+    private var sleepTimerJob: Job? = null
     private var lastTransitionReason: VantafynMusicStopReason = VantafynMusicStopReason.QueueChange
     private var playbackServiceStarted = false
     private var lastRegistryTickMs: Long = 0L
@@ -148,6 +158,10 @@ class MusicPlaybackController private constructor(context: Context) {
                         current?.let { emitEvent(VantafynMusicPlaybackEvent.TrackStarted(it, currentPosition.coerceAtLeast(0L))) }
                     }
                     lastTransitionReason = VantafynMusicStopReason.QueueChange
+                    if (_state.value.sleepTimerMode == SleepTimerMode.EndOfTrack) {
+                        pause()
+                        cancelSleepTimer()
+                    }
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -166,6 +180,9 @@ class MusicPlaybackController private constructor(context: Context) {
                             ),
                         )
                         _state.update { it.copy(isPlaying = false) }
+                        if (_state.value.sleepTimerMode == SleepTimerMode.EndOfQueue) {
+                            cancelSleepTimer()
+                        }
                     }
                     if (playbackState == Player.STATE_READY) {
                         forcePlaybackSnapshot()
@@ -211,6 +228,10 @@ class MusicPlaybackController private constructor(context: Context) {
                         tickerJob = null
                         syncTicker()
                     }
+                } else {
+                    tickerJob?.cancel()
+                    tickerJob = null
+                    LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "background idle")
                 }
             }
         }
@@ -268,6 +289,7 @@ class MusicPlaybackController private constructor(context: Context) {
         val track = _state.value.currentTrack
         val position = sessionPlayer.currentPosition.coerceAtLeast(0L)
         emitEvent(VantafynMusicPlaybackEvent.Stopped(track, position, reason))
+        sessionPlayer.playWhenReady = false
         sessionPlayer.stop()
         if (clearQueue) {
             sessionPlayer.clearMediaItems()
@@ -282,6 +304,25 @@ class MusicPlaybackController private constructor(context: Context) {
                 durationMs = if (clearQueue) 0L else it.durationMs,
             )
         }
+    }
+
+    fun suspendLocalPlaybackForCast(positionMs: Long) {
+        val track = _state.value.currentTrack
+        val safePosition = positionMs.coerceAtLeast(0L)
+        emitEvent(VantafynMusicPlaybackEvent.Stopped(track, safePosition, VantafynMusicStopReason.Background))
+        sessionPlayer.playWhenReady = false
+        sessionPlayer.pause()
+        sessionPlayer.stop()
+        stopPlaybackService()
+        _state.update {
+            it.copy(
+                isPlaying = false,
+                positionMs = safePosition,
+                durationMs = track?.durationMs ?: it.durationMs,
+                errorMessage = null,
+            )
+        }
+        syncTicker()
     }
 
     fun next() {
@@ -317,16 +358,150 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     fun playNext(track: VantafynMusicTrack) {
-        val insertIndex = (_state.value.queueIndex + 1).coerceAtMost(_state.value.queue.size)
-        sessionPlayer.addMediaItem(insertIndex, track.toMediaItem())
+        val currentQueue = _state.value.queue
+        val existingIndex = currentQueue.indexOfFirst { it.id == track.id }
+        if (existingIndex >= 0) {
+            sessionPlayer.removeMediaItem(existingIndex)
+        }
+        val currentIdx = sessionPlayer.currentMediaItemIndex.coerceAtLeast(0)
+        val insertIdx = (currentIdx + 1).coerceAtMost(sessionPlayer.mediaItemCount)
+        sessionPlayer.addMediaItem(insertIdx, track.toMediaItem())
         tracksByMediaId[track.id.toString()] = track
-        _state.update { it.copy(queue = it.queue.toMutableList().apply { add(insertIndex, track) }) }
+        val newQueue = currentQueue.toMutableList()
+        if (existingIndex >= 0) newQueue.removeAt(existingIndex)
+        newQueue.add(insertIdx, track)
+        _state.update { it.copy(queue = newQueue, queueIndex = sessionPlayer.currentMediaItemIndex) }
     }
 
     fun addToQueue(track: VantafynMusicTrack) {
         sessionPlayer.addMediaItem(track.toMediaItem())
         tracksByMediaId[track.id.toString()] = track
         _state.update { it.copy(queue = it.queue + track) }
+    }
+
+    fun removeFromQueue(index: Int) {
+        if (index !in 0 until sessionPlayer.mediaItemCount) return
+        sessionPlayer.removeMediaItem(index)
+        _state.update { state ->
+            val newQueue = state.queue.toMutableList().also { if (index in it.indices) it.removeAt(index) }
+            val newIndex = sessionPlayer.currentMediaItemIndex.coerceIn(0, newQueue.size.coerceAtLeast(1) - 1)
+            state.copy(queue = newQueue, queueIndex = newIndex)
+        }
+    }
+
+    fun clearUpcomingQueue() {
+        val currentIdx = sessionPlayer.currentMediaItemIndex
+        val queue = _state.value.queue
+        if (currentIdx < 0 || currentIdx >= queue.size) return
+        val totalCount = sessionPlayer.mediaItemCount
+        if (totalCount > currentIdx + 1) {
+            sessionPlayer.removeMediaItems(currentIdx + 1, totalCount)
+        }
+        _state.update { it.copy(queue = queue.take(currentIdx + 1)) }
+    }
+
+    fun clearAllQueue() {
+        stop(clearQueue = true)
+    }
+
+    fun addMultipleToQueue(tracks: List<VantafynMusicTrack>) {
+        if (tracks.isEmpty()) return
+        val mediaItems = tracks.map { track ->
+            tracksByMediaId[track.id.toString()] = track
+            track.toMediaItem()
+        }
+        sessionPlayer.addMediaItems(mediaItems)
+        _state.update { it.copy(queue = it.queue + tracks) }
+    }
+
+    fun playNextMultiple(tracks: List<VantafynMusicTrack>) {
+        if (tracks.isEmpty()) return
+        val currentQueue = _state.value.queue.toMutableList()
+        val currentIdx = sessionPlayer.currentMediaItemIndex.coerceAtLeast(0)
+        val insertIdx = (currentIdx + 1).coerceAtMost(sessionPlayer.mediaItemCount)
+        val mediaItems = tracks.map { track ->
+            tracksByMediaId[track.id.toString()] = track
+            track.toMediaItem()
+        }
+        sessionPlayer.addMediaItems(insertIdx, mediaItems)
+        currentQueue.addAll(insertIdx, tracks)
+        _state.update { it.copy(queue = currentQueue, queueIndex = sessionPlayer.currentMediaItemIndex) }
+    }
+
+    fun setSleepTimer(minutes: Int) {
+        cancelSleepTimer()
+        if (minutes <= 0) return
+        val totalSeconds = minutes * 60L
+        _state.update {
+            it.copy(
+                sleepTimerRemainingSeconds = totalSeconds,
+                sleepTimerMode = SleepTimerMode.Duration,
+            )
+        }
+        sleepTimerJob = scope.launch {
+            var remaining = totalSeconds
+            while (remaining > 0) {
+                delay(1000)
+                remaining--
+                _state.update { it.copy(sleepTimerRemainingSeconds = remaining) }
+                if (remaining == 3L) {
+                    fadeVolume(from = 1.0f, to = 0.0f, durationMs = 3000)
+                }
+            }
+            pause()
+            sessionPlayer.volume = 1.0f
+            _state.update {
+                it.copy(
+                    sleepTimerRemainingSeconds = null,
+                    sleepTimerMode = null,
+                )
+            }
+        }
+    }
+
+    fun setSleepTimerEndOfTrack() {
+        cancelSleepTimer()
+        _state.update {
+            it.copy(
+                sleepTimerRemainingSeconds = null,
+                sleepTimerMode = SleepTimerMode.EndOfTrack,
+            )
+        }
+    }
+
+    fun setSleepTimerEndOfQueue() {
+        cancelSleepTimer()
+        _state.update {
+            it.copy(
+                sleepTimerRemainingSeconds = null,
+                sleepTimerMode = SleepTimerMode.EndOfQueue,
+            )
+        }
+    }
+
+    fun cancelSleepTimer() {
+        sleepTimerJob?.cancel()
+        sleepTimerJob = null
+        sessionPlayer.volume = 1.0f
+        _state.update {
+            it.copy(
+                sleepTimerRemainingSeconds = null,
+                sleepTimerMode = null,
+            )
+        }
+    }
+
+    private suspend fun fadeVolume(from: Float, to: Float, durationMs: Long) {
+        val steps = 30
+        val stepInterval = (durationMs / steps).coerceAtLeast(10L)
+        val delta = (to - from) / steps
+        var currentVol = from
+        for (i in 0 until steps) {
+            currentVol += delta
+            sessionPlayer.volume = currentVol.coerceIn(0.0f, 1.0f)
+            delay(stepInterval)
+        }
+        sessionPlayer.volume = to.coerceIn(0.0f, 1.0f)
     }
 
     fun previous() {
@@ -416,11 +591,11 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     private fun syncTicker() {
-        if (!sessionPlayer.isPlaying) {
+        if (!sessionPlayer.isPlaying || !AppForegroundStateRepository.isForeground.value) {
             tickerJob?.cancel()
             tickerJob = null
-            LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "music paused")
-            Log.d(TAG, "Ticker stopped (paused)")
+            LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, if (!sessionPlayer.isPlaying) "music paused" else "background idle")
+            Log.d(TAG, "Ticker stopped (playing=${sessionPlayer.isPlaying}, foreground=${AppForegroundStateRepository.isForeground.value})")
             return
         }
         if (tickerJob != null) return
@@ -430,8 +605,7 @@ class MusicPlaybackController private constructor(context: Context) {
             owner = "MusicPlaybackController",
             state = "playing",
         )
-        val isForeground = AppForegroundStateRepository.isForeground.value
-        Log.d(TAG, "Ticker started (foreground=$isForeground)")
+        Log.d(TAG, "Ticker started (foreground=true)")
         tickerJob = scope.launch {
             while (isActive) {
                 _state.update { state ->
@@ -445,16 +619,11 @@ class MusicPlaybackController private constructor(context: Context) {
                     )
                 }
                 val now = System.currentTimeMillis()
-                val registryTickInterval = if (AppForegroundStateRepository.isForeground.value) {
-                    ForegroundTickerIntervalMs
-                } else {
-                    BackgroundRegistryTickIntervalMs
-                }
-                if (now - lastRegistryTickMs >= registryTickInterval) {
+                if (now - lastRegistryTickMs >= ForegroundTickerIntervalMs) {
                     lastRegistryTickMs = now
                     LongRunningTaskRegistry.tick(MUSIC_TICKER_TASK_ID, if (sessionPlayer.isPlaying) "playing" else "paused")
                 }
-                delay(if (AppForegroundStateRepository.isForeground.value) ForegroundTickerIntervalMs else BackgroundTickerIntervalMs)
+                delay(ForegroundTickerIntervalMs)
             }
         }
     }
@@ -467,7 +636,7 @@ class MusicPlaybackController private constructor(context: Context) {
     private fun ExoPlayer.enableCompatibleAudioOffload() {
         val audioOffloadPreferences = AudioOffloadPreferences.Builder()
             .setAudioOffloadMode(AudioOffloadPreferences.AUDIO_OFFLOAD_MODE_ENABLED)
-            .setIsGaplessSupportRequired(true)
+            .setIsGaplessSupportRequired(false)
             .build()
         trackSelectionParameters = trackSelectionParameters
             .buildUpon()

@@ -3,6 +3,7 @@ package dev.vantafyn.feature.player
 import android.app.Activity
 import android.app.PictureInPictureParams
 import android.content.Context
+import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.Build
 import android.util.Rational
@@ -80,11 +81,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -136,10 +139,18 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassCard
 import dev.vantafyn.core.ui.VantafynGlassModalPanel
 import dev.vantafyn.core.ui.VantafynGlassPanel
+import dev.vantafyn.core.ui.VantafynGlassSurface
+import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynGradientSpinner
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynSpacing
+import dev.vantafyn.core.ui.rememberDevicePosture
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import java.text.DateFormat
@@ -161,7 +172,7 @@ fun MobilePlayerScreen(
     onPlayNext: (UpNextCandidate, Long) -> Unit,
     onPlayPrevious: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
-    onPrepareCastPlayback: (Long) -> Unit,
+    onPrepareCastPlayback: (Long, Int?, Int?) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
     onSyncPlayPause: (Long) -> Unit = {},
@@ -235,7 +246,7 @@ private fun PlayerSurface(
     onPlayNext: (UpNextCandidate, Long) -> Unit,
     onPlayPrevious: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
-    onPrepareCastPlayback: (Long) -> Unit,
+    onPrepareCastPlayback: (Long, Int?, Int?) -> Unit,
     onSelectAudioTrack: (Int, Long) -> Unit,
     onSelectSubtitleTrack: (Int?, Long) -> Unit,
     onSyncPlayPause: (Long) -> Unit,
@@ -313,7 +324,7 @@ private fun PlayerSurface(
                 setMediaItem(item.toMediaItem())
                 prepare()
                 if (item.startPositionMs > 0L) seekTo(item.startPositionMs)
-                playWhenReady = !item.isCastResolved
+                playWhenReady = !item.isCastResolved && outputState.activeOutput != PlaybackOutputType.GoogleCast
             }
     }
     val skipSegment: (JellyfinMediaSegment) -> Unit = { segment ->
@@ -427,12 +438,18 @@ private fun PlayerSurface(
             !item.isLiveStream
         ) {
             val handoffPosition = player.currentPosition.coerceAtLeast(positionMs)
+            val castItem = item.copy(
+                selectedAudioStreamIndex = selectedAudioIndex,
+                selectedSubtitleStreamIndex = selectedSubtitleIndex,
+            )
             player.pause()
+            selectedAudioIndex?.let { onSelectAudioTrack(it, handoffPosition) }
+            onSelectSubtitleTrack(selectedSubtitleIndex, handoffPosition)
             onProgress(handoffPosition, true)
             if (item.isCastResolved) {
-                outputCoordinator.loadVideo(item, handoffPosition)
+                outputCoordinator.loadVideo(castItem, handoffPosition)
             } else {
-                onPrepareCastPlayback(handoffPosition)
+                onPrepareCastPlayback(handoffPosition, selectedAudioIndex, selectedSubtitleIndex)
             }
         }
     }
@@ -519,7 +536,7 @@ private fun PlayerSurface(
     LaunchedEffect(player, started, isCastingThisItem, lifecycleOwner) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
-                delay(7_000L)
+                delay(15_000L)
                 if (started && !isCastingThisItem) onProgress(player.currentPosition, !player.isPlaying)
             }
         }
@@ -600,203 +617,291 @@ private fun PlayerSurface(
         upNextState = candidate?.let { UpNextState.Cancelled(it) } ?: UpNextState.Hidden
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-            ) { controlsVisible = !controlsVisible },
-    ) {
-        if (isCastingThisItem) {
-            CastControllerSurface(
-                item = item,
-                receiverName = castState.receiverName,
-                positionMs = castState.positionMs,
-                durationMs = castState.durationMs.takeIf { it > 0L } ?: durationMs,
-                isPlaying = castState.isPlaying,
-                errorMessage = outputState.lastErrorMessage,
-                subtitleTracks = castState.subtitleTracks,
-                activeSubtitleTrackId = castState.activeSubtitleTrackId,
-                onPlayPause = {
-                    if (castState.isPlaying) {
-                        onSyncPlayPause(castState.positionMs)
-                    } else {
-                        onSyncPlayResume(castState.positionMs)
-                    }
-                    outputCoordinator.playPause()
-                },
-                onSeekTo = {
-                    outputCoordinator.seekTo(it)
-                    onSyncPlaySeek(it)
-                },
-                onSeekBy = { delta ->
-                    val target = (castState.positionMs + delta).coerceIn(0L, (castState.durationMs.takeIf { it > 0L } ?: durationMs).coerceAtLeast(0L))
-                    outputCoordinator.seekTo(target)
-                    onSyncPlaySeek(target)
-                    onProgress(target, !castState.isPlaying)
-                },
-                onPlayPrevious = {
-                    val candidate = previousCandidate ?: return@CastControllerSurface
-                    if (!previousStarted) {
-                        previousStarted = true
-                        onPlayPrevious(candidate, castState.positionMs)
-                    }
-                },
-                onPlayNext = {
-                    val candidate = upNextCandidate ?: return@CastControllerSurface
-                    if (!nextStarted) {
-                        nextStarted = true
-                        upNextState = UpNextState.PlayingNext
-                        onPlayNext(candidate, castState.positionMs)
-                    }
-                },
-                onStopCasting = {
-                    onProgress(castState.positionMs, true)
-                    outputCoordinator.disconnect(stopPlayback = true)
-                    onBack()
-                },
-                onSubtitles = { castSubtitleSheetVisible = true },
-                onPlayHere = {
-                    val resumePosition = castState.positionMs
-                    outputCoordinator.playVideoOnThisDevice(stopCastPlayback = true)
-                    player.seekTo(resumePosition)
+    val posture = rememberDevicePosture()
+
+    if (posture.isTabletop && !isCastingThisItem && !isInPiP) {
+        FlexTheaterPlayerLayout(
+            item = item,
+            isPlaying = isPlaying,
+            isBuffering = isBuffering,
+            positionMs = positionMs,
+            durationMs = durationMs,
+            selectedAudioIndex = selectedAudioIndex,
+            selectedSubtitleIndex = selectedSubtitleIndex,
+            playbackSpeed = playbackSpeed,
+            resizeMode = resizeMode,
+            activeSegment = if (activeSegmentBehavior == JellyfinMediaSegmentBehavior.Prompt && activeSegment?.id.toString() !in autoSkippedSegmentIds) activeSegment else null,
+            onBack = onBack,
+            onPlayPause = {
+                if (player.isPlaying) {
+                    player.pause()
+                    onSyncPlayPause(player.currentPosition)
+                } else {
                     player.play()
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            AndroidView(
-                factory = {
-                    val initialResizeMode = resizeMode.media3Mode
-                    PlayerView(it).apply {
-                        useController = false
-                        this.resizeMode = initialResizeMode
-                        this.player = player
-                        layoutParams = ViewGroup.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT,
+                    onSyncPlayResume(player.currentPosition)
+                }
+                onProgress(player.currentPosition, !player.isPlaying)
+            },
+            onSeekBy = { delta ->
+                val target = (player.currentPosition + delta).coerceIn(0L, durationMs.coerceAtLeast(player.currentPosition + delta))
+                player.seekTo(target)
+                onSyncPlaySeek(target)
+                onProgress(target, !player.isPlaying)
+            },
+            onSeekTo = { pos ->
+                player.seekTo(pos)
+                onSyncPlaySeek(pos)
+                onProgress(pos, !player.isPlaying)
+            },
+            onAudio = { sheet = PlayerSheet.Audio },
+            onSubtitles = { sheet = PlayerSheet.Subtitles },
+            onMore = { sheet = PlayerSheet.More },
+            onPlayPrevious = {
+                val candidate = previousCandidate ?: return@FlexTheaterPlayerLayout
+                if (!previousStarted) {
+                    previousStarted = true
+                    onPlayPrevious(candidate, player.currentPosition)
+                }
+            },
+            onPlayNext = {
+                val candidate = upNextCandidate ?: return@FlexTheaterPlayerLayout
+                if (!nextStarted) {
+                    nextStarted = true
+                    upNextState = UpNextState.PlayingNext
+                    onPlayNext(candidate, player.currentPosition)
+                }
+            },
+            onEnterPiP = enterPiP,
+            onSkipSegment = { activeSegment?.let(skipSegment) },
+            topContent = {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    AndroidView(
+                        factory = {
+                            val initialResizeMode = resizeMode.media3Mode
+                            PlayerView(it).apply {
+                                useController = false
+                                this.resizeMode = initialResizeMode
+                                this.player = player
+                                layoutParams = ViewGroup.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                )
+                            }
+                        },
+                        update = {
+                            it.player = player
+                            it.resizeMode = resizeMode.media3Mode
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (isBuffering) {
+                        PlayerLoadingIndicator(
+                            text = "Buffering",
+                            modifier = Modifier.align(Alignment.Center),
                         )
                     }
-                },
-                update = {
-                    it.player = player
-                    it.resizeMode = resizeMode.media3Mode
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-        if (isBuffering && !isCastingThisItem) {
-            PlayerLoadingIndicator(
-                text = "Buffering",
-                modifier = Modifier.align(Alignment.Center),
-            )
-        }
-        AnimatedVisibility(
-            visible = controlsVisible && !isCastingThisItem && !isInPiP,
-            modifier = Modifier.fillMaxSize(),
-            enter = fadeIn(tween(220)),
-            exit = fadeOut(tween(320)),
-        ) {
-            PlayerControls(
-                item = item,
-                isPlaying = isPlaying,
-                isBuffering = isBuffering,
-                positionMs = positionMs,
-                durationMs = durationMs,
-                selectedAudioIndex = selectedAudioIndex,
-                selectedSubtitleIndex = selectedSubtitleIndex,
-                onBack = onBack,
-                onPlayPause = {
-                    if (player.isPlaying) {
-                        player.pause()
-                        onSyncPlayPause(player.currentPosition)
-                    } else {
-                        player.play()
-                        onSyncPlayResume(player.currentPosition)
-                    }
-                    onProgress(player.currentPosition, !player.isPlaying)
-                },
-                onSeekBy = {
-                    val target = (player.currentPosition + it).coerceIn(0L, durationMs.coerceAtLeast(player.currentPosition + it))
-                    player.seekTo(target)
-                    onSyncPlaySeek(target)
-                    onProgress(target, !player.isPlaying)
-                },
-                onSeekTo = {
-                    player.seekTo(it)
-                    onSyncPlaySeek(it)
-                    onProgress(it, !player.isPlaying)
-                },
-                onAudio = { sheet = PlayerSheet.Audio },
-                onSubtitles = { sheet = PlayerSheet.Subtitles },
-                onMore = { sheet = PlayerSheet.More },
-                onPlayPrevious = {
-                    val candidate = previousCandidate ?: return@PlayerControls
-                    if (!previousStarted) {
-                        previousStarted = true
-                        onPlayPrevious(candidate, player.currentPosition)
-                    }
-                },
-                onPlayNext = {
-                    val candidate = upNextCandidate ?: return@PlayerControls
-                    if (!nextStarted) {
-                        nextStarted = true
-                        upNextState = UpNextState.PlayingNext
-                        onPlayNext(candidate, player.currentPosition)
-                    }
-                },
-                onEnterPiP = enterPiP,
-            )
-        }
-        AnimatedVisibility(
-            visible = activeSegment != null &&
-                activeSegmentBehavior == JellyfinMediaSegmentBehavior.Prompt &&
-                activeSegment.id.toString() !in autoSkippedSegmentIds,
-            enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
-                slideInVertically(animationSpec = tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it / 5 }),
-            exit = fadeOut(tween(260, easing = FastOutSlowInEasing)) +
-                slideOutVertically(animationSpec = tween(300, easing = FastOutSlowInEasing), targetOffsetY = { it / 5 }),
+                }
+            },
+        )
+    } else {
+        Box(
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(end = 54.dp, start = 18.dp, bottom = if (controlsVisible) 166.dp else 54.dp),
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { controlsVisible = !controlsVisible },
         ) {
-            val segment = activeSegment
-            if (segment != null) {
-                SkipSegmentOverlay(
-                    label = segment.skipLabel(),
-                    onSkip = { skipSegment(segment) },
-                )
-            }
-        }
-        AnimatedVisibility(
-            visible = upNextState is UpNextState.Available,
-            enter = fadeIn(tween(260)) + slideInVertically(animationSpec = tween(360, easing = FastOutSlowInEasing), initialOffsetY = { it / 3 }),
-            exit = fadeOut(tween(260)) + slideOutVertically(animationSpec = tween(360, easing = FastOutSlowInEasing), targetOffsetY = { it / 3 }),
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .widthIn(max = 560.dp)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 14.dp, vertical = if (controlsVisible) 162.dp else 24.dp),
-        ) {
-            val available = upNextState as? UpNextState.Available
-            if (available != null) {
-                UpNextOverlay(
-                    state = available,
-                    totalCountdownSeconds = autoplaySettings.countdownSeconds,
-                    onPlayNow = {
+            if (isCastingThisItem) {
+                CastControllerSurface(
+                    item = item,
+                    receiverName = castState.receiverName,
+                    positionMs = castState.positionMs,
+                    durationMs = castState.durationMs.takeIf { it > 0L } ?: durationMs,
+                    isPlaying = castState.isPlaying,
+                    errorMessage = outputState.lastErrorMessage,
+                    subtitleTracks = castState.subtitleTracks,
+                    activeSubtitleTrackId = castState.activeSubtitleTrackId,
+                    onPlayPause = {
+                        if (castState.isPlaying) {
+                            onSyncPlayPause(castState.positionMs)
+                        } else {
+                            onSyncPlayResume(castState.positionMs)
+                        }
+                        outputCoordinator.playPause()
+                    },
+                    onSeekTo = {
+                        outputCoordinator.seekTo(it)
+                        onSyncPlaySeek(it)
+                    },
+                    onSeekBy = { delta ->
+                        val target = (castState.positionMs + delta).coerceIn(0L, (castState.durationMs.takeIf { it > 0L } ?: durationMs).coerceAtLeast(0L))
+                        outputCoordinator.seekTo(target)
+                        onSyncPlaySeek(target)
+                        onProgress(target, !castState.isPlaying)
+                    },
+                    onPlayPrevious = {
+                        val candidate = previousCandidate ?: return@CastControllerSurface
+                        if (!previousStarted) {
+                            previousStarted = true
+                            onPlayPrevious(candidate, castState.positionMs)
+                        }
+                    },
+                    onPlayNext = {
+                        val candidate = upNextCandidate ?: return@CastControllerSurface
                         if (!nextStarted) {
                             nextStarted = true
                             upNextState = UpNextState.PlayingNext
-                            onPlayNext(available.candidate, player.currentPosition)
+                            onPlayNext(candidate, castState.positionMs)
                         }
                     },
-                    onCancel = {
-                        upNextCancelled = true
-                        upNextState = UpNextState.Cancelled(available.candidate)
+                    onStopCasting = {
+                        onProgress(castState.positionMs, true)
+                        outputCoordinator.disconnect(stopPlayback = true)
+                        onBack()
                     },
+                    onSubtitles = { castSubtitleSheetVisible = true },
+                    onPlayHere = {
+                        val resumePosition = castState.positionMs
+                        outputCoordinator.playVideoOnThisDevice(stopCastPlayback = true)
+                        player.seekTo(resumePosition)
+                        player.play()
+                    },
+                    modifier = Modifier.fillMaxSize(),
                 )
+            } else {
+                AndroidView(
+                    factory = {
+                        val initialResizeMode = resizeMode.media3Mode
+                        PlayerView(it).apply {
+                            useController = false
+                            this.resizeMode = initialResizeMode
+                            this.player = player
+                            layoutParams = ViewGroup.LayoutParams(
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                                ViewGroup.LayoutParams.MATCH_PARENT,
+                            )
+                        }
+                    },
+                    update = {
+                        it.player = player
+                        it.resizeMode = resizeMode.media3Mode
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+            if (isBuffering && !isCastingThisItem) {
+                PlayerLoadingIndicator(
+                    text = "Buffering",
+                    modifier = Modifier.align(Alignment.Center),
+                )
+            }
+            AnimatedVisibility(
+                visible = controlsVisible && !isCastingThisItem && !isInPiP,
+                modifier = Modifier.fillMaxSize(),
+                enter = fadeIn(tween(220)),
+                exit = fadeOut(tween(320)),
+            ) {
+                PlayerControls(
+                    item = item,
+                    isPlaying = isPlaying,
+                    isBuffering = isBuffering,
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    selectedAudioIndex = selectedAudioIndex,
+                    selectedSubtitleIndex = selectedSubtitleIndex,
+                    onBack = onBack,
+                    onPlayPause = {
+                        if (player.isPlaying) {
+                            player.pause()
+                            onSyncPlayPause(player.currentPosition)
+                        } else {
+                            player.play()
+                            onSyncPlayResume(player.currentPosition)
+                        }
+                        onProgress(player.currentPosition, !player.isPlaying)
+                    },
+                    onSeekBy = {
+                        val target = (player.currentPosition + it).coerceIn(0L, durationMs.coerceAtLeast(player.currentPosition + it))
+                        player.seekTo(target)
+                        onSyncPlaySeek(target)
+                        onProgress(target, !player.isPlaying)
+                    },
+                    onSeekTo = {
+                        player.seekTo(it)
+                        onSyncPlaySeek(it)
+                        onProgress(it, !player.isPlaying)
+                    },
+                    onAudio = { sheet = PlayerSheet.Audio },
+                    onSubtitles = { sheet = PlayerSheet.Subtitles },
+                    onMore = { sheet = PlayerSheet.More },
+                    onPlayPrevious = {
+                        val candidate = previousCandidate ?: return@PlayerControls
+                        if (!previousStarted) {
+                            previousStarted = true
+                            onPlayPrevious(candidate, player.currentPosition)
+                        }
+                    },
+                    onPlayNext = {
+                        val candidate = upNextCandidate ?: return@PlayerControls
+                        if (!nextStarted) {
+                            nextStarted = true
+                            upNextState = UpNextState.PlayingNext
+                            onPlayNext(candidate, player.currentPosition)
+                        }
+                    },
+                    onEnterPiP = enterPiP,
+                )
+            }
+            AnimatedVisibility(
+                visible = activeSegment != null &&
+                    activeSegmentBehavior == JellyfinMediaSegmentBehavior.Prompt &&
+                    activeSegment.id.toString() !in autoSkippedSegmentIds,
+                enter = fadeIn(tween(320, easing = FastOutSlowInEasing)) +
+                    slideInVertically(animationSpec = tween(380, easing = FastOutSlowInEasing), initialOffsetY = { it / 5 }),
+                exit = fadeOut(tween(260, easing = FastOutSlowInEasing)) +
+                    slideOutVertically(animationSpec = tween(300, easing = FastOutSlowInEasing), targetOffsetY = { it / 5 }),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(end = 54.dp, start = 18.dp, bottom = if (controlsVisible) 166.dp else 54.dp),
+            ) {
+                val segment = activeSegment
+                if (segment != null) {
+                    SkipSegmentOverlay(
+                        label = segment.skipLabel(),
+                        onSkip = { skipSegment(segment) },
+                    )
+                }
+            }
+            AnimatedVisibility(
+                visible = upNextState is UpNextState.Available,
+                enter = fadeIn(tween(260)) + slideInVertically(animationSpec = tween(360, easing = FastOutSlowInEasing), initialOffsetY = { it / 3 }),
+                exit = fadeOut(tween(260)) + slideOutVertically(animationSpec = tween(360, easing = FastOutSlowInEasing), targetOffsetY = { it / 3 }),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .widthIn(max = 560.dp)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(horizontal = 14.dp, vertical = if (controlsVisible) 162.dp else 24.dp),
+            ) {
+                val available = upNextState as? UpNextState.Available
+                if (available != null) {
+                    UpNextOverlay(
+                        state = available,
+                        totalCountdownSeconds = autoplaySettings.countdownSeconds,
+                        onPlayNow = {
+                            if (!nextStarted) {
+                                nextStarted = true
+                                upNextState = UpNextState.PlayingNext
+                                onPlayNext(available.candidate, player.currentPosition)
+                            }
+                        },
+                        onCancel = {
+                            upNextCancelled = true
+                            upNextState = UpNextState.Cancelled(available.candidate)
+                        },
+                    )
+                }
             }
         }
     }
@@ -896,14 +1001,483 @@ private fun PlayerImmersiveMode() {
         } else {
             val controller = WindowCompat.getInsetsController(window, window.decorView)
             val previousBehavior = controller.systemBarsBehavior
+            val previousColorMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) window.colorMode else 0
+
             WindowCompat.setDecorFitsSystemWindows(window, false)
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
+
+            // Ensure Android activates full HDR luminance and wide color gamut in portrait & landscape
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                try {
+                    window.colorMode = ActivityInfo.COLOR_MODE_HDR
+                } catch (_: Throwable) {}
+            }
+
             onDispose {
                 controller.show(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior = previousBehavior
                 WindowCompat.setDecorFitsSystemWindows(window, true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        window.colorMode = previousColorMode
+                    } catch (_: Throwable) {}
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun FlexTheaterPlayerLayout(
+    item: VantafynPlaybackItem,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    selectedAudioIndex: Int?,
+    selectedSubtitleIndex: Int?,
+    playbackSpeed: Float,
+    resizeMode: PlayerResizeMode,
+    activeSegment: JellyfinMediaSegment?,
+    onBack: () -> Unit,
+    onPlayPause: () -> Unit,
+    onSeekBy: (Long) -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onAudio: () -> Unit,
+    onSubtitles: () -> Unit,
+    onMore: () -> Unit,
+    onPlayPrevious: () -> Unit,
+    onPlayNext: () -> Unit,
+    onEnterPiP: () -> Unit,
+    onSkipSegment: () -> Unit,
+    topContent: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var topControlsVisible by remember { mutableStateOf(true) }
+    var lastInteractionMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+
+    LaunchedEffect(topControlsVisible, lastInteractionMs) {
+        if (topControlsVisible) {
+            delay(6_000L)
+            topControlsVisible = false
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color(0xFF07080C)),
+    ) {
+        // TOP HALF: Upright Video Stage
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(Color.Black)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    topControlsVisible = !topControlsVisible
+                    lastInteractionMs = System.currentTimeMillis()
+                },
+        ) {
+            // Video Surface (Position and aspect ratio are permanently locked)
+            topContent()
+
+            // Top Stage floating overlay (Auto-hides after 6s of inactivity)
+            androidx.compose.animation.AnimatedVisibility(
+                visible = topControlsVisible,
+                enter = fadeIn(tween(250)),
+                exit = fadeOut(tween(350)),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    PlayerChevronBackButton(onBack)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        VantafynGlassSurface(
+                            variant = VantafynGlassVariant.Chip,
+                            cornerRadius = 999.dp,
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                text = "Flex Theater",
+                                color = Color(0xFF31D7FF),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 11.sp,
+                            )
+                        }
+                        GoogleCastRouteButton(modifier = Modifier.size(40.dp))
+                    }
+                }
+            }
+
+            if (activeSegment != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = 12.dp),
+                ) {
+                    OutlinedButton(
+                        onClick = onSkipSegment,
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = Color.Black.copy(alpha = 0.75f),
+                            contentColor = Color.White,
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            Brush.linearGradient(listOf(Color(0xFF31D7FF), Color(0xFFFF5277))),
+                        ),
+                        shape = RoundedCornerShape(999.dp),
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                    ) {
+                        Text("Skip ${activeSegment.type.name.replace("_", " ")} →", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // Hinge Spacer
+        Spacer(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .background(Color(0xFF040508)),
+        )
+
+        // BOTTOM HALF: Flat Control Console
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF0A0C14),
+                            Color(0xFF0F121E),
+                            Color(0xFF05060A),
+                        ),
+                    ),
+                )
+                .padding(horizontal = 14.dp, vertical = 8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(24.dp))
+                    .border(
+                        1.dp,
+                        Brush.linearGradient(
+                            listOf(
+                                Color(0xFF31D7FF).copy(alpha = 0.50f),
+                                Color(0xFFFF5277).copy(alpha = 0.35f),
+                                Color(0xFF9D4EDD).copy(alpha = 0.25f),
+                                Color.White.copy(alpha = 0.10f),
+                            ),
+                        ),
+                        RoundedCornerShape(24.dp),
+                    )
+                    .background(Color(0xFF0D0F18)),
+            ) {
+                // Movie/Show Poster or Backdrop background with crisp visibility
+                val backdropOrPoster = item.backdropUrl ?: item.posterUrl
+                if (!backdropOrPoster.isNullOrBlank()) {
+                    AsyncImage(
+                        model = backdropOrPoster,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .blur(4.dp)
+                            .graphicsLayer { alpha = 0.55f },
+                    )
+                }
+
+                // Dark Scrim Overlay to ensure 100% legibility of all controls
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFF0B0D16).copy(alpha = 0.65f),
+                                    Color(0xFF07090F).copy(alpha = 0.78f),
+                                    Color(0xFF040508).copy(alpha = 0.90f),
+                                ),
+                            ),
+                        ),
+                )
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    // 1. Rich Media Header (Mini-Poster card + Title/Subtitle + Source Badges + PiP)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            // Mini Poster Card
+                            val posterThumb = item.posterUrl ?: item.backdropUrl
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 46.dp, height = 66.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .border(
+                                        1.dp,
+                                        Brush.linearGradient(
+                                            listOf(
+                                                Color(0xFF31D7FF).copy(alpha = 0.60f),
+                                                Color(0xFFFF5277).copy(alpha = 0.40f),
+                                                Color.White.copy(alpha = 0.15f),
+                                            ),
+                                        ),
+                                        RoundedCornerShape(10.dp),
+                                    )
+                                    .background(Color.White.copy(alpha = 0.08f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (!posterThumb.isNullOrBlank()) {
+                                    AsyncImage(
+                                        model = posterThumb,
+                                        contentDescription = "Poster",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize(),
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.PlayArrow,
+                                        contentDescription = null,
+                                        tint = Color.White.copy(alpha = 0.60f),
+                                        modifier = Modifier.size(24.dp),
+                                    )
+                                }
+                            }
+
+                            // Metadata Column
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = item.title,
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                    lineHeight = 19.sp,
+                                )
+                                item.subtitle?.let { sub ->
+                                    Text(
+                                        text = sub,
+                                        color = Color.White.copy(alpha = 0.75f),
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                item.sourceLabel?.let { source ->
+                                    VantafynGlassSurface(
+                                        variant = VantafynGlassVariant.Chip,
+                                        cornerRadius = 6.dp,
+                                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                                    ) {
+                                        Text(
+                                            text = source,
+                                            color = Color(0xFF31D7FF),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // PiP Button
+                        IconButton(
+                            onClick = onEnterPiP,
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.10f)),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.PictureInPicture,
+                                contentDescription = "PiP",
+                                tint = Color.White.copy(alpha = 0.90f),
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+
+                    // 2. Scrubber with signature gradient
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        VantafynPlayerProgressSlider(
+                            positionMs = positionMs,
+                            durationMs = durationMs,
+                            onSeekTo = onSeekTo,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = positionMs.formatMs(),
+                                color = Color(0xFF31D7FF),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            if (isBuffering) {
+                                Text(
+                                    text = "Buffering...",
+                                    color = Color(0xFFFFD166),
+                                    fontSize = 11.sp,
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                                )
+                            }
+                            Text(
+                                text = "-${(durationMs - positionMs).coerceAtLeast(0L).formatMs()}",
+                                color = Color.White.copy(alpha = 0.70f),
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+
+                    // 3. Main playback buttons row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (item.previousCandidate != null && !item.isLiveStream) {
+                            IconButton(onClick = onPlayPrevious, modifier = Modifier.size(46.dp)) {
+                                Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(28.dp))
+                            }
+                        }
+                        IconButton(onClick = { onSeekBy(-10_000L) }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Rounded.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(30.dp))
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .shadow(16.dp, CircleShape, spotColor = Color(0xFF00E7FF))
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(VantafynGradients.AccentColors))
+                                .clickable(onClick = onPlayPause),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = Color.Black,
+                                modifier = Modifier.size(34.dp),
+                            )
+                        }
+                        IconButton(onClick = { onSeekBy(10_000L) }, modifier = Modifier.size(48.dp)) {
+                            Icon(Icons.Rounded.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(30.dp))
+                        }
+                        if (item.upNextCandidate != null && !item.isLiveStream) {
+                            IconButton(onClick = onPlayNext, modifier = Modifier.size(46.dp)) {
+                                Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(28.dp))
+                            }
+                        }
+                    }
+
+                    // 4. Lower tool pills
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        FlexToolChip(
+                            icon = Icons.Rounded.ClosedCaption,
+                            label = selectedSubtitleIndex?.let { "CC On" } ?: "CC Off",
+                            active = selectedSubtitleIndex != null,
+                            onClick = onSubtitles,
+                        )
+                        FlexToolChip(
+                            icon = Icons.Rounded.Audiotrack,
+                            label = "Audio",
+                            active = selectedAudioIndex != null,
+                            onClick = onAudio,
+                        )
+                        FlexToolChip(
+                            icon = Icons.Rounded.Speed,
+                            label = "${playbackSpeed}x",
+                            active = playbackSpeed != 1f,
+                            onClick = onMore,
+                        )
+                        FlexToolChip(
+                            icon = Icons.Rounded.Settings,
+                            label = "More",
+                            active = false,
+                            onClick = onMore,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlexToolChip(
+    icon: ImageVector,
+    label: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    VantafynGlassSurface(
+        variant = if (active) VantafynGlassVariant.Button else VantafynGlassVariant.Chip,
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .clickable(onClick = onClick),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = if (active) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.70f),
+                modifier = Modifier.size(14.dp),
+            )
+            Text(
+                text = label,
+                color = if (active) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.85f),
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 11.sp,
+            )
         }
     }
 }
@@ -935,7 +1509,7 @@ private fun PlayerControls(
                 Brush.verticalGradient(
                     listOf(
                         Color.Black.copy(alpha = 0.72f),
-                        Color.Black.copy(alpha = 0.18f),
+                        Color.Black.copy(alpha = 0.35f),
                         Color.Black.copy(alpha = 0.86f),
                     ),
                 ),

@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
 
     <application
         android:allowBackup="false"
@@ -37,6 +39,28 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
+        <activity
+            android:name=".ambient.AmbientNowPlayingActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|smallestScreenSize|screenLayout|uiMode|density"
+            android:resizeableActivity="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:inheritShowWhenLocked="true"
+            android:showForAllUsers="true"
+            android:launchMode="singleTop"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="dev.vantafyn.action.AMBIENT_DISPLAY" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <meta-data android:name="com.motorola.subscreen.show_on_subscreen" android:value="true" />
+            <meta-data android:name="com.motorola.subscreen.allow_rotate" android:value="false" />
+            <meta-data android:name="com.motorola.subscreen.fullscreen" android:value="true" />
+            <meta-data android:name="com.motorola.subscreen.show_when_locked" android:value="true" />
+            <meta-data android:name="com.motorola.subscreen.large_screen_app" android:value="true" />
+            <meta-data android:name="motorola.subscreen.app.support" android:value="true" />
+            <meta-data android:name="android.allow_multiple_resumed" android:value="true" />
         </activity>
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

@@ -445,6 +445,7 @@ private val TvHomePosterCardWidth: Dp = 88.dp
 private val TvHomeLogoSlotHeight: Dp = 78.dp
 private val TvHomeMetadataSlotHeight: Dp = 20.dp
 private val TvHomeDescriptionSlotHeight: Dp = 58.dp
+private val TvHomeDescriptionMaxWidth: Dp = 520.dp
 private val TvHomeActionSlotHeight: Dp = 38.dp
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -650,15 +651,42 @@ private fun TvHomeSpotlightOverlay(
                 .height(TvHomeDescriptionSlotHeight),
             contentAlignment = Alignment.TopStart,
         ) {
-            Text(
-                text = item.overview.orEmpty(),
-                color = Color(0xFFD1D8E6),
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            val overview = item.overview.orEmpty()
+            if (overview.isNotBlank()) {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = TvHomeDescriptionMaxWidth)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                colorStops = arrayOf(
+                                    0.00f to Color(0xC0060A12),
+                                    0.68f to Color(0x96070D18),
+                                    1.00f to Color(0x24070D18),
+                                ),
+                            ),
+                        )
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.035f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.08f),
+                                ),
+                            ),
+                        )
+                        .padding(horizontal = 12.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = overview,
+                        color = Color(0xFFD1D8E6),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))

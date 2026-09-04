@@ -5,6 +5,7 @@ import androidx.compose.material.icons.rounded.Animation
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.ArtTrack
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CollectionsBookmark
@@ -15,6 +16,8 @@ import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FiberManualRecord
 import androidx.compose.material.icons.rounded.Flight
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Hd
 import androidx.compose.material.icons.rounded.Headphones
@@ -108,6 +111,16 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     // ----------------------------------------------------
     // Make it yours
     // ----------------------------------------------------
+    DiscoverFeature(
+        id = "experience_modes",
+        title = "Experience Modes",
+        shortDescription = "Switch between full multimedia hub and dedicated music player modes.",
+        category = DiscoverCategory.MakeItYours,
+        icon = Icons.Rounded.GraphicEq,
+        isNew = true,
+        detailedDescription = "Customize how Vantafyn functions. Use Full Media for your movies, TV shows, and music together, or switch to Music Only for a streamlined, audiophile music streaming app.",
+        deepLinkAction = "open_settings",
+    ),
     DiscoverFeature(
         id = "themes",
         title = "Themes",
@@ -382,6 +395,36 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         icon = Icons.Rounded.OndemandVideo,
         detailedDescription = "Open Settings \u2192 Playback Preferences \u2192 Video Player. Switch to External Player to use apps like MX Player or VLC.",
         deepLinkAction = "open_playback_preferences",
+    ),
+    DiscoverFeature(
+        id = "ambient_display",
+        title = "Ambient Lock Screen Display",
+        shortDescription = "Fullscreen karaoke synced lyrics and playback controls over your lock screen.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.Fullscreen,
+        isNew = true,
+        detailedDescription = "Transform your phone into a dedicated music and karaoke display when docked, charging, or locked. Features large auto-scrolling synced lyrics with dynamic artwork glows, burn-in pixel shift protection, and auto-dimming controls. Toggle auto-launch in Settings \u2192 Ambient Display.",
+        steps = listOf(
+            "Play any song with synced lyrics",
+            "Lock your phone or tap the Ambient button in Now Playing",
+            "Enjoy real-time karaoke lyrics over your lock screen",
+        ),
+        deepLinkAction = "open_ambient_preview",
+    ),
+    DiscoverFeature(
+        id = "opensubsonic_backend",
+        title = "OpenSubsonic & Navidrome Support",
+        shortDescription = "Stream high-res audio and synced lyrics from dedicated Subsonic and Navidrome servers.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.LibraryMusic,
+        isNew = true,
+        detailedDescription = "Connect directly to your OpenSubsonic, Navidrome, or LMS music servers. Enjoy native support for artists, albums, playlists, high-resolution audio streaming, and synced lyrics.",
+        steps = listOf(
+            "Open Profile & Settings \u2192 Experience Mode",
+            "Select Music Only",
+            "Choose OpenSubsonic and enter your server credentials",
+        ),
+        deepLinkAction = "open_settings",
     ),
     DiscoverFeature(
         id = "music_player",

@@ -158,6 +158,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Forum
+import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlayCircle
 import androidx.compose.material.icons.rounded.QueuePlayNext
@@ -337,6 +338,8 @@ import dev.vantafyn.core.ui.VantafynPermissionUiState
 import dev.vantafyn.core.ui.VantafynProfileCard
 import dev.vantafyn.core.ui.VantafynScreenScaffold
 import dev.vantafyn.core.ui.VantafynServerCard
+import dev.vantafyn.core.experience.ExperienceMode
+import dev.vantafyn.core.experience.MusicBackendType
 import dev.vantafyn.core.ui.VantafynSetupHeader
 import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import dev.vantafyn.core.ui.VantafynSkeletonBrush
@@ -481,9 +484,30 @@ fun VantafynAppContent(
                 VantafynSetupStep.Welcome -> WelcomeScreen(
                     state = state,
                     tv = tv,
-                    onContinue = viewModel::continueFromWelcome,
+                    onContinue = { viewModel.continueFromWelcome(tv) },
                     onBack = viewModel::navigateSetupBack,
                     showBack = state.savedProfiles.isNotEmpty(),
+                )
+                VantafynSetupStep.SelectExperience -> ExperienceSelectionScreen(
+                    state = state,
+                    tv = tv,
+                    onSelectExperience = viewModel::selectExperienceMode,
+                    onBack = viewModel::navigateSetupBack,
+                )
+                VantafynSetupStep.SelectMusicBackend -> MusicBackendSelectionScreen(
+                    state = state,
+                    tv = tv,
+                    onSelectBackend = viewModel::selectMusicBackend,
+                    onBack = viewModel::navigateSetupBack,
+                )
+                VantafynSetupStep.ConnectSubsonic -> ConnectSubsonicScreen(
+                    state = state,
+                    tv = tv,
+                    onServerUrlChanged = viewModel::onSubsonicServerUrlChanged,
+                    onUsernameChanged = viewModel::onSubsonicUsernameChanged,
+                    onPasswordChanged = viewModel::onSubsonicPasswordChanged,
+                    onConnect = viewModel::connectSubsonic,
+                    onBack = viewModel::navigateSetupBack,
                 )
                 VantafynSetupStep.ConnectServer -> ConnectServerScreen(
                 state = state,
@@ -540,186 +564,16 @@ fun VantafynAppContent(
                 onWorkOffline = viewModel::workOfflineFromRecovery,
                 onBack = viewModel::navigateSetupBack,
             )
-                VantafynSetupStep.Home -> AnimatedVisibility(
-                    visible = !state.isLogoutTransitioning,
-                    enter = EnterTransition.None,
-                    exit = if (reducedMotion) {
-                        fadeOut(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing))
-                    } else {
-                        fadeOut(animationSpec = tween(durationMillis = 560, easing = VantafynSetupCinematicEasing)) +
-                            slideOutVertically(
-                                animationSpec = tween(durationMillis = 560, easing = VantafynSetupCinematicEasing),
-                                targetOffsetY = { -5 },
-                            )
-                    },
-                ) {
-                    HomeScreen(
-                        state = state,
-                        tv = tv,
-                        onRetry = viewModel::retryLibraries,
-                        onSwitchUser = viewModel::showProfilePicker,
-                        onAddProfile = viewModel::addProfile,
-                        onQuickConnect = viewModel::openDeviceQuickConnect,
-                        onDeviceQuickConnectCodeChanged = viewModel::onDeviceQuickConnectCodeChanged,
-                        onAuthorizeDeviceQuickConnect = viewModel::authorizeDeviceQuickConnect,
-                        onConfirmLogout = viewModel::confirmCurrentProfileLogout,
-                        onCancelLogout = viewModel::cancelCurrentProfileLogout,
-                        onLogoutCurrentProfile = viewModel::logoutCurrentProfile,
-                        onNavigateMobile = viewModel::navigateMobile,
-                        onOpenLibrary = viewModel::openLibrary,
-                        onReorderLibraries = viewModel::reorderLibraries,
-                        onSetLibrariesViewMode = viewModel::setLibrariesViewMode,
-                        onRetryLibrary = viewModel::retryLibraryItems,
-                        onSetLibraryFilter = viewModel::setLibraryItemsFilter,
-                        onSetLibraryAlphabet = viewModel::setLibraryAlphabetKey,
-                        onSetViewMode = viewModel::setLibraryViewMode,
-                        onPreviousLibraryPage = viewModel::previousLibraryItemsPage,
-                        onNextLibraryPage = viewModel::nextLibraryItemsPage,
-                        onRefreshAdmin = viewModel::pollAdminOverview,
-                        onOpenMedia = viewModel::openMedia,
-                        onMarkWhatsNewSeen = viewModel::markWhatsNewSeen,
-                        onToggleWhatsNew = viewModel::toggleWhatsNew,
-                onRetryMedia = viewModel::retryMediaDetail,
-                onSearchQueryChanged = viewModel::onSearchQueryChanged,
-                onLoadFavorites = viewModel::loadFavorites,
-                onPlaybackComingSoon = viewModel::showPlaybackComingSoon,
-                onClearMessage = viewModel::clearMobileMessage,
-                onToggleHomeSection = viewModel::toggleHomeSection,
-                onMoveHomeSection = viewModel::moveHomeSection,
-                onResetHomeLayout = viewModel::resetHomeLayout,
-                onSaveHomeLayoutDraft = viewModel::saveHomeLayoutDraft,
-                onAddSmartRow = viewModel::addSmartRow,
-                onRemoveSmartRow = viewModel::removeSmartRow,
-                onCycleArtwork = viewModel::cycleSectionArtwork,
-                onCycleShape = viewModel::cycleSectionShape,
-                onCycleSize = viewModel::cycleSectionSize,
-                onCycleSpacing = viewModel::cycleSectionSpacing,
-                onToggleThemeMusic = viewModel::toggleThemeMusic,
-                onSelectThemeMusicVolume = viewModel::selectThemeMusicVolume,
-                onSetBottomRailAccent = viewModel::setBottomRailAccent,
-                onToggleAutoLoginLastProfile = viewModel::toggleAutoLoginLastProfile,
-                onSelectBackground = viewModel::selectBackground,
-                onSelectTheme = viewModel::selectTheme,
-            onToggleMediaFavorite = viewModel::toggleMediaFavorite,
-            onToggleMediaPlayed = viewModel::toggleMediaPlayed,
-            onSetMediaFavorite = viewModel::setMediaFavorite,
-            onSetMediaPlayed = viewModel::setMediaPlayed,
-            onQueueMediaDownload = viewModel::queueMediaDownloadById,
-            onOpenDownloads = viewModel::openDownloads,
-            onRefreshDownloads = viewModel::loadDownloads,
-            onPlayOfflineDownload = viewModel::playOfflineDownload,
-            onCancelDownload = viewModel::cancelDownload,
-            onRetryDownload = viewModel::retryDownload,
-            onRemoveDownload = viewModel::removeDownload,
-            onRemoveAllDownloads = viewModel::removeAllDownloads,
-            onSetDownloadWifiOnlyDefault = viewModel::setDownloadWifiOnlyDefault,
-            onStartPlayback = { viewModel.startPlayback() },
-            onStartPlaybackFromBeginning = viewModel::startPlaybackFromBeginning,
-            onStartEpisodePlayback = viewModel::startEpisodePlayback,
-            onSelectSeason = viewModel::selectSeason,
-                onRetryPlayback = viewModel::retryPlayback,
-                onTryTranscodedPlayback = viewModel::tryTranscodedPlayback,
-                onExitPlayback = viewModel::exitPlayback,
-                onPlaybackStarted = viewModel::reportPlaybackStarted,
-                onPlaybackProgress = viewModel::reportPlaybackProgress,
-                onPlaybackEnded = viewModel::exitPlayback,
-                onPlayNextEpisode = viewModel::playNextEpisode,
-                onPlayPreviousEpisode = viewModel::playPreviousEpisode,
-            onPlayerError = viewModel::handlePlayerError,
-                onPrepareCastPlayback = viewModel::prepareCastPlayback,
-                onSelectPlaybackAudioTrack = viewModel::selectPlaybackAudioTrack,
-                onSelectPlaybackSubtitleTrack = viewModel::selectPlaybackSubtitleTrack,
-                onSyncPlayPause = viewModel::sendWatchPartyPause,
-                onSyncPlayResume = viewModel::sendWatchPartyResume,
-                onSyncPlaySeek = viewModel::sendWatchPartySeek,
-                onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
-                onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
-                onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
-                onSetAutoplayCountdownSeconds = viewModel::setAutoplayCountdownSeconds,
-                onSetUpNextDisplayMode = viewModel::setUpNextDisplayMode,
-                onTogglePassoutProtection = viewModel::togglePassoutProtection,
-                onSetPassoutProtectionLimitMinutes = viewModel::setPassoutProtectionLimitMinutes,
-                onSelectVideoPlayerPreference = viewModel::selectVideoPlayerPreference,
-                onSetMaxStreamingBitrateMbps = viewModel::setMaxStreamingBitrateMbps,
-                onSetMediaSegmentBehavior = viewModel::setMediaSegmentBehavior,
-                onExternalVideoPlayerLaunched = viewModel::externalVideoPlayerLaunched,
-                onExternalVideoPlayerLaunchFailed = viewModel::externalVideoPlayerLaunchFailed,
-                onChangePassword = viewModel::changeCurrentUserPassword,
-                onOpenAdminUser = viewModel::openAdminUser,
-                onCloseAdminUser = viewModel::closeAdminUser,
-                onCreateAdminUser = viewModel::createAdminUser,
-                onUpdateAdminUser = viewModel::updateSelectedAdminUser,
-                onResetAdminPassword = viewModel::resetSelectedAdminPassword,
-                onScanAdminLibrary = viewModel::scanAdminLibrary,
-                onSetAdminPluginEnabled = viewModel::setAdminPluginEnabled,
-                onRunAdminTask = viewModel::runAdminTask,
-                onStopAdminTask = viewModel::stopAdminTask,
-                onUploadCurrentProfileImage = viewModel::uploadCurrentUserProfileImage,
-                onDeleteCurrentProfileImage = viewModel::deleteCurrentUserProfileImage,
-                onUploadAdminProfileImage = viewModel::uploadSelectedAdminUserProfileImage,
-                onDeleteAdminProfileImage = viewModel::deleteSelectedAdminUserProfileImage,
-                onCreateWatchParty = viewModel::createWatchParty,
-                onLoadWatchParty = viewModel::shuffleWatchPartyDeck,
-                onLeaveWatchParty = viewModel::leaveWatchParty,
-                onUpdateWatchPartyName = viewModel::updateWatchPartyName,
-                onUpdateWatchPartyMode = viewModel::updateWatchPartyMode,
-                onUpdateWatchPartyRules = viewModel::updateWatchPartyRules,
-                onStartWatchPartyFromDetail = viewModel::startWatchPartyFromDetail,
-                onLoadWatchPartyRecipients = viewModel::loadWatchPartyRecipients,
-                onToggleWatchPartyRecipient = viewModel::toggleWatchPartyRecipient,
-                onSendWatchPartyInvites = viewModel::sendWatchPartyInvites,
-                onClearWatchPartyInviteAnimation = viewModel::clearWatchPartyInviteAnimation,
-                onToggleWatchPartyReady = viewModel::toggleWatchPartyReady,
-                onVoteWatchPartyCandidate = viewModel::voteWatchPartyCandidate,
-                onStartMatchedWatchPartyPlayback = viewModel::startMatchedWatchPartyPlayback,
-                onStartFixedWatchPartyPlayback = viewModel::startFixedWatchPartyPlayback,
-                onToggleWatchPartyEnabled = viewModel::toggleWatchPartyEnabled,
-                onToggleWatchPartyInvitesEnabled = viewModel::toggleWatchPartyInvitesEnabled,
-                onToggleWatchPartyInviteAnimationEnabled = viewModel::toggleWatchPartyInviteAnimationEnabled,
-                onSetWatchPartyInviteExpirySeconds = viewModel::setWatchPartyInviteExpirySeconds,
-                onSetAdminSpeedLimit = viewModel::setAdminSpeedLimitMbps,
-                onSendAdminSessionMessage = viewModel::sendAdminSessionMessage,
-                onSendAdminBroadcastMessage = viewModel::sendAdminBroadcastMessage,
-                onClearAdminSessionMessageError = viewModel::clearAdminSessionMessageError,
-                onNavigateBack = viewModel::navigateMobileBack,
-                onOpenAchievements = viewModel::openAchievements,
-                onRetryAchievements = { viewModel.loadAchievements(force = true) },
-                onDismissAchievementUnlock = viewModel::dismissAchievementUnlock,
-                onToggleAchievementsEnabled = viewModel::toggleAchievementsEnabled,
-                onToggleSocialEnabled = viewModel::toggleSocialEnabled,
-                onToggleSocialDockEnabled = viewModel::toggleSocialDockEnabled,
-                onDismissSocialDock = viewModel::dismissSocialDock,
-                onOpenSocial = viewModel::openSocialScreen,
-                onOpenSocialPanel = viewModel::openSocialPanel,
-                onCloseSocialPanel = viewModel::closeSocialPanel,
-                onOpenChatWithFriend = viewModel::openChatWithFriend,
-                onOpenChatFromConversation = viewModel::openChatFromConversation,
-                onSendChatMessage = viewModel::sendChatMessage,
-                onAcceptFriendRequest = viewModel::acceptFriendRequest,
-                onDeclineFriendRequest = viewModel::declineOrRemoveFriend,
-                onSendFriendRequest = viewModel::sendFriendRequest,
-                onRemoveFriend = viewModel::removeFriend,
-                onBlockUser = viewModel::blockUser,
-                onUnblockUser = viewModel::unblockUser,
-                onDeleteConversation = viewModel::deleteConversation,
-                onClearChatWithActivePeer = viewModel::clearChatWithActivePeer,
-                onShareMediaToFriend = viewModel::shareMediaRecommendationToFriend,
-                onDismissSocialIslandPreview = viewModel::dismissSocialIslandPreview,
-                onSetActiveSocialTab = viewModel::setActiveSocialTab,
-                onRefreshSocial = { viewModel.loadSocialData(force = true) },
-                onSearchChatMedia = viewModel::searchChatMedia,
-                onRefreshChatMessages = {
-                    val activePeer = viewModel.state.value.activeChatPeer
-                    if (activePeer != null) {
-                        viewModel.openChatWithFriend(activePeer)
-                    }
-                },
-                notificationPermissionState = notificationPermissionState,
-                onRequestMusicControlsPermission = onRequestMusicControlsPermission,
-                onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
-            )
+                VantafynSetupStep.Home -> HomeScreenHost(
+                    state = state,
+                    tv = tv,
+                    viewModel = viewModel,
+                    notificationPermissionState = notificationPermissionState,
+                    onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+                    onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
+                    reducedMotion = reducedMotion,
+                )
             }
-        }
         }
         if (!tv) {
             DisplayMessageOverlay(
@@ -752,6 +606,40 @@ fun VantafynAppContent(
                 modifier = Modifier.align(Alignment.TopCenter),
             )
         }
+    }
+}
+
+@Composable
+private fun HomeScreenHost(
+    state: VantafynHomeUiState,
+    tv: Boolean,
+    viewModel: VantafynHomeViewModel,
+    notificationPermissionState: VantafynPermissionUiState,
+    onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
+    onNotificationPermissionSettingsAction: () -> Unit,
+    reducedMotion: Boolean,
+) {
+    AnimatedVisibility(
+        visible = !state.isLogoutTransitioning,
+        enter = EnterTransition.None,
+        exit = if (reducedMotion) {
+            fadeOut(animationSpec = tween(durationMillis = 160, easing = FastOutSlowInEasing))
+        } else {
+            fadeOut(animationSpec = tween(durationMillis = 560, easing = VantafynSetupCinematicEasing)) +
+                slideOutVertically(
+                    animationSpec = tween(durationMillis = 560, easing = VantafynSetupCinematicEasing),
+                    targetOffsetY = { -5 },
+                )
+        },
+    ) {
+        HomeScreen(
+            state = state,
+            tv = tv,
+            viewModel = viewModel,
+            notificationPermissionState = notificationPermissionState,
+            onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+            onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
+        )
     }
 }
 
@@ -1147,7 +1035,7 @@ internal fun rememberReducedMotionPreference(): Boolean {
 }
 
 @Composable
-private fun SetupMaterialize(
+internal fun SetupMaterialize(
     delayMillis: Int,
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
@@ -1544,7 +1432,7 @@ private fun QuickConnectScreen(
 }
 
 @Composable
-private fun SetupBackScaffold(
+internal fun SetupBackScaffold(
     onBack: () -> Unit,
     showBack: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
@@ -3149,159 +3037,7 @@ private fun BottomRailAccentSettings(
 private fun HomeScreen(
     state: VantafynHomeUiState,
     tv: Boolean,
-    onRetry: () -> Unit,
-    onSwitchUser: () -> Unit,
-    onAddProfile: () -> Unit,
-    onQuickConnect: () -> Unit,
-    onDeviceQuickConnectCodeChanged: (String) -> Unit,
-    onAuthorizeDeviceQuickConnect: () -> Unit,
-    onConfirmLogout: () -> Unit,
-    onCancelLogout: () -> Unit,
-    onLogoutCurrentProfile: () -> Unit,
-    onNavigateMobile: (MobileDestination) -> Unit,
-    onOpenLibrary: (JellyfinLibrary) -> Unit,
-    onReorderLibraries: (List<UUID>) -> Unit,
-    onSetLibrariesViewMode: (LibrariesViewMode) -> Unit,
-    onRetryLibrary: () -> Unit,
-    onSetLibraryFilter: (JellyfinLibraryItemFilter) -> Unit,
-    onSetLibraryAlphabet: (String?) -> Unit,
-    onSetViewMode: (LibraryViewMode) -> Unit,
-    onPreviousLibraryPage: () -> Unit,
-    onNextLibraryPage: () -> Unit,
-    onRefreshAdmin: () -> Unit,
-    onOpenMedia: (java.util.UUID) -> Unit,
-    onMarkWhatsNewSeen: () -> Unit,
-    onToggleWhatsNew: () -> Unit,
-    onRetryMedia: () -> Unit,
-    onSearchQueryChanged: (String) -> Unit,
-    onLoadFavorites: () -> Unit,
-    onPlaybackComingSoon: () -> Unit,
-    onClearMessage: () -> Unit,
-    onToggleHomeSection: (HomeSectionType) -> Unit,
-    onMoveHomeSection: (HomeSectionType, Int) -> Unit,
-    onResetHomeLayout: () -> Unit,
-    onSaveHomeLayoutDraft: (List<HomeSectionPreference>, List<String>) -> Unit,
-    onAddSmartRow: (String) -> Unit,
-    onRemoveSmartRow: (String) -> Unit,
-    onCycleArtwork: (HomeSectionType) -> Unit,
-    onCycleShape: (HomeSectionType) -> Unit,
-    onCycleSize: (HomeSectionType) -> Unit,
-    onCycleSpacing: (HomeSectionType) -> Unit,
-    onToggleThemeMusic: () -> Unit,
-    onSelectThemeMusicVolume: (ThemeMusicVolume) -> Unit,
-    onSetBottomRailAccent: (BottomRailAccent) -> Unit,
-    onToggleAutoLoginLastProfile: () -> Unit,
-    onSelectBackground: (VantafynAppBackground) -> Unit,
-    onSelectTheme: (VantafynThemePreset) -> Unit,
-    onToggleMediaFavorite: () -> Unit,
-    onToggleMediaPlayed: () -> Unit,
-    onSetMediaFavorite: (java.util.UUID, Boolean) -> Unit,
-    onSetMediaPlayed: (java.util.UUID, Boolean) -> Unit,
-    onQueueMediaDownload: (java.util.UUID) -> Unit,
-    onOpenDownloads: () -> Unit,
-    onRefreshDownloads: () -> Unit,
-    onPlayOfflineDownload: (DownloadRecord) -> Unit,
-    onCancelDownload: (DownloadRecord) -> Unit,
-    onRetryDownload: (DownloadRecord) -> Unit,
-    onRemoveDownload: (DownloadRecord) -> Unit,
-    onRemoveAllDownloads: () -> Unit,
-    onSetDownloadWifiOnlyDefault: (Boolean) -> Unit,
-    onStartPlayback: () -> Unit,
-    onStartPlaybackFromBeginning: () -> Unit,
-    onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
-    onSelectSeason: (java.util.UUID?) -> Unit,
-    onRetryPlayback: () -> Unit,
-    onTryTranscodedPlayback: () -> Unit,
-    onExitPlayback: (Long) -> Unit,
-    onPlaybackStarted: (Long) -> Unit,
-    onPlaybackProgress: (Long, Boolean) -> Unit,
-    onPlaybackEnded: (Long) -> Unit,
-    onPlayNextEpisode: (UpNextCandidate, Long) -> Unit,
-    onPlayPreviousEpisode: (UpNextCandidate, Long) -> Unit,
-    onPlayerError: () -> Unit,
-    onPrepareCastPlayback: (Long) -> Unit,
-    onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
-    onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
-    onSyncPlayPause: (Long) -> Unit,
-    onSyncPlayResume: (Long) -> Unit,
-    onSyncPlaySeek: (Long) -> Unit,
-    onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
-    onEditPlaybackPreferences: ((dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> dev.vantafyn.core.jellyfin.JellyfinUserPlaybackPreferences) -> Unit,
-    onSavePlaybackPreferences: () -> Unit,
-    onSetAutoplayCountdownSeconds: (Int) -> Unit,
-    onSetUpNextDisplayMode: (UpNextDisplayMode) -> Unit,
-    onTogglePassoutProtection: () -> Unit,
-    onSetPassoutProtectionLimitMinutes: (Int) -> Unit,
-    onSelectVideoPlayerPreference: (VantafynVideoPlayerPreference) -> Unit,
-    onSetMaxStreamingBitrateMbps: (Int?) -> Unit,
-    onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
-    onExternalVideoPlayerLaunched: () -> Unit,
-    onExternalVideoPlayerLaunchFailed: () -> Unit,
-    onChangePassword: (String, String) -> Unit,
-    onOpenAdminUser: (java.util.UUID) -> Unit,
-    onCloseAdminUser: () -> Unit,
-    onCreateAdminUser: (String, String) -> Unit,
-    onUpdateAdminUser: (Boolean?, Boolean?, Boolean?, Boolean?, List<java.util.UUID>?) -> Unit,
-    onResetAdminPassword: (String) -> Unit,
-    onScanAdminLibrary: () -> Unit,
-    onSetAdminPluginEnabled: (java.util.UUID, String?, Boolean) -> Unit,
-    onRunAdminTask: (String) -> Unit,
-    onStopAdminTask: (String) -> Unit,
-    onUploadCurrentProfileImage: (ByteArray, String) -> Unit,
-    onDeleteCurrentProfileImage: () -> Unit,
-    onUploadAdminProfileImage: (ByteArray, String) -> Unit,
-    onDeleteAdminProfileImage: () -> Unit,
-    onCreateWatchParty: () -> Unit,
-    onLoadWatchParty: () -> Unit,
-    onLeaveWatchParty: () -> Unit,
-    onUpdateWatchPartyName: (String) -> Unit,
-    onUpdateWatchPartyMode: (WatchPartyMode) -> Unit,
-    onUpdateWatchPartyRules: (dev.vantafyn.core.jellyfin.WatchPartyRules) -> Unit,
-    onStartWatchPartyFromDetail: (WatchPartyMode) -> Unit,
-    onLoadWatchPartyRecipients: () -> Unit,
-    onToggleWatchPartyRecipient: (String) -> Unit,
-    onSendWatchPartyInvites: () -> Unit,
-    onClearWatchPartyInviteAnimation: () -> Unit,
-    onToggleWatchPartyReady: () -> Unit,
-    onVoteWatchPartyCandidate: (dev.vantafyn.core.jellyfin.WatchPartyVoteValue) -> Unit,
-    onStartMatchedWatchPartyPlayback: () -> Unit,
-    onStartFixedWatchPartyPlayback: () -> Unit,
-    onToggleWatchPartyEnabled: () -> Unit,
-    onToggleWatchPartyInvitesEnabled: () -> Unit,
-    onToggleWatchPartyInviteAnimationEnabled: () -> Unit,
-    onSetWatchPartyInviteExpirySeconds: (Int) -> Unit,
-    onSetAdminSpeedLimit: (Int?) -> Unit,
-    onSendAdminSessionMessage: (String, String?, String, Long) -> Unit,
-    onSendAdminBroadcastMessage: (String?, String, Long) -> Unit,
-    onClearAdminSessionMessageError: () -> Unit,
-    onNavigateBack: () -> Unit,
-    onOpenAchievements: () -> Unit = {},
-    onRetryAchievements: () -> Unit = {},
-    onDismissAchievementUnlock: () -> Unit = {},
-    onToggleAchievementsEnabled: () -> Unit = {},
-    onToggleSocialEnabled: () -> Unit = {},
-    onToggleSocialDockEnabled: () -> Unit = {},
-    onDismissSocialDock: () -> Unit = {},
-    onOpenSocial: () -> Unit = {},
-    onOpenSocialPanel: () -> Unit = {},
-    onCloseSocialPanel: () -> Unit = {},
-    onOpenChatWithFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
-    onOpenChatFromConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit = {},
-    onSendChatMessage: (String) -> Unit = {},
-    onAcceptFriendRequest: (String) -> Unit = {},
-    onDeclineFriendRequest: (String) -> Unit = {},
-    onSendFriendRequest: (String) -> Unit = {},
-    onRemoveFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend) -> Unit = {},
-    onBlockUser: (java.util.UUID, String, String, String?) -> Unit = { _, _, _, _ -> },
-    onUnblockUser: (java.util.UUID) -> Unit = {},
-    onDeleteConversation: (dev.vantafyn.core.jellyfin.JellyfinSocialConversation) -> Unit = {},
-    onClearChatWithActivePeer: () -> Unit = {},
-    onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, dev.vantafyn.core.jellyfin.JellyfinMediaDetail) -> Unit = { _, _ -> },
-    onDismissSocialIslandPreview: () -> Unit = {},
-    onSetActiveSocialTab: (dev.vantafyn.feature.home.SocialTab) -> Unit = {},
-    onRefreshSocial: () -> Unit = {},
-    onSearchChatMedia: (String) -> Unit = {},
-    onRefreshChatMessages: () -> Unit = {},
+    viewModel: VantafynHomeViewModel,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
     onNotificationPermissionSettingsAction: () -> Unit = {},
@@ -3310,165 +3046,190 @@ private fun HomeScreen(
     if (!tv) {
         MobileShellScreen(
             state = state,
-            onRetryHome = onRetry,
-            onSwitchUser = onSwitchUser,
-            onAddProfile = onAddProfile,
-            onQuickConnect = onQuickConnect,
-            onDeviceQuickConnectCodeChanged = onDeviceQuickConnectCodeChanged,
-            onAuthorizeDeviceQuickConnect = onAuthorizeDeviceQuickConnect,
-            onConfirmLogout = onConfirmLogout,
-            onCancelLogout = onCancelLogout,
-            onLogoutCurrentProfile = onLogoutCurrentProfile,
-            onNavigate = onNavigateMobile,
-            onOpenAchievements = onOpenAchievements,
-            onRetryAchievements = onRetryAchievements,
-            onDismissAchievementUnlock = onDismissAchievementUnlock,
-            onToggleAchievementsEnabled = onToggleAchievementsEnabled,
-            onToggleSocialEnabled = onToggleSocialEnabled,
-            onToggleSocialDockEnabled = onToggleSocialDockEnabled,
-            onDismissSocialDock = onDismissSocialDock,
-            onOpenSocial = onOpenSocial,
-            onOpenSocialPanel = onOpenSocialPanel,
-            onCloseSocialPanel = onCloseSocialPanel,
-            onOpenChatWithFriend = onOpenChatWithFriend,
-            onOpenChatFromConversation = onOpenChatFromConversation,
-            onSendChatMessage = onSendChatMessage,
-            onAcceptFriendRequest = onAcceptFriendRequest,
-            onDeclineFriendRequest = onDeclineFriendRequest,
-            onSendFriendRequest = onSendFriendRequest,
-            onRemoveFriend = onRemoveFriend,
-            onBlockUser = onBlockUser,
-            onUnblockUser = onUnblockUser,
-            onDeleteConversation = onDeleteConversation,
-            onClearChatWithActivePeer = onClearChatWithActivePeer,
-            onShareMediaToFriend = onShareMediaToFriend,
-            onDismissSocialIslandPreview = onDismissSocialIslandPreview,
-            onSetActiveSocialTab = onSetActiveSocialTab,
-            onRefreshSocial = onRefreshSocial,
-            onRefreshChatMessages = onRefreshChatMessages,
-            onOpenLibrary = onOpenLibrary,
-            onReorderLibraries = onReorderLibraries,
-            onSetLibrariesViewMode = onSetLibrariesViewMode,
-            onRetryLibrary = onRetryLibrary,
-            onSetLibraryFilter = onSetLibraryFilter,
-            onSetLibraryAlphabet = onSetLibraryAlphabet,
-            onSetViewMode = onSetViewMode,
-            onPreviousLibraryPage = onPreviousLibraryPage,
-            onNextLibraryPage = onNextLibraryPage,
-            onRefreshAdmin = onRefreshAdmin,
-            onOpenMedia = onOpenMedia,
-            onMarkWhatsNewSeen = onMarkWhatsNewSeen,
-            onToggleWhatsNew = onToggleWhatsNew,
-            onRetryMedia = onRetryMedia,
-            onSearchQueryChanged = onSearchQueryChanged,
-            onLoadFavorites = onLoadFavorites,
-            onPlaybackComingSoon = onPlaybackComingSoon,
-            onClearMessage = onClearMessage,
-            onToggleHomeSection = onToggleHomeSection,
-            onMoveHomeSection = onMoveHomeSection,
-            onResetHomeLayout = onResetHomeLayout,
-            onSaveHomeLayoutDraft = onSaveHomeLayoutDraft,
-            onAddSmartRow = onAddSmartRow,
-            onRemoveSmartRow = onRemoveSmartRow,
-            onCycleArtwork = onCycleArtwork,
-            onCycleShape = onCycleShape,
-            onCycleSize = onCycleSize,
-            onCycleSpacing = onCycleSpacing,
-            onToggleThemeMusic = onToggleThemeMusic,
-            onSelectThemeMusicVolume = onSelectThemeMusicVolume,
-            onSetBottomRailAccent = onSetBottomRailAccent,
-            onToggleAutoLoginLastProfile = onToggleAutoLoginLastProfile,
-            onSelectBackground = onSelectBackground,
-            onSelectTheme = onSelectTheme,
-            onToggleMediaFavorite = onToggleMediaFavorite,
-            onToggleMediaPlayed = onToggleMediaPlayed,
-            onSetMediaFavorite = onSetMediaFavorite,
-            onSetMediaPlayed = onSetMediaPlayed,
-            onQueueMediaDownload = onQueueMediaDownload,
-            onOpenDownloads = onOpenDownloads,
-            onRefreshDownloads = onRefreshDownloads,
-            onPlayOfflineDownload = onPlayOfflineDownload,
-            onCancelDownload = onCancelDownload,
-            onRetryDownload = onRetryDownload,
-            onRemoveDownload = onRemoveDownload,
-            onRemoveAllDownloads = onRemoveAllDownloads,
-            onSetDownloadWifiOnlyDefault = onSetDownloadWifiOnlyDefault,
-            onStartPlayback = onStartPlayback,
-            onStartPlaybackFromBeginning = onStartPlaybackFromBeginning,
-            onStartEpisodePlayback = onStartEpisodePlayback,
-            onSelectSeason = onSelectSeason,
-            onRetryPlayback = onRetryPlayback,
-            onTryTranscodedPlayback = onTryTranscodedPlayback,
-            onExitPlayback = onExitPlayback,
-            onPlaybackStarted = onPlaybackStarted,
-            onPlaybackProgress = onPlaybackProgress,
-            onPlaybackEnded = onPlaybackEnded,
-            onPlayNextEpisode = onPlayNextEpisode,
-            onPlayPreviousEpisode = onPlayPreviousEpisode,
-            onPlayerError = onPlayerError,
-            onPrepareCastPlayback = onPrepareCastPlayback,
-            onSelectPlaybackAudioTrack = onSelectPlaybackAudioTrack,
-            onSelectPlaybackSubtitleTrack = onSelectPlaybackSubtitleTrack,
-            onSyncPlayPause = onSyncPlayPause,
-            onSyncPlayResume = onSyncPlayResume,
-            onSyncPlaySeek = onSyncPlaySeek,
-            onStartLiveTvPlayback = onStartLiveTvPlayback,
-            onEditPlaybackPreferences = onEditPlaybackPreferences,
-            onSavePlaybackPreferences = onSavePlaybackPreferences,
-            onSetAutoplayCountdownSeconds = onSetAutoplayCountdownSeconds,
-            onSetUpNextDisplayMode = onSetUpNextDisplayMode,
-            onTogglePassoutProtection = onTogglePassoutProtection,
-            onSetPassoutProtectionLimitMinutes = onSetPassoutProtectionLimitMinutes,
-            onSelectVideoPlayerPreference = onSelectVideoPlayerPreference,
-            onSetMaxStreamingBitrateMbps = onSetMaxStreamingBitrateMbps,
-            onSetMediaSegmentBehavior = onSetMediaSegmentBehavior,
-            onExternalVideoPlayerLaunched = onExternalVideoPlayerLaunched,
-            onExternalVideoPlayerLaunchFailed = onExternalVideoPlayerLaunchFailed,
-            onChangePassword = onChangePassword,
-            onOpenAdminUser = onOpenAdminUser,
-            onCloseAdminUser = onCloseAdminUser,
-            onCreateAdminUser = onCreateAdminUser,
-            onUpdateAdminUser = onUpdateAdminUser,
-            onResetAdminPassword = onResetAdminPassword,
-            onScanAdminLibrary = onScanAdminLibrary,
-            onSetAdminPluginEnabled = onSetAdminPluginEnabled,
-            onRunAdminTask = onRunAdminTask,
-            onStopAdminTask = onStopAdminTask,
-            onUploadCurrentProfileImage = onUploadCurrentProfileImage,
-            onDeleteCurrentProfileImage = onDeleteCurrentProfileImage,
-            onUploadAdminProfileImage = onUploadAdminProfileImage,
-            onDeleteAdminProfileImage = onDeleteAdminProfileImage,
-            onCreateWatchParty = onCreateWatchParty,
-            onLoadWatchParty = onLoadWatchParty,
-            onLeaveWatchParty = onLeaveWatchParty,
-            onUpdateWatchPartyName = onUpdateWatchPartyName,
-            onUpdateWatchPartyMode = onUpdateWatchPartyMode,
-            onUpdateWatchPartyRules = onUpdateWatchPartyRules,
-            onStartWatchPartyFromDetail = onStartWatchPartyFromDetail,
-            onLoadWatchPartyRecipients = onLoadWatchPartyRecipients,
-            onToggleWatchPartyRecipient = onToggleWatchPartyRecipient,
-            onSendWatchPartyInvites = onSendWatchPartyInvites,
-            onClearWatchPartyInviteAnimation = onClearWatchPartyInviteAnimation,
-            onToggleWatchPartyReady = onToggleWatchPartyReady,
-            onVoteWatchPartyCandidate = onVoteWatchPartyCandidate,
-            onStartMatchedWatchPartyPlayback = onStartMatchedWatchPartyPlayback,
-            onStartFixedWatchPartyPlayback = onStartFixedWatchPartyPlayback,
-            onToggleWatchPartyEnabled = onToggleWatchPartyEnabled,
-            onToggleWatchPartyInvitesEnabled = onToggleWatchPartyInvitesEnabled,
-            onToggleWatchPartyInviteAnimationEnabled = onToggleWatchPartyInviteAnimationEnabled,
-            onSetWatchPartyInviteExpirySeconds = onSetWatchPartyInviteExpirySeconds,
-            onSetAdminSpeedLimit = onSetAdminSpeedLimit,
-            onSendAdminSessionMessage = onSendAdminSessionMessage,
-            onSendAdminBroadcastMessage = onSendAdminBroadcastMessage,
-            onClearAdminSessionMessageError = onClearAdminSessionMessageError,
-            onNavigateBack = onNavigateBack,
+            onRetryHome = viewModel::retryLibraries,
+            onSwitchUser = viewModel::showProfilePicker,
+            onAddProfile = viewModel::addProfile,
+            onQuickConnect = viewModel::openDeviceQuickConnect,
+            onDeviceQuickConnectCodeChanged = viewModel::onDeviceQuickConnectCodeChanged,
+            onAuthorizeDeviceQuickConnect = viewModel::authorizeDeviceQuickConnect,
+            onConfirmLogout = viewModel::confirmCurrentProfileLogout,
+            onCancelLogout = viewModel::cancelCurrentProfileLogout,
+            onLogoutCurrentProfile = viewModel::logoutCurrentProfile,
+            onNavigate = viewModel::navigateMobile,
+            onSelectExperienceMode = viewModel::switchExperienceModeFromSettings,
+            onSelectMusicBackend = viewModel::switchMusicBackendFromSettings,
+            onOpenAchievements = viewModel::openAchievements,
+            onRetryAchievements = { viewModel.loadAchievements(force = true) },
+            onDismissAchievementUnlock = viewModel::dismissAchievementUnlock,
+            onToggleAchievementsEnabled = viewModel::toggleAchievementsEnabled,
+            onToggleSocialEnabled = viewModel::toggleSocialEnabled,
+            onToggleSocialDockEnabled = viewModel::toggleSocialDockEnabled,
+            onDismissSocialDock = viewModel::dismissSocialDock,
+            onOpenSocial = viewModel::openSocialScreen,
+            onOpenSocialPanel = viewModel::openSocialPanel,
+            onCloseSocialPanel = viewModel::closeSocialPanel,
+            onOpenChatWithFriend = viewModel::openChatWithFriend,
+            onOpenChatFromConversation = viewModel::openChatFromConversation,
+            onSendChatMessage = viewModel::sendChatMessage,
+            onAcceptFriendRequest = viewModel::acceptFriendRequest,
+            onDeclineFriendRequest = viewModel::declineOrRemoveFriend,
+            onSendFriendRequest = viewModel::sendFriendRequest,
+            onRemoveFriend = viewModel::removeFriend,
+            onBlockUser = viewModel::blockUser,
+            onUnblockUser = viewModel::unblockUser,
+            onDeleteConversation = viewModel::deleteConversation,
+            onClearChatWithActivePeer = viewModel::clearChatWithActivePeer,
+            onShareMediaToFriend = viewModel::shareMediaRecommendationToFriend,
+            onDismissSocialIslandPreview = viewModel::dismissSocialIslandPreview,
+            onSetActiveSocialTab = viewModel::setActiveSocialTab,
+            onRefreshSocial = { viewModel.loadSocialData(force = true) },
+            onSearchChatMedia = viewModel::searchChatMedia,
+            onRefreshChatMessages = {
+                val activePeer = viewModel.state.value.activeChatPeer
+                if (activePeer != null) {
+                    viewModel.openChatWithFriend(activePeer)
+                }
+            },
+            onOpenLibrary = viewModel::openLibrary,
+            onReorderLibraries = viewModel::reorderLibraries,
+            onSetLibrariesViewMode = viewModel::setLibrariesViewMode,
+            onRetryLibrary = viewModel::retryLibraryItems,
+            onSetLibraryFilter = viewModel::setLibraryItemsFilter,
+            onSetLibraryAlphabet = viewModel::setLibraryAlphabetKey,
+            onSetViewMode = viewModel::setLibraryViewMode,
+            onPreviousLibraryPage = viewModel::previousLibraryItemsPage,
+            onNextLibraryPage = viewModel::nextLibraryItemsPage,
+            onRefreshAdmin = viewModel::pollAdminOverview,
+            onOpenMedia = viewModel::openMedia,
+            onMarkWhatsNewSeen = viewModel::markWhatsNewSeen,
+            onToggleWhatsNew = viewModel::toggleWhatsNew,
+            onRetryMedia = viewModel::retryMediaDetail,
+            onSearchQueryChanged = viewModel::onSearchQueryChanged,
+            onLoadFavorites = viewModel::loadFavorites,
+            onPlaybackComingSoon = viewModel::showPlaybackComingSoon,
+            onClearMessage = viewModel::clearMobileMessage,
+            onToggleHomeSection = viewModel::toggleHomeSection,
+            onMoveHomeSection = viewModel::moveHomeSection,
+            onResetHomeLayout = viewModel::resetHomeLayout,
+            onSaveHomeLayoutDraft = viewModel::saveHomeLayoutDraft,
+            onAddSmartRow = viewModel::addSmartRow,
+            onRemoveSmartRow = viewModel::removeSmartRow,
+            onCycleArtwork = viewModel::cycleSectionArtwork,
+            onCycleShape = viewModel::cycleSectionShape,
+            onCycleSize = viewModel::cycleSectionSize,
+            onCycleSpacing = viewModel::cycleSectionSpacing,
+            onToggleThemeMusic = viewModel::toggleThemeMusic,
+            onSelectThemeMusicVolume = viewModel::selectThemeMusicVolume,
+            onSetBottomRailAccent = viewModel::setBottomRailAccent,
+            onToggleAutoLoginLastProfile = viewModel::toggleAutoLoginLastProfile,
+            onSelectBackground = viewModel::selectBackground,
+            onSelectTheme = viewModel::selectTheme,
+            onToggleMediaFavorite = viewModel::toggleMediaFavorite,
+            onToggleMediaPlayed = viewModel::toggleMediaPlayed,
+            onSetMediaFavorite = viewModel::setMediaFavorite,
+            onSetMediaPlayed = viewModel::setMediaPlayed,
+            onQueueMediaDownload = viewModel::queueMediaDownloadById,
+            onOpenDownloads = viewModel::openDownloads,
+            onRefreshDownloads = viewModel::loadDownloads,
+            onPlayOfflineDownload = viewModel::playOfflineDownload,
+            onCancelDownload = viewModel::cancelDownload,
+            onRetryDownload = viewModel::retryDownload,
+            onRemoveDownload = viewModel::removeDownload,
+            onRemoveAllDownloads = viewModel::removeAllDownloads,
+            onSetDownloadWifiOnlyDefault = viewModel::setDownloadWifiOnlyDefault,
+            onStartPlayback = { viewModel.startPlayback() },
+            onStartPlaybackFromBeginning = viewModel::startPlaybackFromBeginning,
+            onStartEpisodePlayback = viewModel::startEpisodePlayback,
+            onSelectSeason = viewModel::selectSeason,
+            onRetryPlayback = viewModel::retryPlayback,
+            onTryTranscodedPlayback = viewModel::tryTranscodedPlayback,
+            onExitPlayback = viewModel::exitPlayback,
+            onPlaybackStarted = viewModel::reportPlaybackStarted,
+            onPlaybackProgress = viewModel::reportPlaybackProgress,
+            onPlaybackEnded = viewModel::exitPlayback,
+            onPlayNextEpisode = viewModel::playNextEpisode,
+            onPlayPreviousEpisode = viewModel::playPreviousEpisode,
+            onPlayerError = viewModel::handlePlayerError,
+            onPrepareCastPlayback = viewModel::prepareCastPlayback,
+            onSelectPlaybackAudioTrack = { track, pos -> viewModel.selectPlaybackAudioTrack(track, pos) },
+            onSelectPlaybackSubtitleTrack = { track, pos -> viewModel.selectPlaybackSubtitleTrack(track, pos) },
+            onSyncPlayPause = viewModel::sendWatchPartyPause,
+            onSyncPlayResume = viewModel::sendWatchPartyResume,
+            onSyncPlaySeek = viewModel::sendWatchPartySeek,
+            onStartLiveTvPlayback = viewModel::startLiveTvPlayback,
+            onEditPlaybackPreferences = viewModel::editPlaybackPreferences,
+            onSavePlaybackPreferences = viewModel::savePlaybackPreferences,
+            onSetAutoplayCountdownSeconds = viewModel::setAutoplayCountdownSeconds,
+            onSetUpNextDisplayMode = viewModel::setUpNextDisplayMode,
+            onTogglePassoutProtection = viewModel::togglePassoutProtection,
+            onSetPassoutProtectionLimitMinutes = viewModel::setPassoutProtectionLimitMinutes,
+            onSelectVideoPlayerPreference = viewModel::selectVideoPlayerPreference,
+            onSetMaxStreamingBitrateMbps = viewModel::setMaxStreamingBitrateMbps,
+            onSetMediaSegmentBehavior = viewModel::setMediaSegmentBehavior,
+            onExternalVideoPlayerLaunched = viewModel::externalVideoPlayerLaunched,
+            onExternalVideoPlayerLaunchFailed = viewModel::externalVideoPlayerLaunchFailed,
+            onChangePassword = viewModel::changeCurrentUserPassword,
+            onOpenAdminUser = viewModel::openAdminUser,
+            onCloseAdminUser = viewModel::closeAdminUser,
+            onCreateAdminUser = viewModel::createAdminUser,
+            onUpdateAdminUser = viewModel::updateSelectedAdminUser,
+            onResetAdminPassword = viewModel::resetSelectedAdminPassword,
+            onScanAdminLibrary = viewModel::scanAdminLibrary,
+            onSetAdminPluginEnabled = viewModel::setAdminPluginEnabled,
+            onRunAdminTask = viewModel::runAdminTask,
+            onStopAdminTask = viewModel::stopAdminTask,
+            onUploadCurrentProfileImage = viewModel::uploadCurrentUserProfileImage,
+            onDeleteCurrentProfileImage = viewModel::deleteCurrentUserProfileImage,
+            onUploadAdminProfileImage = viewModel::uploadSelectedAdminUserProfileImage,
+            onDeleteAdminProfileImage = viewModel::deleteSelectedAdminUserProfileImage,
+            onCreateWatchParty = viewModel::createWatchParty,
+            onLoadWatchParty = viewModel::shuffleWatchPartyDeck,
+            onLeaveWatchParty = viewModel::leaveWatchParty,
+            onUpdateWatchPartyName = viewModel::updateWatchPartyName,
+            onUpdateWatchPartyMode = viewModel::updateWatchPartyMode,
+            onUpdateWatchPartyRules = viewModel::updateWatchPartyRules,
+            onStartWatchPartyFromDetail = viewModel::startWatchPartyFromDetail,
+            onLoadWatchPartyRecipients = viewModel::loadWatchPartyRecipients,
+            onToggleWatchPartyRecipient = viewModel::toggleWatchPartyRecipient,
+            onSendWatchPartyInvites = viewModel::sendWatchPartyInvites,
+            onClearWatchPartyInviteAnimation = viewModel::clearWatchPartyInviteAnimation,
+            onToggleWatchPartyReady = viewModel::toggleWatchPartyReady,
+            onVoteWatchPartyCandidate = viewModel::voteWatchPartyCandidate,
+            onStartMatchedWatchPartyPlayback = viewModel::startMatchedWatchPartyPlayback,
+            onStartFixedWatchPartyPlayback = viewModel::startFixedWatchPartyPlayback,
+            onToggleWatchPartyEnabled = viewModel::toggleWatchPartyEnabled,
+            onToggleWatchPartyInvitesEnabled = viewModel::toggleWatchPartyInvitesEnabled,
+            onToggleWatchPartyInviteAnimationEnabled = viewModel::toggleWatchPartyInviteAnimationEnabled,
+            onSetWatchPartyInviteExpirySeconds = viewModel::setWatchPartyInviteExpirySeconds,
+            onSetAdminSpeedLimit = viewModel::setAdminSpeedLimitMbps,
+            onSendAdminSessionMessage = viewModel::sendAdminSessionMessage,
+            onSendAdminBroadcastMessage = viewModel::sendAdminBroadcastMessage,
+            onClearAdminSessionMessageError = viewModel::clearAdminSessionMessageError,
+            onNavigateBack = viewModel::navigateMobileBack,
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
             onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
             modifier = modifier,
         )
-        return
+    } else {
+        TvHomeScreen(
+            state = state,
+            tv = true,
+            onRetry = viewModel::retryLibraries,
+            onSwitchUser = viewModel::showProfilePicker,
+            modifier = modifier,
+        )
     }
+}
+
+@Composable
+private fun TvHomeScreen(
+    state: VantafynHomeUiState,
+    tv: Boolean,
+    onRetry: () -> Unit,
+    onSwitchUser: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     VantafynScreenScaffold(modifier) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -3609,7 +3370,7 @@ private fun MobileShellScreen(
     onPlayNextEpisode: (UpNextCandidate, Long) -> Unit,
     onPlayPreviousEpisode: (UpNextCandidate, Long) -> Unit,
     onPlayerError: () -> Unit,
-    onPrepareCastPlayback: (Long) -> Unit,
+    onPrepareCastPlayback: (Long, Int?, Int?) -> Unit,
     onSelectPlaybackAudioTrack: (Int, Long) -> Unit,
     onSelectPlaybackSubtitleTrack: (Int?, Long) -> Unit,
     onSyncPlayPause: (Long) -> Unit,
@@ -3668,6 +3429,8 @@ private fun MobileShellScreen(
     notificationPermissionState: VantafynPermissionUiState,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
     onNotificationPermissionSettingsAction: () -> Unit,
+    onSelectExperienceMode: (ExperienceMode) -> Unit = {},
+    onSelectMusicBackend: (MusicBackendType) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var mediaActionTarget by remember { mutableStateOf<MediaActionTarget?>(null) }
@@ -3751,7 +3514,8 @@ private fun MobileShellScreen(
             }
         }
     }
-    val handlesSystemBack = state.mobileDestination != MobileDestination.Home ||
+    val rootDestination = if (state.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home
+    val handlesSystemBack = state.mobileDestination != rootDestination ||
         state.confirmLogout ||
         state.mobileMessage != null ||
         showMusicQuickPlayer ||
@@ -3774,38 +3538,47 @@ private fun MobileShellScreen(
                 .fillMaxSize(),
         ) {
             when (state.mobileDestination) {
-                MobileDestination.Home -> MobileHomeContent(
-                    state = state,
-                    homeLayoutOverride = draftHomeLayout,
-                    configuredSmartRowsOverride = draftSmartRows,
-                    highlightedHomeSection = selectedHomeSectionName?.let { name ->
-                        runCatching { HomeSectionType.valueOf(name) }.getOrNull()
-                    },
-                    onRetry = onRetryHome,
-                    onSearch = { onNavigate(MobileDestination.Search) },
-                    onProfile = { onNavigate(MobileDestination.Profile) },
-                    onOpenAchievements = onOpenAchievements,
-                    onOpenLibrary = { library ->
-                        if (!homeEditorOpen) onOpenLibrary(library)
-                    },
-                    onOpenMedia = { mediaId ->
-                        if (!homeEditorOpen) onOpenMedia(mediaId)
-                    },
-                    onMediaLongPress = { target ->
-                        if (!homeEditorOpen) mediaActionTarget = target
-                    },
-                    onHeroLongPress = { item ->
-                        if (!homeEditorOpen) {
-                            mediaActionTarget = item.toMediaActionTarget(allowHomeCustomize = true)
-                        }
-                    },
-                    onStartLiveTvPlayback = { channelId, channelName, programName ->
-                        if (!homeEditorOpen) onStartLiveTvPlayback(channelId, channelName, programName)
-                    },
-                    onPlaybackComingSoon = {
-                        if (!homeEditorOpen) onPlaybackComingSoon()
-                    },
-                )
+                MobileDestination.Home -> {
+                    if (state.experienceMode == ExperienceMode.MusicOnly) {
+                        MusicScreen(
+                            session = state.session,
+                            onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+                        )
+                    } else {
+                        MobileHomeContent(
+                            state = state,
+                            homeLayoutOverride = draftHomeLayout,
+                            configuredSmartRowsOverride = draftSmartRows,
+                            highlightedHomeSection = selectedHomeSectionName?.let { name ->
+                                runCatching { HomeSectionType.valueOf(name) }.getOrNull()
+                            },
+                            onRetry = onRetryHome,
+                            onSearch = { onNavigate(MobileDestination.Search) },
+                            onProfile = { onNavigate(MobileDestination.Profile) },
+                            onOpenAchievements = onOpenAchievements,
+                            onOpenLibrary = { library ->
+                                if (!homeEditorOpen) onOpenLibrary(library)
+                            },
+                            onOpenMedia = { mediaId ->
+                                if (!homeEditorOpen) onOpenMedia(mediaId)
+                            },
+                            onMediaLongPress = { target ->
+                                if (!homeEditorOpen) mediaActionTarget = target
+                            },
+                            onHeroLongPress = { item ->
+                                if (!homeEditorOpen) {
+                                    mediaActionTarget = item.toMediaActionTarget(allowHomeCustomize = true)
+                                }
+                            },
+                            onStartLiveTvPlayback = { channelId, channelName, programName ->
+                                if (!homeEditorOpen) onStartLiveTvPlayback(channelId, channelName, programName)
+                            },
+                            onPlaybackComingSoon = {
+                                if (!homeEditorOpen) onPlaybackComingSoon()
+                            },
+                        )
+                    }
+                }
                 MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
                 MobileDestination.Downloads -> DownloadsScreen(
                     state = state,
@@ -3861,7 +3634,9 @@ private fun MobileShellScreen(
                             onPlayNext = onPlayNextEpisode,
                             onPlayPrevious = onPlayPreviousEpisode,
                             onPlayerError = onPlayerError,
-                            onPrepareCastPlayback = onPrepareCastPlayback,
+                            onPrepareCastPlayback = { positionMs, audioStreamIndex, subtitleStreamIndex ->
+                                onPrepareCastPlayback(positionMs, audioStreamIndex, subtitleStreamIndex)
+                            },
                             onSelectAudioTrack = onSelectPlaybackAudioTrack,
                             onSelectSubtitleTrack = onSelectPlaybackSubtitleTrack,
                             onSyncPlayPause = onSyncPlayPause,
@@ -3896,12 +3671,71 @@ private fun MobileShellScreen(
                 ) {
                     when (state.mobileDestination) {
                         MobileDestination.Libraries -> LibrariesScreen(state, onOpenLibrary, onReorderLibraries, onSetLibrariesViewMode)
-                        MobileDestination.Search -> SearchScreen(state, onSearchQueryChanged, onOpenMedia, onMediaLongPress = { mediaActionTarget = it })
+                        MobileDestination.Search -> SearchScreen(
+                            state = state,
+                            onSearchQueryChanged = onSearchQueryChanged,
+                            onOpenMedia = { mediaId ->
+                                if (state.experienceMode == ExperienceMode.MusicOnly) {
+                                    val searchItem = state.searchResults.firstOrNull { it.id == mediaId }
+                                    val creds = getSubsonicCredentials(context)
+                                    if (searchItem?.itemType in listOf("Audio", "MusicTrack", "Song") && creds != null && state.musicBackendType == MusicBackendType.OpenSubsonic) {
+                                        val controller = dev.vantafyn.core.media.MusicPlaybackController.get(context)
+                                        val track = dev.vantafyn.core.media.VantafynMusicTrack(
+                                            id = searchItem!!.id,
+                                            title = searchItem.title,
+                                            artist = searchItem.subtitle?.substringBefore(" · ").orEmpty().ifBlank { "Unknown Artist" },
+                                            album = searchItem.subtitle?.substringAfter(" · ", "")?.ifBlank { null },
+                                            albumId = null,
+                                            durationMs = null,
+                                            streamUrl = dev.vantafyn.core.subsonic.SubsonicClient(creds).buildStreamUrl(searchItem.id.toString()),
+                                            artworkUrl = searchItem.imageUrl,
+                                            isFavorite = searchItem.isFavorite,
+                                        )
+                                        controller.playQueue(listOf(track), 0)
+                                    } else {
+                                        onNavigate(MobileDestination.Music)
+                                    }
+                                } else {
+                                    onOpenMedia(mediaId)
+                                }
+                            },
+                            onMediaLongPress = { mediaActionTarget = it },
+                        )
                         MobileDestination.Music -> MusicScreen(
                             session = state.session,
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
                         )
-                        MobileDestination.Favorites -> FavoritesScreen(state, onLoadFavorites, onOpenMedia, onRemoveFromMyList = { onSetMediaFavorite(it, false) }, onMediaLongPress = { mediaActionTarget = it })
+                        MobileDestination.Favorites -> FavoritesScreen(
+                            state = state,
+                            onLoadFavorites = onLoadFavorites,
+                            onOpenMedia = { mediaId ->
+                                if (state.experienceMode == ExperienceMode.MusicOnly) {
+                                    val favItem = state.favorites.firstOrNull { it.id == mediaId }
+                                    val creds = getSubsonicCredentials(context)
+                                    if (favItem?.itemType in listOf("Audio", "MusicTrack", "Song") && creds != null && state.musicBackendType == MusicBackendType.OpenSubsonic) {
+                                        val controller = dev.vantafyn.core.media.MusicPlaybackController.get(context)
+                                        val track = dev.vantafyn.core.media.VantafynMusicTrack(
+                                            id = favItem!!.id,
+                                            title = favItem.title,
+                                            artist = favItem.subtitle?.substringBefore(" · ").orEmpty().ifBlank { "Unknown Artist" },
+                                            album = favItem.subtitle?.substringAfter(" · ", "")?.ifBlank { null },
+                                            albumId = null,
+                                            durationMs = null,
+                                            streamUrl = dev.vantafyn.core.subsonic.SubsonicClient(creds).buildStreamUrl(favItem.id.toString()),
+                                            artworkUrl = favItem.imageUrl ?: favItem.backdropUrl,
+                                            isFavorite = true,
+                                        )
+                                        controller.playQueue(listOf(track), 0)
+                                    } else {
+                                        onNavigate(MobileDestination.Music)
+                                    }
+                                } else {
+                                    onOpenMedia(mediaId)
+                                }
+                            },
+                            onRemoveFromMyList = { onSetMediaFavorite(it, false) },
+                            onMediaLongPress = { mediaActionTarget = it },
+                        )
                         MobileDestination.WatchParty -> WatchPartyScreen(
                             state = state,
                             onCreate = onCreateWatchParty,
@@ -3976,6 +3810,8 @@ private fun MobileShellScreen(
                             onToggleSocialEnabled = onToggleSocialEnabled,
                             onToggleSocialDockEnabled = onToggleSocialDockEnabled,
                             onDiscoverVantafyn = { onNavigate(MobileDestination.DiscoverVantafyn) },
+                            onSelectExperienceMode = onSelectExperienceMode,
+                            onSelectMusicBackend = onSelectMusicBackend,
                         )
                         MobileDestination.DeviceQuickConnect -> DeviceQuickConnectScreen(
                             state = state,
@@ -4041,6 +3877,12 @@ private fun MobileShellScreen(
                                     "open_admin" -> onNavigate(MobileDestination.Admin)
                                     "open_send_text_to_tv" -> onNavigate(MobileDestination.TvInput)
                                     "open_pair_tv" -> onNavigate(MobileDestination.Profile)
+                                    "open_ambient_preview" -> {
+                                        runCatching {
+                                            val intent = Intent(context, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity"))
+                                            context.startActivity(intent)
+                                        }
+                                    }
                                     else -> Unit
                                 }
                             },
@@ -4307,6 +4149,7 @@ private fun MobileShellScreen(
                     unreadMessagesCount = state.socialConversations.sumOf { it.unreadCount },
                     incomingFriendRequestsCount = state.socialRequests.count { it.isIncoming },
                     accentMode = state.bottomRailAccent,
+                    experienceMode = state.experienceMode,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
@@ -7168,6 +7011,7 @@ private fun SearchScreen(
     onMediaLongPress: (MediaActionTarget) -> Unit,
 ) {
     var selectedType by remember { mutableStateOf<String?>(null) }
+    val isMusicOnly = state.experienceMode == ExperienceMode.MusicOnly
     val trimmedQuery = state.searchQuery.trim()
     val groupedResults = state.searchResults.groupBy { it.itemType?.ifBlank { "Other" } ?: "Other" }
     val typeFilters = groupedResults.keys.sorted()
@@ -7181,14 +7025,25 @@ private fun SearchScreen(
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
-            Text("Search", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            Text(if (isMusicOnly) "Search Music" else "Search", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(VantafynSpacing.md))
             VantafynTextField(
                 value = state.searchQuery,
                 onValueChange = onSearchQueryChanged,
-                label = "Search Jellyfin",
-                placeholder = "Movie, show, episode...",
+                label = if (isMusicOnly) "Search Music" else "Search Jellyfin",
+                placeholder = if (isMusicOnly) "Track, artist, album, playlist..." else "Movie, show, episode...",
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                trailingIcon = if (state.searchQuery.isNotBlank()) {
+                    {
+                        IconButton(onClick = { onSearchQueryChanged("") }) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Clear search",
+                                tint = VantafynColors.Muted,
+                            )
+                        }
+                    }
+                } else null,
             )
         }
         if (typeFilters.isNotEmpty()) {
@@ -7204,6 +7059,7 @@ private fun SearchScreen(
         if (trimmedQuery.length < 2) {
             item(key = "search-idle") {
                 EmptySearchState(
+                    experienceMode = state.experienceMode,
                     selectedType = selectedType,
                     onSelectType = { selectedType = it },
                 )
@@ -7265,12 +7121,22 @@ private val searchQuickFilters = listOf(
     SearchQuickFilter("Collections", "BoxSet", Icons.Rounded.CollectionsBookmark),
 )
 
+private val musicSearchQuickFilters = listOf(
+    SearchQuickFilter("Songs", "Audio", Icons.Rounded.MusicNote),
+    SearchQuickFilter("Albums", "MusicAlbum", Icons.Rounded.LibraryMusic),
+    SearchQuickFilter("Artists", "MusicArtist", Icons.Rounded.Person),
+    SearchQuickFilter("Playlists", "Playlist", Icons.Rounded.GraphicEq),
+)
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun EmptySearchState(
+    experienceMode: ExperienceMode = ExperienceMode.FullMedia,
     selectedType: String?,
     onSelectType: (String?) -> Unit,
 ) {
+    val isMusicOnly = experienceMode == ExperienceMode.MusicOnly
+    val filters = if (isMusicOnly) musicSearchQuickFilters else searchQuickFilters
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -7284,13 +7150,13 @@ private fun EmptySearchState(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    "Search your universe",
+                    if (isMusicOnly) "Search your music" else "Search your universe",
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                 )
                 Text(
-                    "Find movies, shows, music, people, and more.",
+                    if (isMusicOnly) "Find songs, albums, artists, and playlists." else "Find movies, shows, music, people, and more.",
                     color = VantafynColors.Muted.copy(alpha = 0.88f),
                     style = MaterialTheme.typography.bodyLarge,
                 )
@@ -7301,7 +7167,7 @@ private fun EmptySearchState(
             horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
         ) {
-            searchQuickFilters.forEachIndexed { index, chip ->
+            filters.forEachIndexed { index, chip ->
                 StaggeredSearchReveal(index = index) {
                     SearchQuickChip(
                         label = chip.label,
@@ -7469,21 +7335,7 @@ private fun SubtleSearchSparkle() {
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val pulse = if (isResumed) {
-        val transition = rememberInfiniteTransition(label = "searchSparkle")
-        transition.animateFloat(
-            initialValue = 0.35f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 1800, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "searchSparklePulse",
-        ).value
-    } else {
-        0.35f
-    }
+    val pulse = 0.85f
     Box(
         modifier = Modifier
             .size(42.dp)
@@ -7556,6 +7408,7 @@ private fun FavoritesScreen(
     onRemoveFromMyList: (java.util.UUID) -> Unit,
     onMediaLongPress: (MediaActionTarget) -> Unit,
 ) {
+    val isMusicOnly = state.experienceMode == ExperienceMode.MusicOnly
     val grouped = state.favorites.groupBy { it.itemType?.ifBlank { "Other" } ?: "Other" }
     val groupedEntries = grouped.toSortedMap().entries.toList()
     var revealActive by remember(state.session?.profileId) { mutableStateOf(true) }
@@ -7575,10 +7428,10 @@ private fun FavoritesScreen(
         item {
             HomeContentReveal(index = 0, animate = revealActive) {
                 Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text("My List", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+                    Text(if (isMusicOnly) "Favorite Music" else "My List", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
                     Icon(
                         imageVector = Icons.Rounded.Refresh,
-                        contentDescription = "Refresh My List",
+                        contentDescription = if (isMusicOnly) "Refresh Favorite Music" else "Refresh My List",
                         tint = VantafynColors.Ink.copy(alpha = 0.86f),
                         modifier = Modifier
                             .size(40.dp)
@@ -7592,7 +7445,7 @@ private fun FavoritesScreen(
         if (state.isFavoritesLoading) item { HomeContentReveal(index = 1, animate = revealActive) { MyListLoadingSkeleton() } }
         state.favoritesError?.let { item { HomeContentReveal(index = 1, animate = revealActive) { VantafynErrorCard(it) } } }
         if (!state.isFavoritesLoading && state.favorites.isEmpty() && state.favoritesError == null) {
-            item { HomeContentReveal(index = 1, animate = revealActive) { MyListEmptyState() } }
+            item { HomeContentReveal(index = 1, animate = revealActive) { MyListEmptyState(experienceMode = state.experienceMode) } }
         }
         groupedEntries.forEachIndexed { groupIndex, (type, itemsForType) ->
             item {
@@ -7674,7 +7527,10 @@ private fun MyListSkeletonRow(labelWidth: androidx.compose.ui.unit.Dp, wide: Boo
 }
 
 @Composable
-private fun MyListEmptyState() {
+private fun MyListEmptyState(
+    experienceMode: ExperienceMode = ExperienceMode.FullMedia,
+) {
+    val isMusicOnly = experienceMode == ExperienceMode.MusicOnly
     VantafynGlassCard(
         modifier = Modifier
             .fillMaxWidth()
@@ -7747,14 +7603,14 @@ private fun MyListEmptyState() {
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(
-                    "Start building your list",
+                    if (isMusicOnly) "Start building your favorites" else "Start building your list",
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.headlineSmall,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    "Save films and shows you want close by. They will appear here as a private collection for this profile.",
+                    if (isMusicOnly) "Save songs, albums, and artists you love. They will appear here for instant listening." else "Save films and shows you want close by. They will appear here as a private collection for this profile.",
                     color = VantafynColors.Muted.copy(alpha = 0.9f),
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
@@ -8055,7 +7911,7 @@ private fun AdminScreen(
             try {
                 onRefresh()
                 while (isActive) {
-                    delay(8_000L)
+                    delay(30_000L)
                     LongRunningTaskRegistry.tick("admin.refresh", "refreshing")
                     onRefresh()
                 }
@@ -11470,6 +11326,112 @@ private fun WatchPartyMatchCard(candidate: WatchPartyCandidate, onStartMatched: 
 }
 
 @Composable
+private fun ExperienceModeSettingsCard(
+    state: VantafynHomeUiState,
+    onSelectMode: (ExperienceMode) -> Unit,
+    onSelectBackend: (MusicBackendType) -> Unit,
+) {
+    GlassPanel {
+        Text("Experience Mode", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        Text(
+            "Choose whether Vantafyn runs as a full multimedia hub or a dedicated streaming music player.",
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val fullMediaSelected = state.experienceMode == ExperienceMode.FullMedia
+            val musicOnlySelected = state.experienceMode == ExperienceMode.MusicOnly
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (fullMediaSelected) VantafynColors.Primary.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f))
+                    .border(
+                        BorderStroke(1.dp, if (fullMediaSelected) VantafynColors.Primary else Color.White.copy(alpha = 0.12f)),
+                        RoundedCornerShape(14.dp),
+                    )
+                    .clickable { onSelectMode(ExperienceMode.FullMedia) }
+                    .padding(vertical = 12.dp, horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Rounded.Movie, contentDescription = null, tint = if (fullMediaSelected) Color.White else VantafynColors.Muted)
+                    Text("Full Media", color = if (fullMediaSelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (musicOnlySelected) VantafynColors.Primary.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f))
+                    .border(
+                        BorderStroke(1.dp, if (musicOnlySelected) VantafynColors.Primary else Color.White.copy(alpha = 0.12f)),
+                        RoundedCornerShape(14.dp),
+                    )
+                    .clickable { onSelectMode(ExperienceMode.MusicOnly) }
+                    .padding(vertical = 12.dp, horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = if (musicOnlySelected) Color.White else VantafynColors.Muted)
+                    Text("Music Only", color = if (musicOnlySelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                }
+            }
+        }
+
+        if (state.experienceMode == ExperienceMode.MusicOnly) {
+            Spacer(Modifier.height(4.dp))
+            Text("Music Provider", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val isSubsonic = state.musicBackendType == MusicBackendType.OpenSubsonic
+                val isJellyfin = state.musicBackendType == MusicBackendType.Jellyfin
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isSubsonic) Color(0xFF00B4D8).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.04f))
+                        .border(
+                            BorderStroke(1.dp, if (isSubsonic) Color(0xFF00B4D8) else Color.White.copy(alpha = 0.1f)),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable { onSelectBackend(MusicBackendType.OpenSubsonic) }
+                        .padding(vertical = 10.dp, horizontal = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("OpenSubsonic", color = if (isSubsonic) Color.White else VantafynColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (isJellyfin) Color(0xFF4361EE).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.04f))
+                        .border(
+                            BorderStroke(1.dp, if (isJellyfin) Color(0xFF4361EE) else Color.White.copy(alpha = 0.1f)),
+                            RoundedCornerShape(12.dp),
+                        )
+                        .clickable { onSelectBackend(MusicBackendType.Jellyfin) }
+                        .padding(vertical = 10.dp, horizontal = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("Jellyfin Music", color = if (isJellyfin) Color.White else VantafynColors.Muted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ProfileSettingsScreen(
     state: VantafynHomeUiState,
     onAdmin: () -> Unit,
@@ -11502,6 +11464,8 @@ private fun ProfileSettingsScreen(
     onToggleSocialEnabled: () -> Unit = {},
     onToggleSocialDockEnabled: () -> Unit = {},
     onDiscoverVantafyn: () -> Unit,
+    onSelectExperienceMode: (ExperienceMode) -> Unit = {},
+    onSelectMusicBackend: (MusicBackendType) -> Unit = {},
     viewModel: VantafynHomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -11543,9 +11507,18 @@ private fun ProfileSettingsScreen(
                     )
                 }
             }
+            item {
+                HomeContentReveal(index = 2, animate = revealActive) {
+                    ExperienceModeSettingsCard(
+                        state = state,
+                        onSelectMode = onSelectExperienceMode,
+                        onSelectBackend = onSelectMusicBackend,
+                    )
+                }
+            }
             if (state.isProfileImageSaving || state.profileImageError != null) {
                 item {
-                    HomeContentReveal(index = 2, animate = revealActive) {
+                    HomeContentReveal(index = 3, animate = revealActive) {
                         ProfileImageStatusCard(
                             isSaving = state.isProfileImageSaving,
                             error = state.profileImageError,
@@ -11633,6 +11606,16 @@ private fun ProfileSettingsScreen(
             }
             item {
                 HomeContentReveal(index = 6, animate = revealActive) {
+                    AmbientDisplaySettingsCard()
+                }
+            }
+            item {
+                HomeContentReveal(index = 7, animate = revealActive) {
+                    MusicStreamingQualitySettingsCard()
+                }
+            }
+            item {
+                HomeContentReveal(index = 8, animate = revealActive) {
                     GlassPanel {
                         Text("Vantafyn", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         WhatsNewSettingsRow(
@@ -11730,6 +11713,276 @@ private fun ProfileSettingsScreen(
         )
     }
     avatarPicker.Content()
+}
+
+@Composable
+private fun AmbientDisplaySettingsCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var currentMode by remember { mutableStateOf(dev.vantafyn.core.media.ambient.AmbientDisplayPreferences.getMode(context)) }
+
+    GlassPanel {
+        Text(
+            "Ambient Display",
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Text(
+            "Fullscreen synced lyrics and controls over your lock screen during playback.",
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+
+        Spacer(Modifier.height(2.dp))
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SettingsRowIcon(Icons.Rounded.Fullscreen)
+            Text(
+                "Auto-launch on lock",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        VantafynGlassSurface(
+            modifier = Modifier.fillMaxWidth(),
+            variant = VantafynGlassVariant.Chip,
+            cornerRadius = 999.dp,
+            contentPadding = PaddingValues(4.dp),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                dev.vantafyn.core.media.ambient.AmbientAutoLaunchMode.entries.forEach { mode ->
+                    val isSelected = mode == currentMode
+                    val shape = RoundedCornerShape(999.dp)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(
+                                if (isSelected) {
+                                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
+                                } else {
+                                    Modifier.clip(shape)
+                                },
+                            )
+                            .background(if (isSelected) Color.White.copy(alpha = 0.08f) else Color.Transparent)
+                            .clickable {
+                                currentMode = mode
+                                dev.vantafyn.core.media.ambient.AmbientDisplayPreferences.setMode(context, mode)
+                            }
+                            .padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = mode.label,
+                            color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodyLarge,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = currentMode.description,
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        SettingsRow(
+            title = "Preview Ambient Display",
+            subtitle = "Test the fullscreen synced lyrics ambient experience",
+            onClick = {
+                runCatching {
+                    val intent = Intent(context, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity"))
+                    context.startActivity(intent)
+                }
+            },
+            icon = Icons.Rounded.PlayArrow,
+            compact = true,
+        )
+    }
+}
+
+@Composable
+private fun MusicStreamingQualitySettingsCard() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var wifiQuality by remember { mutableStateOf(dev.vantafyn.core.media.music.MusicQualityPreferences.getWifiQuality(context)) }
+    var cellularQuality by remember { mutableStateOf(dev.vantafyn.core.media.music.MusicQualityPreferences.getCellularQuality(context)) }
+    var autoSwitch by remember { mutableStateOf(dev.vantafyn.core.media.music.MusicQualityPreferences.isAutoSwitchEnabled(context)) }
+    val isMetered = remember { dev.vantafyn.core.media.music.MusicQualityPreferences.isMeteredOrCellular(context) }
+    val currentQuality = remember(wifiQuality, cellularQuality, autoSwitch, isMetered) {
+        dev.vantafyn.core.media.music.MusicQualityPreferences.resolveCurrentQuality(context)
+    }
+
+    GlassPanel {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Music Audio Quality",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Smart network-aware streaming fidelity & data saver",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xFF31D7FF).copy(alpha = 0.12f))
+                    .border(BorderStroke(1.dp, Color(0xFF31D7FF).copy(alpha = 0.35f)), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
+            ) {
+                Text(
+                    text = "Active: ${currentQuality.shortLabel}",
+                    color = Color(0xFF31D7FF),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // Smart Network Switching Switch
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .clickable {
+                    val next = !autoSwitch
+                    autoSwitch = next
+                    dev.vantafyn.core.media.music.MusicQualityPreferences.setAutoSwitchEnabled(context, next)
+                }
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            SettingsRowIcon(Icons.Rounded.AutoAwesome)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "Smart Network Switching",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "Stream Lossless on Wi-Fi and save cellular data automatically",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            VantafynPremiumSwitchVisual(checked = autoSwitch)
+        }
+
+        Spacer(Modifier.height(4.dp))
+
+        // Wi-Fi Quality
+        Text(
+            "Wi-Fi Streaming Quality",
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        QualitySelectorGroup(
+            selected = wifiQuality,
+            onSelect = {
+                wifiQuality = it
+                dev.vantafyn.core.media.music.MusicQualityPreferences.setWifiQuality(context, it)
+            },
+        )
+        Text(
+            text = wifiQuality.description,
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+
+        Spacer(Modifier.height(4.dp))
+
+        // Cellular Quality
+        Text(
+            "Cellular / Metered Data Quality",
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        QualitySelectorGroup(
+            selected = cellularQuality,
+            onSelect = {
+                cellularQuality = it
+                dev.vantafyn.core.media.music.MusicQualityPreferences.setCellularQuality(context, it)
+            },
+        )
+        Text(
+            text = cellularQuality.description,
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun QualitySelectorGroup(
+    selected: dev.vantafyn.core.media.music.MusicStreamingQuality,
+    onSelect: (dev.vantafyn.core.media.music.MusicStreamingQuality) -> Unit,
+) {
+    VantafynGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        variant = VantafynGlassVariant.Chip,
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(4.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            dev.vantafyn.core.media.music.MusicStreamingQuality.entries.forEach { quality ->
+                val isSelected = quality == selected
+                val shape = RoundedCornerShape(999.dp)
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(
+                            if (isSelected) {
+                                Modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
+                            } else {
+                                Modifier.clip(shape)
+                            },
+                        )
+                        .background(if (isSelected) Color.White.copy(alpha = 0.08f) else Color.Transparent)
+                        .clickable { onSelect(quality) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = quality.shortLabel,
+                        color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -11976,67 +12229,31 @@ private fun groupWhatsNewItems(items: List<JellyfinMediaItem>): List<WhatsNewIte
 private fun WatchedCheckBadge(
     modifier: Modifier = Modifier,
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val infiniteTransition = rememberInfiniteTransition(label = "watchedBadge")
-    val shift by if (isResumed) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 3200, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "watchedBadgeShift",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
     val glassShape = RoundedCornerShape(6.dp)
     Box(
-        modifier = modifier.size(width = 24.dp, height = 20.dp),
-    ) {
-        Canvas(Modifier.matchParentSize()) {
-            drawRoundRect(
-                brush = Brush.linearGradient(
-                    colors = VantafynGradients.AccentColors + VantafynGradients.AccentColors.first(),
-                    start = Offset(-size.width * shift, -size.height * shift),
-                    end = Offset(size.width * (1f - shift), size.height * (1f - shift)),
-                    tileMode = TileMode.Repeated,
-                ),
-                cornerRadius = CornerRadius(6.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx()),
+        modifier = modifier
+            .size(width = 24.dp, height = 20.dp)
+            .clip(glassShape)
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(VantafynGradients.AccentColors),
+                shape = glassShape,
             )
-        }
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .padding(1.dp)
-                .clip(glassShape)
-                .background(VantafynColors.Graphite.copy(alpha = 0.90f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Canvas(Modifier.size(10.dp)) {
-                val w = size.width
-                val h = size.height
-                drawPath(
-                    path = Path().apply {
-                        moveTo(w * 0.15f, h * 0.50f)
-                        lineTo(w * 0.40f, h * 0.80f)
-                        lineTo(w * 0.85f, h * 0.20f)
-                    },
-                    color = Color.White,
-                    style = Stroke(width = w * 0.25f, cap = StrokeCap.Round, join = StrokeJoin.Round),
-                )
-            }
+            .background(VantafynColors.Graphite.copy(alpha = 0.92f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(10.dp)) {
+            val w = size.width
+            val h = size.height
+            drawPath(
+                path = Path().apply {
+                    moveTo(w * 0.15f, h * 0.50f)
+                    lineTo(w * 0.40f, h * 0.80f)
+                    lineTo(w * 0.85f, h * 0.20f)
+                },
+                color = Color.White,
+                style = Stroke(width = w * 0.25f, cap = StrokeCap.Round, join = StrokeJoin.Round),
+            )
         }
     }
 }
@@ -12047,117 +12264,41 @@ private fun UnwatchedCountBadge(
     modifier: Modifier = Modifier,
 ) {
     val displayText = if (count > 999) "999+" else count.toString()
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val infiniteTransition = rememberInfiniteTransition(label = "unwatchedBadge")
-    val shift by if (isResumed) {
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 3200, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "unwatchedBadgeShift",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
     val glassShape = RoundedCornerShape(6.dp)
     Box(
-        modifier = modifier.size(width = 30.dp, height = 22.dp),
+        modifier = modifier
+            .size(width = 30.dp, height = 22.dp)
+            .clip(glassShape)
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(VantafynGradients.AccentColors),
+                shape = glassShape,
+            )
+            .background(VantafynColors.Graphite.copy(alpha = 0.92f)),
+        contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.matchParentSize()) {
-            drawRoundRect(
-                brush = Brush.linearGradient(
-                    colors = VantafynGradients.AccentColors + VantafynGradients.AccentColors.first(),
-                    start = Offset(-size.width * shift, -size.height * shift),
-                    end = Offset(size.width * (1f - shift), size.height * (1f - shift)),
-                    tileMode = TileMode.Repeated,
-                ),
-                cornerRadius = CornerRadius(6.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx()),
-            )
-        }
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .padding(1.dp)
-                .clip(glassShape)
-                .background(VantafynColors.Graphite.copy(alpha = 0.90f)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = displayText,
-                color = Color.White,
-                fontWeight = FontWeight.ExtraBold,
-                fontSize = 9.sp,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                modifier = Modifier.offset(y = (-1.5).dp),
-            )
-        }
+        Text(
+            text = displayText,
+            color = Color.White,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 9.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            modifier = Modifier.offset(y = (-1.5).dp),
+        )
     }
 }
 
 @Composable
 private fun WhatsNewGradientDot(modifier: Modifier = Modifier) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val shift by if (isResumed) {
-        val infiniteTransition = rememberInfiniteTransition(label = "whatsNewDot")
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 3200, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "whatsNewDotShift",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
     Box(
         modifier = modifier
             .size(10.dp)
-            .shadow(2.dp, RoundedCornerShape(999.dp))
-            .drawWithContent {
-                if (isResumed) {
-                    val start = Offset(-size.width * shift, -size.height * shift)
-                    val end = Offset(size.width * (1f - shift), size.height * (1f - shift))
-                    drawCircle(
-                        brush = Brush.linearGradient(
-                            colors = VantafynGradients.AccentColors + VantafynGradients.AccentColors.first(),
-                            start = start,
-                            end = end,
-                            tileMode = TileMode.Repeated,
-                        ),
-                        radius = size.minDimension / 2f,
-                    )
-                } else {
-                    drawCircle(
-                        color = Color(0xFF8EA2FF),
-                        radius = size.minDimension / 2f,
-                    )
-                }
-            },
+            .shadow(2.dp, CircleShape)
+            .background(
+                brush = Brush.linearGradient(VantafynGradients.AccentColors),
+                shape = CircleShape,
+            ),
     )
 }
 
@@ -14845,6 +14986,7 @@ private fun AdminUserSettingsScreen(
             }
         }
     }
+    avatarPicker.Content()
 }
 
 @Composable
@@ -18038,19 +18180,29 @@ private fun MobileBottomNav(
     unreadMessagesCount: Int = 0,
     incomingFriendRequestsCount: Int = 0,
     accentMode: BottomRailAccent = BottomRailAccent.Off,
+    experienceMode: ExperienceMode = ExperienceMode.FullMedia,
     modifier: Modifier = Modifier,
 ) {
     var tapTrigger by remember { mutableIntStateOf(0) }
-    val mainTabs = remember(isAdmin) {
-        buildList {
-            add(MobileDestination.Home)
-            add(MobileDestination.Libraries)
-            add(MobileDestination.Search)
-            add(MobileDestination.Music)
-            add(MobileDestination.Favorites)
-            add(MobileDestination.Requests)
-            if (isAdmin) add(MobileDestination.Admin)
-            if (!isAdmin) add(MobileDestination.Profile)
+    val mainTabs = remember(isAdmin, experienceMode) {
+        if (experienceMode == ExperienceMode.MusicOnly) {
+            buildList {
+                add(MobileDestination.Music)
+                add(MobileDestination.Libraries)
+                add(MobileDestination.Favorites)
+                add(MobileDestination.Profile)
+            }
+        } else {
+            buildList {
+                add(MobileDestination.Home)
+                add(MobileDestination.Libraries)
+                add(MobileDestination.Search)
+                add(MobileDestination.Music)
+                add(MobileDestination.Favorites)
+                add(MobileDestination.Requests)
+                if (isAdmin) add(MobileDestination.Admin)
+                if (!isAdmin) add(MobileDestination.Profile)
+            }
         }
     }
     val socialTabs = remember { dev.vantafyn.feature.home.SocialTab.entries }
@@ -18089,7 +18241,9 @@ private fun MobileBottomNav(
                         if (!isSocialMode) {
                             val selected = (mode as? NavigationRailMode.Main)?.selected
                             mainTabs.forEach { destination ->
-                                val tabSelected = selected == destination || (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile)
+                                val tabSelected = selected == destination ||
+                                    (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
+                                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
                                 val interactionSource = remember { MutableInteractionSource() }
                                 Box(
                                     modifier = Modifier
@@ -18811,33 +18965,8 @@ private fun String.looksLocalServerAddress(): Boolean {
 
 @Composable
 private fun SelectedNavWaterFill() {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val transition = rememberInfiniteTransition(label = "navWater")
-    val offset by if (isResumed) {
-        transition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 6800, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "navWaterOffset",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
     Canvas(modifier = Modifier.fillMaxSize()) {
         val radius = size.height / 2f
-        val travel = size.width * offset
         drawRoundRect(
             brush = Brush.linearGradient(
                 colors = listOf(
@@ -18848,9 +18977,8 @@ private fun SelectedNavWaterFill() {
                     Color(0xFF00FF9C).copy(alpha = 0.90f),
                     Color(0xFF1018FF).copy(alpha = 0.96f),
                 ),
-                start = androidx.compose.ui.geometry.Offset(-travel, 0f),
-                end = androidx.compose.ui.geometry.Offset(size.width - travel, size.height),
-                tileMode = TileMode.Repeated,
+                start = androidx.compose.ui.geometry.Offset(0f, 0f),
+                end = androidx.compose.ui.geometry.Offset(size.width, size.height),
             ),
             cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius, radius),
         )
@@ -19124,7 +19252,7 @@ private fun LibraryRow(
 }
 
 @Composable
-private fun CenterPane(content: @Composable () -> Unit) {
+internal fun CenterPane(content: @Composable () -> Unit) {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
@@ -19309,6 +19437,15 @@ private fun ContextAction(icon: String, label: String, onClick: () -> Unit, enab
     }
 }
 
+private fun getSubsonicCredentials(context: android.content.Context): dev.vantafyn.core.subsonic.SubsonicCredentials? {
+    val prefs = context.getSharedPreferences("vantafyn_subsonic_prefs", android.content.Context.MODE_PRIVATE)
+    val url = prefs.getString("subsonic_url", null) ?: return null
+    val user = prefs.getString("subsonic_username", null) ?: return null
+    val pass = prefs.getString("subsonic_password", null) ?: return null
+    if (url.isBlank() || user.isBlank() || pass.isBlank()) return null
+    return dev.vantafyn.core.subsonic.SubsonicCredentials(serverUrl = url, username = user, passwordOrToken = pass)
+}
+
 private fun JellyfinMediaCard.toMediaActionTarget(): MediaActionTarget =
     MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite)
 
@@ -19347,11 +19484,14 @@ private fun String.searchGroupLabel(): String =
         "series" -> "TV Shows"
         "episode" -> "Episodes"
         "boxset" -> "Collections"
-        "audio", "musicalbum", "musicartist" -> "Music"
+        "audio", "musictrack", "song" -> "Songs"
+        "musicalbum" -> "Albums"
+        "musicartist" -> "Artists"
+        "playlist" -> "Playlists"
         "book" -> "Books"
         "livetvchannel", "livetvprogram" -> "Live TV"
         else -> replaceFirstChar(Char::titlecase)
-	    }
+    }
 
 private fun String?.supportsMyListAction(): Boolean =
     equals("Movie", ignoreCase = true) ||

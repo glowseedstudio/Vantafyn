@@ -195,7 +195,7 @@ I review all code that goes into the project, understand how it works, debug iss
 Vantafyn brings your Jellyfin community to life by turning media consumption into an engaging, interconnected experience:
 
 * **Powered by the Achievement Badges Server Plugin**:
-  * Leverages the server-side milestone, scoring, and friend relationship foundations of the open-source **[Achievement Badges Plugin](https://github.com/knackebrot/jellyfin-plugin-achievements)** created by **`knackebrot`**.
+  * Leverages the server-side milestone, scoring, and friend relationship foundations of the open-source **[Achievement Badges Plugin](https://github.com/ZL154/AchievementBadges_for_Jellyfin)** created by **`ZL154`**.
 * **Bespoke Native Mobile User Interface**:
   * **Interactive Achievements Hub**: Unlocks milestone badges (e.g. *First Contact*, *Night Owl*, *Series Binger*), tracks progression tiers from **Rookie (Tier 1)** through **Mythic**, and showcases badges with dynamic rarity indicators.
   * **Signature Animated Chromatic Modals**: Custom-built `vantafynAnimatedModalBorder` delivers smooth glowing chromatic gradient borders around unlock dialogues, inspection popups, and bottom sheets.
@@ -230,14 +230,14 @@ While Vantafyn functions seamlessly out-of-the-box with any standard Jellyfin se
 
 | Plugin | Repository & Download | What It Unlocks |
 | :--- | :--- | :--- |
-| **Achievement Badges** | [GitHub Repository](https://github.com/knackebrot/jellyfin-plugin-achievements)<br>`https://github.com/knackebrot/jellyfin-plugin-achievements` | **Achievements & Native Social**: Powers user milestone badges, points, rank tiers, friends lists, and 1-to-1 messaging. |
+| **Achievement Badges** | [GitHub Repository](https://github.com/ZL154/AchievementBadges_for_Jellyfin)<br>`https://github.com/ZL154/AchievementBadges_for_Jellyfin` | **Achievements & Native Social**: Powers user milestone badges, points, rank tiers, friends lists, and 1-to-1 messaging. |
 | **Playback Reporting** | [GitHub Repository](https://github.com/jellyfin/jellyfin-plugin-playbackreporting)<br>`https://github.com/jellyfin/jellyfin-plugin-playbackreporting` | **Server Statistics & Analytics**: Powers the viewing trends chart, watch time breakdowns, and Most Watched media metrics in the Admin tab. |
 | **Intro Skipper** | [GitHub Repository](https://github.com/Intro-Skipper/intro-skipper)<br>`https://github.com/Intro-Skipper/intro-skipper` | **Skip Intro / Credits**: Automatically analyzes media audio fingerprints to show seamless skip buttons during playback. |
 
 ### How to Install Plugins in Jellyfin
 
 1. In your Jellyfin web interface, open the **Dashboard** and navigate to **Plugins** > **Repositories**.
-2. Click **Add Repository (+)** and provide the plugin's manifest URL (available on the plugin's GitHub page, e.g. `https://raw.githubusercontent.com/knackebrot/jellyfin-plugin-achievements/master/manifest.json` or `https://raw.githubusercontent.com/jellyfin/jellyfin-plugin-playbackreporting/master/manifest.json`).
+2. Click **Add Repository (+)** and provide the plugin's manifest URL (available on the plugin's GitHub page, e.g. `https://raw.githubusercontent.com/ZL154/AchievementBadges_for_Jellyfin/main/manifest.json` or `https://raw.githubusercontent.com/jellyfin/jellyfin-plugin-playbackreporting/master/manifest.json`).
 3. Navigate to **Plugins** > **Catalog**, find the plugin under its category, and click **Install**.
 4. Restart your Jellyfin server to activate the plugin. Vantafyn will automatically detect and light up the corresponding features!
 
@@ -247,7 +247,7 @@ While Vantafyn functions seamlessly out-of-the-box with any standard Jellyfin se
 
 Vantafyn stands on the shoulders of fantastic open-source projects and talented community developers. A sincere and huge thank you to:
 
-* **[knackebrot](https://github.com/knackebrot)** — For creating the extraordinary **[Jellyfin Achievement Badges Plugin](https://github.com/knackebrot/jellyfin-plugin-achievements)**. Your server-side achievements engine, milestone logic, points architecture, and friend relationship system inspired and paved the way for Vantafyn's gamification and native social experiences. Thank you for your wonderful contributions to the Jellyfin ecosystem!
+* **[ZL154](https://github.com/ZL154)** — For creating the extraordinary **[Achievement Badges for Jellyfin](https://github.com/ZL154/AchievementBadges_for_Jellyfin)** plugin. Your server-side achievements engine, milestone logic, points architecture, and friend relationship system inspired and paved the way for Vantafyn's gamification and native social experiences. Thank you for your wonderful contributions to the Jellyfin ecosystem!
 * **[The Jellyfin Project & Team](https://jellyfin.org/)** — For building and maintaining the premier free and open-source media system that gives users true ownership over their media.
 * **[The AndroidX & Google Media3 Team](https://developer.android.com/guide/topics/media/media3)** — For the robust, high-performance ExoPlayer and Media3 streaming foundations.
 * **[Intro-Skipper Contributors](https://github.com/Intro-Skipper/intro-skipper)** — For the clever audio fingerprinting algorithms that enable effortless intro and credit skipping.
