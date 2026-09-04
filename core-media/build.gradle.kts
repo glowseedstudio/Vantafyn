@@ -17,6 +17,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core-jellyfin"))
+    implementation(project(":core-downloads"))
     api(libs.androidx.core.ktx)
     api(libs.androidx.media3.exoplayer)
     api(libs.androidx.media3.exoplayer.hls)

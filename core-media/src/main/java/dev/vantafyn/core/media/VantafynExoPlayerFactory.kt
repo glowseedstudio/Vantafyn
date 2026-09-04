@@ -31,6 +31,21 @@ object VantafynExoPlayerFactory {
             .build()
 
     @OptIn(UnstableApi::class)
+    fun videoLoadControl(): DefaultLoadControl =
+        DefaultLoadControl.Builder()
+            .setBufferDurationsMs(
+                /* minBufferMs = */ 15_000,
+                /* maxBufferMs = */ 50_000,
+                /* bufferForPlaybackMs = */ 1_500,
+                /* bufferForPlaybackAfterRebufferMs = */ 3_000,
+            )
+            .setBackBuffer(
+                /* backBufferDurationMs = */ 10_000,
+                /* retainBackBufferFromKeyframe = */ false,
+            )
+            .build()
+
+    @OptIn(UnstableApi::class)
     fun musicBuilder(context: Context): ExoPlayer.Builder {
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
             VantafynMediaCache.getCacheDataSourceFactory(context),
@@ -40,12 +55,16 @@ object VantafynExoPlayerFactory {
             .setLoadControl(musicLoadControl())
     }
 
+    @OptIn(UnstableApi::class)
     fun builder(context: Context): ExoPlayer.Builder =
         ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+            .setLoadControl(videoLoadControl())
 
+    @OptIn(UnstableApi::class)
     fun builder(context: Context, trackSelector: DefaultTrackSelector): ExoPlayer.Builder =
         ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
             .setTrackSelector(trackSelector)
+            .setLoadControl(videoLoadControl())
 }
 
 object VantafynMedia3ExtensionSupport {

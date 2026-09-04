@@ -395,6 +395,7 @@ private val VantafynSetupCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1
 fun VantafynAppContent(
     tv: Boolean,
     modifier: Modifier = Modifier,
+    isCarMode: Boolean = false,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
     onNotificationPermissionSettingsAction: () -> Unit = {},
@@ -567,6 +568,7 @@ fun VantafynAppContent(
                 VantafynSetupStep.Home -> HomeScreenHost(
                     state = state,
                     tv = tv,
+                    isCarMode = isCarMode,
                     viewModel = viewModel,
                     notificationPermissionState = notificationPermissionState,
                     onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -613,6 +615,7 @@ fun VantafynAppContent(
 private fun HomeScreenHost(
     state: VantafynHomeUiState,
     tv: Boolean,
+    isCarMode: Boolean = false,
     viewModel: VantafynHomeViewModel,
     notificationPermissionState: VantafynPermissionUiState,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
@@ -635,6 +638,7 @@ private fun HomeScreenHost(
         HomeScreen(
             state = state,
             tv = tv,
+            isCarMode = isCarMode,
             viewModel = viewModel,
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -3037,6 +3041,7 @@ private fun BottomRailAccentSettings(
 private fun HomeScreen(
     state: VantafynHomeUiState,
     tv: Boolean,
+    isCarMode: Boolean = false,
     viewModel: VantafynHomeViewModel,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
@@ -3046,6 +3051,7 @@ private fun HomeScreen(
     if (!tv) {
         MobileShellScreen(
             state = state,
+            isCarMode = isCarMode,
             onRetryHome = viewModel::retryLibraries,
             onSwitchUser = viewModel::showProfilePicker,
             onAddProfile = viewModel::addProfile,
@@ -3273,6 +3279,7 @@ private fun TvHomeScreen(
 @Composable
 private fun MobileShellScreen(
     state: VantafynHomeUiState,
+    isCarMode: Boolean = false,
     onRetryHome: () -> Unit,
     onSwitchUser: () -> Unit,
     onAddProfile: () -> Unit,
@@ -3539,7 +3546,16 @@ private fun MobileShellScreen(
         ) {
             when (state.mobileDestination) {
                 MobileDestination.Home -> {
-                    if (state.experienceMode == ExperienceMode.MusicOnly) {
+                    if (isCarMode) {
+                        dev.vantafyn.feature.home.car.CarDashboardScreen(
+                            state = state,
+                            onOpenMedia = { mediaId ->
+                                if (!homeEditorOpen) onOpenMedia(mediaId)
+                            },
+                            onNavigate = onNavigate,
+                            onPlayOfflineDownload = onPlayOfflineDownload,
+                        )
+                    } else if (state.experienceMode == ExperienceMode.MusicOnly) {
                         MusicScreen(
                             session = state.session,
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
@@ -4095,7 +4111,7 @@ private fun MobileShellScreen(
                     },
                 )
             }
-            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat) {
+            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat && !isCarMode) {
                 AnimatedVisibility(
                     visible = homeEditorOpen && state.mobileDestination == MobileDestination.Home,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -15079,7 +15095,9 @@ private fun HomeLayoutScreen(
     onCycleSize: (HomeSectionType) -> Unit,
     onCycleSpacing: (HomeSectionType) -> Unit,
 ) {
-    val editableSections = state.homeLayout.sortedBy { it.order }.filter { it.type != HomeSectionType.MediaBar }
+    val editableSections = remember(state.homeLayout) {
+        state.homeLayout.sortedBy { it.order }.filter { it.type != HomeSectionType.MediaBar }
+    }
     var editingTarget by remember { mutableStateOf<HomeLayoutEditorTarget?>(null) }
     val editingPreference = editingTarget?.let { target ->
         state.homeLayout.firstOrNull { it.type == target.type }

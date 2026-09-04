@@ -71,6 +71,14 @@ class SqliteDownloadRepository(
         )
     }
 
+    override suspend fun listAllCompleted(): List<DownloadRecord> = withContext(dispatcher) {
+        queryDownload(
+            selection = "state = ?",
+            selectionArgs = arrayOf(DownloadState.Completed.name),
+            orderBy = "sort_title COLLATE NOCASE ASC, title COLLATE NOCASE ASC",
+        )
+    }
+
     override suspend fun updateState(
         id: String,
         state: DownloadState,

@@ -18,6 +18,8 @@ interface DownloadRepository {
         states: Set<DownloadState>,
     ): List<DownloadRecord>
 
+    suspend fun listAllCompleted(): List<DownloadRecord>
+
     suspend fun updateState(
         id: String,
         state: DownloadState,

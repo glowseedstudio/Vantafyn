@@ -134,17 +134,17 @@ fun AmbientNowPlayingScreen(
     var controlsVisible by remember { mutableStateOf(true) }
     var lastInteractionMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
-    // Live Clock
+    // Live Clock (checked every 15s to update cleanly without constant CPU wakes)
     var currentTimeText by remember { mutableStateOf("") }
     LaunchedEffect(Unit) {
         val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
         while (isActive) {
             currentTimeText = timeFormat.format(Date())
-            delay(1_000L)
+            delay(15_000L)
         }
     }
 
-    // Live Position Ticker for smooth seekbar and lyrics sync
+    // Live Position Ticker for seekbar and lyrics sync (250ms interval)
     var livePositionMs by remember(playbackState.currentTrack?.id, playbackState.isPlaying) {
         mutableLongStateOf(playbackState.positionMs)
     }
@@ -155,7 +155,7 @@ fun AmbientNowPlayingScreen(
         }
         while (isActive) {
             livePositionMs = currentPositionMs()
-            delay(100L)
+            delay(250L)
         }
     }
 
@@ -696,7 +696,7 @@ private fun AmbientPlainLyricsList(text: String) {
         verticalArrangement = Arrangement.spacedBy(16.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        itemsIndexed(lines) { _, line ->
+        itemsIndexed(lines, key = { index, line -> "$index-$line" }) { _, line ->
             Text(
                 text = line,
                 color = Color.White.copy(alpha = 0.70f),

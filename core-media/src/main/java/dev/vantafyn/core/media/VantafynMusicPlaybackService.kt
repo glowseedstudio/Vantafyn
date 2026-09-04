@@ -747,8 +747,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     mediaId.startsWith(VantafynMusicMediaLibraryProvider.TRACK_PREFIX) -> provider().resolveQueueAsync(mediaId)
                     mediaId == VantafynMusicMediaLibraryProvider.RECENT_ID ||
                         mediaId == VantafynMusicMediaLibraryProvider.SONGS_ID ||
+                        mediaId == VantafynMusicMediaLibraryProvider.DOWNLOADS_ID ||
+                        mediaId == VantafynMusicMediaLibraryProvider.DOWNLOADS_SONGS_ID ||
                         mediaId == VantafynMusicMediaLibraryProvider.QUEUE_ID ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.ALBUM_PREFIX) ||
+                        mediaId.startsWith(VantafynMusicMediaLibraryProvider.DOWNLOAD_ALBUM_PREFIX) ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.PLAYLIST_PREFIX) ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.SEARCH_PREFIX) -> {
                         val children = provider().getChildrenAsync(mediaId)
