@@ -64,7 +64,17 @@ import dev.vantafyn.core.media.autoeq.AutoEqHardwareStatus
 import dev.vantafyn.core.media.autoeq.AutoEqPreset
 import dev.vantafyn.core.media.autoeq.AutoEqRepository
 import dev.vantafyn.core.media.autoeq.EqualizerBandInfo
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material.icons.rounded.Shield
+import androidx.compose.material3.MaterialTheme
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGlassSurface
+import dev.vantafyn.core.ui.VantafynGlassVariant
+import dev.vantafyn.core.ui.VantafynTextField
 
 @Composable
 fun AutoEqSearchScreen(
@@ -95,7 +105,7 @@ fun AutoEqSearchScreen(
     }
 
     val brands = remember {
-        listOf("All", "Sony", "Apple", "Sennheiser", "Bose", "Audio-Technica", "Beyerdynamic", "Moondrop", "Samsung")
+        listOf("All", "Sony", "Apple", "Sennheiser", "Bose", "Beyerdynamic", "Moondrop", "AKG", "Hifiman", "Audio-Technica", "Audeze")
     }
 
     Box(
@@ -106,6 +116,7 @@ fun AutoEqSearchScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(horizontal = 18.dp),
         ) {
             Spacer(Modifier.height(14.dp))
@@ -118,33 +129,34 @@ fun AutoEqSearchScreen(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
-                            .background(VantafynColors.Primary.copy(alpha = 0.18f)),
+                            .background(Color(0xFF21D8FF).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFF21D8FF).copy(alpha = 0.30f), CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.GraphicEq,
                             contentDescription = null,
-                            tint = VantafynColors.Primary,
-                            modifier = Modifier.size(24.dp),
+                            tint = Color(0xFF21D8FF),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                     Column {
                         Text(
                             text = "AutoEQ Calibration",
                             color = VantafynColors.Ink,
-                            fontSize = 19.sp,
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
                             text = "Hardware headphone compensation curves",
                             color = VantafynColors.Muted,
-                            fontSize = 12.sp,
+                            style = MaterialTheme.typography.bodySmall,
                         )
                     }
                 }
@@ -206,35 +218,32 @@ fun AutoEqSearchScreen(
 
             Spacer(Modifier.height(14.dp))
 
-            // Search Box
-            TextField(
+            // Search Box with VantafynTextField (compact single-line + focus glow highlight)
+            VantafynTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp)),
-                placeholder = {
-                    Text("Search model (e.g. WH-1000XM5, AirPods, HD 600)...", color = VantafynColors.Muted, fontSize = 13.sp)
-                },
-                leadingIcon = {
-                    Icon(Icons.Rounded.Search, contentDescription = null, tint = VantafynColors.Muted)
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
+                label = "Search model",
+                placeholder = "Search model (e.g. WH-1000XM5, AirPods, HD 600)...",
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = if (searchQuery.isNotEmpty()) {
+                    {
                         IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Rounded.Clear, contentDescription = "Clear", tint = VantafynColors.Muted)
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Clear search",
+                                tint = VantafynColors.Muted,
+                            )
                         }
                     }
+                } else {
+                    {
+                        Icon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = null,
+                            tint = VantafynColors.Muted,
+                        )
+                    }
                 },
-                singleLine = true,
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = VantafynColors.Surface.copy(alpha = 0.85f),
-                    unfocusedContainerColor = VantafynColors.Surface.copy(alpha = 0.65f),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    focusedTextColor = VantafynColors.Ink,
-                    unfocusedTextColor = VantafynColors.Ink,
-                ),
             )
 
             Spacer(Modifier.height(10.dp))
@@ -255,16 +264,17 @@ fun AutoEqSearchScreen(
                         },
                         label = { Text(brand, fontSize = 12.sp) },
                         colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = VantafynColors.Primary.copy(alpha = 0.22f),
-                            selectedLabelColor = VantafynColors.Primary,
-                            containerColor = VantafynColors.Surface.copy(alpha = 0.5f),
+                            selectedContainerColor = Color(0xFF21D8FF).copy(alpha = 0.18f),
+                            selectedLabelColor = Color(0xFF21D8FF),
+                            containerColor = Color.White.copy(alpha = 0.05f),
                             labelColor = VantafynColors.Muted,
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             enabled = true,
                             selected = isSelected,
-                            borderColor = if (isSelected) VantafynColors.Primary.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.08f),
+                            borderColor = if (isSelected) Color(0xFF21D8FF).copy(alpha = 0.50f) else Color.White.copy(alpha = 0.08f),
                         ),
+                        shape = RoundedCornerShape(999.dp),
                     )
                 }
             }
@@ -319,29 +329,98 @@ private fun ActivePresetCard(
     onToggleEnabled: (Boolean) -> Unit,
     onReset: () -> Unit,
 ) {
-    val borderColor by animateColorAsState(
-        targetValue = if (isEnabled && selectedPreset != null) VantafynColors.Primary.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
-        animationSpec = tween(300),
-        label = "activeBorder",
-    )
+    val isActivated = isEnabled && selectedPreset != null
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(VantafynColors.Surface)
-            .border(1.2.dp, borderColor, RoundedCornerShape(20.dp))
-            .padding(16.dp),
+    VantafynGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        variant = VantafynGlassVariant.Card,
+        selected = isActivated,
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(16.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Header / Status Eyebrow Row
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isActivated) Color(0xFF21D8FF) else VantafynColors.Muted.copy(alpha = 0.5f),
+                            ),
+                    )
                     Text(
-                        text = if (selectedPreset != null) selectedPreset.name else "No Profile Selected",
+                        text = if (isActivated) "CALIBRATION ACTIVE" else if (selectedPreset != null) "CALIBRATION PAUSED" else "HEADPHONE PROFILE",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            letterSpacing = 0.8.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        ),
+                        color = if (isActivated) Color(0xFF21D8FF) else VantafynColors.Muted,
+                    )
+                }
+
+                if (selectedPreset != null) {
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable(onClick = onReset),
+                        variant = VantafynGlassVariant.Chip,
+                        cornerRadius = 999.dp,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "Reset to Flat",
+                            color = Color(0xFFFF8A80),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+
+            // Main Info Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isActivated) {
+                                Color(0xFF21D8FF).copy(alpha = 0.16f)
+                            } else {
+                                Color.White.copy(alpha = 0.06f)
+                            },
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isActivated) Color(0xFF21D8FF).copy(alpha = 0.35f) else Color.White.copy(alpha = 0.08f),
+                            shape = CircleShape,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (selectedPreset != null) Icons.Rounded.Headphones else Icons.Rounded.GraphicEq,
+                        contentDescription = null,
+                        tint = if (isActivated) Color(0xFF21D8FF) else VantafynColors.Muted,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = selectedPreset?.name ?: "No Profile Selected",
                         color = VantafynColors.Ink,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
@@ -350,49 +429,65 @@ private fun ActivePresetCard(
                     )
                     Text(
                         text = if (selectedPreset != null) {
-                            "${selectedPreset.brand} · ${selectedPreset.type} · ${selectedPreset.source}"
+                            "${selectedPreset.brand} · ${selectedPreset.type} (${selectedPreset.source})"
                         } else {
                             "Select your headphone model below to calibrate"
                         },
                         color = VantafynColors.Muted,
                         fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
 
                 Switch(
-                    checked = isEnabled && selectedPreset != null,
+                    checked = isActivated,
                     onCheckedChange = { onToggleEnabled(it) },
                     enabled = selectedPreset != null,
                     colors = SwitchDefaults.colors(
-                        checkedThumbColor = VantafynColors.Ink,
-                        checkedTrackColor = VantafynColors.Primary,
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFF21D8FF),
                         uncheckedThumbColor = VantafynColors.Muted,
-                        uncheckedTrackColor = Color.White.copy(alpha = 0.1f),
+                        uncheckedTrackColor = Color.White.copy(alpha = 0.12f),
+                        uncheckedBorderColor = Color.Transparent,
                     ),
                 )
             }
 
+            // Headroom Details if selected
             if (selectedPreset != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color.White.copy(alpha = 0.08f)),
+                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text(
-                        text = "Anti-clipping Headroom: ${selectedPreset.preamp} dB",
-                        color = VantafynColors.Primary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Shield,
+                            contentDescription = null,
+                            tint = Color(0xFFFFD166),
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text(
+                            text = "Anti-clipping Headroom",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VantafynColors.Muted,
+                        )
+                    }
 
                     Text(
-                        text = "Reset to Flat",
-                        color = Color(0xFFFF8A80),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier
-                            .clickable(onClick = onReset)
-                            .padding(4.dp),
+                        text = "${selectedPreset.preamp} dB",
+                        color = Color(0xFFFFD166),
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                     )
                 }
             }
@@ -404,21 +499,32 @@ private fun ActivePresetCard(
 private fun HardwareBandsVisualizer(
     bands: List<EqualizerBandInfo>,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(VantafynColors.Surface.copy(alpha = 0.55f))
-            .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(16.dp))
-            .padding(12.dp),
+    VantafynGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        variant = VantafynGlassVariant.Card,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(14.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                text = "Applied Hardware Bands (${bands.size} Bands)",
-                color = VantafynColors.Muted,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-            )
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "APPLIED HARDWARE BANDS",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        letterSpacing = 0.8.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                    color = Color(0xFF21D8FF),
+                )
+                Text(
+                    text = "${bands.size} Bands",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VantafynColors.Muted,
+                )
+            }
 
             Row(
                 modifier = Modifier
@@ -438,7 +544,7 @@ private fun HardwareBandsVisualizer(
                         // Gain dB label
                         Text(
                             text = String.format(java.util.Locale.US, "%+.1f", gainDb),
-                            color = if (gainDb != 0f) VantafynColors.Primary else VantafynColors.Muted,
+                            color = if (gainDb != 0f) Color(0xFF21D8FF) else VantafynColors.Muted,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold,
                         )
@@ -462,7 +568,7 @@ private fun HardwareBandsVisualizer(
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(
                                         Brush.verticalGradient(
-                                            listOf(VantafynColors.Primary, Color(0xFF00796B)),
+                                            listOf(Color(0xFF21D8FF), Color(0xFF00796B)),
                                         ),
                                     ),
                             )
@@ -489,20 +595,14 @@ private fun HeadphonePresetItem(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    val borderColor by animateColorAsState(
-        targetValue = if (isSelected) VantafynColors.Primary.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.06f),
-        animationSpec = tween(250),
-        label = "itemBorder",
-    )
-
-    Box(
+    VantafynGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (isSelected) VantafynColors.Primary.copy(alpha = 0.10f) else VantafynColors.Surface)
-            .border(1.dp, borderColor, RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(14.dp),
+            .clickable(onClick = onClick),
+        variant = VantafynGlassVariant.Card,
+        selected = isSelected,
+        cornerRadius = 16.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -516,17 +616,22 @@ private fun HeadphonePresetItem(
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(
-                            if (isSelected) VantafynColors.Primary.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.06f),
+                            if (isSelected) Color(0xFF21D8FF).copy(alpha = 0.18f) else Color.White.copy(alpha = 0.05f),
+                        )
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) Color(0xFF21D8FF).copy(alpha = 0.35f) else Color.White.copy(alpha = 0.06f),
+                            shape = CircleShape,
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Headphones,
                         contentDescription = null,
-                        tint = if (isSelected) VantafynColors.Primary else VantafynColors.Muted,
+                        tint = if (isSelected) Color(0xFF21D8FF) else VantafynColors.Muted,
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -534,7 +639,7 @@ private fun HeadphonePresetItem(
                 Column {
                     Text(
                         text = preset.name,
-                        color = if (isSelected) VantafynColors.Primary else VantafynColors.Ink,
+                        color = if (isSelected) Color(0xFF21D8FF) else VantafynColors.Ink,
                         fontSize = 14.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
@@ -553,15 +658,15 @@ private fun HeadphonePresetItem(
             if (isSelected) {
                 Box(
                     modifier = Modifier
-                        .size(26.dp)
+                        .size(24.dp)
                         .clip(CircleShape)
-                        .background(VantafynColors.Primary),
+                        .background(Color(0xFF21D8FF)),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Check,
                         contentDescription = "Selected",
-                        tint = Color.Black,
+                        tint = Color(0xFF0C101B),
                         modifier = Modifier.size(16.dp),
                     )
                 }

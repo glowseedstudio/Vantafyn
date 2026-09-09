@@ -41,6 +41,7 @@ import dev.vantafyn.core.media.VantafynMusicPlaybackEvent
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import dev.vantafyn.core.media.VantafynMusicStopReason
 import dev.vantafyn.core.media.VantafynMusicTrack
+import dev.vantafyn.core.media.music.MusicStreamingQuality
 import dev.vantafyn.core.experience.ExperienceMode
 import dev.vantafyn.core.experience.ExperiencePreferences
 import dev.vantafyn.core.experience.MusicBackendType
@@ -442,6 +443,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    fun setStreamingQuality(quality: MusicStreamingQuality) {
+        playbackController.setStreamingQuality(quality)
     }
 
     fun playAlbum(album: JellyfinMusicAlbum) {

@@ -685,6 +685,12 @@ data class JellyfinMusicTrack(
     val genres: List<String> = emptyList(),
     val replayGainTrackGainDb: Float? = null,
     val replayGainTrackPeak: Float? = null,
+    val container: String? = null,
+    val codec: String? = null,
+    val bitrate: Int? = null,
+    val sampleRate: Int? = null,
+    val bitDepth: Int? = null,
+    val channels: Int? = null,
 )
 
 data class JellyfinMusicAlbum(

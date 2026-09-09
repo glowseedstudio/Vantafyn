@@ -1,6 +1,7 @@
 package dev.vantafyn.feature.music.provider
 
 import dev.vantafyn.core.jellyfin.JellyfinMusicRepository
+import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
 import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
@@ -35,20 +36,7 @@ class JellyfinMusicDataProviderAdapter(
         when (val result = musicRepository.getMusicHome(session)) {
             is JellyfinResult.Success -> {
                 val home = result.value
-                val spotlight = home.songs.take(10).map {
-                    VantafynMusicTrack(
-                        id = it.id,
-                        title = it.title,
-                        artist = it.artist,
-                        album = it.album,
-                        albumId = it.albumId,
-                        durationMs = it.durationMs,
-                        genres = it.genres,
-                        streamUrl = it.streamUrl,
-                        artworkUrl = it.artworkUrl,
-                        isFavorite = it.isFavorite,
-                    )
-                }
+                val spotlight = home.songs.take(10).map { it.toVantafynTrack() }
                 val recentAlbums = home.albums.map {
                     MusicAlbum(
                         id = it.id,
@@ -140,20 +128,7 @@ class JellyfinMusicDataProviderAdapter(
         val session = requireSession()
         when (val result = musicRepository.getAlbumTracks(session, albumId)) {
             is JellyfinResult.Success -> {
-                val tracks = result.value.map {
-                    VantafynMusicTrack(
-                        id = it.id,
-                        title = it.title,
-                        artist = it.artist,
-                        album = it.album,
-                        albumId = it.albumId,
-                        durationMs = it.durationMs,
-                        genres = it.genres,
-                        streamUrl = it.streamUrl,
-                        artworkUrl = it.artworkUrl,
-                        isFavorite = it.isFavorite,
-                    )
-                }
+                val tracks = result.value.map { it.toVantafynTrack() }
                 val first = tracks.firstOrNull()
                 MusicAlbumDetail(
                     id = albumId,
@@ -197,20 +172,7 @@ class JellyfinMusicDataProviderAdapter(
         val session = requireSession()
         when (val result = musicRepository.getPlaylistItems(session, playlistId)) {
             is JellyfinResult.Success -> {
-                val tracks = result.value.map {
-                    VantafynMusicTrack(
-                        id = it.id,
-                        title = it.title,
-                        artist = it.artist,
-                        album = it.album,
-                        albumId = it.albumId,
-                        durationMs = it.durationMs,
-                        genres = it.genres,
-                        streamUrl = it.streamUrl,
-                        artworkUrl = it.artworkUrl,
-                        isFavorite = it.isFavorite,
-                    )
-                }
+                val tracks = result.value.map { it.toVantafynTrack() }
                 MusicPlaylistDetail(
                     id = playlistId,
                     title = "Playlist",
@@ -229,20 +191,7 @@ class JellyfinMusicDataProviderAdapter(
         val session = requireSession()
         when (val result = musicRepository.searchMusic(session, query)) {
             is JellyfinResult.Success -> {
-                val tracks = result.value.map {
-                    VantafynMusicTrack(
-                        id = it.id,
-                        title = it.title,
-                        artist = it.artist,
-                        album = it.album,
-                        albumId = it.albumId,
-                        durationMs = it.durationMs,
-                        genres = it.genres,
-                        streamUrl = it.streamUrl,
-                        artworkUrl = it.artworkUrl,
-                        isFavorite = it.isFavorite,
-                    )
-                }
+                val tracks = result.value.map { it.toVantafynTrack() }
                 MusicSearchResult(
                     artists = emptyList(),
                     albums = emptyList(),
@@ -283,4 +232,26 @@ class JellyfinMusicDataProviderAdapter(
 
     override suspend fun scrobble(trackId: UUID, submissionTimeMs: Long): MusicResult<Unit> =
         MusicResult.Success(Unit)
+
+    private fun JellyfinMusicTrack.toVantafynTrack(): VantafynMusicTrack =
+        VantafynMusicTrack(
+            id = id,
+            title = title,
+            artist = artist,
+            album = album,
+            albumId = albumId,
+            durationMs = durationMs,
+            genres = genres,
+            streamUrl = streamUrl,
+            artworkUrl = artworkUrl,
+            isFavorite = isFavorite,
+            replayGainTrackGainDb = replayGainTrackGainDb,
+            replayGainTrackPeak = replayGainTrackPeak,
+            container = container,
+            codec = codec,
+            bitrate = bitrate,
+            sampleRate = sampleRate,
+            bitDepth = bitDepth,
+            channels = channels,
+        )
 }

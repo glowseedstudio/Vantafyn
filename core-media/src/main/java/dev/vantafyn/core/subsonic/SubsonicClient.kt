@@ -261,19 +261,13 @@ class SubsonicMusicDataProvider(
 
         for (i in 0 until songArray.length()) {
             val obj = songArray.getJSONObject(i)
-            val trackId = getUuid(obj.optString("id"))
             tracks.add(
-                VantafynMusicTrack(
-                    id = trackId,
-                    title = obj.optString("title", "Untitled Track"),
-                    artist = obj.optString("artist", artistName),
-                    album = albumTitle,
-                    albumId = albumId,
-                    durationMs = obj.optLong("duration") * 1000L,
-                    genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
-                    streamUrl = resolveStreamUrl(obj.optString("id")),
-                    artworkUrl = client.buildCoverArtUrl(obj.optString("coverArt", sid)),
-                    isFavorite = obj.optBoolean("starred", false),
+                parseSubsonicTrack(
+                    obj = obj,
+                    defaultArtist = artistName,
+                    defaultAlbum = albumTitle,
+                    defaultAlbumId = albumId,
+                    defaultCoverArt = albumObj.optString("coverArt", sid),
                 )
             )
         }
@@ -285,6 +279,7 @@ class SubsonicMusicDataProvider(
             artistId = albumObj.optString("artistId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
             year = albumObj.optInt("year").takeIf { it > 0 },
             coverUrl = coverUrl,
+            genres = listOfNotNull(albumObj.optString("genre").takeIf { it.isNotBlank() }),
             tracks = tracks,
         )
     }.fold(
@@ -323,20 +318,7 @@ class SubsonicMusicDataProvider(
         val tracks = mutableListOf<VantafynMusicTrack>()
         for (i in 0 until entryArray.length()) {
             val obj = entryArray.getJSONObject(i)
-            tracks.add(
-                VantafynMusicTrack(
-                    id = getUuid(obj.optString("id")),
-                    title = obj.optString("title", "Untitled Track"),
-                    artist = obj.optString("artist", "Unknown Artist"),
-                    album = obj.optString("album"),
-                    albumId = obj.optString("albumId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
-                    durationMs = obj.optLong("duration") * 1000L,
-                    genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
-                    streamUrl = resolveStreamUrl(obj.optString("id")),
-                    artworkUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
-                    isFavorite = obj.optBoolean("starred", false),
-                )
-            )
+            tracks.add(parseSubsonicTrack(obj))
         }
         MusicPlaylistDetail(
             id = playlistId,
@@ -386,19 +368,7 @@ class SubsonicMusicDataProvider(
         val tracks = mutableListOf<VantafynMusicTrack>()
         for (i in 0 until songArray.length()) {
             val obj = songArray.getJSONObject(i)
-            tracks.add(
-                VantafynMusicTrack(
-                    id = getUuid(obj.optString("id")),
-                    title = obj.optString("title", "Untitled Track"),
-                    artist = obj.optString("artist", "Unknown Artist"),
-                    album = obj.optString("album"),
-                    albumId = obj.optString("albumId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
-                    durationMs = obj.optLong("duration") * 1000L,
-                    streamUrl = resolveStreamUrl(obj.optString("id")),
-                    artworkUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
-                    isFavorite = obj.optBoolean("starred", false),
-                )
-            )
+            tracks.add(parseSubsonicTrack(obj))
         }
 
         MusicSearchResult(artists = artists, albums = albums, tracks = tracks)
@@ -461,20 +431,7 @@ class SubsonicMusicDataProvider(
         val tracks = mutableListOf<VantafynMusicTrack>()
         for (i in 0 until songArray.length()) {
             val obj = songArray.getJSONObject(i)
-            tracks.add(
-                VantafynMusicTrack(
-                    id = getUuid(obj.optString("id")),
-                    title = obj.optString("title", "Untitled Track"),
-                    artist = obj.optString("artist", "Unknown Artist"),
-                    album = obj.optString("album"),
-                    albumId = obj.optString("albumId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
-                    durationMs = obj.optLong("duration") * 1000L,
-                    genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
-                    streamUrl = resolveStreamUrl(obj.optString("id")),
-                    artworkUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
-                    isFavorite = obj.optBoolean("starred", false),
-                )
-            )
+            tracks.add(parseSubsonicTrack(obj))
         }
         tracks
     }.fold(
@@ -490,24 +447,53 @@ class SubsonicMusicDataProvider(
         val tracks = mutableListOf<VantafynMusicTrack>()
         for (i in 0 until songArray.length()) {
             val obj = songArray.getJSONObject(i)
-            tracks.add(
-                VantafynMusicTrack(
-                    id = getUuid(obj.optString("id")),
-                    title = obj.optString("title", "Untitled Track"),
-                    artist = obj.optString("artist", "Unknown Artist"),
-                    album = obj.optString("album"),
-                    albumId = obj.optString("albumId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
-                    durationMs = obj.optLong("duration") * 1000L,
-                    genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
-                    streamUrl = resolveStreamUrl(obj.optString("id")),
-                    artworkUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
-                    isFavorite = true,
-                )
-            )
+            tracks.add(parseSubsonicTrack(obj, forceFavorite = true))
         }
         tracks
     }.fold(
         onSuccess = { MusicResult.Success(it) },
         onFailure = { MusicResult.Failure(it.message ?: "Failed to get starred songs", it) },
     )
+
+    private fun parseSubsonicTrack(
+        obj: JSONObject,
+        defaultArtist: String? = null,
+        defaultAlbum: String? = null,
+        defaultAlbumId: UUID? = null,
+        defaultCoverArt: String? = null,
+        forceFavorite: Boolean? = null,
+    ): VantafynMusicTrack {
+        val sid = obj.optString("id")
+        val trackId = getUuid(sid)
+        val rg = obj.optJSONObject("replayGain")
+        val gain = rg?.optDouble("trackGain")?.takeIf { !it.isNaN() }?.toFloat()
+        val peak = rg?.optDouble("trackPeak")?.takeIf { !it.isNaN() }?.toFloat()
+        val rawBitrate = obj.optInt("bitRate").takeIf { it > 0 } ?: obj.optInt("bitrate").takeIf { it > 0 }
+        val suffix = obj.optString("suffix").takeIf { it.isNotBlank() }
+        val samplingRate = obj.optInt("samplingRate").takeIf { it > 0 }
+        val bitDepth = obj.optInt("bitDepth").takeIf { it > 0 }
+        val channelCount = obj.optInt("channelCount").takeIf { it > 0 }
+        val coverArtId = obj.optString("coverArt").takeIf { it.isNotBlank() } ?: defaultCoverArt ?: sid
+
+        return VantafynMusicTrack(
+            id = trackId,
+            title = obj.optString("title", "Untitled Track"),
+            artist = obj.optString("artist", defaultArtist ?: "Unknown Artist"),
+            album = obj.optString("album").takeIf { it.isNotBlank() } ?: defaultAlbum,
+            albumId = obj.optString("albumId").takeIf { it.isNotBlank() }?.let { getUuid(it) } ?: defaultAlbumId,
+            durationMs = obj.optLong("duration") * 1000L,
+            genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
+            streamUrl = resolveStreamUrl(sid),
+            artworkUrl = client.buildCoverArtUrl(coverArtId),
+            isFavorite = forceFavorite ?: obj.optBoolean("starred", false),
+            replayGainTrackGainDb = gain,
+            replayGainTrackPeak = peak,
+            container = suffix,
+            codec = suffix,
+            bitrate = rawBitrate,
+            sampleRate = samplingRate,
+            bitDepth = bitDepth,
+            channels = channelCount,
+        )
+    }
 }

@@ -125,7 +125,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.4",
+            version = "0.9.5",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -4180,6 +4180,8 @@ private val musicItemFields = listOf(
     ItemFields.GENRES,
     ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
     ItemFields.MEDIA_STREAMS,
+    ItemFields.TAGS,
+    ItemFields.MEDIA_SOURCES,
 )
 
 private val itemImageTypes = listOf(ImageType.PRIMARY, ImageType.BACKDROP, ImageType.THUMB, ImageType.LOGO)
@@ -4281,19 +4283,28 @@ private fun BaseItemDto.toWatchPartyCandidate(api: ApiClient, serverId: String?)
 
 private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): JellyfinMusicTrack {
     val trackGain = normalizationGain ?: tags?.firstNotNullOfOrNull { tag ->
-        if (tag.startsWith("REPLAYGAIN_TRACK_GAIN=", ignoreCase = true) ||
-            tag.startsWith("REPLAYGAIN_TRACK_GAIN:", ignoreCase = true)
-        ) {
-            tag.substring(22).removeSuffix("dB").removeSuffix("db").removeSuffix("DB").trim().toFloatOrNull()
+        if (tag.contains("replaygain_track_gain", ignoreCase = true)) {
+            val raw = tag.substringAfter("=", "").takeIf { it.isNotBlank() }
+                ?: tag.substringAfter(":", "").takeIf { it.isNotBlank() }
+            raw?.replace("dB", "", ignoreCase = true)?.trim()?.toFloatOrNull()
         } else null
     }
     val trackPeak = tags?.firstNotNullOfOrNull { tag ->
-        if (tag.startsWith("REPLAYGAIN_TRACK_PEAK=", ignoreCase = true) ||
-            tag.startsWith("REPLAYGAIN_TRACK_PEAK:", ignoreCase = true)
-        ) {
-            tag.substring(22).trim().toFloatOrNull()
+        if (tag.contains("replaygain_track_peak", ignoreCase = true)) {
+            val raw = tag.substringAfter("=", "").takeIf { it.isNotBlank() }
+                ?: tag.substringAfter(":", "").takeIf { it.isNotBlank() }
+            raw?.trim()?.toFloatOrNull()
         } else null
     }
+
+    val audioStream = mediaStreams?.firstOrNull { it.type == MediaStreamType.AUDIO }
+    val mediaSource = mediaSources?.firstOrNull()
+    val trackContainer = container ?: mediaSource?.container
+    val trackCodec = audioStream?.codec ?: mediaSource?.mediaStreams?.firstOrNull { it.type == MediaStreamType.AUDIO }?.codec
+    val trackBitrate = audioStream?.bitRate ?: mediaSource?.bitrate
+    val trackSampleRate = audioStream?.sampleRate
+    val trackBitDepth = audioStream?.bitDepth
+    val trackChannels = audioStream?.channels
 
     return JellyfinMusicTrack(
         id = id,
@@ -4337,6 +4348,12 @@ private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): 
         isFavorite = userData?.isFavorite == true,
         replayGainTrackGainDb = trackGain,
         replayGainTrackPeak = trackPeak,
+        container = trackContainer,
+        codec = trackCodec,
+        bitrate = trackBitrate,
+        sampleRate = trackSampleRate,
+        bitDepth = trackBitDepth,
+        channels = trackChannels,
     )
 }
 

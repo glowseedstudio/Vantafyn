@@ -79,10 +79,25 @@ class ReplayGainAudioProcessorTest {
             preventClipping = true,
         )
 
-        processor.updateTrackGain(trackGainDb = 5.0f, trackPeak = 0.5f)
-
-        assertFalse(processor.isActive)
+        assertFalse(processor.isEnabled)
         assertEquals(0.0f, processor.currentEffectiveGainDb, 0.001f)
+
+        // Verify pass-through when audio format is configured
+        val format = AudioProcessor.AudioFormat(44100, 2, C.ENCODING_PCM_16BIT)
+        processor.configure(format)
+        processor.flush()
+
+        val input = ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN)
+        input.putShort(1000)
+        input.putShort(-2000)
+        input.flip()
+
+        processor.queueInput(input)
+        val output = processor.output
+        output.order(ByteOrder.LITTLE_ENDIAN)
+
+        assertEquals(1000, output.short.toInt())
+        assertEquals(-2000, output.short.toInt())
     }
 
     @Test
@@ -143,5 +158,84 @@ class ReplayGainAudioProcessorTest {
 
         assertEquals(32767, output.short.toInt())
         assertEquals(-32768, output.short.toInt())
+    }
+
+    @Test
+    fun immediateGainAppliesToFirstSampleWithoutRampDown() {
+        val processor = ReplayGainAudioProcessor()
+        val format = AudioProcessor.AudioFormat(44100, 2, C.ENCODING_PCM_16BIT)
+        processor.configure(format)
+        processor.flush()
+
+        // Set configuration with -6.02 dB fallback (~0.5x gain)
+        processor.setConfiguration(
+            enabled = true,
+            preAmpWithGainDb = 0.0f,
+            gainWithoutGainDb = -6.0206f,
+            preventClipping = false,
+            immediate = true,
+        )
+
+        // With immediate = true, target and current are immediately 0.5x, no ramping from 1.0
+        val input = ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN)
+        input.putShort(2000)
+        input.putShort(-4000)
+        input.flip()
+
+        processor.queueInput(input)
+        val output = processor.output
+        output.order(ByteOrder.LITTLE_ENDIAN)
+
+        // Very first samples must be exactly scaled by 0.5x (1000 and -2000), not full volume!
+        assertEquals(1000, output.short.toInt())
+        assertEquals(-2000, output.short.toInt())
+    }
+
+    @Test
+    fun trackQueueAdvanceOnDiscontinuityAppliesNextGainSeamlessly() {
+        val processor = ReplayGainAudioProcessor()
+        val format = AudioProcessor.AudioFormat(44100, 2, C.ENCODING_PCM_16BIT)
+        processor.configure(format)
+        processor.flush()
+
+        processor.setConfiguration(
+            enabled = true,
+            preAmpWithGainDb = 0.0f,
+            gainWithoutGainDb = 0.0f,
+            preventClipping = false,
+            immediate = true,
+        )
+
+        // Setup queue: Track 0 has +6.02 dB (2.0x), Track 1 has -6.02 dB (0.5x)
+        val queue = listOf(
+            6.0206f to null,
+            -6.0206f to null,
+        )
+        processor.setTrackQueue(queue, startIndex = 0)
+
+        // Track 0 samples
+        val inputTrack0 = ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN)
+        inputTrack0.putShort(1000)
+        inputTrack0.putShort(-1000)
+        inputTrack0.flip()
+        processor.queueInput(inputTrack0)
+        val outputTrack0 = processor.output
+        outputTrack0.order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(2000, outputTrack0.short.toInt())
+        assertEquals(-2000, outputTrack0.short.toInt())
+
+        // Simulate gapless track transition (decoder switches stream and triggers discontinuity)
+        processor.onStreamDiscontinuity()
+
+        // Track 1 samples should immediately be scaled by 0.5x from sample 0
+        val inputTrack1 = ByteBuffer.allocateDirect(4).order(ByteOrder.LITTLE_ENDIAN)
+        inputTrack1.putShort(1000)
+        inputTrack1.putShort(-1000)
+        inputTrack1.flip()
+        processor.queueInput(inputTrack1)
+        val outputTrack1 = processor.output
+        outputTrack1.order(ByteOrder.LITTLE_ENDIAN)
+        assertEquals(500, outputTrack1.short.toInt())
+        assertEquals(-500, outputTrack1.short.toInt())
     }
 }

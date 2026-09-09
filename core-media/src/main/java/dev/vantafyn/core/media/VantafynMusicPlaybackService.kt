@@ -685,6 +685,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                         streamUrl = it.streamUrl,
                         artworkUrl = it.artworkUrl,
                         isFavorite = it.isFavorite,
+                        replayGainTrackGainDb = it.replayGainTrackGainDb,
+                        replayGainTrackPeak = it.replayGainTrackPeak,
                     )
                 }
                 if (queue.isEmpty()) {

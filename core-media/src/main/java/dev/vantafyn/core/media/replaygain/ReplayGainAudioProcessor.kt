@@ -64,9 +64,17 @@ class ReplayGainAudioProcessor : BaseAudioProcessor() {
     private var targetLinearGain: Float = 1.0f
     private var currentLinearGain: Float = 1.0f
 
-    // Ramp step per sample to eliminate click/pop artifacts on track transitions (ramps over ~1024 samples)
+    // Ramp step per sample to eliminate click/pop artifacts on live UI slider changes (ramps over ~1024 samples)
     private val rampSamples = 1024
     private var rampStep: Float = 0.0f
+
+    // Queue of pending track (gainDb, peak) tuples for gapless stream discontinuity sync
+    private var trackGainQueue: List<Pair<Float?, Float?>> = emptyList()
+    private var decodingQueueIndex: Int = -1
+
+    init {
+        recalculateGain(immediate = true)
+    }
 
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
         return when (inputAudioFormat.encoding) {
@@ -76,18 +84,76 @@ class ReplayGainAudioProcessor : BaseAudioProcessor() {
     }
 
     override fun isActive(): Boolean {
-        return isEnabled && inputAudioFormat.encoding != C.ENCODING_INVALID
+        return inputAudioFormat.encoding != C.ENCODING_INVALID
     }
 
     /**
      * Updates the current track's embedded ReplayGain metadata.
-     * Called at track transition boundaries.
+     * When [immediate] is true, target gain is applied immediately with zero ramping,
+     * ensuring the beginning of a track never starts louder and ramps down.
      */
     @Synchronized
-    fun updateTrackGain(trackGainDb: Float?, trackPeak: Float?) {
+    fun updateTrackGain(trackGainDb: Float?, trackPeak: Float?, immediate: Boolean = false) {
         currentTrackGainDb = trackGainDb
         currentTrackPeak = trackPeak
-        recalculateGain()
+        recalculateGain(immediate = immediate)
+    }
+
+    /**
+     * Synchronizes track gain from the main looper during onMediaItemTransition.
+     * Only applies changes if current effective track metadata does not match.
+     */
+    @Synchronized
+    fun syncTrackGain(trackGainDb: Float?, trackPeak: Float?) {
+        if (currentTrackGainDb == trackGainDb && currentTrackPeak == trackPeak) return
+        updateTrackGain(trackGainDb, trackPeak, immediate = true)
+    }
+
+    /**
+     * Sets the upcoming queue of track gains and primes the starting track's gain.
+     */
+    @Synchronized
+    fun setTrackQueue(queue: List<Pair<Float?, Float?>>, startIndex: Int) {
+        trackGainQueue = queue
+        decodingQueueIndex = startIndex
+        val entry = queue.getOrNull(startIndex)
+        updateTrackGain(entry?.first, entry?.second, immediate = true)
+    }
+
+    /**
+     * Pre-selects a specific queue index (e.g. on manual skip/seek), applying its gain immediately.
+     */
+    @Synchronized
+    fun setTrackQueueIndex(index: Int) {
+        decodingQueueIndex = index
+        val entry = trackGainQueue.getOrNull(index)
+        if (entry != null) {
+            updateTrackGain(entry.first, entry.second, immediate = true)
+        }
+    }
+
+    /**
+     * Updates the playlist track queue without changing current playing state.
+     */
+    @Synchronized
+    fun updateTrackList(queue: List<Pair<Float?, Float?>>, currentIndex: Int) {
+        trackGainQueue = queue
+        decodingQueueIndex = currentIndex
+    }
+
+    /**
+     * Called on the audio playback thread by [ForwardingAudioSink.handleDiscontinuity]
+     * when the decoder switches to output buffers for the next track in a gapless sequence.
+     */
+    @Synchronized
+    fun onStreamDiscontinuity() {
+        if (trackGainQueue.isEmpty()) return
+        val nextIndex = decodingQueueIndex + 1
+        if (nextIndex in trackGainQueue.indices) {
+            decodingQueueIndex = nextIndex
+            val entry = trackGainQueue[nextIndex]
+            updateTrackGain(entry.first, entry.second, immediate = true)
+        }
     }
 
     /**
@@ -99,21 +165,23 @@ class ReplayGainAudioProcessor : BaseAudioProcessor() {
         preAmpWithGainDb: Float,
         gainWithoutGainDb: Float,
         preventClipping: Boolean,
+        immediate: Boolean = false,
     ) {
         this.isEnabled = enabled
         this.preAmpWithReplayGainDb = preAmpWithGainDb
         this.gainWithoutReplayGainDb = gainWithoutGainDb
         this.preventClipping = preventClipping
-        recalculateGain()
+        recalculateGain(immediate = immediate)
     }
 
     @Synchronized
-    private fun recalculateGain() {
+    private fun recalculateGain(immediate: Boolean = false) {
         if (!isEnabled) {
             targetLinearGain = 1.0f
+            currentLinearGain = 1.0f
             currentEffectiveGainDb = 0.0f
             isPeakLimitingActive = false
-            updateRampStep()
+            rampStep = 0.0f
             return
         }
 
@@ -140,7 +208,13 @@ class ReplayGainAudioProcessor : BaseAudioProcessor() {
         targetLinearGain = linear
         currentEffectiveGainDb = linearToDb(linear)
         isPeakLimitingActive = peakLimiting
-        updateRampStep()
+
+        if (immediate) {
+            currentLinearGain = targetLinearGain
+            rampStep = 0.0f
+        } else {
+            updateRampStep()
+        }
     }
 
     private fun updateRampStep() {
@@ -158,8 +232,8 @@ class ReplayGainAudioProcessor : BaseAudioProcessor() {
         val target = targetLinearGain
         val current = currentLinearGain
 
-        // Fast path: pass-through if gain is exactly unity and no ramping in progress
-        if (abs(current - 1.0f) < 0.0001f && abs(target - 1.0f) < 0.0001f) {
+        // Fast path: pass-through if disabled or gain is exactly unity and no ramping in progress
+        if (!isEnabled || (abs(current - 1.0f) < 0.0001f && abs(target - 1.0f) < 0.0001f)) {
             outputBuffer.put(inputBuffer)
             outputBuffer.flip()
             return

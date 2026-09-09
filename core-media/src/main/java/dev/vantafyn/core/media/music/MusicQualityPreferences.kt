@@ -88,4 +88,60 @@ object MusicQualityPreferences {
             wifiQuality
         }
     }
+
+    fun setActiveQuality(context: Context, quality: MusicStreamingQuality) {
+        val appContext = context.applicationContext
+        if (isMeteredOrCellular(appContext)) {
+            setCellularQuality(appContext, quality)
+        } else {
+            setWifiQuality(appContext, quality)
+        }
+    }
+
+    fun rewriteStreamUrl(originalUrl: String, quality: MusicStreamingQuality): String {
+        if (originalUrl.isBlank() || originalUrl.startsWith("file:") || originalUrl.startsWith("content:")) {
+            return originalUrl
+        }
+        val uri = runCatching { android.net.Uri.parse(originalUrl) }.getOrNull() ?: return originalUrl
+        val scheme = uri.scheme
+        if (scheme != "http" && scheme != "https") {
+            return originalUrl
+        }
+
+        val maxKbps = quality.maxBitrateKbps
+        val maxBps = quality.maxBitrateBps
+
+        val isSubsonic = originalUrl.contains("/rest/stream.view") || originalUrl.contains("stream.view")
+        val isJellyfin = originalUrl.contains("/Audio/", ignoreCase = true) || originalUrl.contains("/Videos/", ignoreCase = true)
+
+        if (!isSubsonic && !isJellyfin) {
+            return originalUrl
+        }
+
+        val builder = uri.buildUpon().clearQuery()
+        val paramNames = runCatching { uri.queryParameterNames }.getOrNull() ?: emptySet()
+
+        for (name in paramNames) {
+            if (isSubsonic && name.equals("maxBitRate", ignoreCase = true)) {
+                continue
+            }
+            if (isJellyfin && (name.equals("maxStreamingBitrate", ignoreCase = true) || name.equals("audioBitRate", ignoreCase = true))) {
+                continue
+            }
+            for (value in uri.getQueryParameters(name)) {
+                builder.appendQueryParameter(name, value)
+            }
+        }
+
+        if (isSubsonic && maxKbps != null) {
+            builder.appendQueryParameter("maxBitRate", maxKbps.toString())
+        }
+        if (isJellyfin && maxBps != null) {
+            builder.appendQueryParameter("maxStreamingBitrate", maxBps.toString())
+            builder.appendQueryParameter("audioBitRate", maxBps.toString())
+        }
+
+        return builder.build().toString()
+    }
 }
+

@@ -571,6 +571,14 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             streamUrl = streamUrl,
             artworkUrl = artworkUrl,
             isFavorite = isFavorite,
+            replayGainTrackGainDb = replayGainTrackGainDb,
+            replayGainTrackPeak = replayGainTrackPeak,
+            container = container,
+            codec = codec,
+            bitrate = bitrate,
+            sampleRate = sampleRate,
+            bitDepth = bitDepth,
+            channels = channels,
         )
 
     private fun VantafynMusicTrack.toJellyfinTrack(): JellyfinMusicTrack =
@@ -586,6 +594,14 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             hasLyrics = false,
             streamUrl = streamUrl,
             isFavorite = isFavorite,
+            replayGainTrackGainDb = replayGainTrackGainDb,
+            replayGainTrackPeak = replayGainTrackPeak,
+            container = container,
+            codec = codec,
+            bitrate = bitrate,
+            sampleRate = sampleRate,
+            bitDepth = bitDepth,
+            channels = channels,
         )
 
     private fun VantafynMusicTrack.toMediaItemForBrowse(containerId: String): MediaItem {

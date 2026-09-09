@@ -6,7 +6,7 @@ import java.net.URL
 fun JellyfinSession.mediaBrowserAuthHeader(
     client: String = "Vantafyn",
     device: String = "Android",
-    version: String = "0.9.4",
+    version: String = "0.9.5",
 ): String =
     "MediaBrowser Client=\"$client\", Device=\"$device\", DeviceId=\"$profileId\", Version=\"$version\", Token=\"$accessToken\""
 

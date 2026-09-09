@@ -3,12 +3,19 @@ package dev.vantafyn.feature.music
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
+import dev.vantafyn.feature.music.audiostream.AudioQualityBadgePill
+import dev.vantafyn.feature.music.audiostream.AudioStreamDetailsSheet
+import dev.vantafyn.feature.music.audiostream.MusicBitrateSettingsIconButton
+import dev.vantafyn.feature.music.audiostream.MusicStreamingBitrateSheet
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -35,6 +42,7 @@ import androidx.compose.material.icons.rounded.Reorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.background
@@ -54,6 +62,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -195,6 +207,7 @@ import coil3.imageLoader
 import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import coil3.request.allowHardware
+import coil3.request.crossfade
 import dev.vantafyn.core.cast.GoogleCastRouteButton
 import dev.vantafyn.core.jellyfin.JellyfinLyrics
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
@@ -4255,9 +4268,12 @@ private fun NowPlayingDialog(
     var showSleepTimerSheet by remember { mutableStateOf(false) }
     var showAutoEqDialog by remember { mutableStateOf(false) }
     var showReplayGainDialog by remember { mutableStateOf(false) }
+    var showAudioStreamDetailsSheet by remember { mutableStateOf(false) }
+    var showStreamingBitrateSheet by remember { mutableStateOf(false) }
     var showSaveQueueDialog by remember { mutableStateOf(false) }
     var contextQueueIndex by remember { mutableIntStateOf(-1) }
     val track = state.playback.currentTrack ?: return
+    val isDownloaded = track.streamUrl.startsWith("file:") || track.streamUrl.startsWith("content:")
     val context = androidx.compose.ui.platform.LocalContext.current
     var revealActive by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
@@ -4300,46 +4316,21 @@ private fun NowPlayingDialog(
                         Row(
                             modifier = Modifier.align(Alignment.CenterStart),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            if (state.isRadioActive) {
-                                val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
-                                val radioAlpha by infiniteTransition.animateFloat(
-                                    initialValue = 0.65f,
-                                    targetValue = 1f,
-                                    animationSpec = infiniteRepeatable(
-                                        animation = tween(1000, easing = LinearEasing),
-                                        repeatMode = RepeatMode.Reverse,
-                                    ),
-                                    label = "radio_alpha",
+                            if (!isDownloaded) {
+                                MusicBitrateSettingsIconButton(
+                                    onClick = { showStreamingBitrateSheet = true },
+                                    size = 40,
                                 )
-                                VantafynGlassSurface(
-                                    modifier = Modifier.clip(RoundedCornerShape(999.dp)),
-                                    variant = VantafynGlassVariant.Chip,
-                                    cornerRadius = 999.dp,
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.alpha(radioAlpha),
-                                    ) {
-                                        Icon(
-                                            Icons.Rounded.Radio,
-                                            contentDescription = "Infinite Radio Active",
-                                            tint = Color(0xFF21D8FF),
-                                            modifier = Modifier.size(13.dp),
-                                        )
-                                        Text(
-                                            "INFINITE RADIO",
-                                            color = Color(0xFF21D8FF),
-                                            fontWeight = FontWeight.Bold,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            letterSpacing = 0.5.sp,
-                                        )
-                                    }
-                                }
                             }
+                            FlatMusicIconButton(
+                                icon = Icons.Rounded.Bedtime,
+                                contentDescription = "Sleep Timer",
+                                onClick = { showSleepTimerSheet = true },
+                                selected = state.playback.sleepTimerMode != null,
+                                size = 40,
+                            )
                             if (state.playback.sleepTimerMode != null) {
                                 val label = when (state.playback.sleepTimerMode) {
                                     SleepTimerMode.Duration -> {
@@ -4357,13 +4348,13 @@ private fun NowPlayingDialog(
                                         .clickable { showSleepTimerSheet = true },
                                     variant = VantafynGlassVariant.Chip,
                                     cornerRadius = 999.dp,
-                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     ) {
-                                        Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = Color(0xFFFFD166), modifier = Modifier.size(13.dp))
+                                        Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = Color(0xFFFFD166), modifier = Modifier.size(12.dp))
                                         Text(label, color = Color(0xFF21D8FF), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
                                     }
                                 }
@@ -4381,30 +4372,49 @@ private fun NowPlayingDialog(
                             horizontalArrangement = Arrangement.spacedBy(2.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            FlatMusicIconButton(
-                                icon = Icons.Rounded.Bedtime,
-                                contentDescription = "Sleep Timer",
-                                onClick = { showSleepTimerSheet = true },
-                                selected = state.playback.sleepTimerMode != null,
-                                size = 44,
-                            )
                             GoogleCastRouteButton(modifier = Modifier.size(44.dp))
                             FlatMusicIconButton(Icons.Rounded.Close, "Close", viewModel::closeNowPlaying, size = 44)
+                        }
+
+                        if (state.isRadioActive) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .layout { measurable, constraints ->
+                                        val placeable = measurable.measure(constraints)
+                                        layout(placeable.width, 0) {
+                                            placeable.placeRelative(0, 0)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                InfiniteRadioPill()
+                            }
                         }
                     }
                 }
             }
             item {
                 MusicContentReveal(index = 1, animate = revealActive) {
-                    MusicArt(
-                        imageUrl = track.artworkUrl,
-                        modifier = Modifier
-                            .size(296.dp)
-                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(30.dp)),
-                        cornerRadius = 30,
-                        title = track.title,
-                        subtitle = track.artist,
-                    )
+                    AnimatedContent(
+                        targetState = track,
+                        transitionSpec = {
+                            fadeIn(animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing)) togetherWith
+                                fadeOut(animationSpec = tween(durationMillis = 350, easing = FastOutLinearInEasing))
+                        },
+                        contentAlignment = Alignment.Center,
+                        label = "NowPlayingAlbumArtCrossfade",
+                    ) { currentTrack ->
+                        MusicArt(
+                            imageUrl = currentTrack.artworkUrl,
+                            modifier = Modifier
+                                .size(296.dp)
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(30.dp)),
+                            cornerRadius = 30,
+                            title = currentTrack.title,
+                            subtitle = currentTrack.artist,
+                        )
+                    }
                 }
             }
             item {
@@ -4435,9 +4445,26 @@ private fun NowPlayingDialog(
                             durationMs = state.playback.durationMs,
                             onSeek = viewModel::seekTo,
                         )
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(state.playback.positionMs.formatTime(), color = VantafynColors.Muted)
-                            Text(state.playback.durationMs.formatTime(), color = VantafynColors.Muted)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = state.playback.positionMs.formatTime(),
+                                color = VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            AudioQualityBadgePill(
+                                audioStreamInfo = state.playback.audioStreamInfo,
+                                track = track,
+                                onClick = { showAudioStreamDetailsSheet = true },
+                            )
+                            Text(
+                                text = state.playback.durationMs.formatTime(),
+                                color = VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
                         }
                     }
                 }
@@ -4570,6 +4597,22 @@ private fun NowPlayingDialog(
             onSetEndOfQueue = viewModel::setSleepTimerEndOfQueue,
             onCancel = viewModel::cancelSleepTimer,
         )
+        AudioStreamDetailsSheet(
+            visible = showAudioStreamDetailsSheet,
+            track = track,
+            audioStreamInfo = state.playback.audioStreamInfo,
+            onDismiss = { showAudioStreamDetailsSheet = false },
+            onOpenReplayGainSettings = { showReplayGainDialog = true },
+        )
+        MusicStreamingBitrateSheet(
+            visible = showStreamingBitrateSheet,
+            currentQuality = dev.vantafyn.core.media.music.MusicQualityPreferences.resolveCurrentQuality(context),
+            onSelectQuality = { quality ->
+                viewModel.setStreamingQuality(quality)
+                showStreamingBitrateSheet = false
+            },
+            onDismiss = { showStreamingBitrateSheet = false },
+        )
         if (showAutoEqDialog) {
             androidx.compose.ui.window.Dialog(
                 onDismissRequest = { showAutoEqDialog = false },
@@ -4637,6 +4680,55 @@ private fun NowPlayingDialog(
 }
 
 @Composable
+private fun InfiniteRadioPill(modifier: Modifier = Modifier) {
+    val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
+    val radioAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.65f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "radio_alpha",
+    )
+    val radioGradient = remember {
+        Brush.horizontalGradient(
+            colors = listOf(
+                Color(0xFF21D8FF),
+                Color(0xFFFF36C7),
+            ),
+        )
+    }
+    VantafynGlassSurface(
+        modifier = modifier.clip(RoundedCornerShape(999.dp)),
+        variant = VantafynGlassVariant.Chip,
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            modifier = Modifier.alpha(radioAlpha),
+        ) {
+            Icon(
+                Icons.Rounded.Radio,
+                contentDescription = "Infinite Radio Active",
+                tint = Color(0xFF21D8FF),
+                modifier = Modifier.size(13.dp),
+            )
+            Text(
+                "INFINITE RADIO",
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    brush = radioGradient,
+                ),
+                letterSpacing = 0.6.sp,
+            )
+        }
+    }
+}
+
+@Composable
 private fun MusicReactiveBackground(track: VantafynMusicTrack) {
     val context = LocalContext.current
     val fallbackPalette = remember(track.id, track.artworkUrl) { track.musicPalette() }
@@ -4661,17 +4753,32 @@ private fun MusicReactiveBackground(track: VantafynMusicTrack) {
         }
         if (extracted != null) palette = extracted
     }
+    val animatedBase by animateColorAsState(
+        targetValue = palette.base,
+        animationSpec = tween(durationMillis = 600, easing = LinearEasing),
+        label = "reactive_bg_base",
+    )
+    val animatedAccent by animateColorAsState(
+        targetValue = palette.accent,
+        animationSpec = tween(durationMillis = 600, easing = LinearEasing),
+        label = "reactive_bg_accent",
+    )
+    val animatedSecondary by animateColorAsState(
+        targetValue = palette.secondary,
+        animationSpec = tween(durationMillis = 600, easing = LinearEasing),
+        label = "reactive_bg_secondary",
+    )
     Box(
         Modifier
             .fillMaxSize()
-            .background(palette.base),
+            .background(animatedBase),
     )
     Box(
         Modifier
             .fillMaxSize()
             .background(
                 Brush.radialGradient(
-                    colors = listOf(palette.accent.copy(alpha = 0.70f), Color.Transparent),
+                    colors = listOf(animatedAccent.copy(alpha = 0.70f), Color.Transparent),
                     center = Offset(160f, 220f),
                     radius = 720f,
                 ),
@@ -4682,7 +4789,7 @@ private fun MusicReactiveBackground(track: VantafynMusicTrack) {
             .fillMaxSize()
             .background(
                 Brush.radialGradient(
-                    colors = listOf(palette.secondary.copy(alpha = 0.62f), Color.Transparent),
+                    colors = listOf(animatedSecondary.copy(alpha = 0.62f), Color.Transparent),
                     center = Offset(860f, 860f),
                     radius = 840f,
                 ),
@@ -4694,7 +4801,7 @@ private fun MusicReactiveBackground(track: VantafynMusicTrack) {
             .background(
                 Brush.linearGradient(
                     listOf(
-                        palette.base.copy(alpha = 0.34f),
+                        animatedBase.copy(alpha = 0.34f),
                         VantafynColors.Graphite.copy(alpha = 0.18f),
                         Color.Black.copy(alpha = 0.30f),
                     ),
@@ -5016,6 +5123,8 @@ private fun CurrentTrackMoreSheet(
 ) {
     BackHandler(enabled = visible, onBack = onDismiss)
     val density = LocalDensity.current
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val topClearance = maxOf(statusBarTop + 48.dp, 84.dp)
     val extraOffsetPx = remember(density) {
         with(density) { (MusicBottomSheetRailClearance + 56.dp).roundToPx() }
     }
@@ -5039,7 +5148,7 @@ private fun CurrentTrackMoreSheet(
             VantafynGlassModalPanel(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
+                    .padding(start = 14.dp, end = 14.dp, top = topClearance, bottom = MusicBottomSheetRailClearance)
                     .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -5062,37 +5171,98 @@ private fun CurrentTrackMoreSheet(
                         ),
                     ),
                 cornerRadius = 30.dp,
-                contentPadding = PaddingValues(18.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 14.dp),
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        MusicArt(track.artworkUrl, Modifier.size(58.dp), cornerRadius = 16, title = track.title, subtitle = track.artist)
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Drag indicator handle
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .size(width = 38.dp, height = 4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(Color.White.copy(alpha = 0.25f)),
+                    )
+
+                    // Track header row with artwork, title/artist, and close button
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        MusicArt(
+                            imageUrl = track.artworkUrl,
+                            modifier = Modifier.size(50.dp),
+                            cornerRadius = 14,
+                            title = track.title,
+                            subtitle = track.artist,
+                        )
                         Column(Modifier.weight(1f)) {
-                            VantafynMarqueeText(track.title, MaterialTheme.typography.titleMedium.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold))
-                            VantafynMarqueeText(track.artist, MaterialTheme.typography.bodyMedium.copy(color = VantafynColors.Muted))
+                            VantafynMarqueeText(
+                                text = track.title,
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    color = VantafynColors.Ink,
+                                    fontWeight = FontWeight.SemiBold,
+                                ),
+                            )
+                            VantafynMarqueeText(
+                                text = track.artist,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    color = VantafynColors.Muted,
+                                ),
+                            )
+                        }
+                        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                            Icon(
+                                imageVector = Icons.Rounded.Close,
+                                contentDescription = "Close",
+                                tint = VantafynColors.Muted,
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
-                    MusicMenuAction(
-                        if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        if (track.isFavorite) "Remove from My List" else "Add to My List",
-                        onFavorite,
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.White.copy(alpha = 0.08f)),
                     )
-                    MusicMenuAction(
-                        Icons.Rounded.Radio,
-                        if (isRadioActive) "End Station Radio" else "Start Station Radio",
-                        onToggleRadio,
-                    )
-                    MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
-                    MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
-                    MusicMenuAction(Icons.Rounded.PlaylistAdd, "New playlist", onNewPlaylist)
-                    if (playlists.isNotEmpty()) {
-                        MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
+
+                    // Scrollable list of actions
+                    val scrollState = rememberScrollState()
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false)
+                            .verticalScroll(scrollState),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        MusicMenuAction(
+                            if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                            if (track.isFavorite) "Remove from My List" else "Add to My List",
+                            onFavorite,
+                        )
+                        MusicMenuAction(
+                            Icons.Rounded.Radio,
+                            if (isRadioActive) "End Station Radio" else "Start Station Radio",
+                            onToggleRadio,
+                        )
+                        MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
+                        MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
+                        MusicMenuAction(Icons.Rounded.PlaylistAdd, "New playlist", onNewPlaylist)
+                        if (playlists.isNotEmpty()) {
+                            MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
+                        }
+                        if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
+                        if (canGoToArtist) MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to artist", onGoToArtist)
+                        MusicMenuAction(Icons.Rounded.GraphicEq, "Headphone EQ (AutoEQ)", onOpenAutoEq)
+                        MusicMenuAction(Icons.Rounded.VolumeUp, "Loudness Leveling (ReplayGain)", onOpenReplayGain)
+                        MusicMenuAction(Icons.Rounded.Info, "View track details", onTrackDetails)
+                        Spacer(modifier = Modifier.height(4.dp))
                     }
-                    if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
-                    if (canGoToArtist) MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to artist", onGoToArtist)
-                    MusicMenuAction(Icons.Rounded.GraphicEq, "Headphone EQ (AutoEQ)", onOpenAutoEq)
-                    MusicMenuAction(Icons.Rounded.VolumeUp, "Loudness Leveling (ReplayGain)", onOpenReplayGain)
-                    MusicMenuAction(Icons.Rounded.Info, "View track details", onTrackDetails)
                 }
             }
         }
@@ -6656,24 +6826,36 @@ private fun MusicArt(
     title: String? = null,
     subtitle: String? = null,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var hasError by remember(imageUrl) { mutableStateOf(false) }
+    val showPlaceholder = imageUrl.isNullOrBlank() || hasError
+
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius.dp)),
+            .clip(RoundedCornerShape(cornerRadius.dp))
+            .background(Color(0xFF141416)),
         contentAlignment = Alignment.Center,
     ) {
-        PremiumCoverPlaceholder(
-            title = title,
-            subtitle = subtitle,
-            cornerRadius = cornerRadius,
-            compact = cornerRadius <= 14,
-            modifier = Modifier.fillMaxSize(),
-        )
-        if (!imageUrl.isNullOrBlank()) {
+        if (showPlaceholder) {
+            PremiumCoverPlaceholder(
+                title = title,
+                subtitle = subtitle,
+                cornerRadius = cornerRadius,
+                compact = cornerRadius <= 14,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
             AsyncImage(
-                model = imageUrl,
+                model = remember(imageUrl) {
+                    ImageRequest.Builder(context)
+                        .data(imageUrl)
+                        .crossfade(300)
+                        .build()
+                },
                 contentDescription = null,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                onError = { hasError = true },
             )
         }
     }

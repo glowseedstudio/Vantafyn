@@ -18,7 +18,7 @@ object ReplayGainPreferences {
     const val DEFAULT_PRE_AMP_WITH_REPLAY_GAIN_DB = 0.0f
     const val DEFAULT_GAIN_WITHOUT_REPLAY_GAIN_DB = -3.0f
     const val DEFAULT_PREVENT_CLIPPING = true
-    const val DEFAULT_ENABLED = true
+    const val DEFAULT_ENABLED = false
 
     const val MIN_PRE_AMP_DB = -12.0f
     const val MAX_PRE_AMP_DB = 12.0f

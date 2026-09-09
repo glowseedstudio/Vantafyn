@@ -49,6 +49,7 @@ object VantafynExoPlayerFactory {
     fun musicRenderersFactory(
         context: Context,
         audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> = emptyArray(),
+        onStreamDiscontinuity: (() -> Unit)? = null,
     ): DefaultRenderersFactory =
         object : DefaultRenderersFactory(context.applicationContext) {
             override fun buildAudioSink(
@@ -56,11 +57,21 @@ object VantafynExoPlayerFactory {
                 enableFloatOutput: Boolean,
                 enableAudioOffload: Boolean,
             ): androidx.media3.exoplayer.audio.AudioSink? {
-                return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                val defaultSink = androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioTrackPlaybackParams(true)
                     .setAudioProcessors(audioProcessors)
                     .build()
+                return if (onStreamDiscontinuity != null) {
+                    object : androidx.media3.exoplayer.audio.ForwardingAudioSink(defaultSink) {
+                        override fun handleDiscontinuity() {
+                            super.handleDiscontinuity()
+                            onStreamDiscontinuity.invoke()
+                        }
+                    }
+                } else {
+                    defaultSink
+                }
             }
         }.apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
@@ -71,11 +82,15 @@ object VantafynExoPlayerFactory {
     fun musicBuilder(
         context: Context,
         audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> = emptyArray(),
+        onStreamDiscontinuity: (() -> Unit)? = null,
     ): ExoPlayer.Builder {
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
             VantafynMediaCache.getCacheDataSourceFactory(context),
         )
-        return ExoPlayer.Builder(context.applicationContext, musicRenderersFactory(context, audioProcessors))
+        return ExoPlayer.Builder(
+            context.applicationContext,
+            musicRenderersFactory(context, audioProcessors, onStreamDiscontinuity),
+        )
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(musicLoadControl())
     }

@@ -24,12 +24,18 @@ class AutoEqRepository(private val context: Context) {
                 val jsonArray = JSONArray(jsonString)
                 val list = ArrayList<AutoEqPreset>(jsonArray.length())
 
+                val defaultFrequencies = listOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
                 for (i in 0 until jsonArray.length()) {
                     val obj = jsonArray.getJSONObject(i)
-                    val freqArray = obj.getJSONArray("frequencies")
-                    val frequencies = ArrayList<Int>(freqArray.length())
-                    for (f in 0 until freqArray.length()) {
-                        frequencies.add(freqArray.getInt(f))
+                    val freqArray = obj.optJSONArray("frequencies")
+                    val frequencies = if (freqArray != null && freqArray.length() > 0) {
+                        val freqs = ArrayList<Int>(freqArray.length())
+                        for (f in 0 until freqArray.length()) {
+                            freqs.add(freqArray.getInt(f))
+                        }
+                        freqs
+                    } else {
+                        defaultFrequencies
                     }
 
                     val gainsArray = obj.getJSONArray("gains")

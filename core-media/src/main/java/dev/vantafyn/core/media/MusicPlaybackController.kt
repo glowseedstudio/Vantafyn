@@ -7,9 +7,11 @@ import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
@@ -45,6 +47,12 @@ data class VantafynMusicTrack(
     val isFavorite: Boolean = false,
     val replayGainTrackGainDb: Float? = null,
     val replayGainTrackPeak: Float? = null,
+    val container: String? = null,
+    val codec: String? = null,
+    val bitrate: Int? = null,
+    val sampleRate: Int? = null,
+    val bitDepth: Int? = null,
+    val channels: Int? = null,
 )
 
 enum class VantafynMusicStopReason {
@@ -82,6 +90,7 @@ data class VantafynMusicPlaybackState(
     val errorMessage: String? = null,
     val sleepTimerRemainingSeconds: Long? = null,
     val sleepTimerMode: SleepTimerMode? = null,
+    val audioStreamInfo: VantafynAudioStreamInfo? = null,
 ) {
     val currentTrack: VantafynMusicTrack?
         get() = queue.getOrNull(queueIndex)
@@ -109,6 +118,10 @@ class MusicPlaybackController private constructor(context: Context) {
     private var playbackServiceStarted = false
     private var lastRegistryTickMs: Long = 0L
     private val tracksByMediaId = mutableMapOf<String, VantafynMusicTrack>()
+    private val _state = MutableStateFlow(VantafynMusicPlaybackState())
+    val state: StateFlow<VantafynMusicPlaybackState> = _state.asStateFlow()
+    private val _events = MutableSharedFlow<VantafynMusicPlaybackEvent>(extraBufferCapacity = 64)
+    val events: SharedFlow<VantafynMusicPlaybackEvent> = _events.asSharedFlow()
 
     val preCacheManager: VantafynMediaPreCacheManager by lazy {
         VantafynMediaPreCacheManager(
@@ -145,22 +158,14 @@ class MusicPlaybackController private constructor(context: Context) {
         }
     }
 
-    init {
-        scope.launch {
-            combine(
-                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.isEnabledFlow,
-                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.preAmpWithReplayGainFlow,
-                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.gainWithoutReplayGainFlow,
-                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.preventClippingFlow,
-            ) { enabled, preAmp, fallback, preventClipping ->
-                replayGainAudioProcessor.setConfiguration(enabled, preAmp, fallback, preventClipping)
-            }.collect()
-        }
-    }
+    private var lastAudioFormat: Format? = null
 
     internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.musicBuilder(
         context = context.applicationContext,
         audioProcessors = arrayOf(replayGainAudioProcessor),
+        onStreamDiscontinuity = {
+            replayGainAudioProcessor.onStreamDiscontinuity()
+        },
     ).build().apply {
         setAudioAttributes(
             AudioAttributes.Builder()
@@ -181,6 +186,14 @@ class MusicPlaybackController private constructor(context: Context) {
             ) {
                 audioEffectsManager.onAudioSessionIdChanged(audioSessionId)
             }
+
+            override fun onAudioInputFormatChanged(
+                eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+                format: Format,
+                decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?,
+            ) {
+                updateAudioStreamInfo(format)
+            }
         })
         if (audioSessionId > 0) {
             audioEffectsManager.onAudioSessionIdChanged(audioSessionId)
@@ -198,6 +211,7 @@ class MusicPlaybackController private constructor(context: Context) {
                 }
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    lastAudioFormat = null
                     val previous = _state.value.currentTrack
                     val previousPosition = _state.value.positionMs
                     val currentIndex = currentMediaItemIndex.takeIf { it >= 0 } ?: _state.value.queueIndex
@@ -231,11 +245,16 @@ class MusicPlaybackController private constructor(context: Context) {
                         ?: trackForReplayGain?.replayGainTrackGainDb
                     val peak = mediaItem?.mediaMetadata?.extras?.takeIf { it.containsKey(EXTRA_REPLAY_GAIN_PEAK) }?.getFloat(EXTRA_REPLAY_GAIN_PEAK)
                         ?: trackForReplayGain?.replayGainTrackPeak
-                    replayGainAudioProcessor.updateTrackGain(gainDb, peak)
+                    replayGainAudioProcessor.syncTrackGain(gainDb, peak)
+                    updateAudioStreamInfo(audioFormat)
                     if (_state.value.sleepTimerMode == SleepTimerMode.EndOfTrack) {
                         pause()
                         cancelSleepTimer()
                     }
+                }
+
+                override fun onTracksChanged(tracks: Tracks) {
+                    updateAudioStreamInfo(audioFormat)
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -245,6 +264,7 @@ class MusicPlaybackController private constructor(context: Context) {
                             positionMs = currentPosition.coerceAtLeast(0L),
                         )
                     }
+                    updateAudioStreamInfo(audioFormat)
                     if (playbackState == Player.STATE_ENDED) {
                         emitEvent(
                             VantafynMusicPlaybackEvent.Stopped(
@@ -287,11 +307,6 @@ class MusicPlaybackController private constructor(context: Context) {
         )
     }
 
-    private val _state = MutableStateFlow(VantafynMusicPlaybackState())
-    val state: StateFlow<VantafynMusicPlaybackState> = _state.asStateFlow()
-    private val _events = MutableSharedFlow<VantafynMusicPlaybackEvent>(extraBufferCapacity = 64)
-    val events: SharedFlow<VantafynMusicPlaybackEvent> = _events.asSharedFlow()
-
     init {
         scope.launch {
             AppForegroundStateRepository.isForeground.collect { isForeground ->
@@ -308,6 +323,17 @@ class MusicPlaybackController private constructor(context: Context) {
                     LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "background idle")
                 }
             }
+        }
+        scope.launch {
+            combine(
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.isEnabledFlow,
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.preAmpWithReplayGainFlow,
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.gainWithoutReplayGainFlow,
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.preventClippingFlow,
+            ) { enabled, preAmp, fallback, preventClipping ->
+                replayGainAudioProcessor.setConfiguration(enabled, preAmp, fallback, preventClipping)
+                updateAudioStreamInfo()
+            }.collect()
         }
     }
 
@@ -337,6 +363,12 @@ class MusicPlaybackController private constructor(context: Context) {
         val mediaItems = queue.map { it.toMediaItem() }
         tracksByMediaId.clear()
         queue.forEach { track -> tracksByMediaId[track.id.toString()] = track }
+        replayGainAudioProcessor.setTrackQueue(
+            queue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+            safeIndex,
+        )
+        lastAudioFormat = null
+        updateAudioStreamInfo(null)
         sessionPlayer.setMediaItems(mediaItems, safeIndex, 0L)
         sessionPlayer.prepare()
         ensurePlaybackService()
@@ -374,6 +406,7 @@ class MusicPlaybackController private constructor(context: Context) {
             preCacheManager.cancelAll("queue cleared")
             radioQueueManager.stopRadio("queue cleared")
             sessionPlayer.clearMediaItems()
+            lastAudioFormat = null
         }
         stopPlaybackService()
         _state.update {
@@ -383,6 +416,7 @@ class MusicPlaybackController private constructor(context: Context) {
                 isPlaying = false,
                 positionMs = 0L,
                 durationMs = if (clearQueue) 0L else it.durationMs,
+                audioStreamInfo = if (clearQueue) null else it.audioStreamInfo,
             )
         }
     }
@@ -406,15 +440,73 @@ class MusicPlaybackController private constructor(context: Context) {
         syncTicker()
     }
 
+    fun setStreamingQuality(quality: dev.vantafyn.core.media.music.MusicStreamingQuality) {
+        dev.vantafyn.core.media.music.MusicQualityPreferences.setActiveQuality(appContext, quality)
+        val currentQueue = _state.value.queue
+        if (currentQueue.isEmpty()) return
+
+        val updatedQueue = currentQueue.map { track ->
+            if (track.streamUrl.startsWith("file:") || track.streamUrl.startsWith("content:")) {
+                track
+            } else {
+                track.copy(
+                    streamUrl = dev.vantafyn.core.media.music.MusicQualityPreferences.rewriteStreamUrl(track.streamUrl, quality),
+                )
+            }
+        }
+
+        tracksByMediaId.clear()
+        updatedQueue.forEach { track -> tracksByMediaId[track.id.toString()] = track }
+
+        val currentIndex = sessionPlayer.currentMediaItemIndex.takeIf { it in updatedQueue.indices } ?: _state.value.queueIndex
+        val currentPos = sessionPlayer.currentPosition.coerceAtLeast(0L)
+        val wasPlaying = sessionPlayer.isPlaying
+
+        for (i in updatedQueue.indices) {
+            runCatching {
+                sessionPlayer.replaceMediaItem(i, updatedQueue[i].toMediaItem())
+            }
+        }
+
+        val currentTrack = updatedQueue.getOrNull(currentIndex)
+        val isRemoteTrack = currentTrack != null &&
+            !currentTrack.streamUrl.startsWith("file:") &&
+            !currentTrack.streamUrl.startsWith("content:")
+
+        replayGainAudioProcessor.updateTrackList(
+            updatedQueue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+            currentIndex,
+        )
+        val gainDb = currentTrack?.replayGainTrackGainDb
+        val peak = currentTrack?.replayGainTrackPeak
+        replayGainAudioProcessor.updateTrackGain(gainDb, peak, immediate = true)
+
+        if (isRemoteTrack) {
+            lastAudioFormat = null
+            sessionPlayer.seekTo(currentIndex, currentPos)
+            if (wasPlaying) {
+                sessionPlayer.play()
+            }
+        }
+
+        _state.update { it.copy(queue = updatedQueue) }
+        updateAudioStreamInfo(null)
+    }
+
     fun next() {
         ensurePlaybackService()
         if (sessionPlayer.hasNextMediaItem()) {
+            val nextIdx = sessionPlayer.nextMediaItemIndex
+            if (nextIdx in _state.value.queue.indices) {
+                replayGainAudioProcessor.setTrackQueueIndex(nextIdx)
+            }
             lastTransitionReason = VantafynMusicStopReason.Skip
             sessionPlayer.seekToNextMediaItem()
             sessionPlayer.play()
             forcePlaybackSnapshot()
             syncTicker()
         } else if (_state.value.repeatMode == VantafynMusicRepeatMode.All && _state.value.queue.isNotEmpty()) {
+            replayGainAudioProcessor.setTrackQueueIndex(0)
             lastTransitionReason = VantafynMusicStopReason.Skip
             sessionPlayer.seekTo(0, 0L)
             sessionPlayer.play()
@@ -425,6 +517,7 @@ class MusicPlaybackController private constructor(context: Context) {
 
     fun playQueueIndex(index: Int) {
         val safeIndex = index.takeIf { it in _state.value.queue.indices } ?: return
+        replayGainAudioProcessor.setTrackQueueIndex(safeIndex)
         ensurePlaybackService()
         lastTransitionReason = VantafynMusicStopReason.Skip
         sessionPlayer.seekTo(safeIndex, 0L)
@@ -452,12 +545,20 @@ class MusicPlaybackController private constructor(context: Context) {
         if (existingIndex >= 0) newQueue.removeAt(existingIndex)
         newQueue.add(insertIdx, track)
         _state.update { it.copy(queue = newQueue, queueIndex = sessionPlayer.currentMediaItemIndex) }
+        replayGainAudioProcessor.updateTrackList(
+            newQueue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+            sessionPlayer.currentMediaItemIndex,
+        )
     }
 
     fun addToQueue(track: VantafynMusicTrack) {
         sessionPlayer.addMediaItem(track.toMediaItem())
         tracksByMediaId[track.id.toString()] = track
         _state.update { it.copy(queue = it.queue + track) }
+        replayGainAudioProcessor.updateTrackList(
+            _state.value.queue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+            sessionPlayer.currentMediaItemIndex,
+        )
     }
 
     fun removeFromQueue(index: Int) {
@@ -466,6 +567,10 @@ class MusicPlaybackController private constructor(context: Context) {
         _state.update { state ->
             val newQueue = state.queue.toMutableList().also { if (index in it.indices) it.removeAt(index) }
             val newIndex = sessionPlayer.currentMediaItemIndex.coerceIn(0, newQueue.size.coerceAtLeast(1) - 1)
+            replayGainAudioProcessor.updateTrackList(
+                newQueue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+                newIndex,
+            )
             state.copy(queue = newQueue, queueIndex = newIndex)
         }
     }
@@ -483,6 +588,10 @@ class MusicPlaybackController private constructor(context: Context) {
                 newQueue.add(toIndex, item)
             }
             val newIndex = sessionPlayer.currentMediaItemIndex.coerceIn(0, newQueue.size.coerceAtLeast(1) - 1)
+            replayGainAudioProcessor.updateTrackList(
+                newQueue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+                newIndex,
+            )
             state.copy(queue = newQueue, queueIndex = newIndex)
         }
     }
@@ -608,6 +717,10 @@ class MusicPlaybackController private constructor(context: Context) {
             sessionPlayer.seekTo(0L)
             _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, 0L)) }
         } else {
+            val prevIdx = sessionPlayer.previousMediaItemIndex
+            if (prevIdx in _state.value.queue.indices) {
+                replayGainAudioProcessor.setTrackQueueIndex(prevIdx)
+            }
             lastTransitionReason = VantafynMusicStopReason.Skip
             sessionPlayer.seekToPreviousMediaItem()
         }
@@ -677,6 +790,8 @@ class MusicPlaybackController private constructor(context: Context) {
                 errorMessage = null,
             )
         }
+        lastAudioFormat = null
+        updateAudioStreamInfo(null)
         ensurePlaybackService()
         return queue.map { it.toMediaItem() }
     }
@@ -765,10 +880,31 @@ class MusicPlaybackController private constructor(context: Context) {
         playbackServiceStarted = false
     }
 
+    private fun updateAudioStreamInfo(format: Format? = null) {
+        if (format != null) {
+            lastAudioFormat = format
+        }
+        val currentTrack = _state.value.currentTrack
+        val streamInfo = VantafynAudioStreamInfo.fromTrackAndFormat(
+            track = currentTrack,
+            format = format ?: lastAudioFormat ?: runCatching { sessionPlayer.audioFormat }.getOrNull(),
+            replayGainAppliedDb = if (replayGainAudioProcessor.isEnabled) {
+                replayGainAudioProcessor.currentEffectiveGainDb
+            } else null,
+        )
+        _state.update { it.copy(audioStreamInfo = streamInfo) }
+    }
+
     private fun VantafynMusicTrack.toMediaItem(): MediaItem {
         val extras = android.os.Bundle().apply {
             replayGainTrackGainDb?.let { putFloat(EXTRA_REPLAY_GAIN_DB, it) }
             replayGainTrackPeak?.let { putFloat(EXTRA_REPLAY_GAIN_PEAK, it) }
+            codec?.let { putString(EXTRA_CODEC, it) }
+            container?.let { putString(EXTRA_CONTAINER, it) }
+            bitrate?.let { putInt(EXTRA_BITRATE, it) }
+            sampleRate?.let { putInt(EXTRA_SAMPLE_RATE, it) }
+            bitDepth?.let { putInt(EXTRA_BIT_DEPTH, it) }
+            channels?.let { putInt(EXTRA_CHANNELS, it) }
         }
         return MediaItem.Builder()
             .setUri(streamUrl)
@@ -797,6 +933,12 @@ class MusicPlaybackController private constructor(context: Context) {
 
         const val EXTRA_REPLAY_GAIN_DB = "dev.vantafyn.replaygain.GAIN_DB"
         const val EXTRA_REPLAY_GAIN_PEAK = "dev.vantafyn.replaygain.PEAK"
+        const val EXTRA_CODEC = "dev.vantafyn.media.CODEC"
+        const val EXTRA_CONTAINER = "dev.vantafyn.media.CONTAINER"
+        const val EXTRA_BITRATE = "dev.vantafyn.media.BITRATE"
+        const val EXTRA_SAMPLE_RATE = "dev.vantafyn.media.SAMPLE_RATE"
+        const val EXTRA_BIT_DEPTH = "dev.vantafyn.media.BIT_DEPTH"
+        const val EXTRA_CHANNELS = "dev.vantafyn.media.CHANNELS"
 
         @Volatile
         private var instance: MusicPlaybackController? = null
