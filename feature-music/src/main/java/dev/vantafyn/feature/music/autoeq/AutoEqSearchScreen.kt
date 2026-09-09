@@ -100,7 +100,7 @@ fun AutoEqSearchScreen(
             all.filter { it.brand.equals(selectedBrandFilter, ignoreCase = true) }
         } else {
             all
-        }
+        }.distinctBy { it.id }
         isLoading = false
     }
 

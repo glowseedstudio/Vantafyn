@@ -25,6 +25,7 @@ class AutoEqRepository(private val context: Context) {
                 val list = ArrayList<AutoEqPreset>(jsonArray.length())
 
                 val defaultFrequencies = listOf(31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+                val seenIds = HashSet<String>()
                 for (i in 0 until jsonArray.length()) {
                     val obj = jsonArray.getJSONObject(i)
                     val freqArray = obj.optJSONArray("frequencies")
@@ -44,9 +45,25 @@ class AutoEqRepository(private val context: Context) {
                         gains.add(gainsArray.getDouble(g).toFloat())
                     }
 
+                    val rawId = obj.getString("id")
+                    var uniqueId = rawId
+                    if (seenIds.contains(uniqueId)) {
+                        val sourceSlug = obj.optString("source", "").lowercase().replace(Regex("[^a-z0-9]"), "_").trim('_')
+                        if (sourceSlug.isNotEmpty() && !uniqueId.endsWith(sourceSlug)) {
+                            uniqueId = "${rawId}_$sourceSlug"
+                        }
+                        var counter = 2
+                        val baseId = uniqueId
+                        while (seenIds.contains(uniqueId)) {
+                            uniqueId = "${baseId}_$counter"
+                            counter++
+                        }
+                    }
+                    seenIds.add(uniqueId)
+
                     list.add(
                         AutoEqPreset(
-                            id = obj.getString("id"),
+                            id = uniqueId,
                             name = obj.getString("name"),
                             brand = obj.getString("brand"),
                             type = obj.optString("type", "Headphones"),
