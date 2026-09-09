@@ -5,14 +5,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.ServiceInfo
-import android.os.BatteryManager
-import dev.vantafyn.core.media.ambient.AmbientAutoLaunchMode
-import dev.vantafyn.core.media.ambient.AmbientDisplayPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -65,92 +60,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > MAX_ARTWORK_CACHE_SIZE
     }
     private val appIconBitmap: Bitmap by lazy { createFallbackNotificationArtwork() }
-    private val screenOffReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            if (intent?.action != Intent.ACTION_SCREEN_OFF) return
-            val appContext = context?.applicationContext ?: return
-            val mode = AmbientDisplayPreferences.getMode(appContext)
-            if (mode == AmbientAutoLaunchMode.Off) return
-
-            val state = MusicPlaybackController.get(appContext).state.value
-            if (!state.isPlaying || state.currentTrack == null) return
-
-            if (mode == AmbientAutoLaunchMode.ChargingOnly) {
-                val batteryFilter = IntentFilter(Intent.ACTION_BATTERY_CHANGED)
-                val batteryIntent = appContext.registerReceiver(null, batteryFilter)
-                val status = batteryIntent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-                val isCharging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
-                    status == BatteryManager.BATTERY_STATUS_FULL
-                if (!isCharging) return
-            }
-
-            val displayManager = appContext.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
-            val displays = displayManager?.displays ?: emptyArray()
-            val externalDisplay = displays.firstOrNull { it.displayId != android.view.Display.DEFAULT_DISPLAY }
-
-            val targetDisplayId = if (externalDisplay != null && externalDisplay.state == android.view.Display.STATE_ON) {
-                externalDisplay.displayId
-            } else {
-                null
-            }
-
-            launchAmbientActivity(targetDisplayId)
-        }
-    }
-
-    private fun launchAmbientActivity(targetDisplayId: Int?) {
-        try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager
-            @Suppress("DEPRECATION")
-            val wakeLock = powerManager?.newWakeLock(
-                android.os.PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
-                    android.os.PowerManager.ACQUIRE_CAUSES_WAKEUP or
-                    android.os.PowerManager.ON_AFTER_RELEASE,
-                "Vantafyn:AmbientLockWakeLock",
-            )
-            wakeLock?.acquire(3000L)
-
-            val options = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                android.app.ActivityOptions.makeBasic().apply {
-                    setPendingIntentBackgroundActivityStartMode(android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-                    if (targetDisplayId != null && targetDisplayId != android.view.Display.DEFAULT_DISPLAY) {
-                        setLaunchDisplayId(targetDisplayId)
-                    }
-                }.toBundle()
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && targetDisplayId != null && targetDisplayId != android.view.Display.DEFAULT_DISPLAY) {
-                android.app.ActivityOptions.makeBasic().apply {
-                    setLaunchDisplayId(targetDisplayId)
-                }.toBundle()
-            } else {
-                null
-            }
-
-            val ambientIntent = Intent(this, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity")).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-
-            val pendingIntent = PendingIntent.getActivity(
-                this,
-                9999,
-                ambientIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            try {
-                pendingIntent.send(this, 0, null, null, null, null, options)
-            } catch (e: Exception) {
-                startActivity(ambientIntent, options)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not launch AmbientNowPlayingActivity: ${e.message}")
-        }
-    }
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Music service created")
         createMusicPlaybackChannel()
-        val screenFilter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-        registerReceiver(screenOffReceiver, screenFilter)
 
         playbackController = MusicPlaybackController.get(this)
         mediaLibraryProvider = VantafynMusicMediaLibraryProvider(this)
@@ -287,7 +201,6 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     override fun onDestroy() {
         Log.d(TAG, "Music service destroyed")
         LongRunningTaskRegistry.stop(MUSIC_SERVICE_TASK_ID, "service destroyed")
-        runCatching { unregisterReceiver(screenOffReceiver) }
         isForegroundService = false
         serviceScope.cancel()
         mediaSession?.release()

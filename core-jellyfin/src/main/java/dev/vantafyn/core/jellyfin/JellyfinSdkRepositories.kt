@@ -98,6 +98,8 @@ import org.jellyfin.sdk.model.api.TranscodingProfile
 import org.jellyfin.sdk.model.api.UserItemDataDto
 import org.jellyfin.sdk.model.api.MediaStreamType
 import org.jellyfin.sdk.model.api.UpdateUserPassword
+import org.jellyfin.sdk.model.api.request.GetAlbumArtistsRequest
+import org.jellyfin.sdk.model.api.request.GetArtistsRequest
 import org.jellyfin.sdk.model.api.request.GetItemsRequest
 import org.jellyfin.sdk.model.api.request.GetEpisodesRequest
 import org.jellyfin.sdk.model.api.request.GetLatestMediaRequest
@@ -123,7 +125,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.3",
+            version = "0.9.4",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -1783,20 +1785,198 @@ class SdkJellyfinMusicRepository(
             }
         }
 
-    override suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int): JellyfinResult<List<JellyfinMusicTrack>> =
+    override suspend fun getTrack(session: JellyfinSession, trackId: java.util.UUID): JellyfinResult<JellyfinMusicTrack> =
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                JellyfinResult.Success(
-                    getMusicTracks(
-                        api = api,
-                        session = session,
-                        limit = limit,
-                        searchTerm = query.takeIf { it.isNotBlank() },
-                        sortBy = listOf(ItemSortBy.SORT_NAME),
-                        sortOrder = listOf(SortOrder.ASCENDING),
-                    ),
-                )
+                val item by api.userLibraryApi.getItem(userId = session.user.id, itemId = trackId)
+                JellyfinResult.Success(item.toMusicTrack(api, session))
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            val trimmed = query.trim()
+            if (trimmed.isBlank()) {
+                return@withContext JellyfinResult.Success(emptyList())
+            }
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                coroutineScope {
+                    // 1. Direct song title matches
+                    val titleDeferred = async {
+                        runCatching {
+                            getMusicTracks(
+                                api = api,
+                                session = session,
+                                limit = limit,
+                                searchTerm = trimmed,
+                                sortBy = listOf(ItemSortBy.SORT_NAME),
+                                sortOrder = listOf(SortOrder.ASCENDING),
+                            )
+                        }.getOrDefault(emptyList())
+                    }
+
+                    // 2. Comprehensive search hints across the server (matches songs, artists, albums with tokenized fuzzy matching)
+                    val hintsDeferred = async {
+                        runCatching {
+                            val response by api.searchApi.getSearchHints(
+                                GetSearchHintsRequest(
+                                    userId = session.user.id,
+                                    searchTerm = trimmed,
+                                    includeItemTypes = listOf(
+                                        BaseItemKind.AUDIO,
+                                        BaseItemKind.MUSIC_ARTIST,
+                                        BaseItemKind.MUSIC_ALBUM,
+                                    ),
+                                    limit = 30,
+                                ),
+                            )
+                            response.searchHints
+                        }.getOrDefault(emptyList())
+                    }
+
+                    // 3. Artist matches via ArtistsApi (getArtists & getAlbumArtists)
+                    val artistDeferred = async {
+                        runCatching {
+                            val artistsResp = runCatching {
+                                val r by api.artistsApi.getArtists(
+                                    GetArtistsRequest(
+                                        userId = session.user.id,
+                                        searchTerm = trimmed,
+                                        limit = 8,
+                                    ),
+                                )
+                                r.items
+                            }.getOrDefault(emptyList())
+
+                            val albumArtistsResp = runCatching {
+                                val r by api.artistsApi.getAlbumArtists(
+                                    GetAlbumArtistsRequest(
+                                        userId = session.user.id,
+                                        searchTerm = trimmed,
+                                        limit = 8,
+                                    ),
+                                )
+                                r.items
+                            }.getOrDefault(emptyList())
+
+                            (artistsResp + albumArtistsResp).map { it.id }.distinct().take(8)
+                        }.getOrDefault(emptyList())
+                    }
+
+                    // 4. Album matches via ItemsApi
+                    val albumDeferred = async {
+                        runCatching {
+                            val albumResponse by api.itemsApi.getItems(
+                                GetItemsRequest(
+                                    userId = session.user.id,
+                                    recursive = true,
+                                    searchTerm = trimmed,
+                                    limit = 8,
+                                    includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                                    enableTotalRecordCount = false,
+                                ),
+                            )
+                            albumResponse.items.map { it.id }.take(8)
+                        }.getOrDefault(emptyList())
+                    }
+
+                    val titleTracks = titleDeferred.await()
+                    val searchHints = hintsDeferred.await()
+                    val directArtistIds = artistDeferred.await()
+                    val directAlbumIds = albumDeferred.await()
+
+                    // Extract artist and album IDs from search hints
+                    val hintArtistIds = searchHints
+                        .filter { it.type == BaseItemKind.MUSIC_ARTIST }
+                        .mapNotNull { it.itemId }
+                    val allArtistIds = (directArtistIds + hintArtistIds).distinct().take(8)
+
+                    val hintAlbumIds = searchHints
+                        .filter { it.type == BaseItemKind.MUSIC_ALBUM }
+                        .mapNotNull { it.itemId }
+                    val allAlbumIds = (directAlbumIds + hintAlbumIds).distinct().take(8)
+
+                    // Extract direct audio track IDs from search hints
+                    val hintTrackIds = searchHints
+                        .filter { it.type == BaseItemKind.AUDIO }
+                        .mapNotNull { it.itemId }
+                        .distinct()
+
+                    // Fetch tracks for matching artists in parallel
+                    val artistTracksDeferred = async {
+                        if (allArtistIds.isNotEmpty()) {
+                            runCatching {
+                                getMusicTracks(
+                                    api = api,
+                                    session = session,
+                                    limit = limit,
+                                    artistIds = allArtistIds,
+                                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                                    sortOrder = listOf(SortOrder.ASCENDING),
+                                )
+                            }.getOrDefault(emptyList())
+                        } else {
+                            emptyList()
+                        }
+                    }
+
+                    // Fetch tracks for matching albums in parallel
+                    val albumTracksDeferred = async {
+                        if (allAlbumIds.isNotEmpty()) {
+                            runCatching {
+                                getMusicTracks(
+                                    api = api,
+                                    session = session,
+                                    limit = limit,
+                                    albumIds = allAlbumIds,
+                                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                                    sortOrder = listOf(SortOrder.ASCENDING),
+                                )
+                            }.getOrDefault(emptyList())
+                        } else {
+                            emptyList()
+                        }
+                    }
+
+                    // Fetch hint tracks not already fetched via title search
+                    val hintTracksDeferred = async {
+                        val missingTrackIds = hintTrackIds.filterNot { id -> titleTracks.any { it.id == id } }
+                        if (missingTrackIds.isNotEmpty()) {
+                            runCatching {
+                                val response by api.itemsApi.getItems(
+                                    GetItemsRequest(
+                                        userId = session.user.id,
+                                        ids = missingTrackIds.take(limit),
+                                        fields = musicItemFields,
+                                        includeItemTypes = listOf(BaseItemKind.AUDIO),
+                                        enableUserData = true,
+                                        enableImages = true,
+                                        imageTypeLimit = 2,
+                                        enableImageTypes = listOf(ImageType.PRIMARY),
+                                    ),
+                                )
+                                response.items.map { it.toMusicTrack(api, session) }
+                            }.getOrDefault(emptyList())
+                        } else {
+                            emptyList()
+                        }
+                    }
+
+                    val artistTracks = artistTracksDeferred.await()
+                    val albumTracks = albumTracksDeferred.await()
+                    val hintTracks = hintTracksDeferred.await()
+
+                    // Prioritize: direct title matches & hint tracks, then artist tracks, then album tracks
+                    val combined = (titleTracks + hintTracks + artistTracks + albumTracks)
+                        .distinctBy { it.id }
+                        .take(limit)
+
+                    JellyfinResult.Success(combined)
+                }
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
@@ -1882,12 +2062,106 @@ class SdkJellyfinMusicRepository(
             }
         }
 
+    override suspend fun getSimilarTracks(
+        session: JellyfinSession,
+        trackId: java.util.UUID,
+        limit: Int,
+        excludeTrackIds: Set<java.util.UUID>,
+    ): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val results = mutableListOf<JellyfinMusicTrack>()
+
+                // 1. Tier 1: /Items/{itemId}/Similar
+                runCatching {
+                    val similarResponse by api.libraryApi.getSimilarItems(
+                        GetSimilarItemsRequest(
+                            itemId = trackId,
+                            userId = session.user.id,
+                            limit = limit * 2,
+                            fields = musicItemFields,
+                        ),
+                    )
+                    val similarTracks = similarResponse.items
+                        .filter { it.id !in excludeTrackIds && it.id != trackId }
+                        .map { it.toMusicTrack(api, session) }
+                    results.addAll(similarTracks)
+                }
+
+                // 2. If < 5 items, fallback to seed track's genres/artists with Random sort
+                if (results.size < 5) {
+                    val seedItem = runCatching {
+                        val itemResponse by api.userLibraryApi.getItem(userId = session.user.id, itemId = trackId)
+                        itemResponse
+                    }.getOrNull()
+
+                    val genreNames = seedItem?.genres.orEmpty().filter {
+                        !it.equals("music", ignoreCase = true) && !it.equals("audio", ignoreCase = true)
+                    }
+                    val artistIdList = seedItem?.artistItems?.map { it.id }.orEmpty()
+
+                    // Tier 2: Search by genre with Random sort
+                    if (genreNames.isNotEmpty()) {
+                        runCatching {
+                            val genreTracks = getMusicTracks(
+                                api = api,
+                                session = session,
+                                limit = limit * 2,
+                                genres = genreNames,
+                                sortBy = listOf(ItemSortBy.RANDOM),
+                                sortOrder = listOf(SortOrder.ASCENDING),
+                            ).filter { it.id !in excludeTrackIds && it.id != trackId && results.none { r -> r.id == it.id } }
+                            results.addAll(genreTracks)
+                        }
+                    }
+
+                    // Tier 3: Search by artist with Random sort
+                    if (results.size < 5 && artistIdList.isNotEmpty()) {
+                        runCatching {
+                            val artistTracks = getMusicTracks(
+                                api = api,
+                                session = session,
+                                limit = limit * 2,
+                                artistIds = artistIdList,
+                                sortBy = listOf(ItemSortBy.RANDOM),
+                                sortOrder = listOf(SortOrder.ASCENDING),
+                            ).filter { it.id !in excludeTrackIds && it.id != trackId && results.none { r -> r.id == it.id } }
+                            results.addAll(artistTracks)
+                        }
+                    }
+
+                    // Tier 4: Broad library random
+                    if (results.size < 5) {
+                        runCatching {
+                            val randomTracks = getMusicTracks(
+                                api = api,
+                                session = session,
+                                limit = limit * 2,
+                                sortBy = listOf(ItemSortBy.RANDOM),
+                                sortOrder = listOf(SortOrder.ASCENDING),
+                            ).filter { it.id !in excludeTrackIds && it.id != trackId && results.none { r -> r.id == it.id } }
+                            results.addAll(randomTracks)
+                        }
+                    }
+                }
+
+                JellyfinResult.Success(results.distinctBy { it.id }.take(limit))
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
     private suspend fun getMusicTracks(
         api: ApiClient,
         session: JellyfinSession,
         limit: Int,
         parentId: java.util.UUID? = null,
         searchTerm: String? = null,
+        artistIds: Collection<java.util.UUID>? = null,
+        albumIds: Collection<java.util.UUID>? = null,
+        artists: Collection<String>? = null,
+        genres: Collection<String>? = null,
         sortBy: List<ItemSortBy>,
         sortOrder: List<SortOrder>,
     ): List<JellyfinMusicTrack> {
@@ -1897,6 +2171,10 @@ class SdkJellyfinMusicRepository(
                 parentId = parentId,
                 recursive = parentId == null,
                 searchTerm = searchTerm,
+                artistIds = artistIds,
+                albumIds = albumIds,
+                artists = artists,
+                genres = genres,
                 limit = limit,
                 sortBy = sortBy,
                 sortOrder = sortOrder,
@@ -2904,13 +3182,12 @@ class SdkJellyfinAdminRepository(
     }
 
     private fun authenticatedJsonGet(session: JellyfinSession, pathAndQuery: String): String {
-        val base = session.server.url.trimEnd('/')
-        val connection = URL("$base/$pathAndQuery").openConnection() as HttpURLConnection
-        connection.requestMethod = "GET"
-        connection.connectTimeout = 12_000
-        connection.readTimeout = 18_000
-        connection.setRequestProperty("Accept", "application/json")
-        connection.setRequestProperty("X-Emby-Token", session.accessToken)
+        val connection = session.openAuthenticatedConnection(
+            pathAndQuery = pathAndQuery,
+            method = "GET",
+            connectTimeoutMs = 12_000,
+            readTimeoutMs = 18_000,
+        )
         val code = connection.responseCode
         val stream = if (code in 200..299) connection.inputStream else connection.errorStream
         val body = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
@@ -4002,8 +4279,23 @@ private fun BaseItemDto.toWatchPartyCandidate(api: ApiClient, serverId: String?)
         isContinueWatching = (userData?.playedPercentage ?: 0.0) > 0.0 && userData?.played != true,
     )
 
-private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): JellyfinMusicTrack =
-    JellyfinMusicTrack(
+private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): JellyfinMusicTrack {
+    val trackGain = normalizationGain ?: tags?.firstNotNullOfOrNull { tag ->
+        if (tag.startsWith("REPLAYGAIN_TRACK_GAIN=", ignoreCase = true) ||
+            tag.startsWith("REPLAYGAIN_TRACK_GAIN:", ignoreCase = true)
+        ) {
+            tag.substring(22).removeSuffix("dB").removeSuffix("db").removeSuffix("DB").trim().toFloatOrNull()
+        } else null
+    }
+    val trackPeak = tags?.firstNotNullOfOrNull { tag ->
+        if (tag.startsWith("REPLAYGAIN_TRACK_PEAK=", ignoreCase = true) ||
+            tag.startsWith("REPLAYGAIN_TRACK_PEAK:", ignoreCase = true)
+        ) {
+            tag.substring(22).trim().toFloatOrNull()
+        } else null
+    }
+
+    return JellyfinMusicTrack(
         id = id,
         title = name ?: "Untitled track",
         artist = artists?.joinToString(", ")?.takeIf { it.isNotBlank() }
@@ -4012,7 +4304,12 @@ private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): 
         album = album,
         albumId = albumId,
         durationMs = runTimeTicks?.let { it / 10_000L },
-        genres = genres.orEmpty(),
+        genres = genres.orEmpty().filter {
+            !it.equals("music", ignoreCase = true) &&
+                !it.equals("audio", ignoreCase = true) &&
+                !it.equals("general", ignoreCase = true) &&
+                !it.equals("unknown", ignoreCase = true)
+        },
         artworkUrl = primaryImageUrl(api, 520),
         hasLyrics = hasLyrics == true,
         streamUrl = api.universalAudioApi.getUniversalAudioStreamUrl(
@@ -4038,7 +4335,10 @@ private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): 
         ).withAccessToken(session.accessToken),
         playlistItemId = playlistItemId,
         isFavorite = userData?.isFavorite == true,
+        replayGainTrackGainDb = trackGain,
+        replayGainTrackPeak = trackPeak,
     )
+}
 
 private fun BaseItemDto.toMusicAlbum(api: ApiClient): JellyfinMusicAlbum =
     JellyfinMusicAlbum(
@@ -4047,6 +4347,12 @@ private fun BaseItemDto.toMusicAlbum(api: ApiClient): JellyfinMusicAlbum =
         artist = albumArtist ?: artists?.joinToString(", "),
         year = productionYear,
         artworkUrl = primaryImageUrl(api, 520),
+        genres = genres.orEmpty().filter {
+            !it.equals("music", ignoreCase = true) &&
+                !it.equals("audio", ignoreCase = true) &&
+                !it.equals("general", ignoreCase = true) &&
+                !it.equals("unknown", ignoreCase = true)
+        },
     )
 
 private fun BaseItemDto.toMusicArtist(api: ApiClient): JellyfinMusicArtist =
@@ -4065,8 +4371,7 @@ private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: In
         trackImageUrls = trackImageUrls,
     )
 
-private fun Long.toLyricMillis(): Long =
-    if (this > 86_400_000L) this / 10_000L else this
+private fun Long.toLyricMillis(): Long = this / 10_000L
 
 private fun BaseItemDto.toDetail(
     api: ApiClient,

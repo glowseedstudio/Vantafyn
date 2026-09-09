@@ -46,11 +46,36 @@ object VantafynExoPlayerFactory {
             .build()
 
     @OptIn(UnstableApi::class)
-    fun musicBuilder(context: Context): ExoPlayer.Builder {
+    fun musicRenderersFactory(
+        context: Context,
+        audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> = emptyArray(),
+    ): DefaultRenderersFactory =
+        object : DefaultRenderersFactory(context.applicationContext) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioOffload: Boolean,
+            ): androidx.media3.exoplayer.audio.AudioSink? {
+                return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(true)
+                    .setAudioProcessors(audioProcessors)
+                    .build()
+            }
+        }.apply {
+            setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            setEnableAudioTrackPlaybackParams(true)
+        }
+
+    @OptIn(UnstableApi::class)
+    fun musicBuilder(
+        context: Context,
+        audioProcessors: Array<androidx.media3.common.audio.AudioProcessor> = emptyArray(),
+    ): ExoPlayer.Builder {
         val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
             VantafynMediaCache.getCacheDataSourceFactory(context),
         )
-        return ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+        return ExoPlayer.Builder(context.applicationContext, musicRenderersFactory(context, audioProcessors))
             .setMediaSourceFactory(mediaSourceFactory)
             .setLoadControl(musicLoadControl())
     }

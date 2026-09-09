@@ -41,7 +41,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
@@ -77,6 +79,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -115,13 +118,17 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AdminPanelSettings
+import androidx.compose.material.icons.rounded.ManageAccounts
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.EmojiEvents
@@ -149,6 +156,7 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.NewReleases
@@ -266,6 +274,7 @@ import dev.vantafyn.core.downloads.DownloadRecord
 import dev.vantafyn.core.downloads.DownloadMediaType
 import dev.vantafyn.core.downloads.DownloadStorageSummary
 import dev.vantafyn.core.downloads.DownloadState
+import dev.vantafyn.feature.home.auth.isOfflineAudio
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
@@ -3138,6 +3147,9 @@ private fun HomeScreen(
             onOpenDownloads = viewModel::openDownloads,
             onRefreshDownloads = viewModel::loadDownloads,
             onPlayOfflineDownload = viewModel::playOfflineDownload,
+            onPlayOfflineDownloadNext = viewModel::playOfflineDownloadNext,
+            onPlayOfflineAudioQueue = viewModel::playOfflineAudioQueue,
+            onAddOfflineDownloadToQueue = viewModel::addOfflineDownloadToQueue,
             onCancelDownload = viewModel::cancelDownload,
             onRetryDownload = viewModel::retryDownload,
             onRemoveDownload = viewModel::removeDownload,
@@ -3359,6 +3371,9 @@ private fun MobileShellScreen(
     onOpenDownloads: () -> Unit,
     onRefreshDownloads: () -> Unit,
     onPlayOfflineDownload: (DownloadRecord) -> Unit,
+    onPlayOfflineDownloadNext: (DownloadRecord) -> Unit = {},
+    onPlayOfflineAudioQueue: (List<DownloadRecord>, Int) -> Unit = { _, _ -> },
+    onAddOfflineDownloadToQueue: (DownloadRecord) -> Unit = {},
     onCancelDownload: (DownloadRecord) -> Unit,
     onRetryDownload: (DownloadRecord) -> Unit,
     onRemoveDownload: (DownloadRecord) -> Unit,
@@ -3559,6 +3574,7 @@ private fun MobileShellScreen(
                         MusicScreen(
                             session = state.session,
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+                            onNavigateToDownloads = { onNavigate(MobileDestination.Downloads) },
                         )
                     } else {
                         MobileHomeContent(
@@ -3601,6 +3617,9 @@ private fun MobileShellScreen(
                     onBack = onNavigateBack,
                     onRefresh = onRefreshDownloads,
                     onPlay = onPlayOfflineDownload,
+                    onPlayQueue = onPlayOfflineAudioQueue,
+                    onPlayNext = onPlayOfflineDownloadNext,
+                    onAddToQueue = onAddOfflineDownloadToQueue,
                     onCancel = onCancelDownload,
                     onRetry = onRetryDownload,
                     onRemove = onRemoveDownload,
@@ -3720,6 +3739,7 @@ private fun MobileShellScreen(
                         MobileDestination.Music -> MusicScreen(
                             session = state.session,
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+                            onNavigateToDownloads = { onNavigate(MobileDestination.Downloads) },
                         )
                         MobileDestination.Favorites -> FavoritesScreen(
                             state = state,
@@ -3795,7 +3815,7 @@ private fun MobileShellScreen(
                             onUploadProfileImage = onUploadAdminProfileImage,
                             onDeleteProfileImage = onDeleteAdminProfileImage,
                         )
-                        MobileDestination.Profile -> ProfileSettingsScreen(
+                        MobileDestination.Profile -> SettingsScreen(
                             state = state,
                             onAdmin = { onNavigate(MobileDestination.Admin) },
                             onRequests = { onNavigate(MobileDestination.Requests) },
@@ -3893,12 +3913,7 @@ private fun MobileShellScreen(
                                     "open_admin" -> onNavigate(MobileDestination.Admin)
                                     "open_send_text_to_tv" -> onNavigate(MobileDestination.TvInput)
                                     "open_pair_tv" -> onNavigate(MobileDestination.Profile)
-                                    "open_ambient_preview" -> {
-                                        runCatching {
-                                            val intent = Intent(context, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity"))
-                                            context.startActivity(intent)
-                                        }
-                                    }
+                                    "open_music" -> onNavigate(MobileDestination.Music)
                                     else -> Unit
                                 }
                             },
@@ -11448,7 +11463,186 @@ private fun ExperienceModeSettingsCard(
 }
 
 @Composable
-private fun ProfileSettingsScreen(
+private fun SettingsCardGroup(
+    modifier: Modifier = Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp = 22.dp,
+    items: List<@Composable () -> Unit>,
+) {
+    VantafynGlassCard(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = cornerRadius,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            items.forEachIndexed { index, item ->
+                item()
+                if (index < items.lastIndex) {
+                    HorizontalDivider(
+                        color = Color.White.copy(alpha = 0.08f),
+                        thickness = 0.75.dp,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsNavigationRow(
+    title: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    badge: String? = null,
+    destructive: Boolean = false,
+    showChevron: Boolean = true,
+) {
+    val textColor = if (destructive) Color(0xFFFFB5BE) else VantafynColors.Ink
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        icon?.let { SettingsRowIcon(it, destructive = destructive) }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                color = textColor,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (badge != null) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF58D7FF).copy(alpha = 0.16f))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+            ) {
+                Text(
+                    text = badge,
+                    color = Color(0xFF58D7FF),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+        if (showChevron) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Rounded.NavigateNext,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.35f),
+                modifier = Modifier.size(20.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: () -> Unit,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onCheckedChange)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        icon?.let { SettingsRowIcon(it) }
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (!subtitle.isNullOrBlank()) {
+                Text(
+                    text = subtitle,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        VantafynPremiumSwitchVisual(checked = checked)
+    }
+}
+
+@Composable
+private fun SettingsSubScreenHeader(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+    ) {
+        CompactBackButton(onClick = onBack)
+        Text(
+            text = title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun SettingsGroupHeader(title: String, modifier: Modifier = Modifier) {
+    Text(
+        text = title,
+        color = VantafynColors.Muted,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        modifier = modifier.padding(start = 4.dp, top = 6.dp, bottom = 2.dp),
+    )
+}
+
+private enum class SettingsSubScreen {
+    Main,
+    AccountAndProfiles,
+    AppearanceAndExperience,
+    AudioAndPlayback,
+    IntegrationsAndAdvanced,
+}
+
+@Composable
+private fun SettingsScreen(
     state: VantafynHomeUiState,
     onAdmin: () -> Unit,
     onRequests: () -> Unit,
@@ -11488,6 +11682,7 @@ private fun ProfileSettingsScreen(
     var soundEffectsOn by remember {
         mutableStateOf(dev.vantafyn.core.ui.VantafynSoundEffects.isSoundEffectsEnabled(context))
     }
+    var currentSubScreen by rememberSaveable { mutableStateOf(SettingsSubScreen.Main) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
     var showWhatsNew by remember { mutableStateOf(false) }
@@ -11500,188 +11695,495 @@ private fun ProfileSettingsScreen(
         revealActive = false
     }
     val avatarPicker = rememberProfileImagePicker(onUploadProfileImage)
+
+    BackHandler(enabled = currentSubScreen != SettingsSubScreen.Main) {
+        currentSubScreen = SettingsSubScreen.Main
+    }
+
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .imePadding()
-                .padding(horizontal = 8.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
-            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
-        ) {
-            item {
-                HomeContentReveal(index = 0, animate = revealActive) {
-                    Text("Settings", color = VantafynColors.Ink, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-                }
-            }
-            item {
-                HomeContentReveal(index = 1, animate = revealActive) {
-                    ProfileDashboardCard(
-                        state = state,
-                        onChangePhoto = { avatarPicker.open() },
-                        onRemovePhoto = onDeleteProfileImage,
-                    )
-                }
-            }
-            item {
-                HomeContentReveal(index = 2, animate = revealActive) {
-                    ExperienceModeSettingsCard(
-                        state = state,
-                        onSelectMode = onSelectExperienceMode,
-                        onSelectBackend = onSelectMusicBackend,
-                    )
-                }
-            }
-            if (state.isProfileImageSaving || state.profileImageError != null) {
-                item {
-                    HomeContentReveal(index = 3, animate = revealActive) {
-                        ProfileImageStatusCard(
-                            isSaving = state.isProfileImageSaving,
-                            error = state.profileImageError,
+        AnimatedContent(
+            targetState = currentSubScreen,
+            transitionSpec = {
+                if (targetState != SettingsSubScreen.Main) {
+                    (slideInHorizontally(animationSpec = tween(320, easing = FastOutSlowInEasing)) { it / 3 } + fadeIn(animationSpec = tween(280)))
+                        .togetherWith(
+                            slideOutHorizontally(animationSpec = tween(320, easing = FastOutSlowInEasing)) { -it / 3 } + fadeOut(animationSpec = tween(220))
                         )
-                    }
-                }
-            }
-            item {
-                HomeContentReveal(index = 3, animate = revealActive) {
-                    GlassPanel {
-                        Text("Appearance", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        ThemeSelector(selected = state.selectedTheme, onSelect = onSelectTheme)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            SettingsRowIcon(Icons.Rounded.Wallpaper)
-                            Text("Background", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
-                        }
-                        BackgroundSelector(selected = state.selectedBackground, onSelect = onSelectBackground)
-                        ThemeMusicSettings(
-                            checked = state.themeMusicEnabled,
-                            selected = state.themeMusicVolume,
-                            onToggle = onToggleThemeMusic,
-                            onSelect = onSelectThemeMusicVolume,
+                } else {
+                    (slideInHorizontally(animationSpec = tween(320, easing = FastOutSlowInEasing)) { -it / 3 } + fadeIn(animationSpec = tween(280)))
+                        .togetherWith(
+                            slideOutHorizontally(animationSpec = tween(320, easing = FastOutSlowInEasing)) { it / 3 } + fadeOut(animationSpec = tween(220))
                         )
-                        BottomRailAccentSettings(
-                            selected = state.bottomRailAccent,
-                            onSelect = onSetBottomRailAccent,
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .clickable(onClick = {
-                                    val next = !soundEffectsOn
-                                    soundEffectsOn = next
-                                    dev.vantafyn.core.ui.VantafynSoundEffects.setSoundEffectsEnabled(context, next)
-                                })
-                                .padding(vertical = 4.dp),
-                            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            SettingsRowIcon(Icons.Rounded.VolumeUp)
-                            Text(
-                                "Soundscapes",
-                                color = VantafynColors.Ink,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.weight(1f),
-                            )
-                            VantafynPremiumSwitchVisual(checked = soundEffectsOn)
-                        }
-                    }
-                }
-            }
-            item {
-                HomeContentReveal(index = 4, animate = revealActive) {
-                    GlassPanel {
-                        Text("Profile", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        SettingsRow("Switch User", "", onSwitchUser, compact = true, icon = Icons.Rounded.SwitchAccount)
-                        PremiumToggleRow(
-                            title = "Use last profile on launch",
-                            subtitle = "",
-                            checked = state.autoLoginLastProfile,
-                            onClick = onToggleAutoLoginLastProfile,
-                            icon = Icons.Rounded.Person,
-                        )
-                        SettingsRow("Add Profile", "", onAddProfile, compact = true, icon = Icons.Rounded.PersonAdd)
-                        SettingsRow("Pair a TV", "", { showPairTvSheet = true }, compact = true, icon = Icons.Rounded.Tv)
-                        SettingsRow("Send text to TV", "", onSendTextToTv, compact = true, icon = Icons.Rounded.Send)
-                        SettingsRow("Quick Connect", "", onQuickConnect, compact = true, icon = Icons.Rounded.Link)
-                        SettingsRow("Change Password", "", { showPasswordDialog = true }, compact = true, icon = Icons.Rounded.Lock)
-                        SettingsRow("Log Out", "", onLogout, compact = true, destructive = true, icon = Icons.Rounded.Logout)
-                    }
-                }
-            }
-            item {
-                HomeContentReveal(index = 5, animate = revealActive) {
-                    GlassPanel {
-                        Text("Permissions", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        PermissionStatusGrid(
-                            notificationPermissionState = notificationPermissionState,
-                            onShowPermission = { permissionDetail = it },
-                        )
-                    }
-                }
-            }
-            item {
-                HomeContentReveal(index = 6, animate = revealActive) {
-                    AmbientDisplaySettingsCard()
-                }
-            }
-            item {
-                HomeContentReveal(index = 7, animate = revealActive) {
-                    MusicStreamingQualitySettingsCard()
-                }
-            }
-            item {
-                HomeContentReveal(index = 8, animate = revealActive) {
-                    GlassPanel {
-                        Text("Vantafyn", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                        WhatsNewSettingsRow(
-                            enabled = state.whatsNewEnabled,
-                            hasUnseen = state.hasUnseenWhatsNew,
-                            itemCount = remember(state.whatsNewItems) { groupWhatsNewItems(state.whatsNewItems).size },
-                            onToggle = onToggleWhatsNew,
-                            onClick = { showWhatsNew = true },
-                        )
-                        PremiumToggleRow(
-                            title = "Achievement Badges",
-                            subtitle = "",
-                            checked = state.achievementsEnabled,
-                            onClick = onToggleAchievementsEnabled,
-                            icon = Icons.Rounded.EmojiEvents,
-                        )
-                        if (state.achievementsEnabled && state.isAchievementsAvailable) {
-                            PremiumToggleRow(
-                                title = "Friends & Messaging",
-                                subtitle = "",
-                                checked = state.socialEnabled,
-                                onClick = onToggleSocialEnabled,
-                                icon = Icons.Rounded.PeopleOutline,
-                            )
-                            if (state.socialEnabled) {
-                                PremiumToggleRow(
-                                    title = "Floating Chat Bubble",
-                                    subtitle = "",
-                                    checked = state.socialDockEnabled,
-                                    onClick = onToggleSocialDockEnabled,
-                                    icon = Icons.Rounded.Forum,
+                }.using(SizeTransform(clip = false))
+            },
+            label = "SettingsScreenNavigation",
+        ) { screen ->
+            when (screen) {
+                SettingsSubScreen.Main -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                            .padding(horizontal = 8.dp),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+                    ) {
+                        item {
+                            HomeContentReveal(index = 0, animate = revealActive) {
+                                Text(
+                                    "Settings",
+                                    color = VantafynColors.Ink,
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                             }
                         }
+                        item {
+                            HomeContentReveal(index = 1, animate = revealActive) {
+                                ProfileDashboardCard(
+                                    state = state,
+                                    onChangePhoto = { avatarPicker.open() },
+                                    onRemovePhoto = onDeleteProfileImage,
+                                )
+                            }
+                        }
+                        if (state.isProfileImageSaving || state.profileImageError != null) {
+                            item {
+                                HomeContentReveal(index = 2, animate = revealActive) {
+                                    ProfileImageStatusCard(
+                                        isSaving = state.isProfileImageSaving,
+                                        error = state.profileImageError,
+                                    )
+                                }
+                            }
+                        }
+                        item {
+                            HomeContentReveal(index = 3, animate = revealActive) {
+                                SettingsCardGroup(
+                                    items = listOf(
+                                        {
+                                            SettingsNavigationRow(
+                                                title = "Account & Profiles",
+                                                subtitle = "Switch user, login preferences, TV pairing, security",
+                                                icon = Icons.Rounded.ManageAccounts,
+                                                onClick = { currentSubScreen = SettingsSubScreen.AccountAndProfiles },
+                                            )
+                                        },
+                                        {
+                                            SettingsNavigationRow(
+                                                title = "Appearance & Experience",
+                                                subtitle = "Themes, dynamic backgrounds, rail accent, mode",
+                                                icon = Icons.Rounded.Palette,
+                                                onClick = { currentSubScreen = SettingsSubScreen.AppearanceAndExperience },
+                                            )
+                                        },
+                                        {
+                                            SettingsNavigationRow(
+                                                title = "Audio & Playback",
+                                                subtitle = "Theme music, soundscapes, streaming fidelity",
+                                                icon = Icons.Rounded.GraphicEq,
+                                                onClick = { currentSubScreen = SettingsSubScreen.AudioAndPlayback },
+                                            )
+                                        },
+                                        {
+                                            SettingsNavigationRow(
+                                                title = "Integrations & Advanced",
+                                                subtitle = "Achievements, messaging, admin, permissions, version",
+                                                icon = Icons.Rounded.Tune,
+                                                badge = if (state.hasUnseenWhatsNew) "Update" else null,
+                                                onClick = { currentSubScreen = SettingsSubScreen.IntegrationsAndAdvanced },
+                                            )
+                                        },
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                }
+                SettingsSubScreen.AccountAndProfiles -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                            .padding(horizontal = 8.dp),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                    ) {
+                        item {
+                            SettingsSubScreenHeader(
+                                title = "Account & Profiles",
+                                onBack = { currentSubScreen = SettingsSubScreen.Main },
+                            )
+                        }
+                        item { SettingsGroupHeader("Profile Management") }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Switch User",
+                                            subtitle = "Switch active profile on this server",
+                                            icon = Icons.Rounded.SwitchAccount,
+                                            showChevron = false,
+                                            onClick = onSwitchUser,
+                                        )
+                                    },
+                                    {
+                                        SettingsToggleRow(
+                                            title = "Use last profile on launch",
+                                            subtitle = "Bypass profile picker and automatically sign in",
+                                            icon = Icons.Rounded.Person,
+                                            checked = state.autoLoginLastProfile,
+                                            onCheckedChange = onToggleAutoLoginLastProfile,
+                                        )
+                                    },
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Add Profile",
+                                            subtitle = "Create a new Jellyfin user profile",
+                                            icon = Icons.Rounded.PersonAdd,
+                                            showChevron = false,
+                                            onClick = onAddProfile,
+                                        )
+                                    },
+                                ),
+                            )
+                        }
+                        item { SettingsGroupHeader("Connected Devices & TV") }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Pair a TV",
+                                            subtitle = "Pair this device with a TV using a link code",
+                                            icon = Icons.Rounded.Tv,
+                                            onClick = { showPairTvSheet = true },
+                                        )
+                                    },
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Send text to TV",
+                                            subtitle = "Use mobile keyboard as TV remote input",
+                                            icon = Icons.Rounded.Send,
+                                            onClick = onSendTextToTv,
+                                        )
+                                    },
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Quick Connect",
+                                            subtitle = "Authenticate another client with a quick code",
+                                            icon = Icons.Rounded.Link,
+                                            onClick = onQuickConnect,
+                                        )
+                                    },
+                                ),
+                            )
+                        }
+                        item { SettingsGroupHeader("Security & Session") }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Change Password",
+                                            subtitle = "Update your Jellyfin account password",
+                                            icon = Icons.Rounded.Lock,
+                                            onClick = { showPasswordDialog = true },
+                                        )
+                                    },
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Log Out",
+                                            subtitle = "Sign out of your session on this device",
+                                            icon = Icons.Rounded.Logout,
+                                            destructive = true,
+                                            showChevron = false,
+                                            onClick = onLogout,
+                                        )
+                                    },
+                                ),
+                            )
+                        }
+                    }
+                }
+                SettingsSubScreen.AppearanceAndExperience -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                            .padding(horizontal = 8.dp),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                    ) {
+                        item {
+                            SettingsSubScreenHeader(
+                                title = "Appearance & Experience",
+                                onBack = { currentSubScreen = SettingsSubScreen.Main },
+                            )
+                        }
+                        item { SettingsGroupHeader("Experience Mode") }
+                        item {
+                            ExperienceModeSettingsCard(
+                                state = state,
+                                onSelectMode = onSelectExperienceMode,
+                                onSelectBackend = onSelectMusicBackend,
+                            )
+                        }
+                        item { SettingsGroupHeader("Theme & Styling") }
+                        item {
+                            GlassPanel {
+                                Text("Theme Presets", color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                ThemeSelector(selected = state.selectedTheme, onSelect = onSelectTheme)
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.75.dp)
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    SettingsRowIcon(Icons.Rounded.Wallpaper)
+                                    Text("Background", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
+                                }
+                                BackgroundSelector(selected = state.selectedBackground, onSelect = onSelectBackground)
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.75.dp)
+                                BottomRailAccentSettings(
+                                    selected = state.bottomRailAccent,
+                                    onSelect = onSetBottomRailAccent,
+                                )
+                            }
+                        }
+                        item { SettingsGroupHeader("Layout & Customization") }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Home Layout",
+                                            subtitle = "Reorder and customize home screen shelves",
+                                            icon = Icons.Rounded.ViewAgenda,
+                                            onClick = onHomeLayout,
+                                        )
+                                    },
+                                ),
+                            )
+                        }
+                        item { SettingsGroupHeader("Explore & Highlights") }
+                        item {
+                            WhatsNewSettingsRow(
+                                enabled = state.whatsNewEnabled,
+                                hasUnseen = state.hasUnseenWhatsNew,
+                                itemCount = remember(state.whatsNewItems) { groupWhatsNewItems(state.whatsNewItems).size },
+                                onToggle = onToggleWhatsNew,
+                                onClick = { showWhatsNew = true },
+                            )
+                        }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Discover Vantafyn",
+                                            subtitle = "Explore features, hidden shortcuts, and tips",
+                                            icon = Icons.Rounded.AutoAwesome,
+                                            onClick = onDiscoverVantafyn,
+                                        )
+                                    },
+                                ),
+                            )
+                        }
+                    }
+                }
+                SettingsSubScreen.AudioAndPlayback -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                            .padding(horizontal = 8.dp),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                    ) {
+                        item {
+                            SettingsSubScreenHeader(
+                                title = "Audio & Playback",
+                                onBack = { currentSubScreen = SettingsSubScreen.Main },
+                            )
+                        }
+                        item { SettingsGroupHeader("Streaming Fidelity") }
+                        item {
+                            MusicStreamingQualitySettingsCard()
+                        }
+                        item { SettingsGroupHeader("Atmospheric Audio") }
+                        item {
+                            GlassPanel {
+                                ThemeMusicSettings(
+                                    checked = state.themeMusicEnabled,
+                                    selected = state.themeMusicVolume,
+                                    onToggle = onToggleThemeMusic,
+                                    onSelect = onSelectThemeMusicVolume,
+                                )
+                                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.75.dp)
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .clickable(onClick = {
+                                            val next = !soundEffectsOn
+                                            soundEffectsOn = next
+                                            dev.vantafyn.core.ui.VantafynSoundEffects.setSoundEffectsEnabled(context, next)
+                                        })
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    SettingsRowIcon(Icons.Rounded.VolumeUp)
+                                    Text(
+                                        "Soundscapes",
+                                        color = VantafynColors.Ink,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    VantafynPremiumSwitchVisual(checked = soundEffectsOn)
+                                }
+                            }
+                        }
+                        item { SettingsGroupHeader("Video & Playback") }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "Playback Preferences",
+                                            subtitle = "Player engine, max bitrate, passout protection",
+                                            icon = Icons.Rounded.Tune,
+                                            onClick = onPlaybackPreferences,
+                                        )
+                                    },
+                                ),
+                            )
+                        }
+                    }
+                }
+                SettingsSubScreen.IntegrationsAndAdvanced -> {
+                    val socialItems = buildList<@Composable () -> Unit> {
+                        add {
+                            SettingsToggleRow(
+                                title = "Achievement Badges",
+                                subtitle = "Track playback milestones and unlock trophies",
+                                icon = Icons.Rounded.EmojiEvents,
+                                checked = state.achievementsEnabled,
+                                onCheckedChange = onToggleAchievementsEnabled,
+                            )
+                        }
+                        if (state.achievementsEnabled && state.isAchievementsAvailable) {
+                            add {
+                                SettingsToggleRow(
+                                    title = "Friends & Messaging",
+                                    subtitle = "Connect with server friends and chat",
+                                    icon = Icons.Rounded.PeopleOutline,
+                                    checked = state.socialEnabled,
+                                    onCheckedChange = onToggleSocialEnabled,
+                                )
+                            }
+                            if (state.socialEnabled) {
+                                add {
+                                    SettingsToggleRow(
+                                        title = "Floating Chat Bubble",
+                                        subtitle = "Keep a persistent chat bubble on screen",
+                                        icon = Icons.Rounded.Forum,
+                                        checked = state.socialDockEnabled,
+                                        onCheckedChange = onToggleSocialDockEnabled,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    val serverItems = buildList<@Composable () -> Unit> {
                         if (state.session?.user?.isAdministrator == true) {
-                            SettingsRow("Admin", "", onAdmin, compact = true, icon = Icons.Rounded.AdminPanelSettings)
+                            add {
+                                SettingsNavigationRow(
+                                    title = "Admin Console",
+                                    subtitle = "Server management, activity, and statistics",
+                                    icon = Icons.Rounded.AdminPanelSettings,
+                                    onClick = onAdmin,
+                                )
+                            }
                         }
                         if (state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers) {
-                            SettingsRow("Integrations & Requests", "", onRequests, compact = true, icon = Icons.Rounded.Apps)
+                            add {
+                                SettingsNavigationRow(
+                                    title = "Integrations & Requests",
+                                    subtitle = "Manage Ombi media requests and sync",
+                                    icon = Icons.Rounded.Apps,
+                                    onClick = onRequests,
+                                )
+                            }
                         }
-                        SettingsRow("Downloads", "", onDownloads, compact = true, icon = Icons.Rounded.Download)
-                        SettingsRow("Playback Preferences", "", onPlaybackPreferences, compact = true, icon = Icons.Rounded.Tune)
-                        SettingsRow("Watch Party", "", onWatchParty, compact = true, icon = Icons.Rounded.Groups)
-                        SettingsRow("Discover Vantafyn", "", onDiscoverVantafyn, compact = true, icon = Icons.Rounded.AutoAwesome)
-                        SettingsRow("App version $VANTAFYN_APP_VERSION", "", { showVersionDialog = true }, compact = true, icon = Icons.Rounded.Info)
+                        add {
+                            SettingsNavigationRow(
+                                title = "Downloads",
+                                subtitle = "Offline media storage and downloads manager",
+                                icon = Icons.Rounded.Download,
+                                onClick = onDownloads,
+                            )
+                        }
+                        add {
+                            SettingsNavigationRow(
+                                title = "Watch Party",
+                                subtitle = "Synchronized playback room with friends",
+                                icon = Icons.Rounded.Groups,
+                                onClick = onWatchParty,
+                            )
+                        }
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .imePadding()
+                            .padding(horizontal = 8.dp),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                    ) {
+                        item {
+                            SettingsSubScreenHeader(
+                                title = "Integrations & Advanced",
+                                onBack = { currentSubScreen = SettingsSubScreen.Main },
+                            )
+                        }
+                        item { SettingsGroupHeader("Community & Social") }
+                        item { SettingsCardGroup(items = socialItems) }
+                        if (serverItems.isNotEmpty()) {
+                            item { SettingsGroupHeader("Server Tools & Media") }
+                            item { SettingsCardGroup(items = serverItems) }
+                        }
+                        item { SettingsGroupHeader("Device Permissions") }
+                        item {
+                            GlassPanel {
+                                PermissionStatusGrid(
+                                    notificationPermissionState = notificationPermissionState,
+                                    onShowPermission = { permissionDetail = it },
+                                )
+                            }
+                        }
+                        item { SettingsGroupHeader("About") }
+                        item {
+                            SettingsCardGroup(
+                                items = listOf(
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "App version $VANTAFYN_APP_VERSION",
+                                            subtitle = "Vantafyn build and release information",
+                                            icon = Icons.Rounded.Info,
+                                            onClick = { showVersionDialog = true },
+                                        )
+                                    },
+                                ),
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
     if (showPasswordDialog) {
         PasswordChangeDialog(
             title = "Change Password",
@@ -11732,103 +12234,77 @@ private fun ProfileSettingsScreen(
 }
 
 @Composable
-private fun AmbientDisplaySettingsCard() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var currentMode by remember { mutableStateOf(dev.vantafyn.core.media.ambient.AmbientDisplayPreferences.getMode(context)) }
-
-    GlassPanel {
-        Text(
-            "Ambient Display",
-            color = VantafynColors.Ink,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Text(
-            "Fullscreen synced lyrics and controls over your lock screen during playback.",
-            color = VantafynColors.Muted,
-            style = MaterialTheme.typography.bodyMedium,
-        )
-
-        Spacer(Modifier.height(2.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SettingsRowIcon(Icons.Rounded.Fullscreen)
-            Text(
-                "Auto-launch on lock",
-                color = VantafynColors.Ink,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-        }
-
-        VantafynGlassSurface(
-            modifier = Modifier.fillMaxWidth(),
-            variant = VantafynGlassVariant.Chip,
-            cornerRadius = 999.dp,
-            contentPadding = PaddingValues(4.dp),
-        ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                dev.vantafyn.core.media.ambient.AmbientAutoLaunchMode.entries.forEach { mode ->
-                    val isSelected = mode == currentMode
-                    val shape = RoundedCornerShape(999.dp)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .then(
-                                if (isSelected) {
-                                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
-                                } else {
-                                    Modifier.clip(shape)
-                                },
-                            )
-                            .background(if (isSelected) Color.White.copy(alpha = 0.08f) else Color.Transparent)
-                            .clickable {
-                                currentMode = mode
-                                dev.vantafyn.core.media.ambient.AmbientDisplayPreferences.setMode(context, mode)
-                            }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = mode.label,
-                            color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
-
-        Text(
-            text = currentMode.description,
-            color = VantafynColors.Muted,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier.padding(horizontal = 4.dp),
-        )
-
-        Spacer(Modifier.height(4.dp))
-
-        SettingsRow(
-            title = "Preview Ambient Display",
-            subtitle = "Test the fullscreen synced lyrics ambient experience",
-            onClick = {
-                runCatching {
-                    val intent = Intent(context, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity"))
-                    context.startActivity(intent)
-                }
-            },
-            icon = Icons.Rounded.PlayArrow,
-            compact = true,
-        )
-    }
-}
+private fun ProfileSettingsScreen(
+    state: VantafynHomeUiState,
+    onAdmin: () -> Unit,
+    onRequests: () -> Unit,
+    onDownloads: () -> Unit,
+    onWatchParty: () -> Unit,
+    onHomeLayout: () -> Unit,
+    onPlaybackPreferences: () -> Unit,
+    onToggleThemeMusic: () -> Unit,
+    onSelectThemeMusicVolume: (ThemeMusicVolume) -> Unit,
+    onSetBottomRailAccent: (BottomRailAccent) -> Unit,
+    onToggleAutoLoginLastProfile: () -> Unit,
+    onSwitchUser: () -> Unit,
+    onAddProfile: () -> Unit,
+    onPairTv: () -> Unit = {},
+    onSendTextToTv: () -> Unit = {},
+    onQuickConnect: () -> Unit,
+    onLogout: () -> Unit,
+    onSelectBackground: (VantafynAppBackground) -> Unit,
+    onSelectTheme: (VantafynThemePreset) -> Unit,
+    onChangePassword: (String, String) -> Unit,
+    onUploadProfileImage: (ByteArray, String) -> Unit,
+    onDeleteProfileImage: () -> Unit,
+    notificationPermissionState: VantafynPermissionUiState,
+    onNotificationPermissionAction: () -> Unit,
+    onOpenMedia: (java.util.UUID) -> Unit,
+    onMarkWhatsNewSeen: () -> Unit,
+    onToggleWhatsNew: () -> Unit,
+    onToggleAchievementsEnabled: () -> Unit = {},
+    onToggleSocialEnabled: () -> Unit = {},
+    onToggleSocialDockEnabled: () -> Unit = {},
+    onDiscoverVantafyn: () -> Unit,
+    onSelectExperienceMode: (ExperienceMode) -> Unit = {},
+    onSelectMusicBackend: (MusicBackendType) -> Unit = {},
+    viewModel: VantafynHomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+) = SettingsScreen(
+    state = state,
+    onAdmin = onAdmin,
+    onRequests = onRequests,
+    onDownloads = onDownloads,
+    onWatchParty = onWatchParty,
+    onHomeLayout = onHomeLayout,
+    onPlaybackPreferences = onPlaybackPreferences,
+    onToggleThemeMusic = onToggleThemeMusic,
+    onSelectThemeMusicVolume = onSelectThemeMusicVolume,
+    onSetBottomRailAccent = onSetBottomRailAccent,
+    onToggleAutoLoginLastProfile = onToggleAutoLoginLastProfile,
+    onSwitchUser = onSwitchUser,
+    onAddProfile = onAddProfile,
+    onPairTv = onPairTv,
+    onSendTextToTv = onSendTextToTv,
+    onQuickConnect = onQuickConnect,
+    onLogout = onLogout,
+    onSelectBackground = onSelectBackground,
+    onSelectTheme = onSelectTheme,
+    onChangePassword = onChangePassword,
+    onUploadProfileImage = onUploadProfileImage,
+    onDeleteProfileImage = onDeleteProfileImage,
+    notificationPermissionState = notificationPermissionState,
+    onNotificationPermissionAction = onNotificationPermissionAction,
+    onOpenMedia = onOpenMedia,
+    onMarkWhatsNewSeen = onMarkWhatsNewSeen,
+    onToggleWhatsNew = onToggleWhatsNew,
+    onToggleAchievementsEnabled = onToggleAchievementsEnabled,
+    onToggleSocialEnabled = onToggleSocialEnabled,
+    onToggleSocialDockEnabled = onToggleSocialDockEnabled,
+    onDiscoverVantafyn = onDiscoverVantafyn,
+    onSelectExperienceMode = onSelectExperienceMode,
+    onSelectMusicBackend = onSelectMusicBackend,
+    viewModel = viewModel,
+)
 
 @Composable
 private fun MusicStreamingQualitySettingsCard() {
@@ -13766,24 +14242,371 @@ private fun String.subtitleModeDisplayLabel(): String =
         else -> this
     }
 
+private data class OfflineDownloadCollection(
+    val id: String,
+    val title: String,
+    val subtitle: String?,
+    val isPlaylist: Boolean,
+    val representative: DownloadRecord,
+    val records: List<DownloadRecord>,
+)
+
+private fun DownloadRecord.matchesPlaybackTrack(currentTrackId: UUID?): Boolean {
+    if (currentTrackId == null) return false
+    val trackUuid = runCatching { UUID.fromString(identity.itemId) }.getOrNull()
+        ?: UUID.nameUUIDFromBytes(identity.itemId.toByteArray())
+    return trackUuid == currentTrackId
+}
+
+@Composable
+private fun OfflineCollectionArtGrid(models: List<Any>, modifier: Modifier = Modifier) {
+    val items = models.take(4)
+    val fallback = items.firstOrNull()
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(22.dp))
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.66f)),
+    ) {
+        Column(Modifier.fillMaxSize()) {
+            for (row in 0 until 2) {
+                Row(Modifier.weight(1f)) {
+                    for (col in 0 until 2) {
+                        val idx = row * 2 + col
+                        val model = items.getOrNull(idx) ?: fallback
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .padding(1.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (model != null) {
+                                AsyncImage(
+                                    model = model,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            } else {
+                                OfflineDownloadArtworkFallback(
+                                    title = "${idx + 1}",
+                                    icon = Icons.Rounded.MusicNote,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun OfflineCollectionDetailView(
+    collection: OfflineDownloadCollection,
+    onBack: () -> Unit,
+    onPlayQueue: (List<DownloadRecord>, Int) -> Unit,
+    onTrackOptions: (DownloadRecord) -> Unit,
+) {
+    val context = LocalContext.current
+    val musicController = remember(context) { dev.vantafyn.core.media.MusicPlaybackController.get(context) }
+    val musicPlayback by musicController.state.collectAsStateWithLifecycle()
+    val artworkModels = remember(collection.records) {
+        collection.records.mapNotNull { it.offlineArtworkModel() }.distinct().take(4)
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+            .imePadding()
+            .padding(horizontal = 8.dp),
+        contentPadding = PaddingValues(top = 10.dp, bottom = 118.dp),
+        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+    ) {
+        item(key = "nav-header") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            ) {
+                CompactBackButton(onClick = onBack)
+                Text(
+                    text = if (collection.isPlaylist) "Playlist" else "Album",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        item(key = "collection-header") {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (collection.isPlaylist && artworkModels.size >= 2) {
+                    OfflineCollectionArtGrid(artworkModels, Modifier.size(188.dp))
+                } else {
+                    val singleModel = collection.representative.offlineArtworkModel()
+                    Box(
+                        modifier = Modifier
+                            .size(188.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.56f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (singleModel != null) {
+                            AsyncImage(
+                                model = singleModel,
+                                contentDescription = collection.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            OfflineDownloadArtworkFallback(
+                                title = collection.title,
+                                icon = Icons.Rounded.MusicNote,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    collection.title,
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                collection.subtitle?.let { sub ->
+                    Text(
+                        sub,
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 22.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    VantafynButton(
+                        "Play",
+                        onClick = { onPlayQueue(collection.records, 0) },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        VantafynGlassSurface(
+                            modifier = Modifier.fillMaxSize(),
+                            variant = VantafynGlassVariant.Card,
+                            cornerRadius = 18.dp,
+                            contentPadding = PaddingValues(0.dp),
+                        ) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(VantafynGradients.accentHorizontal()),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = "Downloaded",
+                                        tint = VantafynColors.Ink,
+                                        modifier = Modifier.size(19.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item(key = "tracks-header") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "Tracks",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${collection.records.size} ${if (collection.records.size == 1) "track" else "tracks"}",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+        }
+
+        itemsIndexed(collection.records, key = { _, item -> item.id }) { index, trackRecord ->
+            val isCurrentTrack = trackRecord.matchesPlaybackTrack(musicPlayback.currentTrack?.id)
+            VantafynGlassCard(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isCurrentTrack) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
+                        else Modifier
+                    )
+                    .combinedClickable(
+                        onClick = { onPlayQueue(collection.records, index) },
+                        onLongClick = { onTrackOptions(trackRecord) },
+                    ),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(10.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier.size(28.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isCurrentTrack && musicPlayback.isPlaying) {
+                            Icon(
+                                imageVector = Icons.Rounded.GraphicEq,
+                                contentDescription = "Playing",
+                                tint = VantafynColors.Primary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        } else {
+                            Text(
+                                text = "${index + 1}",
+                                color = if (isCurrentTrack) VantafynColors.Primary else VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isCurrentTrack) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+                    }
+
+                    val trackArt = trackRecord.offlineArtworkModel()
+                    Box(
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.56f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (trackArt != null) {
+                            AsyncImage(
+                                model = trackArt,
+                                contentDescription = trackRecord.title,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            OfflineDownloadArtworkFallback(
+                                title = trackRecord.title,
+                                icon = Icons.Rounded.MusicNote,
+                                modifier = Modifier.fillMaxSize(),
+                            )
+                        }
+                    }
+
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            text = trackRecord.title,
+                            color = if (isCurrentTrack) VantafynColors.Primary else VantafynColors.Ink,
+                            fontWeight = if (isCurrentTrack) FontWeight.SemiBold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        trackRecord.artistName?.let { artist ->
+                            Text(
+                                text = artist,
+                                color = VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+
+                    trackRecord.runtimeTicks?.let { ticks ->
+                        Text(
+                            text = ticks.toTimeLabel(),
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+
+                    IconButton(
+                        onClick = { onTrackOptions(trackRecord) },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "Track options",
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DownloadsScreen(
     state: VantafynHomeUiState,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     onPlay: (DownloadRecord) -> Unit,
+    onPlayQueue: (List<DownloadRecord>, Int) -> Unit = { _, _ -> },
+    onPlayNext: ((DownloadRecord) -> Unit)? = null,
+    onAddToQueue: ((DownloadRecord) -> Unit)? = null,
     onCancel: (DownloadRecord) -> Unit,
     onRetry: (DownloadRecord) -> Unit,
     onRemove: (DownloadRecord) -> Unit,
     onRemoveAll: () -> Unit,
     onSetWifiOnlyDefault: (Boolean) -> Unit,
 ) {
+    val isMusicOnly = state.experienceMode == ExperienceMode.MusicOnly
     var query by rememberSaveable { mutableStateOf("") }
     var selectedType by rememberSaveable { mutableStateOf(DownloadFilter.All) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var selectedDownload by remember { mutableStateOf<DownloadRecord?>(null) }
-    val visibleDownloads = remember(state.offlineDownloads, query, selectedType) {
-        state.offlineDownloads
+    var selectedCollection by remember { mutableStateOf<OfflineDownloadCollection?>(null) }
+    val baseDownloads = remember(state.offlineDownloads, isMusicOnly) {
+        if (isMusicOnly) {
+            state.offlineDownloads.filter {
+                it.mediaType == DownloadMediaType.MusicTrack || it.mediaType == DownloadMediaType.MusicAlbum
+            }
+        } else {
+            state.offlineDownloads
+        }
+    }
+    val visibleDownloads = remember(baseDownloads, query, selectedType) {
+        baseDownloads
             .asSequence()
             .filter { selectedType.matches(it) }
             .filter { it.matchesOfflineDownloadQuery(query) }
@@ -13791,11 +14614,43 @@ private fun DownloadsScreen(
     }
     var screenRevealActive by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
+        onRefresh()
         screenRevealActive = true
         delay(1_450L)
         screenRevealActive = false
     }
     Box(modifier = Modifier.fillMaxSize()) {
+        if (selectedCollection != null) {
+            val currentCollection = selectedCollection!!
+            val updatedRecords = remember(state.offlineDownloads, currentCollection.id) {
+                val matching = if (currentCollection.isPlaylist) {
+                    state.offlineDownloads.filter {
+                        it.state == DownloadState.Completed &&
+                            it.mediaType == DownloadMediaType.MusicTrack &&
+                            it.parentId == currentCollection.id
+                    }
+                } else {
+                    state.offlineDownloads.filter {
+                        it.state == DownloadState.Completed &&
+                            it.mediaType == DownloadMediaType.MusicTrack &&
+                            (it.albumId == currentCollection.id || it.identity.itemId == currentCollection.id)
+                    }
+                }
+                matching.sortedWith(
+                    compareBy<DownloadRecord> { it.sortTitle ?: it.title }
+                        .thenBy { it.createdAtMillis }
+                        .thenBy { it.title }
+                ).ifEmpty { currentCollection.records }
+            }
+            val activeCollection = currentCollection.copy(records = updatedRecords)
+            BackHandler { selectedCollection = null }
+            OfflineCollectionDetailView(
+                collection = activeCollection,
+                onBack = { selectedCollection = null },
+                onPlayQueue = onPlayQueue,
+                onTrackOptions = { selectedDownload = it },
+            )
+        } else {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -13812,9 +14667,11 @@ private fun DownloadsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                     ) {
-                        CompactBackButton(onClick = onBack)
+                        if (!isMusicOnly) {
+                            CompactBackButton(onClick = onBack)
+                        }
                         Text(
-                            "Downloads",
+                            if (isMusicOnly) "Downloaded Music" else "Downloads",
                             color = VantafynColors.Ink,
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.SemiBold,
@@ -13837,14 +14694,15 @@ private fun DownloadsScreen(
                 HomeContentReveal(index = 1, animate = screenRevealActive) {
                     DownloadStorageCard(
                         summary = state.offlineDownloadStorageSummary,
-                        records = state.offlineDownloads,
+                        records = baseDownloads,
+                        isMusicOnly = isMusicOnly,
                         wifiOnly = state.downloadWifiOnlyDefault,
                         onToggleWifiOnly = { onSetWifiOnlyDefault(!state.downloadWifiOnlyDefault) },
                         query = query,
                         onQueryChange = { query = it },
                         selectedFilter = selectedType,
                         onSelectFilter = { selectedType = it },
-                        showRemoveAll = state.offlineDownloads.isNotEmpty(),
+                        showRemoveAll = baseDownloads.isNotEmpty(),
                         onRemoveAll = { confirmClear = true },
                     )
                 }
@@ -13863,23 +14721,27 @@ private fun DownloadsScreen(
                     }
                 }
             }
-            if (!state.isDownloadsLoading && state.offlineDownloads.isEmpty() && state.downloadsError == null) {
+            if (!state.isDownloadsLoading && baseDownloads.isEmpty() && state.downloadsError == null) {
                 item {
                     HomeContentReveal(index = 2, animate = screenRevealActive) {
                         LibraryItemsEmptyState(
-                            title = "Nothing saved yet",
-                            subtitle = "Save movies, episodes, seasons, music, and audiobooks. Completed downloads will play without a server connection.",
-                            icon = Icons.Rounded.Download,
+                            title = if (isMusicOnly) "No downloaded music yet" else "Nothing saved yet",
+                            subtitle = if (isMusicOnly) {
+                                "Download your favorite tracks, albums, and playlists to listen anywhere offline."
+                            } else {
+                                "Save movies, episodes, seasons, music, and audiobooks. Completed downloads will play without a server connection."
+                            },
+                            icon = if (isMusicOnly) Icons.Rounded.DownloadDone else Icons.Rounded.Download,
                         )
                     }
                 }
             }
-            if (!state.isDownloadsLoading && state.offlineDownloads.isNotEmpty() && visibleDownloads.isEmpty()) {
+            if (!state.isDownloadsLoading && baseDownloads.isNotEmpty() && visibleDownloads.isEmpty()) {
                 item {
                     HomeContentReveal(index = 2, animate = screenRevealActive) {
                         LibraryItemsEmptyState(
                             title = "Nothing matched",
-                            subtitle = "Try a different title, artist, series, or media type.",
+                            subtitle = if (isMusicOnly) "Try searching for a different track, album, or playlist." else "Try a different title, artist, series, or media type.",
                             icon = Icons.Rounded.Search,
                         )
                     }
@@ -13890,7 +14752,9 @@ private fun DownloadsScreen(
                     HomeContentReveal(index = 3, animate = screenRevealActive, revealKey = visibleDownloads.map { it.id to it.state }) {
                         OfflineDownloadsRails(
                             records = visibleDownloads,
+                            isMusicOnly = isMusicOnly,
                             onPlay = onPlay,
+                            onOpenCollection = { selectedCollection = it },
                             onLongPress = { selectedDownload = it },
                             onCancel = onCancel,
                             onRetry = onRetry,
@@ -13900,6 +14764,7 @@ private fun DownloadsScreen(
                 }
             }
         }
+        }
         selectedDownload?.let { record ->
             DownloadActionsModal(
                 record = record,
@@ -13908,6 +14773,18 @@ private fun DownloadsScreen(
                     selectedDownload = null
                     onPlay(record)
                 },
+                onPlayNext = if (onPlayNext != null) {
+                    {
+                        selectedDownload = null
+                        onPlayNext(record)
+                    }
+                } else null,
+                onAddToQueue = if (onAddToQueue != null) {
+                    {
+                        selectedDownload = null
+                        onAddToQueue(record)
+                    }
+                } else null,
                 onCancel = {
                     selectedDownload = null
                     onCancel(record)
@@ -13970,6 +14847,7 @@ private fun DownloadsScreen(
 private fun DownloadStorageCard(
     summary: DownloadStorageSummary?,
     records: List<DownloadRecord>,
+    isMusicOnly: Boolean = false,
     wifiOnly: Boolean,
     onToggleWifiOnly: () -> Unit,
     query: String,
@@ -13983,7 +14861,7 @@ private fun DownloadStorageCard(
         Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
             SettingsRowIcon(Icons.Rounded.Storage)
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text("Offline Library", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(if (isMusicOnly) "Offline Music" else "Offline Library", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 Text(
                     "${summary?.completedCount ?: records.count { it.state == DownloadState.Completed }} ready · ${summary?.activeCount ?: 0} active",
                     color = VantafynColors.Muted,
@@ -13997,10 +14875,23 @@ private fun DownloadStorageCard(
                 fontWeight = FontWeight.SemiBold,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
-            DownloadStatPill("Video", records.count { it.mediaType == DownloadMediaType.Movie || it.mediaType == DownloadMediaType.Episode || it.mediaType == DownloadMediaType.Season })
-            DownloadStatPill("Music", records.count { it.mediaType == DownloadMediaType.MusicTrack || it.mediaType == DownloadMediaType.MusicAlbum })
-            DownloadStatPill("Books", records.count { it.mediaType == DownloadMediaType.Audiobook })
+        if (isMusicOnly) {
+            val playlistCount = records.filter { it.mediaType == DownloadMediaType.MusicTrack && !it.parentId.isNullOrBlank() }
+                .groupBy { it.parentId }.size
+            val albumCount = records.filter { it.mediaType == DownloadMediaType.MusicTrack && it.parentId.isNullOrBlank() && !it.albumId.isNullOrBlank() }
+                .groupBy { it.albumId }.size + records.count { it.mediaType == DownloadMediaType.MusicAlbum }
+            val trackCount = records.count { it.mediaType == DownloadMediaType.MusicTrack }
+            Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                DownloadStatPill("Playlists", playlistCount)
+                DownloadStatPill("Albums", albumCount)
+                DownloadStatPill("Tracks", trackCount)
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                DownloadStatPill("Video", records.count { it.mediaType == DownloadMediaType.Movie || it.mediaType == DownloadMediaType.Episode || it.mediaType == DownloadMediaType.Season })
+                DownloadStatPill("Music", records.count { it.mediaType == DownloadMediaType.MusicTrack || it.mediaType == DownloadMediaType.MusicAlbum })
+                DownloadStatPill("Books", records.count { it.mediaType == DownloadMediaType.Audiobook })
+            }
         }
         PremiumToggleRow(
             title = "Wi-Fi only downloads",
@@ -14014,10 +14905,31 @@ private fun DownloadStorageCard(
                 value = query,
                 onValueChange = onQueryChange,
                 label = "Search downloads",
-                placeholder = "Movies, episodes, songs...",
+                placeholder = if (isMusicOnly) "Tracks, albums, playlists..." else "Movies, episodes, songs...",
             )
+            val availableFilters = remember(isMusicOnly) {
+                if (isMusicOnly) {
+                    listOf(
+                        DownloadFilter.All,
+                        DownloadFilter.Playlists,
+                        DownloadFilter.Albums,
+                        DownloadFilter.Tracks,
+                        DownloadFilter.Active,
+                        DownloadFilter.Ready,
+                    )
+                } else {
+                    listOf(
+                        DownloadFilter.All,
+                        DownloadFilter.Video,
+                        DownloadFilter.Music,
+                        DownloadFilter.Books,
+                        DownloadFilter.Active,
+                        DownloadFilter.Ready,
+                    )
+                }
+            }
             LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
-                items(DownloadFilter.entries.toList(), key = { it.name }) { filter ->
+                items(availableFilters, key = { it.name }) { filter ->
                     SelectableChip(filter.label, selectedFilter == filter) {
                         onSelectFilter(filter)
                     }
@@ -14055,7 +14967,9 @@ private fun DownloadStatPill(label: String, count: Int) {
 @Composable
 private fun OfflineDownloadsRails(
     records: List<DownloadRecord>,
+    isMusicOnly: Boolean = false,
     onPlay: (DownloadRecord) -> Unit,
+    onOpenCollection: (OfflineDownloadCollection) -> Unit,
     onLongPress: (DownloadRecord) -> Unit,
     onCancel: (DownloadRecord) -> Unit,
     onRetry: (DownloadRecord) -> Unit,
@@ -14064,9 +14978,9 @@ private fun OfflineDownloadsRails(
     val active = remember(records) { records.filter { it.isActiveDownload() } }
     val failed = remember(records) { records.filter { it.state == DownloadState.Failed || it.state == DownloadState.Cancelled } }
     val ready = remember(records) { records.filter { it.state == DownloadState.Completed } }
-    val movies = remember(ready) { ready.filter { it.mediaType == DownloadMediaType.Movie }.sortedByOfflineTitle() }
-    val tv = remember(ready) {
-        ready.filter { it.mediaType == DownloadMediaType.Episode || it.mediaType == DownloadMediaType.Season }
+    val movies = remember(ready, isMusicOnly) { if (isMusicOnly) emptyList() else ready.filter { it.mediaType == DownloadMediaType.Movie }.sortedByOfflineTitle() }
+    val tv = remember(ready, isMusicOnly) {
+        if (isMusicOnly) emptyList() else ready.filter { it.mediaType == DownloadMediaType.Episode || it.mediaType == DownloadMediaType.Season }
             .sortedWith(compareBy<DownloadRecord> { it.seriesName ?: it.title }
                 .thenBy { it.seasonNumber ?: 0 }
                 .thenBy { it.episodeNumber ?: 0 }
@@ -14076,14 +14990,26 @@ private fun OfflineDownloadsRails(
         ready.filter { it.mediaType == DownloadMediaType.MusicTrack && !it.parentId.isNullOrBlank() && !it.albumName.isNullOrBlank() }
             .groupBy { it.parentId.orEmpty() }
             .values
-            .map { it.sortedByOfflineTitle() }
+            .map { group ->
+                group.sortedWith(
+                    compareBy<DownloadRecord> { it.sortTitle ?: it.title }
+                        .thenBy { it.createdAtMillis }
+                        .thenBy { it.title }
+                )
+            }
             .sortedBy { it.firstOrNull()?.albumName ?: it.firstOrNull()?.title.orEmpty() }
     }
     val albums = remember(ready) {
         ready.filter { it.mediaType == DownloadMediaType.MusicTrack && it.parentId.isNullOrBlank() && !it.albumId.isNullOrBlank() }
             .groupBy { it.albumId.orEmpty() }
             .values
-            .map { it.sortedByOfflineTitle() }
+            .map { group ->
+                group.sortedWith(
+                    compareBy<DownloadRecord> { it.sortTitle ?: it.title }
+                        .thenBy { it.createdAtMillis }
+                        .thenBy { it.title }
+                )
+            }
             .sortedBy { it.firstOrNull()?.albumName ?: it.firstOrNull()?.title.orEmpty() }
     }
     val looseSongs = remember(ready) {
@@ -14094,7 +15020,7 @@ private fun OfflineDownloadsRails(
         }.sortedByOfflineTitle()
     }
     val musicAlbums = remember(ready) { ready.filter { it.mediaType == DownloadMediaType.MusicAlbum }.sortedByOfflineTitle() }
-    val audiobooks = remember(ready) { ready.filter { it.mediaType == DownloadMediaType.Audiobook }.sortedByOfflineTitle() }
+    val audiobooks = remember(ready, isMusicOnly) { if (isMusicOnly) emptyList() else ready.filter { it.mediaType == DownloadMediaType.Audiobook }.sortedByOfflineTitle() }
 
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xl)) {
         if (active.isNotEmpty() || failed.isNotEmpty()) {
@@ -14107,32 +15033,36 @@ private fun OfflineDownloadsRails(
                 onLongPress = onLongPress,
             )
         }
-        OfflineDownloadRecordRail(
-            title = "Movies",
-            records = movies,
-            cardWidth = 142.dp,
-            wide = false,
-            onPlay = onPlay,
-            onLongPress = onLongPress,
-        )
-        OfflineDownloadRecordRail(
-            title = "TV",
-            records = tv,
-            cardWidth = 142.dp,
-            wide = false,
-            onPlay = onPlay,
-            onLongPress = onLongPress,
-        )
+        if (!isMusicOnly) {
+            OfflineDownloadRecordRail(
+                title = "Movies",
+                records = movies,
+                cardWidth = 142.dp,
+                wide = false,
+                onPlay = onPlay,
+                onLongPress = onLongPress,
+            )
+            OfflineDownloadRecordRail(
+                title = "TV",
+                records = tv,
+                cardWidth = 142.dp,
+                wide = false,
+                onPlay = onPlay,
+                onLongPress = onLongPress,
+            )
+        }
         OfflineDownloadCollectionRail(
             title = "Playlists",
             groups = playlists,
-            onPlay = onPlay,
+            isPlaylist = true,
+            onOpenCollection = onOpenCollection,
             onLongPress = onLongPress,
         )
         OfflineDownloadCollectionRail(
             title = "Albums",
             groups = albums,
-            onPlay = onPlay,
+            isPlaylist = false,
+            onOpenCollection = onOpenCollection,
             onLongPress = onLongPress,
         )
         OfflineDownloadRecordRail(
@@ -14140,7 +15070,25 @@ private fun OfflineDownloadsRails(
             records = musicAlbums,
             cardWidth = 142.dp,
             wide = false,
-            onPlay = onPlay,
+            onPlay = { record ->
+                val matchingTracks = ready.filter {
+                    it.mediaType == DownloadMediaType.MusicTrack && it.albumId == record.identity.itemId
+                }
+                if (matchingTracks.isNotEmpty()) {
+                    onOpenCollection(
+                        OfflineDownloadCollection(
+                            id = record.identity.itemId,
+                            title = record.albumName ?: record.title,
+                            subtitle = record.artistName ?: "Album",
+                            isPlaylist = false,
+                            representative = record,
+                            records = matchingTracks,
+                        )
+                    )
+                } else {
+                    onPlay(record)
+                }
+            },
             onLongPress = onLongPress,
         )
         OfflineDownloadRecordRail(
@@ -14151,14 +15099,16 @@ private fun OfflineDownloadsRails(
             onPlay = onPlay,
             onLongPress = onLongPress,
         )
-        OfflineDownloadRecordRail(
-            title = "Audiobooks",
-            records = audiobooks,
-            cardWidth = 220.dp,
-            wide = true,
-            onPlay = onPlay,
-            onLongPress = onLongPress,
-        )
+        if (!isMusicOnly) {
+            OfflineDownloadRecordRail(
+                title = "Audiobooks",
+                records = audiobooks,
+                cardWidth = 220.dp,
+                wide = true,
+                onPlay = onPlay,
+                onLongPress = onLongPress,
+            )
+        }
     }
 }
 
@@ -14200,7 +15150,8 @@ private fun OfflineDownloadRecordRail(
 private fun OfflineDownloadCollectionRail(
     title: String,
     groups: List<List<DownloadRecord>>,
-    onPlay: (DownloadRecord) -> Unit,
+    isPlaylist: Boolean,
+    onOpenCollection: (OfflineDownloadCollection) -> Unit,
     onLongPress: (DownloadRecord) -> Unit,
 ) {
     if (groups.isEmpty()) return
@@ -14214,17 +15165,32 @@ private fun OfflineDownloadCollectionRail(
         LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
             items(groups, key = { group -> group.firstOrNull()?.parentId ?: group.firstOrNull()?.albumId ?: group.firstOrNull()?.id.orEmpty() }) { group ->
                 val representative = group.first()
+                val collection = remember(group, isPlaylist) {
+                    OfflineDownloadCollection(
+                        id = if (isPlaylist) group.firstOrNull()?.parentId ?: group.firstOrNull()?.id.orEmpty()
+                             else group.firstOrNull()?.albumId ?: group.firstOrNull()?.id.orEmpty(),
+                        title = representative.albumName ?: representative.title,
+                        subtitle = if (isPlaylist) {
+                            listOfNotNull(
+                                representative.artistName,
+                                "${group.size} ${if (group.size == 1) "track" else "tracks"}",
+                            ).joinToString(" · ")
+                        } else {
+                            representative.artistName ?: "Album"
+                        },
+                        isPlaylist = isPlaylist,
+                        representative = representative,
+                        records = group,
+                    )
+                }
                 OfflineDownloadArtworkCard(
                     record = representative,
-                    title = representative.albumName ?: representative.title,
-                    subtitle = listOfNotNull(
-                        representative.artistName,
-                        "${group.size} ${if (group.size == 1) "track" else "tracks"}",
-                    ).joinToString(" · "),
+                    title = collection.title,
+                    subtitle = collection.subtitle,
                     countLabel = group.size.toString(),
                     cardWidth = 142.dp,
                     wide = false,
-                    onPlay = { onPlay(representative) },
+                    onPlay = { onOpenCollection(collection) },
                     onLongPress = { onLongPress(representative) },
                 )
             }
@@ -14252,7 +15218,11 @@ private fun OfflineDownloadArtworkCard(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .then(if (wide) Modifier.height(126.dp) else Modifier.aspectRatio(0.68f))
+                .then(
+                    if (wide) Modifier.height(126.dp)
+                    else if (record.mediaType.isOfflineAudio()) Modifier.aspectRatio(1f)
+                    else Modifier.aspectRatio(0.68f)
+                )
                 .clip(RoundedCornerShape(18.dp))
                 .background(VantafynColors.SurfaceHigh.copy(alpha = 0.56f))
                 .combinedClickable(
@@ -14401,6 +15371,8 @@ private fun DownloadActionsModal(
     record: DownloadRecord,
     onDismiss: () -> Unit,
     onPlay: () -> Unit,
+    onPlayNext: (() -> Unit)? = null,
+    onAddToQueue: (() -> Unit)? = null,
     onCancel: () -> Unit,
     onRetry: () -> Unit,
     onRemove: () -> Unit,
@@ -14469,18 +15441,37 @@ private fun DownloadActionsModal(
                         )
                     }
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
-                    if (isReady) {
-                        VantafynButton("Play", onClick = onPlay, modifier = Modifier.weight(1f))
+                if (isReady && record.mediaType.isOfflineAudio() && onPlayNext != null && onAddToQueue != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+                            VantafynButton("Play", onClick = onPlay, modifier = Modifier.weight(1f))
+                            OutlinedButton(onClick = onPlayNext, modifier = Modifier.weight(1f)) {
+                                Text("Play next")
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+                            OutlinedButton(onClick = onAddToQueue, modifier = Modifier.weight(1f)) {
+                                Text("Add to queue")
+                            }
+                            OutlinedButton(onClick = onRemove, modifier = Modifier.weight(1f)) {
+                                Text("Remove", color = Color(0xFFFFC2C2))
+                            }
+                        }
                     }
-                    if (isActive) {
-                        OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
-                    }
-                    if (canRetry) {
-                        VantafynButton("Retry", onClick = onRetry, modifier = Modifier.weight(1f))
-                    }
-                    if (!isActive) {
-                        OutlinedButton(onClick = onRemove, modifier = Modifier.weight(1f)) { Text("Remove", color = Color(0xFFFFC2C2)) }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md), verticalAlignment = Alignment.CenterVertically) {
+                        if (isReady) {
+                            VantafynButton("Play", onClick = onPlay, modifier = Modifier.weight(1f))
+                        }
+                        if (isActive) {
+                            OutlinedButton(onClick = onCancel, modifier = Modifier.weight(1f)) { Text("Cancel") }
+                        }
+                        if (canRetry) {
+                            VantafynButton("Retry", onClick = onRetry, modifier = Modifier.weight(1f))
+                        }
+                        if (!isActive) {
+                            OutlinedButton(onClick = onRemove, modifier = Modifier.weight(1f)) { Text("Remove", color = Color(0xFFFFC2C2)) }
+                        }
                     }
                 }
             }
@@ -14697,6 +15688,9 @@ private enum class DownloadFilter(val label: String) {
     All("All"),
     Video("Video"),
     Music("Music"),
+    Playlists("Playlists"),
+    Albums("Albums"),
+    Tracks("Tracks"),
     Books("Books"),
     Active("Active"),
     Ready("Ready");
@@ -14709,6 +15703,9 @@ private enum class DownloadFilter(val label: String) {
                 record.mediaType == DownloadMediaType.Season
             Music -> record.mediaType == DownloadMediaType.MusicTrack ||
                 record.mediaType == DownloadMediaType.MusicAlbum
+            Playlists -> record.mediaType == DownloadMediaType.MusicTrack && !record.parentId.isNullOrBlank()
+            Albums -> record.mediaType == DownloadMediaType.MusicAlbum || (record.mediaType == DownloadMediaType.MusicTrack && !record.albumId.isNullOrBlank())
+            Tracks -> record.mediaType == DownloadMediaType.MusicTrack
             Books -> record.mediaType == DownloadMediaType.Audiobook
             Active -> record.state in setOf(
                 DownloadState.Queued,
@@ -18206,8 +19203,8 @@ private fun MobileBottomNav(
         if (experienceMode == ExperienceMode.MusicOnly) {
             buildList {
                 add(MobileDestination.Music)
-                add(MobileDestination.Libraries)
                 add(MobileDestination.Favorites)
+                add(MobileDestination.Downloads)
                 add(MobileDestination.Profile)
             }
         } else {
@@ -18772,7 +19769,7 @@ private fun PopupSyncedLyricsView(
     val lifecycleOwner = LocalLifecycleOwner.current
     val activeLineLeadMs = 120L
     var livePlaybackMs by remember(trackId, lines) { mutableLongStateOf(playbackMs) }
-    val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0) }
+    val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs) }
     var suppressAutoFollowUntil by remember(trackId, lines) { mutableLongStateOf(0L) }
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
 
@@ -18808,7 +19805,7 @@ private fun PopupSyncedLyricsView(
     }
 
     LaunchedEffect(activeIndex, lines) {
-        if (lines.isEmpty()) return@LaunchedEffect
+        if (lines.isEmpty() || activeIndex < 0) return@LaunchedEffect
         val isSuppressed = System.currentTimeMillis() < suppressAutoFollowUntil
         if (!isSuppressed) {
             val target = activeIndex.coerceIn(0, lines.lastIndex)
@@ -18954,9 +19951,9 @@ private fun PopupLyricsEmptyState(title: String, message: String, modifier: Modi
 
 private fun List<JellyfinLyricLine>.activeIndex(positionMs: Long): Int {
     if (isEmpty()) return -1
-    var active = 0
+    var active = -1
     forEachIndexed { index, line ->
-        val start = line.startMs ?: return@forEachIndexed
+        val start = line.startMs?.let { if (it > 1_000_000L) it / 10_000L else it } ?: return@forEachIndexed
         if (start <= positionMs) active = index else return active
     }
     return active
@@ -19185,6 +20182,25 @@ private fun MiniNavIcon(destination: MobileDestination, selected: Boolean, activ
                 drawIconPath(path)
                 drawIconLine(start = androidx.compose.ui.geometry.Offset(8.3.dp.toPx(), 11.5.dp.toPx()), end = androidx.compose.ui.geometry.Offset(10.6.dp.toPx(), 14.dp.toPx()))
                 drawIconLine(start = androidx.compose.ui.geometry.Offset(10.6.dp.toPx(), 14.dp.toPx()), end = androidx.compose.ui.geometry.Offset(15.dp.toPx(), 9.dp.toPx()))
+            }
+            MobileDestination.Downloads -> {
+                val tray = Path().apply {
+                    moveTo(4.5.dp.toPx(), 13.5.dp.toPx())
+                    lineTo(4.5.dp.toPx(), 19.dp.toPx())
+                    lineTo(18.5.dp.toPx(), 19.dp.toPx())
+                    lineTo(18.5.dp.toPx(), 13.5.dp.toPx())
+                }
+                drawIconPath(tray)
+                drawIconLine(
+                    start = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 4.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(11.5.dp.toPx(), 14.5.dp.toPx()),
+                )
+                val arrow = Path().apply {
+                    moveTo(7.5.dp.toPx(), 10.5.dp.toPx())
+                    lineTo(11.5.dp.toPx(), 14.5.dp.toPx())
+                    lineTo(15.5.dp.toPx(), 10.5.dp.toPx())
+                }
+                drawIconPath(arrow)
             }
             MobileDestination.Profile -> {
                 drawIconCircle(radius = 3.dp.toPx(), center = androidx.compose.ui.geometry.Offset(size.width / 2f, size.height / 2f))
@@ -19623,7 +20639,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.3"
+private const val VANTAFYN_APP_VERSION = "0.9.4"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

@@ -1095,11 +1095,13 @@ class SdkJellyfinSocialRepository(
 
     private fun toUserAvatarUrl(session: JellyfinSession, userId: UUID, tag: String?): String {
         val baseUrl = session.server.url.trimEnd('/')
-        return if (!tag.isNullOrBlank()) {
-            "$baseUrl/Users/$userId/Images/Primary?tag=$tag&api_key=${session.accessToken}"
-        } else {
-            "$baseUrl/Users/$userId/Images/Primary?api_key=${session.accessToken}"
-        }
+        val params = buildList {
+            if (!tag.isNullOrBlank()) add("tag=$tag")
+            add("maxWidth=200")
+            add("format=Webp")
+            add("quality=90")
+        }.joinToString("&")
+        return "$baseUrl/Users/$userId/Images/Primary?$params"
     }
 
     private fun String?.parseUuidOrNull(): UUID? {

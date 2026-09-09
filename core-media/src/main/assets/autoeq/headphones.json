@@ -1,0 +1,312 @@
+[
+  {
+    "id": "sony_wh_1000xm5",
+    "name": "Sony WH-1000XM5",
+    "brand": "Sony",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -5.6,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-0.5, -4.2, -4.8, -2.1, 0.4, 1.8, -0.6, 5.2, -2.1, -1.0]
+  },
+  {
+    "id": "sony_wh_1000xm4",
+    "name": "Sony WH-1000XM4",
+    "brand": "Sony",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.1,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.2, -3.5, -5.6, -3.2, 0.8, 2.5, -1.2, 5.8, -1.8, -0.5]
+  },
+  {
+    "id": "sony_wf_1000xm5",
+    "name": "Sony WF-1000XM5",
+    "brand": "Sony",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -4.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-1.0, -2.2, -2.5, -1.0, 0.2, 1.5, 0.8, 4.4, -1.2, -0.8]
+  },
+  {
+    "id": "sony_wf_1000xm4",
+    "name": "Sony WF-1000XM4",
+    "brand": "Sony",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -5.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-0.8, -1.9, -3.1, -1.8, 0.5, 2.2, 0.4, 4.8, -1.5, -0.4]
+  },
+  {
+    "id": "sony_mdr_7506",
+    "name": "Sony MDR-7506",
+    "brand": "Sony",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -4.5,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [3.5, 1.8, -0.8, -1.2, 0.1, -0.5, 1.2, -4.2, -3.8, 1.5]
+  },
+  {
+    "id": "apple_airpods_pro_2",
+    "name": "Apple AirPods Pro 2",
+    "brand": "Apple",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -3.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.5, 0.2, -0.8, -0.5, 0.1, 0.8, -0.2, 2.8, -1.2, 0.5]
+  },
+  {
+    "id": "apple_airpods_pro",
+    "name": "Apple AirPods Pro",
+    "brand": "Apple",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -3.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [1.2, 0.8, -0.5, -0.2, 0.4, 1.2, -0.8, 3.5, -1.8, 0.2]
+  },
+  {
+    "id": "apple_airpods_max",
+    "name": "Apple AirPods Max",
+    "brand": "Apple",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -4.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-0.5, -1.2, -1.8, -0.6, 0.2, 0.8, 1.5, 3.8, -2.4, -1.0]
+  },
+  {
+    "id": "apple_airpods_3",
+    "name": "Apple AirPods 3",
+    "brand": "Apple",
+    "type": "Earbud",
+    "source": "rtings (Harman target)",
+    "preamp": -5.0,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [4.8, 2.5, -1.0, -1.5, 0.0, 1.0, 1.8, -2.5, -3.2, 0.8]
+  },
+  {
+    "id": "sennheiser_hd_600",
+    "name": "Sennheiser HD 600",
+    "brand": "Sennheiser",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.5,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [6.2, 4.5, 0.8, -0.5, -0.2, -1.5, 1.2, -2.1, 1.0, -0.8]
+  },
+  {
+    "id": "sennheiser_hd_650",
+    "name": "Sennheiser HD 650 / HD 6XX",
+    "brand": "Sennheiser",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [6.0, 4.1, 0.5, -0.8, -0.4, -1.2, 1.5, -1.8, 1.2, -0.5]
+  },
+  {
+    "id": "sennheiser_hd_560s",
+    "name": "Sennheiser HD 560S",
+    "brand": "Sennheiser",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -4.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [4.5, 2.8, -0.2, -0.4, 0.1, -0.2, 0.5, -3.2, -2.1, 0.5]
+  },
+  {
+    "id": "sennheiser_hd_800s",
+    "name": "Sennheiser HD 800S",
+    "brand": "Sennheiser",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [6.5, 5.2, 1.2, -0.2, -0.5, 0.2, 1.0, -1.5, -5.8, 1.2]
+  },
+  {
+    "id": "sennheiser_momentum_4",
+    "name": "Sennheiser Momentum 4 Wireless",
+    "brand": "Sennheiser",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -5.5,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-1.2, -3.8, -3.2, -1.5, 0.5, 1.2, 0.8, 4.8, -1.0, -1.5]
+  },
+  {
+    "id": "bose_qc_45",
+    "name": "Bose QuietComfort 45",
+    "brand": "Bose",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -4.5,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [1.5, 0.2, -1.2, -0.8, 0.2, 1.0, -0.5, 3.8, -3.5, 0.8]
+  },
+  {
+    "id": "bose_qc_ultra",
+    "name": "Bose QuietComfort Ultra",
+    "brand": "Bose",
+    "type": "Over-Ear",
+    "source": "rtings (Harman target)",
+    "preamp": -4.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.8, -1.0, -1.8, -0.5, 0.4, 0.8, 0.2, 3.5, -2.1, -0.5]
+  },
+  {
+    "id": "bose_qc_35_ii",
+    "name": "Bose QuietComfort 35 II",
+    "brand": "Bose",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -4.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [2.1, 0.5, -1.5, -0.6, 0.4, 1.5, -0.2, 4.2, -2.8, 0.2]
+  },
+  {
+    "id": "audio_technica_ath_m50x",
+    "name": "Audio-Technica ATH-M50x",
+    "brand": "Audio-Technica",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -5.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.8, -1.8, -3.5, -2.0, 0.2, 1.5, 0.8, -2.5, -4.8, 1.2]
+  },
+  {
+    "id": "audio_technica_ath_m40x",
+    "name": "Audio-Technica ATH-M40x",
+    "brand": "Audio-Technica",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -4.6,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [1.2, -0.8, -2.2, -1.2, 0.5, 0.8, 1.0, -3.2, -3.5, 0.5]
+  },
+  {
+    "id": "beyerdynamic_dt_770_pro_80",
+    "name": "Beyerdynamic DT 770 Pro 80 Ohm",
+    "brand": "Beyerdynamic",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.5, -1.5, -2.8, -1.5, 0.2, 1.8, 1.2, -1.8, -6.0, 1.8]
+  },
+  {
+    "id": "beyerdynamic_dt_990_pro",
+    "name": "Beyerdynamic DT 990 Pro 250 Ohm",
+    "brand": "Beyerdynamic",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [4.2, 2.0, -1.8, -2.5, 0.5, 1.5, 1.8, -3.5, -6.5, 1.2]
+  },
+  {
+    "id": "samsung_galaxy_buds_2_pro",
+    "name": "Samsung Galaxy Buds 2 Pro",
+    "brand": "Samsung",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -3.0,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.2, -0.5, -0.8, -0.2, 0.1, 0.5, -0.2, 2.2, -1.0, 0.4]
+  },
+  {
+    "id": "akg_k371",
+    "name": "AKG K371",
+    "brand": "AKG",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -3.5,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-0.5, -0.8, -1.2, -0.4, 0.2, 0.5, 0.8, 3.2, -1.8, 0.0]
+  },
+  {
+    "id": "moondrop_blessing_3",
+    "name": "Moondrop Blessing 3",
+    "brand": "Moondrop",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -4.0,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [2.5, 1.8, 0.5, -0.2, 0.0, -0.4, 0.2, 1.5, -2.2, 0.8]
+  },
+  {
+    "id": "moondrop_aria",
+    "name": "Moondrop Aria",
+    "brand": "Moondrop",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -3.6,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.8, 0.5, -0.4, -0.2, 0.1, 0.2, 0.5, 3.2, -1.5, 0.2]
+  },
+  {
+    "id": "moondrop_chu_2",
+    "name": "Moondrop Chu II",
+    "brand": "Moondrop",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -4.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-0.8, -1.2, -1.5, -0.5, 0.2, 0.8, 0.5, 3.8, -2.0, 0.5]
+  },
+  {
+    "id": "google_pixel_buds_pro",
+    "name": "Google Pixel Buds Pro",
+    "brand": "Google",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -5.0,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-1.5, -3.2, -3.0, -1.2, 0.4, 1.5, 0.8, 4.5, -1.8, -0.5]
+  },
+  {
+    "id": "soundcore_space_q45",
+    "name": "Anker Soundcore Space Q45",
+    "brand": "Anker",
+    "type": "Over-Ear",
+    "source": "rtings (Harman target)",
+    "preamp": -5.8,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [-1.0, -3.8, -4.2, -2.0, 0.5, 1.5, 1.0, 5.2, -3.0, -1.2]
+  },
+  {
+    "id": "hifiman_sundara",
+    "name": "Hifiman Sundara (2020)",
+    "brand": "Hifiman",
+    "type": "Over-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -6.0,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [5.8, 4.2, 1.0, -0.2, -0.1, 0.4, 1.2, -2.5, -1.5, 0.5]
+  },
+  {
+    "id": "koss_ksc75",
+    "name": "Koss KSC75",
+    "brand": "Koss",
+    "type": "On-Ear",
+    "source": "oratory1990 (Harman target)",
+    "preamp": -5.2,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [5.5, 3.8, 0.5, -0.8, -0.2, 0.2, 0.5, -3.2, -1.8, 0.2]
+  },
+  {
+    "id": "shure_se215",
+    "name": "Shure SE215",
+    "brand": "Shure",
+    "type": "In-Ear",
+    "source": "crinacle (Harman In-Ear)",
+    "preamp": -6.5,
+    "frequencies": [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000],
+    "gains": [0.5, -2.2, -4.8, -3.5, 0.2, 2.2, 2.8, 5.5, -4.2, -2.0]
+  }
+]

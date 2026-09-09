@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
-import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.cache.CacheDataSink
@@ -16,29 +15,49 @@ import java.io.File
 @OptIn(UnstableApi::class)
 object VantafynMediaCache {
     private const val CACHE_DIR_NAME = "vantafyn_music_media_cache"
-    private const val MAX_CACHE_BYTES = 256L * 1024L * 1024L // 256 MB LRU disk cache
+    const val DEFAULT_MAX_CACHE_BYTES = 512L * 1024L * 1024L // 512 MB LRU disk cache
 
     @Volatile
     private var simpleCache: SimpleCache? = null
 
+    @Volatile
+    private var databaseProvider: StandaloneDatabaseProvider? = null
+
+    @Volatile
+    var authHeaderProvider: (() -> Map<String, String>)? = null
+
     @Synchronized
-    fun getSimpleCache(context: Context): SimpleCache {
+    fun getSimpleCache(context: Context, maxCacheBytes: Long = DEFAULT_MAX_CACHE_BYTES): SimpleCache {
+        val appContext = context.applicationContext
         return simpleCache ?: run {
-            val cacheDir = File(context.applicationContext.cacheDir, CACHE_DIR_NAME).apply { mkdirs() }
-            val evictor = LeastRecentlyUsedCacheEvictor(MAX_CACHE_BYTES)
-            val databaseProvider = StandaloneDatabaseProvider(context.applicationContext)
-            SimpleCache(cacheDir, evictor, databaseProvider).also { simpleCache = it }
+            val cacheDir = File(appContext.cacheDir, CACHE_DIR_NAME).apply { mkdirs() }
+            val evictor = LeastRecentlyUsedCacheEvictor(maxCacheBytes)
+            val dbProvider = databaseProvider ?: StandaloneDatabaseProvider(appContext).also {
+                databaseProvider = it
+            }
+            SimpleCache(cacheDir, evictor, dbProvider).also { simpleCache = it }
         }
     }
 
-    fun getCacheDataSourceFactory(context: Context): DataSource.Factory {
-        val appContext = context.applicationContext
-        val cache = getSimpleCache(appContext)
-        val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+    fun getHttpDataSourceFactory(): DefaultHttpDataSource.Factory {
+        val factory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(30_000)
             .setAllowCrossProtocolRedirects(true)
+            .setUserAgent("Vantafyn-Android/${android.os.Build.VERSION.RELEASE}")
 
+        authHeaderProvider?.invoke()?.let { headers ->
+            if (headers.isNotEmpty()) {
+                factory.setDefaultRequestProperties(headers)
+            }
+        }
+        return factory
+    }
+
+    fun getCacheDataSourceFactory(context: Context): CacheDataSource.Factory {
+        val appContext = context.applicationContext
+        val cache = getSimpleCache(appContext)
+        val httpDataSourceFactory = getHttpDataSourceFactory()
         val defaultUpstreamFactory = DefaultDataSource.Factory(appContext, httpDataSourceFactory)
 
         val cacheWriteSinkFactory = CacheDataSink.Factory()
@@ -51,4 +70,12 @@ object VantafynMediaCache {
             .setCacheWriteDataSinkFactory(cacheWriteSinkFactory)
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
+
+    @Synchronized
+    fun release() {
+        simpleCache?.release()
+        simpleCache = null
+        databaseProvider = null
+    }
 }
+

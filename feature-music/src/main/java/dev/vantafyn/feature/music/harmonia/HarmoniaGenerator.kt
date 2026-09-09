@@ -204,6 +204,8 @@ interface HarmoniaRecapRepository {
     suspend fun upsert(recap: HarmoniaRecap, serverId: String, profileId: String)
     suspend fun latestPreviews(userId: UUID, serverId: String, profileId: String): List<HarmoniaRecapPreview>
     suspend fun previewForPeriod(userId: UUID, serverId: String, profileId: String, period: HarmoniaPeriodRange): HarmoniaRecapPreview?
+    suspend fun setRecapSaved(recapId: String, isSaved: Boolean) {}
+    suspend fun savedPreviews(userId: UUID, serverId: String, profileId: String): List<HarmoniaRecapPreview> = emptyList()
 }
 
 private fun List<HarmoniaPlaybackRecord>.historySignature(): String {

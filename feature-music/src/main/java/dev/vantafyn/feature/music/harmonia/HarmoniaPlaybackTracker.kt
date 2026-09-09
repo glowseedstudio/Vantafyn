@@ -46,6 +46,7 @@ class HarmoniaPlaybackTracker(
                     endedAt = endedAt,
                     listenedMs = listenedMs,
                     durationMs = track.durationMs,
+                    artworkUrl = track.artworkUrl,
                 ),
             )
         }

@@ -6,6 +6,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -18,9 +19,24 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.CloudOff
+import androidx.compose.material.icons.rounded.DownloadDone
+import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Reorder
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.basicMarquee
@@ -72,6 +88,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Album
+import androidx.compose.material.icons.rounded.ArrowDownward
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CalendarMonth
@@ -88,9 +105,11 @@ import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.PlaylistAdd
 import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.Repeat
 import androidx.compose.material.icons.rounded.RepeatOne
+import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
@@ -106,6 +125,23 @@ import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material.icons.rounded.Timer
+import androidx.compose.material.icons.rounded.Bookmark
+import androidx.compose.material.icons.rounded.BookmarkBorder
+import androidx.compose.material.icons.rounded.LocalFireDepartment
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.NightlightRound
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Replay
+import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.WbSunny
+import androidx.compose.animation.core.AnimationEndReason
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.blur
 import dev.vantafyn.core.media.SleepTimerMode
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import androidx.compose.ui.graphics.Brush
@@ -176,6 +212,7 @@ import dev.vantafyn.feature.music.harmonia.HarmoniaRankedItem
 import dev.vantafyn.feature.music.harmonia.HarmoniaRecap
 import dev.vantafyn.feature.music.harmonia.HarmoniaRecapPreview
 import dev.vantafyn.core.ui.VantafynButton
+import dev.vantafyn.core.ui.VantafynCircularProgressIndicator
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynErrorCard
 import dev.vantafyn.core.ui.VantafynGlassChip
@@ -214,10 +251,10 @@ private const val SyncedLyricsTickerIntervalMs = 250L
 private fun MusicScreenState.scrollResetKey(): String =
     when (this) {
         MusicScreenState.Home -> "home"
-        is MusicScreenState.Album -> "album:${album.id}:${page.startIndex}"
+        is MusicScreenState.Album -> "album:${album.id}"
         is MusicScreenState.Artist -> "artist:${artist.id}"
-        is MusicScreenState.Playlist -> "playlist:${playlist.id}:${page.startIndex}"
-        is MusicScreenState.Songs -> "songs:${page.startIndex}"
+        is MusicScreenState.Playlist -> "playlist:${playlist.id}"
+        is MusicScreenState.Songs -> "songs"
         is MusicScreenState.HarmoniaRecap -> "harmonia:${preview.id}"
     }
 
@@ -226,6 +263,7 @@ fun MusicScreen(
     session: JellyfinSession?,
     modifier: Modifier = Modifier,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
+    onNavigateToDownloads: (() -> Unit)? = null,
     viewModel: MusicViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -287,26 +325,57 @@ fun MusicScreen(
             viewModel.setMusicScreenActive(false)
         }
     }
-    BackHandler(enabled = state.showNowPlaying || state.screen != MusicScreenState.Home) {
+    BackHandler(enabled = state.showNowPlaying || state.screen != MusicScreenState.Home || state.searchQuery.isNotBlank()) {
         if (state.showLyricsScreen) {
             viewModel.closeLyrics()
         } else if (state.showNowPlaying) {
             viewModel.closeNowPlaying()
-        } else {
+        } else if (state.screen != MusicScreenState.Home) {
             viewModel.showHome()
+        } else if (state.searchQuery.isNotBlank()) {
+            viewModel.clearSearch()
         }
     }
     Box(modifier.fillMaxSize()) {
-        LazyColumn(
-            state = musicListState,
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                .imePadding(),
-            contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
-            verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
-        ) {
-            if (state.screen !is MusicScreenState.HarmoniaRecap) {
+        if (state.screen is MusicScreenState.HarmoniaRecap) {
+            val recapScreen = state.screen as MusicScreenState.HarmoniaRecap
+            val isRecapSaved = state.selectedHarmoniaRecap?.isSaved
+                ?: state.savedHarmoniaRecaps.any { it.id == recapScreen.preview.id }
+                || recapScreen.preview.isSaved
+            HarmoniaStoryExperience(
+                preview = recapScreen.preview,
+                recap = state.selectedHarmoniaRecap,
+                isLoading = state.isHarmoniaRecapLoading,
+                error = state.harmoniaRecapError,
+                topTrack = state.harmoniaTopTrack,
+                isMuted = state.isHarmoniaMuted,
+                isSaved = isRecapSaved,
+                onToggleMute = viewModel::toggleHarmoniaMute,
+                onToggleSave = { shouldSave -> viewModel.saveHarmoniaRecap(recapScreen.preview.id, shouldSave) },
+                onBack = viewModel::showHome,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            LazyColumn(
+                state = musicListState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                    .imePadding(),
+                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
+                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+            ) {
+                val home = state.home
+                val isHomeEmpty = home == null || (
+                    home.albums.isEmpty() &&
+                    home.artists.isEmpty() &&
+                    home.playlists.isEmpty() &&
+                    home.songs.isEmpty() &&
+                    home.recentlyAdded.isEmpty() &&
+                    state.recentlyPlayed.isEmpty() &&
+                    state.harmoniaRecaps.isEmpty() &&
+                    state.savedHarmoniaRecaps.isEmpty()
+                )
                 item {
                     if (state.screen == MusicScreenState.Home) {
                         MusicContentReveal(index = 0, animate = homeRevealActive, revealKey = homeRevealKey) {
@@ -316,11 +385,11 @@ fun MusicScreen(
                         MusicTopBackHeader(title = "Music", onBack = viewModel::showHome)
                     }
                 }
-            }
-            state.errorMessage?.let { message ->
+            val errorMsg = state.errorMessage
+            if (errorMsg != null && !(isHomeEmpty && state.screen == MusicScreenState.Home)) {
                 item {
                     MusicContentReveal(index = 1, animate = state.screen == MusicScreenState.Home && homeRevealActive, revealKey = homeRevealKey) {
-                        VantafynErrorCard(message) { VantafynButton("Retry", onClick = viewModel::loadHome) }
+                        VantafynErrorCard(errorMsg) { VantafynButton("Retry", onClick = viewModel::loadHome) }
                     }
                 }
             }
@@ -372,109 +441,182 @@ fun MusicScreen(
                                 )
                             }
                         }
-                    }
-                    state.home?.let { home ->
-                        if (state.harmoniaRecaps.isNotEmpty()) item {
-                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                HarmoniaRail(
-                                    recaps = state.harmoniaRecaps,
-                                    onRecap = viewModel::openHarmoniaRecap,
+                    } else if (state.isSearchLoading) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 32.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = VantafynColors.Primary,
+                                    strokeWidth = 2.5.dp,
                                 )
                             }
                         }
-                        if (state.recentlyPlayed.isNotEmpty()) item {
+                    } else if (state.searchQuery.isNotBlank() && !state.isLoading) {
+                        item {
                             MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                val recentJellyfinTracks = remember(state.recentlyPlayed) {
-                                    state.recentlyPlayed.map { track ->
-                                        JellyfinMusicTrack(
-                                            id = track.id,
-                                            title = track.title,
-                                            artist = track.artist,
-                                            album = track.album,
-                                            albumId = track.albumId,
-                                            durationMs = track.durationMs,
-                                            artworkUrl = track.artworkUrl,
-                                            hasLyrics = true,
-                                            streamUrl = track.streamUrl,
-                                            isFavorite = track.isFavorite,
-                                            genres = track.genres,
+                                VantafynGlassCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp, vertical = 8.dp),
+                                    cornerRadius = 20.dp,
+                                    contentPadding = PaddingValues(24.dp),
+                                ) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Search,
+                                            contentDescription = null,
+                                            tint = VantafynColors.Muted,
+                                            modifier = Modifier.size(36.dp),
+                                        )
+                                        Text(
+                                            text = "No songs found for \"${state.searchQuery.trim()}\"",
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = VantafynColors.Ink,
+                                            textAlign = TextAlign.Center,
+                                        )
+                                        Text(
+                                            text = "Try searching by song title, artist, or album name",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = VantafynColors.Muted,
+                                            textAlign = TextAlign.Center,
                                         )
                                     }
                                 }
-                                MusicTrackRow(
-                                    title = "Recently Played",
-                                    tracks = recentJellyfinTracks,
-                                    pendingTrackId = state.pendingPlayTrackId,
-                                    onTrack = { track -> startMusic { viewModel.playTrack(track, recentJellyfinTracks) } },
-                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
-                                )
                             }
                         }
-                        if (home.recentlyAdded.isNotEmpty()) item {
-                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                MusicTrackRow(
-                                    title = "Recently Added",
-                                    tracks = home.recentlyAdded,
-                                    pendingTrackId = state.pendingPlayTrackId,
-                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } },
-                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
-                                )
+                    }
+                    if (state.searchQuery.isBlank()) {
+                        if (isHomeEmpty && !state.isLoading && !showInitialLoading) {
+                            item(key = "music-offline-empty-state") {
+                                MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    MusicOfflineEmptyState(
+                                        onNavigateToDownloads = onNavigateToDownloads,
+                                        onRetry = viewModel::loadHome,
+                                    )
+                                }
                             }
-                        }
-                        if (home.albums.isNotEmpty()) item {
-                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                MusicAlbumRow(
-                                    albums = home.albums,
-                                    onAlbum = viewModel::openAlbum,
-                                    onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
-                                )
+                        } else {
+                            state.home?.let { home ->
+                            if (state.harmoniaRecaps.isNotEmpty()) item {
+                                MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    HarmoniaRail(
+                                        recaps = state.harmoniaRecaps,
+                                        onRecap = viewModel::openHarmoniaRecap,
+                                    )
+                                }
                             }
-                        }
-                        if (home.artists.isNotEmpty()) item {
-                            MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                MusicArtistRow(
-                                    artists = home.artists,
-                                    onArtist = viewModel::openArtist,
-                                    onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
-                                )
-                            }
-                        }
-                        if (home.playlists.isNotEmpty()) item {
-                            MusicContentReveal(index = 6, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
-                            }
-                        }
-                        if (home.songs.isNotEmpty()) item {
-                            MusicContentReveal(index = 7, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                    MusicSectionHeader("Songs", "View all", viewModel::showSongs)
-                                    MusicTrackList(
-                                        title = "",
-                                        tracks = home.songs.take(20),
-                                        playlists = home.playlists,
+                            if (state.recentlyPlayed.isNotEmpty()) item {
+                                MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    val recentJellyfinTracks = remember(state.recentlyPlayed) {
+                                        state.recentlyPlayed.map { track ->
+                                            JellyfinMusicTrack(
+                                                id = track.id,
+                                                title = track.title,
+                                                artist = track.artist,
+                                                album = track.album,
+                                                albumId = track.albumId,
+                                                durationMs = track.durationMs,
+                                                artworkUrl = track.artworkUrl,
+                                                hasLyrics = true,
+                                                streamUrl = track.streamUrl,
+                                                isFavorite = track.isFavorite,
+                                                genres = track.genres,
+                                            )
+                                        }
+                                    }
+                                    MusicTrackRow(
+                                        title = "Recently Played",
+                                        tracks = recentJellyfinTracks,
                                         pendingTrackId = state.pendingPlayTrackId,
-                                        currentTrackId = state.playback.currentTrack?.id,
-                                        onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
-                                        onChoosePlaylist = { playlistPickerTrack = it },
-                                        onLongPress = { actionTrack = it },
-                                        animateReveal = false,
+                                        onTrack = { track -> startMusic { viewModel.playTrack(track, recentJellyfinTracks) } },
+                                        onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                    )
+                                }
+                            }
+                            if (home.recentlyAdded.isNotEmpty()) item {
+                                MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    MusicTrackRow(
+                                        title = "Recently Added",
+                                        tracks = home.recentlyAdded,
+                                        pendingTrackId = state.pendingPlayTrackId,
+                                        onTrack = { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } },
+                                        onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                    )
+                                }
+                            }
+                            if (home.albums.isNotEmpty()) item {
+                                MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    MusicAlbumRow(
+                                        albums = home.albums,
+                                        onAlbum = viewModel::openAlbum,
+                                        onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
+                                    )
+                                }
+                            }
+                            if (home.artists.isNotEmpty()) item {
+                                MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    MusicArtistRow(
+                                        artists = home.artists,
+                                        onArtist = viewModel::openArtist,
+                                        onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
+                                    )
+                                }
+                            }
+                            if (home.playlists.isNotEmpty()) item {
+                                MusicContentReveal(index = 6, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
+                                }
+                            }
+                            if (home.songs.isNotEmpty()) item {
+                                MusicContentReveal(index = 7, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        MusicSectionHeader("Songs", "View all", viewModel::showSongs)
+                                        MusicTrackList(
+                                            title = "",
+                                            tracks = home.songs.take(20),
+                                            playlists = home.playlists,
+                                            pendingTrackId = state.pendingPlayTrackId,
+                                            currentTrackId = state.playback.currentTrack?.id,
+                                            onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
+                                            onChoosePlaylist = { playlistPickerTrack = it },
+                                            onLongPress = { actionTrack = it },
+                                            animateReveal = false,
+                                        )
+                                    }
+                                }
+                            }
+                            if (state.savedHarmoniaRecaps.isNotEmpty()) item {
+                                MusicContentReveal(index = 8, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    SavedHarmoniaRail(
+                                        recaps = state.savedHarmoniaRecaps,
+                                        onRecap = viewModel::openHarmoniaRecap,
+                                    )
+                                }
+                            }
+                            item {
+                                MusicContentReveal(index = 9, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                    // TODO REMOVE_HARMONIA_TEST_GENERATORS_BEFORE_RELEASE
+                                    HarmoniaDeveloperPanel(
+                                        isGenerating = state.isHarmoniaGenerating,
+                                        message = state.harmoniaGenerationMessage,
+                                        onMonthly = { viewModel.generateTestMonthlyHarmonia() },
+                                        onYearly = viewModel::generateTestYearlyHarmonia,
                                     )
                                 }
                             }
                         }
-                        item {
-                            MusicContentReveal(index = 8, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                // TODO REMOVE_HARMONIA_TEST_GENERATORS_BEFORE_RELEASE
-                                HarmoniaDeveloperPanel(
-                                    isGenerating = state.isHarmoniaGenerating,
-                                    message = state.harmoniaGenerationMessage,
-                                    onMonthly = { viewModel.generateTestMonthlyHarmonia() },
-                                    onYearly = viewModel::generateTestYearlyHarmonia,
-                                )
-                            }
-                        }
                     }
                 }
+            }
                 is MusicScreenState.Album -> {
                     item(key = "album-header-${screen.album.id}") {
                         MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = contentRevealKey) {
@@ -485,6 +627,8 @@ fun MusicScreen(
                                 onBack = viewModel::showHome,
                                 onDownload = { viewModel.queueAlbumDownload(screen.album, screen.tracks) },
                                 isDownloaded = state.isPlaylistDownloaded,
+                                isDownloading = state.isPlaylistDownloading,
+                                downloadProgress = state.playlistDownloadProgress,
                             ) {
                                 screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
                             }
@@ -554,7 +698,11 @@ fun MusicScreen(
                                 onBack = viewModel::showHome,
                                 onDownload = { viewModel.queuePlaylistDownload(screen.playlist, screen.tracks) },
                                 isDownloaded = state.isPlaylistDownloaded,
+                                isDownloading = state.isPlaylistDownloading,
+                                downloadProgress = state.playlistDownloadProgress,
                                 trackImageUrls = screen.playlist.trackImageUrls,
+                                onToggleReorder = viewModel::toggleReorderMode,
+                                isReordering = state.isReorderMode,
                             ) {
                                 startMusic { viewModel.playPlaylist(screen.playlist) }
                             }
@@ -635,29 +783,39 @@ fun MusicScreen(
                             )
                         }
                     }
-                }
-                is MusicScreenState.HarmoniaRecap -> {
-                    item {
-                        MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = contentRevealKey) {
-                            HarmoniaStoryExperience(
-                                preview = screen.preview,
-                                recap = state.selectedHarmoniaRecap,
-                                isLoading = state.isHarmoniaRecapLoading,
-                                error = state.harmoniaRecapError,
-                                onBack = viewModel::showHome,
-                            )
+                    if (screen.page.hasNext && state.songsSearchQuery.isBlank()) {
+                        item(key = "songs-load-more-trigger") {
+                            LaunchedEffect(screen.page.tracks.size) {
+                                viewModel.loadMoreSongs()
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = VantafynColors.Primary,
+                                    strokeWidth = 2.5.dp,
+                                )
+                            }
                         }
                     }
                 }
+                is MusicScreenState.HarmoniaRecap -> Unit
             }
         }
-        MusicStatusBarScrim(
-            alpha = 0.92f,
-            statusBarHeight = statusBarHeight,
-            modifier = Modifier.align(Alignment.TopCenter),
-        )
+        }
+        if (state.screen !is MusicScreenState.HarmoniaRecap) {
+            MusicStatusBarScrim(
+                alpha = 0.92f,
+                statusBarHeight = statusBarHeight,
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
         AnimatedVisibility(
-            visible = state.playback.currentTrack != null,
+            visible = state.playback.currentTrack != null && state.screen !is MusicScreenState.HarmoniaRecap,
             modifier = Modifier.align(Alignment.BottomCenter),
             enter = slideInVertically(
                 initialOffsetY = { fullHeight -> fullHeight + 96 },
@@ -782,6 +940,10 @@ fun MusicScreen(
                         onAddToQueue = {
                             musicContextItem = null
                             viewModel.addToQueue(track)
+                        },
+                        onStartRadio = {
+                            musicContextItem = null
+                            startMusic { viewModel.startRadio(track) }
                         },
                         onToggleFavorite = {
                             musicContextItem = null
@@ -1012,16 +1174,17 @@ private fun HarmoniaRecapCard(
     val shape = RoundedCornerShape(if (yearly) 26.dp else 22.dp)
     Box(
         modifier = Modifier
-            .width(if (yearly) 288.dp else 224.dp)
-            .height(if (yearly) 174.dp else 148.dp)
+            .width(if (yearly) 304.dp else 268.dp)
+            .height(if (yearly) 176.dp else 156.dp)
             .scale(scale)
             .clip(shape)
+            .border(1.dp, Color.White.copy(alpha = 0.16f), shape)
             .background(
                 Brush.linearGradient(
                     listOf(
-                        VantafynColors.Graphite.copy(alpha = 0.88f),
-                        VantafynColors.Surface.copy(alpha = 0.78f),
-                        VantafynColors.Graphite.copy(alpha = 0.90f),
+                        VantafynColors.Graphite.copy(alpha = 0.92f),
+                        VantafynColors.Surface.copy(alpha = 0.82f),
+                        VantafynColors.Graphite.copy(alpha = 0.94f),
                     ),
                     start = Offset.Zero,
                     end = Offset(520f, 260f),
@@ -1029,13 +1192,24 @@ private fun HarmoniaRecapCard(
             )
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
     ) {
+        if (!preview.artworkUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = preview.artworkUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(28.dp)
+                    .alpha(0.35f),
+                contentScale = ContentScale.Crop,
+            )
+        }
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            VantafynGradients.AccentColors.first().copy(alpha = 0.30f * ambient),
+                            VantafynGradients.AccentColors.first().copy(alpha = 0.32f * ambient),
                             VantafynGradients.AccentColors.last().copy(alpha = 0.18f * ambient),
                             Color.Transparent,
                         ),
@@ -1052,7 +1226,7 @@ private fun HarmoniaRecapCard(
                         listOf(
                             Color.White.copy(alpha = 0.10f),
                             Color.Transparent,
-                            VantafynGradients.AccentColors.last().copy(alpha = 0.10f),
+                            VantafynGradients.AccentColors.last().copy(alpha = 0.12f),
                         ),
                     ),
                 ),
@@ -1066,52 +1240,434 @@ private fun HarmoniaRecapCard(
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(if (yearly) 36.dp else 32.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(VantafynGradients.accentHorizontal()),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = if (yearly) Icons.Rounded.AutoAwesome else Icons.Rounded.CalendarMonth,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(if (yearly) 20.dp else 17.dp),
+                        )
+                    }
+                    Text(
+                        preview.periodLabel(),
+                        color = VantafynColors.Ink.copy(alpha = 0.95f),
+                        style = if (yearly) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                }
+                if (yearly) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.14f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            "YEARLY",
+                            color = Color(0xFFFFD166),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        if (yearly) "Year in Review" else "Month in Review",
+                        color = VantafynColors.Ink.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        preview.totalListeningTimeMs.formatListeningTime(),
+                        color = VantafynColors.Ink,
+                        style = if (yearly) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        preview.harmoniaTease(),
+                        color = VantafynColors.Muted.copy(alpha = 0.92f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Spacer(Modifier.width(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(width = if (yearly) 68.dp else 60.dp, height = if (yearly) 58.dp else 52.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .offset(x = if (yearly) 16.dp else 14.dp)
+                            .size(if (yearly) 52.dp else 46.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10131A))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (yearly) 32.dp else 28.dp)
+                                .clip(CircleShape)
+                                .border(0.75.dp, Color.White.copy(alpha = 0.10f), CircleShape),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(if (yearly) 16.dp else 14.dp)
+                                .clip(CircleShape)
+                                .background(VantafynGradients.accentHorizontal()),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(if (yearly) 54.dp else 48.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(VantafynColors.Surface)
+                            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!preview.artworkUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = preview.artworkUrl,
+                                contentDescription = preview.topTrack ?: preview.topArtist,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(VantafynGradients.accentHorizontal()),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedHarmoniaRail(
+    recaps: List<HarmoniaRecapPreview>,
+    onRecap: (HarmoniaRecapPreview) -> Unit,
+) {
+    val uniqueRecaps = remember(recaps) {
+        recaps
+            .sortedWith(compareByDescending<HarmoniaRecapPreview> { it.periodStart }.thenByDescending { it.generatedAt })
+            .distinctBy { "${it.periodType}:${it.periodStart.toEpochMilli()}" }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(if (yearly) 42.dp else 36.dp)
-                        .clip(RoundedCornerShape(14.dp))
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
                         .background(VantafynGradients.accentHorizontal()),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        imageVector = if (yearly) Icons.Rounded.AutoAwesome else Icons.Rounded.CalendarMonth,
+                        imageVector = Icons.Rounded.Bookmark,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(if (yearly) 22.dp else 19.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
                 Text(
-                    preview.periodLabel(),
-                    color = VantafynColors.Ink.copy(alpha = 0.90f),
-                    style = if (yearly) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
+                    "Saved Recaps",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
                 )
             }
-            Column(verticalArrangement = Arrangement.spacedBy(if (yearly) 8.dp else 6.dp)) {
-                Text(
-                    if (yearly) "Yearly Harmonia" else "Monthly Harmonia",
-                    color = VantafynColors.Ink,
-                    style = if (yearly) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
+            Text(
+                "Your Harmonia music memories, kept forever.",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            contentPadding = PaddingValues(horizontal = 2.dp, vertical = 2.dp),
+        ) {
+            items(uniqueRecaps, key = { "saved-${it.id}" }) { recap ->
+                SavedHarmoniaCard(
+                    preview = recap,
+                    onClick = { onRecap(recap) },
                 )
-                Text(
-                    preview.totalListeningTimeMs.formatListeningTime(),
-                    color = VantafynColors.Ink,
-                    style = if (yearly) MaterialTheme.typography.headlineSmall else MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1,
-                )
-                Text(
-                    preview.harmoniaTease(),
-                    color = VantafynColors.Muted.copy(alpha = 0.92f),
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedHarmoniaCard(
+    preview: HarmoniaRecapPreview,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.98f else 1f,
+        animationSpec = spring(stiffness = 500f, dampingRatio = 0.84f),
+        label = "savedHarmoniaPress",
+    )
+    val yearly = preview.periodType == HarmoniaPeriod.YEARLY
+    val shape = RoundedCornerShape(22.dp)
+    Box(
+        modifier = Modifier
+            .width(if (yearly) 296.dp else 260.dp)
+            .height(if (yearly) 168.dp else 156.dp)
+            .scale(scale)
+            .clip(shape)
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        VantafynColors.Graphite.copy(alpha = 0.92f),
+                        VantafynColors.Surface.copy(alpha = 0.82f),
+                        VantafynColors.Graphite.copy(alpha = 0.94f),
+                    ),
+                ),
+            )
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick),
+    ) {
+        if (!preview.artworkUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = preview.artworkUrl,
+                contentDescription = null,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(26.dp)
+                    .alpha(0.32f),
+                contentScale = ContentScale.Crop,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFFFFD166).copy(alpha = 0.22f),
+                            Color.Transparent,
+                        ),
+                        center = Offset(40f, 30f),
+                        radius = 260f,
+                    ),
+                ),
+        )
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.10f),
+                            Color.Transparent,
+                            Color(0xFFFFD166).copy(alpha = 0.08f),
+                        ),
+                    ),
+                ),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFFFD166).copy(alpha = 0.22f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Bookmark,
+                            contentDescription = null,
+                            tint = Color(0xFFFFD166),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Text(
+                        preview.periodLabel(),
+                        color = VantafynColors.Ink,
+                        style = if (yearly) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                }
+                if (yearly) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0xFFFFD166).copy(alpha = 0.16f))
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            "YEARLY",
+                            color = Color(0xFFFFD166),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Text(
+                        if (yearly) "Year in Review" else "Month in Review",
+                        color = VantafynColors.Ink.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        preview.totalListeningTimeMs.formatListeningTime(),
+                        color = VantafynColors.Ink,
+                        style = if (yearly) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                    )
+                    Text(
+                        preview.harmoniaTease(),
+                        color = VantafynColors.Muted.copy(alpha = 0.92f),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                Spacer(Modifier.width(10.dp))
+
+                Box(
+                    modifier = Modifier
+                        .size(width = if (yearly) 68.dp else 60.dp, height = if (yearly) 58.dp else 52.dp),
+                    contentAlignment = Alignment.CenterStart,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .offset(x = if (yearly) 16.dp else 14.dp)
+                            .size(if (yearly) 52.dp else 46.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF10131A))
+                            .border(1.dp, Color.White.copy(alpha = 0.18f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(if (yearly) 32.dp else 28.dp)
+                                .clip(CircleShape)
+                                .border(0.75.dp, Color.White.copy(alpha = 0.10f), CircleShape),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(if (yearly) 16.dp else 14.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(
+                                            Color(0xFFFFD166),
+                                            VantafynGradients.AccentColors.first(),
+                                        ),
+                                    ),
+                                ),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(if (yearly) 54.dp else 48.dp)
+                            .clip(RoundedCornerShape(11.dp))
+                            .background(VantafynColors.Surface)
+                            .border(1.dp, Color(0xFFFFD166).copy(alpha = 0.35f), RoundedCornerShape(11.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!preview.artworkUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = preview.artworkUrl,
+                                contentDescription = preview.topTrack ?: preview.topArtist,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(
+                                                Color(0xFFFFD166).copy(alpha = 0.8f),
+                                                VantafynGradients.AccentColors.first(),
+                                            ),
+                                        ),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Bookmark,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -1173,51 +1729,119 @@ private fun HarmoniaStoryExperience(
     recap: HarmoniaRecap?,
     isLoading: Boolean,
     error: String?,
+    topTrack: JellyfinMusicTrack?,
+    isMuted: Boolean,
+    isSaved: Boolean,
+    onToggleMute: () -> Unit,
+    onToggleSave: (Boolean) -> Unit,
     onBack: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    val slides = remember(recap) { recap?.harmoniaStorySlides().orEmpty() }
-    var slideIndex by rememberSaveable(preview.id, slides.size) { mutableStateOf(0) }
-    LaunchedEffect(slides.size) {
-        if (slides.isNotEmpty()) slideIndex = slideIndex.coerceIn(0, slides.lastIndex)
+    val slides = remember(recap, isSaved) { recap?.harmoniaStorySlides(isSaved).orEmpty() }
+    val slideCount = slides.size
+    var slideIndex by rememberSaveable(preview.id, slideCount) { mutableIntStateOf(0) }
+    LaunchedEffect(slideCount) {
+        if (slideCount > 0) slideIndex = slideIndex.coerceIn(0, slideCount - 1)
     }
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(620.dp)
-            .clip(RoundedCornerShape(30.dp))
-            .pointerInput(slides.size, slideIndex) {
-                var dragTotal = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { dragTotal = 0f },
-                    onHorizontalDrag = { _, dragAmount -> dragTotal += dragAmount },
-                    onDragEnd = {
-                        if (slides.isEmpty()) return@detectHorizontalDragGestures
-                        when {
-                            dragTotal < -48f -> {
-                                if (slideIndex == slides.lastIndex) onBack() else slideIndex += 1
-                            }
-                            dragTotal > 48f -> slideIndex = (slideIndex - 1).coerceAtLeast(0)
-                        }
-                    },
-                )
+
+    var isHolding by remember { mutableStateOf(false) }
+    val slideProgress = remember { Animatable(0f) }
+    var lastSlideIndex by remember { mutableIntStateOf(-1) }
+
+    // Auto-advance timer (6.5s per slide, pauses when holding)
+    LaunchedEffect(slideIndex, isHolding, slideCount) {
+        if (slideCount <= 0 || isHolding) return@LaunchedEffect
+        if (lastSlideIndex != slideIndex) {
+            slideProgress.snapTo(0f)
+            lastSlideIndex = slideIndex
+        }
+        val current = slideProgress.value
+        val durationMs = ((1f - current) * 6500f).toLong().toInt().coerceIn(100, 6500)
+        val animation = slideProgress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(
+                durationMillis = durationMs,
+                easing = LinearEasing,
+            ),
+        )
+        if (animation.endReason == AnimationEndReason.Finished && slideProgress.value >= 0.99f) {
+            slideProgress.snapTo(0f)
+            if (slideIndex < slideCount - 1) {
+                slideIndex++
             }
+        }
+    }
+
+    val currentSlide = slides.getOrNull(slideIndex)
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
             .background(VantafynColors.Graphite),
     ) {
-        HarmoniaNebulaBackdrop(slideIndex)
-        MusicChevronBackButton(
-            onClick = onBack,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(14.dp),
-        )
+        HarmoniaNebulaBackdrop(slideIndex, currentSlide?.artworkUrl ?: topTrack?.artworkUrl ?: preview.artworkUrl)
+
+        // Gesture handling layer for touch-to-hold, swipe, and tap
+        if (slides.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(slideCount, slideIndex) {
+                        awaitEachGesture {
+                            try {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                isHolding = true
+                                var dragX = 0f
+                                var hasDragged = false
+                                val startTime = System.currentTimeMillis()
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    if (change.pressed) {
+                                        val dx = change.position.x - change.previousPosition.x
+                                        dragX += dx
+                                        if (kotlin.math.abs(dragX) > 20f) {
+                                            hasDragged = true
+                                        }
+                                    } else {
+                                        isHolding = false
+                                        val elapsed = System.currentTimeMillis() - startTime
+                                        if (hasDragged) {
+                                            if (dragX < -48f) {
+                                                if (slideIndex < slideCount - 1) slideIndex++ else onBack()
+                                            } else if (dragX > 48f) {
+                                                slideIndex = (slideIndex - 1).coerceAtLeast(0)
+                                            }
+                                        } else if (elapsed < 350) {
+                                            if (down.position.x < size.width * 0.35f) {
+                                                slideIndex = (slideIndex - 1).coerceAtLeast(0)
+                                            } else {
+                                                if (slideIndex < slideCount - 1) slideIndex++ else onBack()
+                                            }
+                                        }
+                                        break
+                                    }
+                                }
+                            } finally {
+                                isHolding = false
+                            }
+                        }
+                    },
+            )
+        }
+
         when {
             isLoading -> VantafynLoadingIndicator(
                 "Loading Harmonia...",
-                modifier = Modifier.align(Alignment.Center),
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .windowInsetsPadding(WindowInsets.safeDrawing),
             )
             error != null -> VantafynGlassCard(
                 modifier = Modifier
                     .align(Alignment.Center)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(22.dp),
                 cornerRadius = 24.dp,
                 contentPadding = PaddingValues(20.dp),
@@ -1230,6 +1854,7 @@ private fun HarmoniaStoryExperience(
             slides.isEmpty() -> VantafynGlassCard(
                 modifier = Modifier
                     .align(Alignment.Center)
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
                     .padding(22.dp),
                 cornerRadius = 24.dp,
                 contentPadding = PaddingValues(20.dp),
@@ -1237,27 +1862,87 @@ private fun HarmoniaStoryExperience(
                 Text("No story slides are available for this recap yet.", color = VantafynColors.Muted, textAlign = TextAlign.Center)
             }
             else -> {
-                val leftTap = remember { MutableInteractionSource() }
-                val rightTap = remember { MutableInteractionSource() }
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 18.dp, end = 18.dp, top = 62.dp, bottom = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                        .windowInsetsPadding(WindowInsets.safeDrawing)
+                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    HarmoniaProgressIndicator(slideIndex = slideIndex, slideCount = slides.size)
+                    // 1. Top Section: Progress indicators & Header controls
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        HarmoniaStoryProgress(
+                            slideIndex = slideIndex,
+                            slideCount = slideCount,
+                            currentProgress = slideProgress.value,
+                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            HarmoniaAudioPill(
+                                track = topTrack,
+                                isMuted = isMuted,
+                                onToggleMute = onToggleMute,
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                IconButton(
+                                    onClick = { onToggleSave(!isSaved) },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.12f)),
+                                ) {
+                                    Icon(
+                                        imageVector = if (isSaved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                                        contentDescription = if (isSaved) "Saved" else "Save Recap",
+                                        tint = if (isSaved) Color(0xFFFFD166) else Color.White,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.12f)),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Close",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 2. Middle Section: Animated Slide Content
                     AnimatedContent(
                         targetState = slides[slideIndex],
                         transitionSpec = {
-                            (fadeIn(tween(240, easing = FastOutSlowInEasing)) togetherWith fadeOut(tween(170, easing = FastOutSlowInEasing)))
+                            (fadeIn(tween(260, easing = FastOutSlowInEasing))) togetherWith fadeOut(tween(160, easing = FastOutSlowInEasing))
                         },
                         label = "harmoniaStorySlide",
                         modifier = Modifier
                             .weight(1f)
-                            .fillMaxWidth(),
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
                     ) { slide ->
-                        HarmoniaStorySlideContent(slide)
+                        HarmoniaStorySlideContent(
+                            slide = slide,
+                            onToggleSave = { onToggleSave(!isSaved) },
+                            onReplay = { slideIndex = 0 },
+                            onBack = onBack,
+                        )
                     }
+
+                    // 3. Bottom Section: Controls
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1270,41 +1955,66 @@ private fun HarmoniaStoryExperience(
                         ) {
                             Text("Back", color = VantafynColors.Ink, maxLines = 1)
                         }
+                        Text(
+                            "${slideIndex + 1} / $slideCount",
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             VantafynGlassChip(selected = false, onClick = { slideIndex = 0 }) {
                                 Text("Replay", color = VantafynColors.Ink, maxLines = 1)
                             }
-                            VantafynGlassChip(selected = true, onClick = {
-                                if (slideIndex == slides.lastIndex) onBack() else slideIndex += 1
-                            }) {
-                                Text(if (slideIndex == slides.lastIndex) "Close" else "Next", color = VantafynColors.Ink, maxLines = 1)
+                            VantafynGlassChip(
+                                selected = true,
+                                onClick = {
+                                    if (slideIndex == slideCount - 1) onBack() else slideIndex += 1
+                                },
+                            ) {
+                                Text(if (slideIndex == slideCount - 1) "Close" else "Next", color = VantafynColors.Ink, maxLines = 1)
                             }
                         }
                     }
                 }
-                Row(modifier = Modifier.matchParentSize()) {
+            }
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaStoryProgress(
+    slideIndex: Int,
+    slideCount: Int,
+    currentProgress: Float,
+) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        repeat(slideCount) { index ->
+            val progress = when {
+                index < slideIndex -> 1f
+                index == slideIndex -> currentProgress.coerceIn(0f, 1f)
+                else -> 0f
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(3.5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.22f)),
+            ) {
+                if (progress > 0f) {
                     Box(
-                        Modifier
-                            .weight(0.36f)
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
                             .fillMaxHeight()
-                            .padding(top = 88.dp, bottom = 82.dp)
-                            .clickable(
-                                interactionSource = leftTap,
-                                indication = null,
-                                onClick = { slideIndex = (slideIndex - 1).coerceAtLeast(0) },
-                            ),
-                    )
-                    Box(
-                        Modifier
-                            .weight(0.64f)
-                            .fillMaxHeight()
-                            .padding(top = 88.dp, bottom = 82.dp)
-                            .clickable(
-                                interactionSource = rightTap,
-                                indication = null,
-                                onClick = {
-                                    if (slideIndex == slides.lastIndex) onBack() else slideIndex += 1
-                                },
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color.White,
+                                        Color(0xFFE2E8F0),
+                                    ),
+                                ),
                             ),
                     )
                 }
@@ -1314,7 +2024,106 @@ private fun HarmoniaStoryExperience(
 }
 
 @Composable
-private fun HarmoniaNebulaBackdrop(slideIndex: Int) {
+private fun HarmoniaAudioPill(
+    track: JellyfinMusicTrack?,
+    isMuted: Boolean,
+    onToggleMute: () -> Unit,
+) {
+    if (track != null) {
+        val artist = track.artist
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.12f))
+                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(999.dp))
+                .padding(start = 12.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AnimatedEqualizerBars(isPlaying = !isMuted)
+                Text(
+                    text = if (artist.isNotBlank()) "${track.title} • $artist" else track.title,
+                    color = Color.White,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 160.dp),
+                )
+                IconButton(
+                    onClick = onToggleMute,
+                    modifier = Modifier.size(26.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isMuted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
+                        contentDescription = if (isMuted) "Unmute" else "Mute",
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.10f))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                tint = Color(0xFFFFD166),
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                "Harmonia Recap",
+                color = Color.White,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AnimatedEqualizerBars(isPlaying: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "equalizer")
+    val h1 by infiniteTransition.animateFloat(
+        initialValue = 4f,
+        targetValue = 14f,
+        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+        label = "bar1",
+    )
+    val h2 by infiniteTransition.animateFloat(
+        initialValue = 12f,
+        targetValue = 5f,
+        animationSpec = infiniteRepeatable(tween(360, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+        label = "bar2",
+    )
+    val h3 by infiniteTransition.animateFloat(
+        initialValue = 6f,
+        targetValue = 16f,
+        animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+        label = "bar3",
+    )
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.Bottom,
+        modifier = Modifier.size(width = 13.dp, height = 16.dp),
+    ) {
+        Box(Modifier.width(2.5.dp).height(if (isPlaying) h1.dp else 4.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
+        Box(Modifier.width(2.5.dp).height(if (isPlaying) h2.dp else 8.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
+        Box(Modifier.width(2.5.dp).height(if (isPlaying) h3.dp else 5.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
+    }
+}
+
+@Composable
+private fun HarmoniaNebulaBackdrop(slideIndex: Int, artworkUrl: String?) {
     val drift by animateFloatAsState(
         targetValue = (slideIndex % 6) / 6f,
         animationSpec = tween(durationMillis = 720, easing = FastOutSlowInEasing),
@@ -1325,6 +2134,17 @@ private fun HarmoniaNebulaBackdrop(slideIndex: Int) {
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(Color(0xFF050812), VantafynColors.Graphite, Color(0xFF060A16)))),
     )
+    if (!artworkUrl.isNullOrBlank()) {
+        AsyncImage(
+            model = artworkUrl,
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .blur(45.dp)
+                .alpha(0.25f),
+            contentScale = ContentScale.Crop,
+        )
+    }
     Box(
         Modifier
             .fillMaxSize()
@@ -1350,32 +2170,23 @@ private fun HarmoniaNebulaBackdrop(slideIndex: Int) {
 }
 
 @Composable
-private fun HarmoniaProgressIndicator(slideIndex: Int, slideCount: Int) {
-    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
-        repeat(slideCount) { index ->
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(3.dp)
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(if (index <= slideIndex) VantafynGradients.accentHorizontal() else Brush.horizontalGradient(listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.08f)))),
-            )
-        }
-    }
-}
-
-@Composable
-private fun HarmoniaStorySlideContent(slide: HarmoniaStorySlide) {
+private fun HarmoniaStorySlideContent(
+    slide: HarmoniaStorySlide,
+    onToggleSave: () -> Unit,
+    onReplay: () -> Unit,
+    onBack: () -> Unit,
+) {
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(
-                slide.kicker,
-                color = VantafynColors.Muted,
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.SemiBold,
+                slide.kicker.uppercase(Locale.getDefault()),
+                color = Color.White.copy(alpha = 0.70f),
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.sp,
             )
             Text(
                 slide.title,
@@ -1390,7 +2201,7 @@ private fun HarmoniaStorySlideContent(slide: HarmoniaStorySlide) {
                     it,
                     color = VantafynColors.Ink,
                     style = MaterialTheme.typography.displaySmall,
-                    fontWeight = FontWeight.Bold,
+                    fontWeight = FontWeight.ExtraBold,
                     maxLines = 2,
                 )
             }
@@ -1404,19 +2215,198 @@ private fun HarmoniaStorySlideContent(slide: HarmoniaStorySlide) {
                 )
             }
         }
-        when (slide.visual) {
-            is HarmoniaStoryVisual.Ranked -> HarmoniaRankedVisual(slide.visual.items)
-            is HarmoniaStoryVisual.Genres -> HarmoniaGenreVisual(slide.visual.items)
-            is HarmoniaStoryVisual.Heatmap -> HarmoniaHeatmapVisual(slide.visual.values)
-            is HarmoniaStoryVisual.Hourly -> HarmoniaHourlyVisual(slide.visual.values)
-            is HarmoniaStoryVisual.Monthly -> HarmoniaMonthlyVisual(slide.visual.values)
+        when (val visual = slide.visual) {
+            is HarmoniaStoryVisual.HeroTrack -> HarmoniaHeroTrackVisual(visual.item)
+            is HarmoniaStoryVisual.HeroArtist -> HarmoniaHeroArtistVisual(visual.item)
+            is HarmoniaStoryVisual.RankedTracks -> HarmoniaRankedTracksVisual(visual.items)
+            is HarmoniaStoryVisual.RankedArtists -> HarmoniaRankedArtistsVisual(visual.items)
+            is HarmoniaStoryVisual.Albums -> HarmoniaAlbumsVisual(visual.items)
+            is HarmoniaStoryVisual.Genres -> HarmoniaGenreVisual(visual.items)
+            is HarmoniaStoryVisual.Heatmap -> HarmoniaHeatmapVisual(visual.values, visual.streakDays, visual.peakDate, visual.peakTimeMs)
+            is HarmoniaStoryVisual.Hourly -> HarmoniaHourlyVisual(visual.values, visual.peakHour)
+            is HarmoniaStoryVisual.Monthly -> HarmoniaMonthlyVisual(visual.values)
+            is HarmoniaStoryVisual.FinalSummary -> HarmoniaFinalSummaryVisual(
+                summary = visual,
+                onToggleSave = onToggleSave,
+                onReplay = onReplay,
+                onBack = onBack,
+            )
             HarmoniaStoryVisual.None -> Spacer(Modifier.height(18.dp))
         }
     }
 }
 
 @Composable
-private fun HarmoniaRankedVisual(items: List<HarmoniaRankedItem>) {
+private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(190.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Vinyl disc peeking out
+            Box(
+                modifier = Modifier
+                    .offset(x = 26.dp)
+                    .size(165.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF10131A))
+                    .border(1.5.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(105.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .clip(CircleShape)
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(14.dp).clip(CircleShape).background(Color(0xFF10131A)))
+                }
+            }
+            // Album cover sleeve
+            Box(
+                modifier = Modifier
+                    .offset(x = (-14).dp)
+                    .size(170.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(VantafynColors.Surface)
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+            ) {
+                if (!item.artworkUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = item.artworkUrl,
+                        contentDescription = item.label,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().background(VantafynGradients.accentHorizontal()), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White, modifier = Modifier.size(54.dp))
+                    }
+                }
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                item.label,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            item.subtitle?.let {
+                Text(
+                    it,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HarmoniaPill(
+                icon = Icons.Rounded.PlayArrow,
+                text = "${item.playCount} plays",
+            )
+            HarmoniaPill(
+                icon = Icons.Rounded.Schedule,
+                text = item.listeningTimeMs.formatListeningTime(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaHeroArtistVisual(item: HarmoniaRankedItem) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(165.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(165.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                VantafynGradients.AccentColors.first().copy(alpha = 0.5f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .size(150.dp)
+                    .clip(CircleShape)
+                    .border(3.dp, VantafynGradients.accentHorizontal(), CircleShape)
+                    .background(VantafynColors.Surface),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (!item.artworkUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = item.artworkUrl,
+                        contentDescription = item.label,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(64.dp))
+                }
+            }
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(
+                item.label,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "Your soundtrack wouldn't be the same without them",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HarmoniaPill(
+                icon = Icons.Rounded.PlayArrow,
+                text = "${item.playCount} plays",
+            )
+            HarmoniaPill(
+                icon = Icons.Rounded.Schedule,
+                text = item.listeningTimeMs.formatListeningTime(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaRankedTracksVisual(items: List<HarmoniaRankedItem>) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         items.take(5).forEachIndexed { index, item ->
             VantafynGlassCard(
@@ -1424,11 +2414,183 @@ private fun HarmoniaRankedVisual(items: List<HarmoniaRankedItem>) {
                 cornerRadius = 18.dp,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("#${index + 1}", color = VantafynColors.Ink, fontWeight = FontWeight.Bold, modifier = Modifier.width(34.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (index == 0) VantafynGradients.accentHorizontal()
+                                else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.06f))),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "#${index + 1}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(VantafynColors.Surface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.artworkUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = item.artworkUrl,
+                                contentDescription = item.label,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+                        }
+                    }
                     Column(Modifier.weight(1f)) {
-                        Text(item.label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("${item.playCount} plays • ${item.listeningTimeMs.formatListeningTime()}", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            item.label,
+                            color = VantafynColors.Ink,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            listOfNotNull(item.subtitle, "${item.playCount} plays", item.listeningTimeMs.formatListeningTime()).joinToString(" • "),
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaRankedArtistsVisual(items: List<HarmoniaRankedItem>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        items.take(5).forEachIndexed { index, item ->
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(
+                                if (index == 0) VantafynGradients.accentHorizontal()
+                                else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.06f))),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "#${index + 1}",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(VantafynColors.Surface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.artworkUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = item.artworkUrl,
+                                contentDescription = item.label,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            item.label,
+                            color = VantafynColors.Ink,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyLarge,
+                        )
+                        Text(
+                            "${item.playCount} plays • ${item.listeningTimeMs.formatListeningTime()}",
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaAlbumsVisual(items: List<HarmoniaRankedItem>) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+        items.take(4).forEachIndexed { index, item ->
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 18.dp,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(VantafynColors.Surface),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (!item.artworkUrl.isNullOrBlank()) {
+                            AsyncImage(
+                                model = item.artworkUrl,
+                                contentDescription = item.label,
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = ContentScale.Crop,
+                            )
+                        } else {
+                            Icon(Icons.Rounded.Album, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            item.label,
+                            color = VantafynColors.Ink,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            listOfNotNull(item.subtitle, "${item.playCount} plays", item.listeningTimeMs.formatListeningTime()).joinToString(" • "),
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                     }
                 }
             }
@@ -1439,25 +2601,60 @@ private fun HarmoniaRankedVisual(items: List<HarmoniaRankedItem>) {
 @Composable
 private fun HarmoniaGenreVisual(items: List<HarmoniaRankedItem>) {
     val total = items.sumOf { it.listeningTimeMs }.coerceAtLeast(1L)
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-        items.take(5).forEach { item ->
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(item.label, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text("${((item.listeningTimeMs * 100) / total).toInt()}%", color = VantafynColors.Muted)
+    val paletteGradients = listOf(
+        listOf(Color(0xFF00F2FE), Color(0xFF4FACFE)),
+        listOf(Color(0xFFFF0844), Color(0xFFFFB199)),
+        listOf(Color(0xFFF77737), Color(0xFFFCCC63)),
+        listOf(Color(0xFF9B51E0), Color(0xFFE056FD)),
+        listOf(Color(0xFF00C9FF), Color(0xFF92FE9D)),
+    )
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        items.take(5).forEachIndexed { index, item ->
+            val percentage = ((item.listeningTimeMs * 100) / total).toInt()
+            val gradient = paletteGradients[index % paletteGradients.size]
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(18.dp)
+                                .clip(CircleShape)
+                                .background(Brush.linearGradient(gradient)),
+                        )
+                        Text(
+                            item.label,
+                            color = VantafynColors.Ink,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    Text(
+                        "$percentage% • ${item.listeningTimeMs.formatListeningTime()}",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(8.dp)
+                        .height(9.dp)
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White.copy(alpha = 0.10f)),
+                        .background(Color.White.copy(alpha = 0.08f)),
                 ) {
                     Box(
                         Modifier
-                            .fillMaxWidth((item.listeningTimeMs.toFloat() / total).coerceIn(0.03f, 1f))
-                            .height(8.dp)
-                            .background(VantafynGradients.accentHorizontal()),
+                            .fillMaxWidth((item.listeningTimeMs.toFloat() / total).coerceIn(0.04f, 1f))
+                            .height(9.dp)
+                            .background(Brush.horizontalGradient(gradient)),
                     )
                 }
             }
@@ -1466,40 +2663,91 @@ private fun HarmoniaGenreVisual(items: List<HarmoniaRankedItem>) {
 }
 
 @Composable
-private fun HarmoniaHeatmapVisual(values: Map<LocalDate, Long>) {
+private fun HarmoniaHeatmapVisual(
+    values: Map<LocalDate, Long>,
+    streakDays: Int,
+    peakDate: LocalDate?,
+    peakTimeMs: Long,
+) {
     val maxValue = values.values.maxOrNull()?.coerceAtLeast(1L) ?: 1L
     val days = values.keys.sorted()
-    val columns = 18
-    Canvas(modifier = Modifier.fillMaxWidth().height(170.dp)) {
-        val gap = 4.dp.toPx()
-        val cell = ((size.width - gap * (columns - 1)) / columns).coerceAtMost(13.dp.toPx())
-        days.takeLast(columns * 7).forEachIndexed { index, day ->
-            val x = (index / 7) * (cell + gap)
-            val y = (index % 7) * (cell + gap)
-            val alpha = (values[day].orZero().toFloat() / maxValue).coerceIn(0.12f, 1f)
-            drawRoundRect(
-                color = VantafynGradients.AccentColors[index % VantafynGradients.AccentColors.size].copy(alpha = 0.18f + alpha * 0.62f),
-                topLeft = Offset(x, y),
-                size = Size(cell, cell),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()),
-            )
+    val columns = 16
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (streakDays > 1) {
+                HarmoniaPill(icon = Icons.Rounded.LocalFireDepartment, text = "$streakDays Day Streak", tint = Color(0xFFFF6B6B))
+            }
+            if (peakDate != null) {
+                HarmoniaPill(icon = Icons.Rounded.AutoAwesome, text = "Peak: $peakDate", tint = Color(0xFFFFD166))
+            }
+        }
+        Canvas(modifier = Modifier.fillMaxWidth().height(145.dp)) {
+            val gap = 4.dp.toPx()
+            val cell = ((size.width - gap * (columns - 1)) / columns).coerceAtMost(14.dp.toPx())
+            days.takeLast(columns * 7).forEachIndexed { index, day ->
+                val x = (index / 7) * (cell + gap)
+                val y = (index % 7) * (cell + gap)
+                val ratio = (values[day].orZero().toFloat() / maxValue)
+                val cellColor = if (ratio <= 0.001f) {
+                    Color.White.copy(alpha = 0.06f)
+                } else {
+                    val color1 = Color(0xFF00F2FE)
+                    val color2 = Color(0xFFFF007A)
+                    androidx.compose.ui.graphics.lerp(color1, color2, ratio.coerceIn(0f, 1f)).copy(alpha = 0.35f + ratio * 0.65f)
+                }
+                drawRoundRect(
+                    color = cellColor,
+                    topLeft = Offset(x, y),
+                    size = Size(cell, cell),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx(), 4.dp.toPx()),
+                )
+            }
         }
     }
 }
 
 @Composable
-private fun HarmoniaHourlyVisual(values: List<Pair<Int, Long>>) {
+private fun HarmoniaHourlyVisual(
+    values: List<Pair<Int, Long>>,
+    peakHour: Int?,
+) {
     val maxValue = values.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 1L
-    Canvas(modifier = Modifier.fillMaxWidth().height(150.dp)) {
-        val barWidth = size.width / 24f
-        values.forEach { (hour, value) ->
-            val height = (size.height * (value.toFloat() / maxValue)).coerceAtLeast(6.dp.toPx())
-            drawRoundRect(
-                color = VantafynGradients.AccentColors[hour % VantafynGradients.AccentColors.size].copy(alpha = 0.72f),
-                topLeft = Offset(hour * barWidth + 2.dp.toPx(), size.height - height),
-                size = Size(barWidth - 4.dp.toPx(), height),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(999f, 999f),
-            )
+    val personality = when (peakHour) {
+        in 22..23, in 0..4 -> "Night Owl" to "Most active late at night"
+        in 5..10 -> "Early Bird" to "Mornings started with music"
+        in 11..16 -> "Daylight Groove" to "Soundtrack to your day"
+        else -> "Evening Unwind" to "Easing into the evening"
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+        HarmoniaPill(
+            icon = if (peakHour in 5..16) Icons.Rounded.WbSunny else Icons.Rounded.NightlightRound,
+            text = "${personality.first} • ${personality.second}",
+            tint = Color(0xFF00F2FE),
+        )
+        Canvas(modifier = Modifier.fillMaxWidth().height(135.dp)) {
+            val barWidth = size.width / 24f
+            values.forEach { (hour, value) ->
+                val height = (size.height * (value.toFloat() / maxValue)).coerceAtLeast(4.dp.toPx())
+                val isPeak = hour == peakHour
+                val color = if (isPeak) {
+                    Color(0xFF00F2FE)
+                } else {
+                    Color.White.copy(alpha = 0.15f + 0.55f * (value.toFloat() / maxValue))
+                }
+                drawRoundRect(
+                    color = color,
+                    topLeft = Offset(hour * barWidth + 2.dp.toPx(), size.height - height),
+                    size = Size(barWidth - 4.dp.toPx(), height),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(999f, 999f),
+                )
+            }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("12 AM", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
+            Text("6 AM", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
+            Text("12 PM", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
+            Text("6 PM", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
+            Text("11 PM", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
         }
     }
 }
@@ -1530,57 +2778,352 @@ private fun HarmoniaMonthlyVisual(values: List<Pair<String, Long>>) {
     }
 }
 
+@Composable
+private fun HarmoniaFinalSummaryVisual(
+    summary: HarmoniaStoryVisual.FinalSummary,
+    onToggleSave: () -> Unit,
+    onReplay: () -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 24.dp,
+            contentPadding = PaddingValues(16.dp),
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Harmonia Recap", color = VantafynColors.Ink, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                    Text("${(summary.totalTimeMs / 60_000L)} mins total", color = VantafynColors.Primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    summary.topTrack?.let { track ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.07f))
+                                .padding(10.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("TOP TRACK", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text(track.label, color = VantafynColors.Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                                Text("${track.playCount} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    summary.topArtist?.let { artist ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.07f))
+                                .padding(10.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("TOP ARTIST", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                Text(artist.label, color = VantafynColors.Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                                Text("${artist.playCount} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+                summary.topGenre?.let { genre ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Top Genre:", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+                        HarmoniaPill(icon = Icons.Rounded.MusicNote, text = genre.label, tint = Color(0xFF00F2FE))
+                    }
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            VantafynButton(
+                text = if (summary.isSaved) "Saved to Recaps" else "Save Recap",
+                onClick = onToggleSave,
+                modifier = Modifier.weight(1f),
+            )
+            VantafynGlassChip(
+                selected = false,
+                onClick = onReplay,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Rounded.Replay, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Text("Replay", color = Color.White)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaPill(
+    icon: ImageVector,
+    text: String,
+    tint: Color = Color.White,
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color.White.copy(alpha = 0.10f))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = tint, modifier = Modifier.size(15.dp))
+            Text(text, color = VantafynColors.Ink, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
 private data class HarmoniaStorySlide(
     val kicker: String,
     val title: String,
     val metric: String? = null,
     val body: String? = null,
     val visual: HarmoniaStoryVisual = HarmoniaStoryVisual.None,
+    val artworkUrl: String? = null,
 )
 
 private sealed interface HarmoniaStoryVisual {
     data object None : HarmoniaStoryVisual
-    data class Ranked(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
+    data class HeroTrack(val item: HarmoniaRankedItem) : HarmoniaStoryVisual
+    data class HeroArtist(val item: HarmoniaRankedItem) : HarmoniaStoryVisual
+    data class RankedTracks(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
+    data class RankedArtists(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
+    data class Albums(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
     data class Genres(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
-    data class Heatmap(val values: Map<LocalDate, Long>) : HarmoniaStoryVisual
-    data class Hourly(val values: List<Pair<Int, Long>>) : HarmoniaStoryVisual
+    data class Heatmap(
+        val values: Map<LocalDate, Long>,
+        val streakDays: Int = 0,
+        val peakDate: LocalDate? = null,
+        val peakTimeMs: Long = 0L,
+    ) : HarmoniaStoryVisual
+    data class Hourly(val values: List<Pair<Int, Long>>, val peakHour: Int? = null) : HarmoniaStoryVisual
     data class Monthly(val values: List<Pair<String, Long>>) : HarmoniaStoryVisual
+    data class FinalSummary(
+        val totalTimeMs: Long,
+        val totalTracks: Int,
+        val topTrack: HarmoniaRankedItem?,
+        val topArtist: HarmoniaRankedItem?,
+        val topAlbum: HarmoniaRankedItem?,
+        val topGenre: HarmoniaRankedItem?,
+        val isSaved: Boolean,
+    ) : HarmoniaStoryVisual
 }
 
-private fun HarmoniaRecap.harmoniaStorySlides(): List<HarmoniaStorySlide> {
+private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaStorySlide> {
     val yearly = periodType == HarmoniaPeriod.YEARLY
-    val label = HarmoniaRecapPreview(id, userId, periodType, periodStart, periodEnd, generatedAt, dataVersion, statistics.totalListeningTimeMs.value ?: 0L, statistics.totalTracksPlayed.value ?: 0, statistics.topArtists.value?.firstOrNull()?.label, statistics.topTracks.value?.firstOrNull()?.label).periodLabel()
+    val label = HarmoniaRecapPreview(
+        id = id,
+        userId = userId,
+        periodType = periodType,
+        periodStart = periodStart,
+        periodEnd = periodEnd,
+        generatedAt = generatedAt,
+        dataVersion = dataVersion,
+        totalListeningTimeMs = statistics.totalListeningTimeMs.value ?: 0L,
+        totalTracksPlayed = statistics.totalTracksPlayed.value ?: 0,
+        topArtist = statistics.topArtists.value?.firstOrNull()?.label,
+        topTrack = statistics.topTracks.value?.firstOrNull()?.label,
+        artworkUrl = statistics.topTracks.value?.firstOrNull()?.artworkUrl ?: statistics.topAlbums.value?.firstOrNull()?.artworkUrl,
+    ).periodLabel()
     val stats = statistics
+    val topTrackItem = stats.topTracks.value?.firstOrNull()
+    val topArtistItem = stats.topArtists.value?.firstOrNull()
+    val topAlbumItem = stats.topAlbums.value?.firstOrNull()
+    val topGenreItem = stats.topGenres.value?.firstOrNull()
+
     return buildList {
-        add(HarmoniaStorySlide("Harmonia • $label", if (yearly) "Your year in music" else "Your month in music", stats.totalListeningTimeMs.value?.formatListeningTime(), "Your music, remembered."))
-        add(HarmoniaStorySlide("Listening scale", "You played ${stats.totalTracksPlayed.value ?: 0} tracks", stats.uniqueArtists.value?.let { "$it artists" }, stats.averageListeningSessionMs.value?.let { "Average session: ${it.formatListeningTime()}" }))
-        stats.topArtists.value?.firstOrNull()?.let { add(HarmoniaStorySlide("Top artist", it.label, it.listeningTimeMs.formatListeningTime(), "${it.playCount} plays", HarmoniaStoryVisual.Ranked(listOf(it)))) }
-        stats.topTracks.value?.takeIf { it.isNotEmpty() }?.let { add(HarmoniaStorySlide("Top tracks", "The songs that stayed with you", null, null, HarmoniaStoryVisual.Ranked(it))) }
-        stats.topAlbums.value?.takeIf { it.isNotEmpty() }?.let { add(HarmoniaStorySlide("Top albums", "The records you returned to", null, null, HarmoniaStoryVisual.Ranked(it))) }
-        stats.topGenres.value?.takeIf { it.isNotEmpty() }?.let { add(HarmoniaStorySlide("Top genres", "Your sound palette", null, null, HarmoniaStoryVisual.Genres(it))) }
-        stats.dailyHeatmap.value?.takeIf { it.isNotEmpty() }?.let { add(HarmoniaStorySlide("Activity", if (yearly) "Your listening year, day by day" else "Your listening month, day by day", null, null, HarmoniaStoryVisual.Heatmap(it))) }
+        add(
+            HarmoniaStorySlide(
+                kicker = "Harmonia • $label",
+                title = if (yearly) "Your year in music" else "Your month in music",
+                metric = stats.totalListeningTimeMs.value?.formatListeningTime(),
+                body = "Every late night, morning commute, and quiet afternoon — here is your story.",
+                artworkUrl = topTrackItem?.artworkUrl ?: topAlbumItem?.artworkUrl,
+                visual = HarmoniaStoryVisual.None,
+            ),
+        )
+        add(
+            HarmoniaStorySlide(
+                kicker = "Listening scale",
+                title = "You played ${stats.totalTracksPlayed.value ?: 0} tracks",
+                metric = stats.uniqueArtists.value?.let { "$it artists explored" },
+                body = stats.averageListeningSessionMs.value?.let { "Average session: ${it.formatListeningTime()}" },
+                artworkUrl = topAlbumItem?.artworkUrl,
+                visual = HarmoniaStoryVisual.None,
+            ),
+        )
+        topArtistItem?.let { artist ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Top artist",
+                    title = artist.label,
+                    metric = artist.listeningTimeMs.formatListeningTime(),
+                    body = "${artist.playCount} plays",
+                    artworkUrl = artist.artworkUrl,
+                    visual = HarmoniaStoryVisual.HeroArtist(artist),
+                ),
+            )
+        }
+        stats.topArtists.value?.takeIf { it.size > 1 }?.let { artists ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Top artists",
+                    title = "The voices that stayed with you",
+                    artworkUrl = artists.firstOrNull()?.artworkUrl,
+                    visual = HarmoniaStoryVisual.RankedArtists(artists),
+                ),
+            )
+        }
+        topTrackItem?.let { track ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Top track",
+                    title = track.label,
+                    metric = track.listeningTimeMs.formatListeningTime(),
+                    body = listOfNotNull(track.subtitle, "${track.playCount} plays").joinToString(" • "),
+                    artworkUrl = track.artworkUrl,
+                    visual = HarmoniaStoryVisual.HeroTrack(track),
+                ),
+            )
+        }
+        stats.topTracks.value?.takeIf { it.size > 1 }?.let { tracks ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Top tracks",
+                    title = "Heavy rotation",
+                    artworkUrl = tracks.firstOrNull()?.artworkUrl,
+                    visual = HarmoniaStoryVisual.RankedTracks(tracks),
+                ),
+            )
+        }
+        stats.topAlbums.value?.takeIf { it.isNotEmpty() }?.let { albums ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Top albums",
+                    title = "The records you returned to",
+                    artworkUrl = albums.firstOrNull()?.artworkUrl,
+                    visual = HarmoniaStoryVisual.Albums(albums),
+                ),
+            )
+        }
+        stats.topGenres.value?.takeIf { it.isNotEmpty() }?.let { genres ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Top genres",
+                    title = "Your sound palette",
+                    body = genres.firstOrNull()?.let { "Your sound leaned towards ${it.label}." },
+                    visual = HarmoniaStoryVisual.Genres(genres),
+                ),
+            )
+        }
+        stats.dailyHeatmap.value?.takeIf { it.isNotEmpty() }?.let { heatmap ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Activity",
+                    title = if (yearly) "Your listening year, day by day" else "Your listening month, day by day",
+                    metric = stats.listeningStreakDays.value?.takeIf { it > 1 }?.let { "🔥 $it Day Streak" },
+                    body = stats.longestListeningDay.value?.let { "Peak: ${it.date} (${it.listeningTimeMs.formatListeningTime()})" },
+                    visual = HarmoniaStoryVisual.Heatmap(
+                        values = heatmap,
+                        streakDays = stats.listeningStreakDays.value ?: 0,
+                        peakDate = stats.longestListeningDay.value?.date,
+                        peakTimeMs = stats.longestListeningDay.value?.listeningTimeMs ?: 0L,
+                    ),
+                ),
+            )
+        }
         stats.listeningByHour.value?.takeIf { it.any { hour -> hour.listeningTimeMs > 0L } }?.let { hours ->
             val activeHour = stats.mostActiveHour.value?.hour?.formatHour()
-            add(HarmoniaStorySlide("Time patterns", "Your listening rhythm", activeHour, stats.mostActiveDay.value?.date?.let { "Most active day: $it" }, HarmoniaStoryVisual.Hourly(hours.map { it.hour to it.listeningTimeMs })))
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Time patterns",
+                    title = "Your listening rhythm",
+                    metric = activeHour?.let { "Peak hour: $it" },
+                    body = stats.mostActiveDay.value?.date?.let { "Most active day: $it" },
+                    visual = HarmoniaStoryVisual.Hourly(
+                        values = hours.map { it.hour to it.listeningTimeMs },
+                        peakHour = stats.mostActiveHour.value?.hour,
+                    ),
+                ),
+            )
         }
         stats.listeningByMonth.value?.takeIf { yearly && it.isNotEmpty() }?.let { months ->
-            add(HarmoniaStorySlide("Monthly journey", "The shape of your year", null, null, HarmoniaStoryVisual.Monthly(months.map { it.month.month.getDisplayName(JavaTextStyle.SHORT, Locale.getDefault()) to it.listeningTimeMs })))
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Monthly journey",
+                    title = "The shape of your year",
+                    visual = HarmoniaStoryVisual.Monthly(
+                        months.map {
+                            it.month.month.getDisplayName(JavaTextStyle.SHORT, Locale.getDefault()) to it.listeningTimeMs
+                        },
+                    ),
+                ),
+            )
         }
         stats.comparisonListeningDeltaMs.value?.let { delta ->
-            if (!yearly) add(HarmoniaStorySlide("Compared with last month", if (delta >= 0) "You listened more" else "You listened less", kotlin.math.abs(delta).formatListeningTime()))
+            if (!yearly) {
+                add(
+                    HarmoniaStorySlide(
+                        kicker = "Compared with last month",
+                        title = if (delta >= 0) "You listened more" else "A quieter month",
+                        metric = kotlin.math.abs(delta).formatListeningTime(),
+                    ),
+                )
+            }
         }
-        stats.mostReplayedTrack.value?.let { add(HarmoniaStorySlide("Replay behaviour", "You kept coming back to ${it.label}", it.playCount.let { count -> "$count plays" }, it.listeningTimeMs.formatListeningTime())) }
+        stats.mostReplayedTrack.value?.let { replayed ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Replay behaviour",
+                    title = "You kept coming back to ${replayed.label}",
+                    metric = "${replayed.playCount} plays",
+                    body = replayed.listeningTimeMs.formatListeningTime(),
+                    artworkUrl = replayed.artworkUrl,
+                ),
+            )
+        }
         listOfNotNull(
             stats.longestListeningDay.value?.let { "Longest day: ${it.date} with ${it.listeningTimeMs.formatListeningTime()}" },
             stats.listeningStreakDays.value?.takeIf { it > 1 }?.let { "Longest streak: $it days" },
         ).takeIf { it.isNotEmpty() }?.let {
             add(HarmoniaStorySlide("Milestones", "Moments that stood out", null, it.joinToString("\n")))
         }
-        derivedPersonality(stats.topGenres.value, stats.listeningByHour.value?.map { it.hour to it.listeningTimeMs }).let { insight ->
-            if (insight != null) add(insight)
+        derivedPersonality(stats.topGenres.value, stats.listeningByHour.value?.map { it.hour to it.listeningTimeMs })?.let { insight ->
+            add(insight)
         }
-        add(HarmoniaStorySlide("Final summary", if (yearly) "This was your year in music." else "This was your month in music.", stats.totalListeningTimeMs.value?.formatListeningTime(), listOfNotNull(stats.topArtists.value?.firstOrNull()?.label?.let { "Top artist: $it" }, stats.topTracks.value?.firstOrNull()?.label?.let { "Top track: $it" }, stats.topGenres.value?.firstOrNull()?.label?.let { "Top genre: $it" }).joinToString("\n").ifBlank { null }))
-        add(HarmoniaStorySlide("Harmonia", "Your music, remembered.", label))
+        add(
+            HarmoniaStorySlide(
+                kicker = "Harmonia Recap",
+                title = if (yearly) "This was your year in music." else "This was your month in music.",
+                visual = HarmoniaStoryVisual.FinalSummary(
+                    totalTimeMs = stats.totalListeningTimeMs.value ?: 0L,
+                    totalTracks = stats.totalTracksPlayed.value ?: 0,
+                    topTrack = topTrackItem,
+                    topArtist = topArtistItem,
+                    topAlbum = topAlbumItem,
+                    topGenre = topGenreItem,
+                    isSaved = isSaved,
+                ),
+            ),
+        )
     }
 }
 
@@ -2010,22 +3553,47 @@ private fun MusicTrackList(
         hasPlayed = true
     }
 
+    var localTracks by remember(tracks) { mutableStateOf(tracks) }
+    var draggedIndex by remember { mutableStateOf<Int?>(null) }
+    var dragStartIndex by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var itemHeightPx by remember { mutableFloatStateOf(0f) }
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val spacingPx = with(density) { 10.dp.toPx() }
+
+    LaunchedEffect(tracks) {
+        if (draggedIndex == null) {
+            localTracks = tracks
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (title.isNotBlank()) Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
-        if (page != null && page.totalItems > page.pageSize) {
-            MusicPageControls(
-                page = page,
-                loading = isPageLoading,
-                onPrevious = onPreviousPage,
-                onNext = onNextPage,
-            )
-        }
-        tracks.forEachIndexed { index, track ->
+        localTracks.forEachIndexed { index, track ->
             key(track.id) {
+                val isItemDragged = draggedIndex == index
                 MusicContentReveal(index = index, animate = revealTrackRows, revealKey = trackRevealKey) {
                     VantafynGlassCard(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .onGloballyPositioned { coords ->
+                                if (coords.size.height > 0) itemHeightPx = coords.size.height.toFloat()
+                            }
+                            .zIndex(if (isItemDragged) 10f else 1f)
+                            .graphicsLayer {
+                                if (isItemDragged) {
+                                    translationY = dragOffsetY
+                                    scaleX = 1.025f
+                                    scaleY = 1.025f
+                                    shadowElevation = 18f
+                                } else {
+                                    translationY = 0f
+                                    scaleX = 1f
+                                    scaleY = 1f
+                                    shadowElevation = 0f
+                                }
+                            }
                             .then(
                                 if (track.id == currentTrackId) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
                                 else Modifier
@@ -2051,39 +3619,74 @@ private fun MusicTrackList(
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             if (isReorderMode && onReorder != null) {
-                                Column(
-                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .pointerInput(track.id, isReorderMode) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    draggedIndex = index
+                                                    dragStartIndex = index
+                                                    dragOffsetY = 0f
+                                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    val curr = draggedIndex ?: return@detectDragGestures
+                                                    dragOffsetY += dragAmount.y
+                                                    val step = if (itemHeightPx > 0f) itemHeightPx + spacingPx else with(density) { 76.dp.toPx() }
+
+                                                    if (dragOffsetY > step * 0.5f && curr < localTracks.lastIndex) {
+                                                        val next = curr + 1
+                                                        val list = localTracks.toMutableList()
+                                                        val item = list.removeAt(curr)
+                                                        list.add(next, item)
+                                                        localTracks = list
+                                                        draggedIndex = next
+                                                        dragOffsetY -= step
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    } else if (dragOffsetY < -step * 0.5f && curr > 0) {
+                                                        val prev = curr - 1
+                                                        val list = localTracks.toMutableList()
+                                                        val item = list.removeAt(curr)
+                                                        list.add(prev, item)
+                                                        localTracks = list
+                                                        draggedIndex = prev
+                                                        dragOffsetY += step
+                                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    val start = dragStartIndex
+                                                    val finish = draggedIndex
+                                                    draggedIndex = null
+                                                    dragStartIndex = null
+                                                    dragOffsetY = 0f
+                                                    if (start != null && finish != null && start != finish) {
+                                                        onReorder(start, finish)
+                                                    }
+                                                },
+                                                onDragCancel = {
+                                                    draggedIndex = null
+                                                    dragStartIndex = null
+                                                    dragOffsetY = 0f
+                                                    localTracks = tracks
+                                                },
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center,
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable(enabled = index > 0) { onReorder(index, index - 1) },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            "\u25B2",
-                                            color = if (index > 0) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.3f),
-                                            fontSize = 11.sp,
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .clickable(enabled = index < tracks.lastIndex) { onReorder(index, index + 1) },
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            "\u25BC",
-                                            color = if (index < tracks.lastIndex) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.3f),
-                                            fontSize = 11.sp,
-                                        )
-                                    }
+                                    Icon(
+                                        imageVector = Icons.Rounded.DragHandle,
+                                        contentDescription = "Drag to reorder",
+                                        tint = VantafynColors.Ink,
+                                        modifier = Modifier.size(20.dp),
+                                    )
                                 }
                             }
-                            MusicArt(track.artworkUrl, Modifier.size(52.dp))
+                            MusicArt(track.artworkUrl, Modifier.size(52.dp), title = track.title, subtitle = track.artist)
                             Column(Modifier.weight(1f)) {
                                 Text(track.title, color = VantafynColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -2113,76 +3716,6 @@ private fun MusicTrackList(
             }
         }
     }
-}
-
-@Composable
-private fun MusicPageControls(
-    page: JellyfinMusicTrackPage,
-    loading: Boolean,
-    onPrevious: () -> Unit,
-    onNext: () -> Unit,
-) {
-    val firstItem = if (page.totalItems == 0) 0 else page.startIndex + 1
-    val lastItem = (page.startIndex + page.tracks.size).coerceAtMost(page.totalItems)
-    val display = MusicPageControlDisplay(
-        firstItem = firstItem,
-        lastItem = lastItem,
-        totalItems = page.totalItems,
-        hasPrevious = page.hasPrevious,
-        hasNext = page.hasNext,
-        loading = loading,
-    )
-    AnimatedContent(
-        targetState = display,
-        transitionSpec = {
-            fadeIn(animationSpec = tween(260, easing = FastOutSlowInEasing)) togetherWith
-                fadeOut(animationSpec = tween(170, easing = FastOutSlowInEasing))
-        },
-        label = "musicPageControlsFade",
-    ) { target ->
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            MusicPageAction("Prev", enabled = target.hasPrevious && !target.loading, onClick = onPrevious)
-            Text(
-                "${target.firstItem}-${target.lastItem} of ${target.totalItems.groupedMusicCountLabel()}",
-                color = VantafynColors.Ink,
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            MusicPageAction("Next", enabled = target.hasNext && !target.loading, onClick = onNext)
-        }
-    }
-}
-
-private data class MusicPageControlDisplay(
-    val firstItem: Int,
-    val lastItem: Int,
-    val totalItems: Int,
-    val hasPrevious: Boolean,
-    val hasNext: Boolean,
-    val loading: Boolean,
-)
-
-@Composable
-private fun MusicPageAction(label: String, enabled: Boolean, onClick: () -> Unit) {
-    Text(
-        text = label,
-        color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.42f),
-        style = MaterialTheme.typography.bodyLarge,
-        fontWeight = FontWeight.SemiBold,
-        modifier = Modifier
-            .clip(RoundedCornerShape(999.dp))
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp),
-    )
 }
 
 @Composable
@@ -2255,6 +3788,12 @@ private fun MusicTopBackHeader(title: String, onBack: () -> Unit) {
     }
 }
 
+private enum class DetailDownloadState {
+    READY,
+    DOWNLOADING,
+    DOWNLOADED,
+}
+
 @Composable
 private fun MusicDetailHeader(
     title: String,
@@ -2263,7 +3802,11 @@ private fun MusicDetailHeader(
     onBack: () -> Unit,
     onDownload: (() -> Unit)? = null,
     isDownloaded: Boolean = false,
+    isDownloading: Boolean = false,
+    downloadProgress: Float = 0f,
     trackImageUrls: List<String> = emptyList(),
+    onToggleReorder: (() -> Unit)? = null,
+    isReordering: Boolean = false,
     onPlay: (() -> Unit)?,
 ) {
     Column(
@@ -2274,7 +3817,7 @@ private fun MusicDetailHeader(
         if (trackImageUrls.size >= 2) {
             PlaylistArtGrid(trackImageUrls, Modifier.size(188.dp))
         } else {
-            MusicCollectionArtwork(imageUrl, Modifier.size(188.dp))
+            MusicCollectionArtwork(imageUrl, Modifier.size(188.dp), title = title, subtitle = subtitle)
         }
         Text(
             title,
@@ -2311,22 +3854,98 @@ private fun MusicDetailHeader(
                     onClick = onPlay,
                     modifier = Modifier.weight(1f),
                 )
-                if (onDownload != null) {
+                if (onToggleReorder != null) {
                     VantafynGlassSurface(
                         modifier = Modifier
                             .size(54.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .clickable(enabled = !isDownloaded, onClick = onDownload),
-                        variant = VantafynGlassVariant.Card,
+                            .clickable(onClick = onToggleReorder),
+                        variant = if (isReordering) VantafynGlassVariant.Panel else VantafynGlassVariant.Card,
                         cornerRadius = 18.dp,
                         contentPadding = PaddingValues(0.dp),
                     ) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                             Icon(
-                                imageVector = if (isDownloaded) Icons.Rounded.Check else Icons.Rounded.Download,
-                                contentDescription = if (isDownloaded) "Downloaded" else "Save offline",
-                                tint = if (isDownloaded) Color.White else VantafynColors.Ink,
+                                imageVector = if (isReordering) Icons.Rounded.Check else Icons.Rounded.Reorder,
+                                contentDescription = if (isReordering) "Done reordering" else "Reorder playlist",
+                                tint = if (isReordering) VantafynColors.Primary else VantafynColors.Ink,
+                                modifier = Modifier.size(24.dp),
                             )
+                        }
+                    }
+                }
+                if (onDownload != null) {
+                    val downloadButtonState = when {
+                        isDownloaded -> DetailDownloadState.DOWNLOADED
+                        isDownloading -> DetailDownloadState.DOWNLOADING
+                        else -> DetailDownloadState.READY
+                    }
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(
+                                enabled = downloadButtonState == DetailDownloadState.READY,
+                                onClick = onDownload,
+                            ),
+                        variant = VantafynGlassVariant.Card,
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            AnimatedContent(
+                                targetState = downloadButtonState,
+                                transitionSpec = {
+                                    (fadeIn(tween(300)) + scaleIn(spring(dampingRatio = Spring.DampingRatioMediumBouncy)))
+                                        .togetherWith(fadeOut(tween(180)) + scaleOut())
+                                },
+                                label = "detail_download_button_state",
+                            ) { buttonState ->
+                                when (buttonState) {
+                                    DetailDownloadState.READY -> {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Download,
+                                            contentDescription = "Save offline",
+                                            tint = VantafynColors.Ink,
+                                            modifier = Modifier.size(24.dp),
+                                        )
+                                    }
+                                    DetailDownloadState.DOWNLOADING -> {
+                                        Box(
+                                            modifier = Modifier.size(38.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            VantafynCircularProgressIndicator(
+                                                progress = if (downloadProgress > 0f) downloadProgress else null,
+                                                modifier = Modifier.size(36.dp),
+                                                strokeWidth = 3.dp,
+                                            )
+                                            Icon(
+                                                imageVector = Icons.Rounded.ArrowDownward,
+                                                contentDescription = "Downloading",
+                                                tint = VantafynColors.Ink,
+                                                modifier = Modifier.size(15.dp),
+                                            )
+                                        }
+                                    }
+                                    DetailDownloadState.DOWNLOADED -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(VantafynGradients.accentHorizontal()),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Check,
+                                                contentDescription = "Downloaded",
+                                                tint = VantafynColors.Ink,
+                                                modifier = Modifier.size(19.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -2337,7 +3956,12 @@ private fun MusicDetailHeader(
 }
 
 @Composable
-private fun MusicCollectionArtwork(imageUrl: String?, modifier: Modifier = Modifier) {
+private fun MusicCollectionArtwork(
+    imageUrl: String?,
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    subtitle: String? = null,
+) {
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(30.dp))
@@ -2352,7 +3976,7 @@ private fun MusicCollectionArtwork(imageUrl: String?, modifier: Modifier = Modif
             .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(30.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        MusicArt(imageUrl, Modifier.fillMaxSize(), cornerRadius = 30)
+        MusicArt(imageUrl, Modifier.fillMaxSize(), cornerRadius = 30, title = title, subtitle = subtitle)
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -2382,18 +4006,17 @@ private fun MusicArtworkTile(
     Column(
         modifier = Modifier
             .width(128.dp)
-            .clip(RoundedCornerShape(22.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick,
             ),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Box(contentAlignment = Alignment.Center) {
             if (trackImageUrls.size >= 2) {
                 PlaylistArtGrid(trackImageUrls, Modifier.size(128.dp))
             } else {
-                MusicArt(imageUrl, Modifier.size(128.dp))
+                MusicArt(imageUrl, Modifier.size(128.dp), title = title, subtitle = subtitle)
             }
             if (isLoading) {
                 Box(
@@ -2407,8 +4030,32 @@ private fun MusicArtworkTile(
                 }
             }
         }
-        Text(title, color = VantafynColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = rememberLifecycleAwareMarquee())
-        Text(subtitle, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = rememberLifecycleAwareMarquee())
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rememberLifecycleAwareMarquee()),
+            )
+            Text(
+                text = subtitle,
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rememberLifecycleAwareMarquee()),
+            )
+        }
     }
 }
 
@@ -2569,7 +4216,7 @@ private fun MusicMiniPlayer(
     ) {
         Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                MusicArt(track.artworkUrl, Modifier.size(50.dp), cornerRadius = 14)
+                MusicArt(track.artworkUrl, Modifier.size(50.dp), cornerRadius = 14, title = track.title, subtitle = track.artist)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     VantafynMarqueeText(
                         text = track.title,
@@ -2606,6 +4253,8 @@ private fun NowPlayingDialog(
     var showPlaylistName by remember { mutableStateOf(false) }
     var showMoreSheet by remember { mutableStateOf(false) }
     var showSleepTimerSheet by remember { mutableStateOf(false) }
+    var showAutoEqDialog by remember { mutableStateOf(false) }
+    var showReplayGainDialog by remember { mutableStateOf(false) }
     var showSaveQueueDialog by remember { mutableStateOf(false) }
     var contextQueueIndex by remember { mutableIntStateOf(-1) }
     val track = state.playback.currentTrack ?: return
@@ -2653,16 +4302,44 @@ private fun NowPlayingDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            FlatMusicIconButton(
-                                icon = Icons.Rounded.Fullscreen,
-                                contentDescription = "Ambient Display",
-                                onClick = {
-                                    runCatching {
-                                        context.startActivity(Intent(context, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity")))
+                            if (state.isRadioActive) {
+                                val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
+                                val radioAlpha by infiniteTransition.animateFloat(
+                                    initialValue = 0.65f,
+                                    targetValue = 1f,
+                                    animationSpec = infiniteRepeatable(
+                                        animation = tween(1000, easing = LinearEasing),
+                                        repeatMode = RepeatMode.Reverse,
+                                    ),
+                                    label = "radio_alpha",
+                                )
+                                VantafynGlassSurface(
+                                    modifier = Modifier.clip(RoundedCornerShape(999.dp)),
+                                    variant = VantafynGlassVariant.Chip,
+                                    cornerRadius = 999.dp,
+                                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        modifier = Modifier.alpha(radioAlpha),
+                                    ) {
+                                        Icon(
+                                            Icons.Rounded.Radio,
+                                            contentDescription = "Infinite Radio Active",
+                                            tint = Color(0xFF21D8FF),
+                                            modifier = Modifier.size(13.dp),
+                                        )
+                                        Text(
+                                            "INFINITE RADIO",
+                                            color = Color(0xFF21D8FF),
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            letterSpacing = 0.5.sp,
+                                        )
                                     }
-                                },
-                                size = 44,
-                            )
+                                }
+                            }
                             if (state.playback.sleepTimerMode != null) {
                                 val label = when (state.playback.sleepTimerMode) {
                                     SleepTimerMode.Duration -> {
@@ -2725,6 +4402,8 @@ private fun NowPlayingDialog(
                             .size(296.dp)
                             .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(30.dp)),
                         cornerRadius = 30,
+                        title = track.title,
+                        subtitle = track.artist,
                     )
                 }
             }
@@ -2814,6 +4493,7 @@ private fun NowPlayingDialog(
                         index = state.playback.queueIndex,
                         onTrack = viewModel::playQueueIndex,
                         onRemove = viewModel::removeQueueItem,
+                        onReorder = viewModel::moveQueueTrack,
                         onLongPress = { contextQueueIndex = it },
                         onSaveQueue = { showSaveQueueDialog = true },
                         onClearUpcoming = viewModel::clearUpcomingQueue,
@@ -2825,45 +4505,93 @@ private fun NowPlayingDialog(
                 Spacer(Modifier.height(96.dp))
             }
         }
-        if (showMoreSheet) {
-            CurrentTrackMoreSheet(
-                track = track,
-                playlists = state.home?.playlists.orEmpty(),
-                onDismiss = { showMoreSheet = false },
-                onNewPlaylist = {
-                    showMoreSheet = false
-                    showPlaylistName = true
-                },
-                onPlayNext = {
-                    showMoreSheet = false
-                    viewModel.playCurrentNext()
-                },
-                onAddToQueue = {
-                    showMoreSheet = false
-                    viewModel.addCurrentToQueue()
-                },
-                onChoosePlaylist = {
-                    showMoreSheet = false
-                    onChoosePlaylist()
-                },
-                canGoToArtist = state.home?.artists?.any { it.name.equals(track.artist, ignoreCase = true) } == true,
-                onGoToAlbum = {
-                    showMoreSheet = false
-                    viewModel.openCurrentAlbum()
-                },
-                onGoToArtist = {
-                    showMoreSheet = false
-                    viewModel.openCurrentArtist()
-                },
-                onFavorite = {
-                    showMoreSheet = false
-                    viewModel.toggleCurrentFavorite()
-                },
-                onTrackDetails = {
-                    showMoreSheet = false
-                    onTrackDetails(track.toDetails())
-                },
-            )
+        CurrentTrackMoreSheet(
+            visible = showMoreSheet,
+            track = track,
+            playlists = state.home?.playlists.orEmpty(),
+            isRadioActive = state.isRadioActive,
+            onDismiss = { showMoreSheet = false },
+            onNewPlaylist = {
+                showMoreSheet = false
+                showPlaylistName = true
+            },
+            onPlayNext = {
+                showMoreSheet = false
+                viewModel.playCurrentNext()
+            },
+            onAddToQueue = {
+                showMoreSheet = false
+                viewModel.addCurrentToQueue()
+            },
+            onToggleRadio = {
+                showMoreSheet = false
+                if (state.isRadioActive) {
+                    viewModel.stopRadio()
+                } else {
+                    viewModel.startRadio(track)
+                }
+            },
+            onChoosePlaylist = {
+                showMoreSheet = false
+                onChoosePlaylist()
+            },
+            canGoToArtist = state.home?.artists?.any { it.name.equals(track.artist, ignoreCase = true) } == true,
+            onGoToAlbum = {
+                showMoreSheet = false
+                viewModel.openCurrentAlbum()
+            },
+            onGoToArtist = {
+                showMoreSheet = false
+                viewModel.openCurrentArtist()
+            },
+            onFavorite = {
+                showMoreSheet = false
+                viewModel.toggleCurrentFavorite()
+            },
+            onOpenAutoEq = {
+                showMoreSheet = false
+                showAutoEqDialog = true
+            },
+            onOpenReplayGain = {
+                showMoreSheet = false
+                showReplayGainDialog = true
+            },
+            onTrackDetails = {
+                showMoreSheet = false
+                onTrackDetails(track.toDetails())
+            },
+        )
+        SleepTimerSheet(
+            visible = showSleepTimerSheet,
+            playback = state.playback,
+            onDismiss = { showSleepTimerSheet = false },
+            onSetDuration = viewModel::setSleepTimer,
+            onSetEndOfTrack = viewModel::setSleepTimerEndOfTrack,
+            onSetEndOfQueue = viewModel::setSleepTimerEndOfQueue,
+            onCancel = viewModel::cancelSleepTimer,
+        )
+        if (showAutoEqDialog) {
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { showAutoEqDialog = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                dev.vantafyn.feature.music.autoeq.AutoEqSearchScreen(
+                    onDismiss = { showAutoEqDialog = false },
+                )
+            }
+        }
+        if (showReplayGainDialog) {
+            val playbackController = remember(context) { dev.vantafyn.core.media.MusicPlaybackController.get(context) }
+            androidx.compose.ui.window.Dialog(
+                onDismissRequest = { showReplayGainDialog = false },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+            ) {
+                dev.vantafyn.feature.music.replaygain.ReplayGainDialog(
+                    playbackController = playbackController,
+                    currentTrack = track,
+                    onDismiss = { showReplayGainDialog = false },
+                )
+            }
         }
     }
     if (showPlaylistName) {
@@ -2892,16 +4620,6 @@ private fun NowPlayingDialog(
             onSave = { playlistTitle ->
                 viewModel.saveQueueAsPlaylist(playlistTitle)
             },
-        )
-    }
-    if (showSleepTimerSheet) {
-        SleepTimerSheet(
-            playback = state.playback,
-            onDismiss = { showSleepTimerSheet = false },
-            onSetDuration = viewModel::setSleepTimer,
-            onSetEndOfTrack = viewModel::setSleepTimerEndOfTrack,
-            onSetEndOfQueue = viewModel::setSleepTimerEndOfQueue,
-            onCancel = viewModel::cancelSleepTimer,
         )
     }
     if (contextQueueIndex >= 0) {
@@ -3210,7 +4928,7 @@ private fun MusicTrackDetailsSheet(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    MusicArt(track.artworkUrl, Modifier.size(72.dp), cornerRadius = 18)
+                    MusicArt(track.artworkUrl, Modifier.size(72.dp), cornerRadius = 18, title = track.title, subtitle = track.artist)
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("Track details", color = VantafynColors.Muted, style = MaterialTheme.typography.labelLarge)
                         Text(
@@ -3278,57 +4996,104 @@ private fun MusicDetailLine(label: String, value: String) {
 
 @Composable
 private fun CurrentTrackMoreSheet(
+    visible: Boolean,
     track: VantafynMusicTrack,
     playlists: List<JellyfinMusicPlaylist>,
+    isRadioActive: Boolean = false,
     onDismiss: () -> Unit,
     onNewPlaylist: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onToggleRadio: () -> Unit = {},
     onChoosePlaylist: () -> Unit,
     canGoToArtist: Boolean,
     onGoToAlbum: () -> Unit,
     onGoToArtist: () -> Unit,
     onFavorite: () -> Unit,
+    onOpenAutoEq: () -> Unit = {},
+    onOpenReplayGain: () -> Unit = {},
     onTrackDetails: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.42f))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.BottomCenter,
+    BackHandler(enabled = visible, onBack = onDismiss)
+    val density = LocalDensity.current
+    val extraOffsetPx = remember(density) {
+        with(density) { (MusicBottomSheetRailClearance + 56.dp).roundToPx() }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)),
     ) {
-        VantafynGlassModalPanel(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
-                .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
-                .clickable(enabled = false) {},
-            cornerRadius = 30.dp,
-            contentPadding = PaddingValues(18.dp),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss,
+                ),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MusicArt(track.artworkUrl, Modifier.size(58.dp), cornerRadius = 16)
-                    Column(Modifier.weight(1f)) {
-                        VantafynMarqueeText(track.title, MaterialTheme.typography.titleMedium.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold))
-                        VantafynMarqueeText(track.artist, MaterialTheme.typography.bodyMedium.copy(color = VantafynColors.Muted))
+            VantafynGlassModalPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
+                    .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {}
+                    .animateEnterExit(
+                        enter = slideInVertically(
+                            initialOffsetY = { fullHeight -> fullHeight + extraOffsetPx },
+                            animationSpec = spring(
+                                dampingRatio = 0.84f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        ),
+                        exit = slideOutVertically(
+                            targetOffsetY = { fullHeight -> fullHeight + extraOffsetPx },
+                            animationSpec = tween(
+                                durationMillis = 260,
+                                easing = CubicBezierEasing(0.32f, 0f, 0.67f, 0f),
+                            ),
+                        ),
+                    ),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(18.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        MusicArt(track.artworkUrl, Modifier.size(58.dp), cornerRadius = 16, title = track.title, subtitle = track.artist)
+                        Column(Modifier.weight(1f)) {
+                            VantafynMarqueeText(track.title, MaterialTheme.typography.titleMedium.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold))
+                            VantafynMarqueeText(track.artist, MaterialTheme.typography.bodyMedium.copy(color = VantafynColors.Muted))
+                        }
                     }
+                    MusicMenuAction(
+                        if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        if (track.isFavorite) "Remove from My List" else "Add to My List",
+                        onFavorite,
+                    )
+                    MusicMenuAction(
+                        Icons.Rounded.Radio,
+                        if (isRadioActive) "End Station Radio" else "Start Station Radio",
+                        onToggleRadio,
+                    )
+                    MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
+                    MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
+                    MusicMenuAction(Icons.Rounded.PlaylistAdd, "New playlist", onNewPlaylist)
+                    if (playlists.isNotEmpty()) {
+                        MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
+                    }
+                    if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
+                    if (canGoToArtist) MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to artist", onGoToArtist)
+                    MusicMenuAction(Icons.Rounded.GraphicEq, "Headphone EQ (AutoEQ)", onOpenAutoEq)
+                    MusicMenuAction(Icons.Rounded.VolumeUp, "Loudness Leveling (ReplayGain)", onOpenReplayGain)
+                    MusicMenuAction(Icons.Rounded.Info, "View track details", onTrackDetails)
                 }
-                MusicMenuAction(
-                    if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                    if (track.isFavorite) "Remove from My List" else "Add to My List",
-                    onFavorite,
-                )
-                MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
-                MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
-                MusicMenuAction(Icons.Rounded.PlaylistAdd, "New playlist", onNewPlaylist)
-                if (playlists.isNotEmpty()) {
-                    MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
-                }
-                if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
-                if (canGoToArtist) MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to artist", onGoToArtist)
-                MusicMenuAction(Icons.Rounded.Info, "View track details", onTrackDetails)
             }
         }
     }
@@ -3353,6 +5118,7 @@ private fun MusicContextActionSheet(
     onToggleFavorite: (() -> Unit)? = null,
     onAddToPlaylist: (() -> Unit)? = null,
     onDownload: (() -> Unit)? = null,
+    onStartRadio: (() -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -3372,7 +5138,7 @@ private fun MusicContextActionSheet(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    MusicArt(artworkUrl, Modifier.size(56.dp), cornerRadius = 16)
+                    MusicArt(artworkUrl, Modifier.size(56.dp), cornerRadius = 16, title = title, subtitle = subtitle)
                     Column(Modifier.weight(1f)) {
                         VantafynMarqueeText(title, MaterialTheme.typography.titleMedium.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold))
                         subtitle?.let { VantafynMarqueeText(it, MaterialTheme.typography.bodyMedium.copy(color = VantafynColors.Muted)) }
@@ -3381,6 +5147,12 @@ private fun MusicContextActionSheet(
                 MusicMenuAction(Icons.Rounded.PlayArrow, "Play Now") {
                     onPlay()
                     onDismiss()
+                }
+                onStartRadio?.let { action ->
+                    MusicMenuAction(Icons.Rounded.Radio, "Start Station Radio") {
+                        action()
+                        onDismiss()
+                    }
                 }
                 MusicMenuAction(Icons.Rounded.NavigateNext, "Play Next") {
                     onPlayNext()
@@ -3415,6 +5187,7 @@ private fun MusicContextActionSheet(
 
 @Composable
 private fun SleepTimerSheet(
+    visible: Boolean,
     playback: VantafynMusicPlaybackState,
     onDismiss: () -> Unit,
     onSetDuration: (Int) -> Unit,
@@ -3422,78 +5195,134 @@ private fun SleepTimerSheet(
     onSetEndOfQueue: () -> Unit,
     onCancel: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.45f))
-            .clickable(onClick = onDismiss),
-        contentAlignment = Alignment.BottomCenter,
+    BackHandler(enabled = visible, onBack = onDismiss)
+    val density = LocalDensity.current
+    val extraOffsetPx = remember(density) {
+        with(density) { (MusicBottomSheetRailClearance + 56.dp).roundToPx() }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)),
     ) {
-        VantafynGlassModalPanel(
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
-                .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
-                .clickable(enabled = false) {},
-            cornerRadius = 30.dp,
-            contentPadding = PaddingValues(18.dp),
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss,
+                ),
+            contentAlignment = Alignment.BottomCenter,
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+            VantafynGlassModalPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
+                    .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {}
+                    .animateEnterExit(
+                        enter = slideInVertically(
+                            initialOffsetY = { fullHeight -> fullHeight + extraOffsetPx },
+                            animationSpec = spring(
+                                dampingRatio = 0.84f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        ),
+                        exit = slideOutVertically(
+                            targetOffsetY = { fullHeight -> fullHeight + extraOffsetPx },
+                            animationSpec = tween(
+                                durationMillis = 260,
+                                easing = CubicBezierEasing(0.32f, 0f, 0.67f, 0f),
+                            ),
+                        ),
+                    ),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(18.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = Color(0xFFFFD166), modifier = Modifier.size(24.dp))
-                        Text("Sleep Timer", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    }
-                    FlatMusicIconButton(Icons.Rounded.Close, "Close timer", onDismiss, size = 38)
-                }
-
-                if (playback.sleepTimerMode != null) {
-                    val statusText = when (playback.sleepTimerMode) {
-                        SleepTimerMode.Duration -> {
-                            val secs = playback.sleepTimerRemainingSeconds ?: 0L
-                            val mins = secs / 60
-                            val remSecs = secs % 60
-                            "Active: ${mins}m ${remSecs}s remaining"
-                        }
-                        SleepTimerMode.EndOfTrack -> "Active: Stopping after current track"
-                        SleepTimerMode.EndOfQueue -> "Active: Stopping at end of album/playlist"
-                        null -> ""
-                    }
-                    VantafynGlassCard(
-                        modifier = Modifier.fillMaxWidth(),
-                        cornerRadius = 16.dp,
-                        contentPadding = PaddingValues(12.dp),
-                    ) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(statusText, color = Color(0xFF21D8FF), fontWeight = FontWeight.SemiBold)
-                            TextButton(onClick = {
-                                onCancel()
-                                onDismiss()
-                            }) {
-                                Text("Turn Off", color = Color(0xFFFF5252))
+                            Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = Color(0xFFFFD166), modifier = Modifier.size(24.dp))
+                            Text("Sleep Timer", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        }
+                        FlatMusicIconButton(Icons.Rounded.Close, "Close timer", onDismiss, size = 38)
+                    }
+
+                    if (playback.sleepTimerMode != null) {
+                        val statusText = when (playback.sleepTimerMode) {
+                            SleepTimerMode.Duration -> {
+                                val secs = playback.sleepTimerRemainingSeconds ?: 0L
+                                val mins = secs / 60
+                                val remSecs = secs % 60
+                                "Active: ${mins}m ${remSecs}s remaining"
+                            }
+                            SleepTimerMode.EndOfTrack -> "Active: Stopping after current track"
+                            SleepTimerMode.EndOfQueue -> "Active: Stopping at end of album/playlist"
+                            null -> ""
+                        }
+                        VantafynGlassCard(
+                            modifier = Modifier.fillMaxWidth(),
+                            cornerRadius = 16.dp,
+                            contentPadding = PaddingValues(12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(statusText, color = Color(0xFF21D8FF), fontWeight = FontWeight.SemiBold)
+                                TextButton(onClick = {
+                                    onCancel()
+                                    onDismiss()
+                                }) {
+                                    Text("Turn Off", color = Color(0xFFFF5252))
+                                }
                             }
                         }
                     }
-                }
 
-                val durations = listOf(15, 30, 45, 60)
-                durations.forEach { mins ->
+                    val durations = listOf(15, 30, 45, 60)
+                    durations.forEach { mins ->
+                        VantafynGlassSurface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    onSetDuration(mins)
+                                    onDismiss()
+                                },
+                            variant = VantafynGlassVariant.Card,
+                            cornerRadius = 16.dp,
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("$mins minutes", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
+                                Icon(Icons.Rounded.Timer, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
                     VantafynGlassSurface(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable {
-                                onSetDuration(mins)
+                                onSetEndOfTrack()
                                 onDismiss()
                             },
                         variant = VantafynGlassVariant.Card,
@@ -3505,51 +5334,30 @@ private fun SleepTimerSheet(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text("$mins minutes", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
-                            Icon(Icons.Rounded.Timer, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
+                            Text("End of this track", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
+                            Icon(Icons.Rounded.SkipNext, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
                         }
                     }
-                }
 
-                VantafynGlassSurface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onSetEndOfTrack()
-                            onDismiss()
-                        },
-                    variant = VantafynGlassVariant.Card,
-                    cornerRadius = 16.dp,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                onSetEndOfQueue()
+                                onDismiss()
+                            },
+                        variant = VantafynGlassVariant.Card,
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp),
                     ) {
-                        Text("End of this track", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
-                        Icon(Icons.Rounded.SkipNext, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
-                    }
-                }
-
-                VantafynGlassSurface(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            onSetEndOfQueue()
-                            onDismiss()
-                        },
-                    variant = VantafynGlassVariant.Card,
-                    cornerRadius = 16.dp,
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 13.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text("End of album / playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
-                        Icon(Icons.Rounded.Stop, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("End of album / playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
+                            Icon(Icons.Rounded.Stop, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
             }
@@ -3610,6 +5418,7 @@ private fun MusicQueueSheet(
     onSaveQueue: () -> Unit,
     onClearUpcoming: () -> Unit,
     onClearAll: () -> Unit,
+    onReorder: ((Int, Int) -> Unit)? = null,
 ) {
     Box(
         modifier = Modifier
@@ -3636,6 +5445,7 @@ private fun MusicQueueSheet(
                     index = state.playback.queueIndex,
                     onTrack = onTrack,
                     onRemove = onRemove,
+                    onReorder = onReorder,
                     onLongPress = onLongPress,
                     onSaveQueue = onSaveQueue,
                     onClearUpcoming = onClearUpcoming,
@@ -3684,8 +5494,8 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
         LyricsRenderState(
             trackId = track.id,
             lyricsTrackId = state.lyricsTrackId,
-            lyrics = state.lyrics,
-            isLoading = state.isLyricsLoading,
+            lyrics = if (state.lyricsTrackId == track.id) state.lyrics else null,
+            isLoading = state.isLyricsLoading || (state.lyricsTrackId != track.id),
         )
     }
     Box(
@@ -3715,22 +5525,33 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Text("Lyrics", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text("Lyrics", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                        if (lyricsState.lyrics?.source?.contains("Offline") == true) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(VantafynColors.SurfaceHigh.copy(alpha = 0.8f))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            ) {
+                                Text(
+                                    text = "Offline",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Primary,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
                     Text(track.title, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    FlatMusicIconButton(
-                        icon = Icons.Rounded.Fullscreen,
-                        contentDescription = "Ambient Display",
-                        onClick = {
-                            runCatching {
-                                context.startActivity(Intent(context, Class.forName("dev.vantafyn.mobile.ambient.AmbientNowPlayingActivity")))
-                            }
-                        },
-                    )
                     FlatMusicIconButton(Icons.Rounded.Close, "Close lyrics", viewModel::closeLyrics)
                 }
             }
@@ -3776,11 +5597,11 @@ private fun LyricsBody(
     when {
         renderState.isLoading -> {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                VantafynLoadingIndicator("Loading lyrics from Jellyfin")
+                VantafynLoadingIndicator("Loading lyrics")
             }
         }
         renderState.lyrics == null -> {
-            LyricsEmptyState("No lyrics available", "Jellyfin did not expose lyrics for this track.")
+            LyricsEmptyState("No lyrics available", "No synchronized or plain lyrics were found for this track.")
         }
         renderState.lyrics.isSynced -> {
             SyncedLyricsView(
@@ -3814,6 +5635,7 @@ private fun SyncedLyricsView(
 ) {
     key(trackId, lines) {
         SyncedLyricsList(
+            trackId = trackId,
             lines = lines,
             playbackMs = playbackMs,
             isPlaying = isPlaying,
@@ -3826,6 +5648,7 @@ private fun SyncedLyricsView(
 
 @Composable
 private fun SyncedLyricsList(
+    trackId: java.util.UUID,
     lines: List<JellyfinLyricLine>,
     playbackMs: Long,
     isPlaying: Boolean,
@@ -3836,9 +5659,9 @@ private fun SyncedLyricsList(
     val listState = rememberLazyListState()
     val lifecycleOwner = LocalLifecycleOwner.current
     val activeLineLeadMs = 120L
-    var livePlaybackMs by remember(lines) { mutableLongStateOf(playbackMs) }
-    val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs).coerceAtLeast(0) }
-    var suppressAutoFollowUntil by remember(lines) { mutableLongStateOf(0L) }
+    var livePlaybackMs by remember(trackId, lines) { mutableLongStateOf(playbackMs) }
+    val activeIndex = remember(lines, livePlaybackMs) { lines.activeIndex(livePlaybackMs + activeLineLeadMs) }
+    var suppressAutoFollowUntil by remember(trackId, lines) { mutableLongStateOf(0L) }
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
 
     LaunchedEffect(isUserDragging) {
@@ -3847,13 +5670,13 @@ private fun SyncedLyricsList(
         }
     }
 
-    LaunchedEffect(playbackMs, isPlaying, lines) {
+    LaunchedEffect(playbackMs, isPlaying, trackId, lines) {
         if (!isPlaying || abs(playbackMs - livePlaybackMs) > 1_200L) {
             livePlaybackMs = playbackMs
         }
     }
 
-    LaunchedEffect(lines, isPlaying, lifecycleOwner) {
+    LaunchedEffect(trackId, lines, isPlaying, lifecycleOwner) {
         if (lines.isEmpty() || !isPlaying) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
@@ -3863,7 +5686,7 @@ private fun SyncedLyricsList(
         }
     }
 
-    LaunchedEffect(lines) {
+    LaunchedEffect(trackId, lines) {
         if (lines.isEmpty()) return@LaunchedEffect
         suppressAutoFollowUntil = 0L
         val initialPos = currentPositionMs()
@@ -3873,7 +5696,7 @@ private fun SyncedLyricsList(
     }
 
     LaunchedEffect(activeIndex, lines) {
-        if (lines.isEmpty()) return@LaunchedEffect
+        if (lines.isEmpty() || activeIndex < 0) return@LaunchedEffect
         val isSuppressed = System.currentTimeMillis() < suppressAutoFollowUntil
         if (!isSuppressed) {
             val target = activeIndex.coerceIn(0, lines.lastIndex)
@@ -4158,6 +5981,7 @@ private fun QueueTrackRow(
     current: Boolean,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier
@@ -4172,7 +5996,7 @@ private fun QueueTrackRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(11.dp),
     ) {
-        MusicArt(track.artworkUrl, Modifier.size(46.dp), cornerRadius = 13)
+        MusicArt(track.artworkUrl, Modifier.size(46.dp), cornerRadius = 13, title = track.title, subtitle = track.artist)
         if (current) {
             Box(
                 modifier = Modifier
@@ -4187,6 +6011,118 @@ private fun QueueTrackRow(
             Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+        if (trailingContent != null) {
+            trailingContent()
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DismissibleQueueTrackRow(
+    track: VantafynMusicTrack,
+    onRemove: () -> Unit,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+    trailingContent: (@Composable () -> Unit)? = null,
+) {
+    var isRemoved by remember(track.id) { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
+    var hasVibratedThreshold by remember(track.id) { mutableStateOf(false) }
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                isRemoved = true
+                true
+            } else {
+                false
+            }
+        },
+        positionalThreshold = { totalDistance -> totalDistance * 0.38f },
+    )
+
+    LaunchedEffect(dismissState.targetValue) {
+        if (dismissState.targetValue == SwipeToDismissBoxValue.EndToStart) {
+            if (!hasVibratedThreshold) {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                hasVibratedThreshold = true
+            }
+        } else {
+            hasVibratedThreshold = false
+        }
+    }
+
+    LaunchedEffect(isRemoved) {
+        if (isRemoved) {
+            delay(280L)
+            onRemove()
+        }
+    }
+
+    AnimatedVisibility(
+        visible = !isRemoved,
+        exit = shrinkVertically(
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioLowBouncy,
+                stiffness = Spring.StiffnessMediumLow,
+            ),
+            shrinkTowards = Alignment.Top,
+        ) + fadeOut(animationSpec = tween(180)),
+        modifier = modifier,
+    ) {
+        SwipeToDismissBox(
+            state = dismissState,
+            enableDismissFromStartToEnd = false,
+            backgroundContent = {
+                val offset = kotlin.math.abs(runCatching { dismissState.requireOffset() }.getOrDefault(0f))
+                val progress = (offset / 180f).coerceIn(0f, 1f)
+                val alpha = (progress * 0.95f).coerceIn(0f, 0.95f)
+                val iconScale by animateFloatAsState(
+                    targetValue = if (progress > 0.45f) 1.15f else (0.65f + 0.35f * progress),
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+                    label = "trashIconScale",
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color.Transparent,
+                                    Color(0xFFE53935).copy(alpha = alpha * 0.35f),
+                                    Color(0xFFD32F2F).copy(alpha = alpha),
+                                )
+                            )
+                        )
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Delete,
+                        contentDescription = "Remove",
+                        tint = Color.White.copy(alpha = (progress * 1.4f).coerceIn(0f, 1f)),
+                        modifier = Modifier
+                            .size(24.dp)
+                            .graphicsLayer {
+                                scaleX = iconScale
+                                scaleY = iconScale
+                            },
+                    )
+                }
+            },
+        ) {
+            QueueTrackRow(
+                track = track,
+                current = false,
+                onClick = onClick,
+                onLongClick = onLongClick,
+                trailingContent = trailingContent,
+            )
+        }
     }
 }
 
@@ -4197,11 +6133,31 @@ private fun QueuePanel(
     index: Int,
     onTrack: (Int) -> Unit,
     onRemove: ((Int) -> Unit)? = null,
+    onReorder: ((Int, Int) -> Unit)? = null,
     onLongPress: ((Int) -> Unit)? = null,
     onSaveQueue: (() -> Unit)? = null,
     onClearUpcoming: (() -> Unit)? = null,
     onClearAll: (() -> Unit)? = null,
 ) {
+    val currentTrack = queue.getOrNull(index)
+    val upcomingInitial = remember(queue, index) {
+        if (queue.size > index + 1) queue.drop(index + 1).take(15) else emptyList()
+    }
+    var localUpcoming by remember(upcomingInitial) { mutableStateOf(upcomingInitial) }
+    var draggedOffset by remember { mutableStateOf<Int?>(null) }
+    var dragStartOffset by remember { mutableStateOf<Int?>(null) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var itemHeightPx by remember { mutableFloatStateOf(0f) }
+    val haptic = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val spacingPx = with(density) { 10.dp.toPx() }
+
+    LaunchedEffect(upcomingInitial) {
+        if (draggedOffset == null) {
+            localUpcoming = upcomingInitial
+        }
+    }
+
     VantafynGlassPanel(
         modifier = Modifier.fillMaxWidth(),
         cornerRadius = 26.dp,
@@ -4226,53 +6182,130 @@ private fun QueuePanel(
                     }
                 }
             }
-            queue.drop(index).take(15).forEachIndexed { offset, track ->
-                val absoluteIndex = index + offset
-                val current = absoluteIndex == index
-                if (!current && onRemove != null) {
-                    val dismissState = rememberSwipeToDismissBoxState(
-                        confirmValueChange = { value ->
-                            if (value == SwipeToDismissBoxValue.EndToStart || value == SwipeToDismissBoxValue.StartToEnd) {
-                                onRemove(absoluteIndex)
-                                true
-                            } else {
-                                false
+
+            if (currentTrack != null) {
+                QueueTrackRow(
+                    track = currentTrack,
+                    current = true,
+                    onClick = { onTrack(index) },
+                    onLongClick = { onLongPress?.invoke(index) },
+                )
+            }
+
+            localUpcoming.forEachIndexed { upcomingOffset, track ->
+                key(track.id) {
+                    val absoluteIndex = (index + 1) + upcomingOffset
+                    val isItemDragged = draggedOffset == upcomingOffset
+
+                    val dragHandle: (@Composable () -> Unit)? = if (onReorder != null && localUpcoming.size > 1) {
+                        {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.05f))
+                                    .pointerInput(track.id) {
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                draggedOffset = upcomingOffset
+                                                dragStartOffset = upcomingOffset
+                                                dragOffsetY = 0f
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                val curr = draggedOffset ?: return@detectDragGestures
+                                                dragOffsetY += dragAmount.y
+                                                val step = if (itemHeightPx > 0f) itemHeightPx + spacingPx else with(density) { 68.dp.toPx() }
+
+                                                if (dragOffsetY > step * 0.5f && curr < localUpcoming.lastIndex) {
+                                                    val next = curr + 1
+                                                    val list = localUpcoming.toMutableList()
+                                                    val item = list.removeAt(curr)
+                                                    list.add(next, item)
+                                                    localUpcoming = list
+                                                    draggedOffset = next
+                                                    dragOffsetY -= step
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                } else if (dragOffsetY < -step * 0.5f && curr > 0) {
+                                                    val prev = curr - 1
+                                                    val list = localUpcoming.toMutableList()
+                                                    val item = list.removeAt(curr)
+                                                    list.add(prev, item)
+                                                    localUpcoming = list
+                                                    draggedOffset = prev
+                                                    dragOffsetY += step
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                val start = dragStartOffset
+                                                val finish = draggedOffset
+                                                draggedOffset = null
+                                                dragStartOffset = null
+                                                dragOffsetY = 0f
+                                                if (start != null && finish != null && start != finish) {
+                                                    onReorder((index + 1) + start, (index + 1) + finish)
+                                                }
+                                            },
+                                            onDragCancel = {
+                                                draggedOffset = null
+                                                dragStartOffset = null
+                                                dragOffsetY = 0f
+                                                localUpcoming = upcomingInitial
+                                            },
+                                        )
+                                    },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.DragHandle,
+                                    contentDescription = "Reorder",
+                                    tint = VantafynColors.Muted,
+                                    modifier = Modifier.size(20.dp),
+                                )
                             }
                         }
-                    )
-                    SwipeToDismissBox(
-                        state = dismissState,
-                        enableDismissFromStartToEnd = false,
-                        backgroundContent = {
-                            val isDismissing = dismissState.targetValue != SwipeToDismissBoxValue.Settled
-                            if (isDismissing) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .clip(RoundedCornerShape(18.dp))
-                                        .background(Color(0xFFFF3B30).copy(alpha = 0.85f))
-                                        .padding(horizontal = 16.dp),
-                                    contentAlignment = Alignment.CenterEnd,
-                                ) {
-                                    Icon(Icons.Rounded.Delete, contentDescription = "Remove", tint = Color.White)
-                                }
+                    } else null
+
+                    val rowModifier = Modifier
+                        .fillMaxWidth()
+                        .onGloballyPositioned { coords ->
+                            if (coords.size.height > 0) itemHeightPx = coords.size.height.toFloat()
+                        }
+                        .zIndex(if (isItemDragged) 10f else 1f)
+                        .graphicsLayer {
+                            if (isItemDragged) {
+                                translationY = dragOffsetY
+                                scaleX = 1.025f
+                                scaleY = 1.025f
+                                shadowElevation = 16f
+                            } else {
+                                translationY = 0f
+                                scaleX = 1f
+                                scaleY = 1f
+                                shadowElevation = 0f
                             }
-                        },
-                    ) {
+                        }
+
+                    if (onRemove != null) {
+                        DismissibleQueueTrackRow(
+                            track = track,
+                            onRemove = { onRemove(absoluteIndex) },
+                            onClick = { onTrack(absoluteIndex) },
+                            onLongClick = { onLongPress?.invoke(absoluteIndex) },
+                            modifier = rowModifier,
+                            trailingContent = dragHandle,
+                        )
+                    } else {
                         QueueTrackRow(
                             track = track,
                             current = false,
                             onClick = { onTrack(absoluteIndex) },
                             onLongClick = { onLongPress?.invoke(absoluteIndex) },
+                            trailingContent = dragHandle,
                         )
                     }
-                } else {
-                    QueueTrackRow(
-                        track = track,
-                        current = current,
-                        onClick = { onTrack(absoluteIndex) },
-                        onLongClick = { onLongPress?.invoke(absoluteIndex) },
-                    )
                 }
             }
         }
@@ -4320,6 +6353,255 @@ private fun QueueTrackContextMenu(
     )
 }
 
+private data class CoverPreset(
+    val bgStart: Color,
+    val bgMid: Color,
+    val bgEnd: Color,
+    val accent: Color,
+    val secondary: Color,
+)
+
+private val PREMIUM_COVER_PRESETS = listOf(
+    // 0: Deep Celestial Cyan
+    CoverPreset(Color(0xFF030A18), Color(0xFF07213D), Color(0xFF0C3860), Color(0xFF00E5FF), Color(0xFF38BDF8)),
+    // 1: Neon Violet & Fuchsia
+    CoverPreset(Color(0xFF140521), Color(0xFF2B0A4C), Color(0xFF4C1D95), Color(0xFFFF2E93), Color(0xFFA855F7)),
+    // 2: Electric Sunset Amber
+    CoverPreset(Color(0xFF1A0A02), Color(0xFF3B1506), Color(0xFF7C2D12), Color(0xFFFF7A00), Color(0xFFFBBF24)),
+    // 3: Emerald Borealis Teal
+    CoverPreset(Color(0xFF021612), Color(0xFF053127), Color(0xFF0F5142), Color(0xFF10B981), Color(0xFF34D399)),
+    // 4: Royal Ultramarine
+    CoverPreset(Color(0xFF080C26), Color(0xFF1B184E), Color(0xFF312E81), Color(0xFF6366F1), Color(0xFF818CF8)),
+    // 5: Crimson Pulse
+    CoverPreset(Color(0xFF1E040B), Color(0xFF3F0717), Color(0xFF881337), Color(0xFFFF3366), Color(0xFFFB7185)),
+    // 6: Cyber Coral & Lavender
+    CoverPreset(Color(0xFF16061E), Color(0xFF340C37), Color(0xFF581C87), Color(0xFFFF6492), Color(0xFFC084FC)),
+    // 7: Deep Obsidian Gold
+    CoverPreset(Color(0xFF120E03), Color(0xFF2C1C05), Color(0xFF452E07), Color(0xFFF59E0B), Color(0xFFFDE047)),
+)
+
+private fun resolveCoverPreset(seedText: String?): CoverPreset {
+    val hash = (seedText?.trim()?.lowercase() ?: "vantafyn").hashCode()
+    val index = (hash and Int.MAX_VALUE) % PREMIUM_COVER_PRESETS.size
+    return PREMIUM_COVER_PRESETS[index]
+}
+
+private fun extractCoverMonogram(title: String?): String {
+    if (title.isNullOrBlank()) return "♪"
+    val cleaned = title.trim()
+    val words = cleaned.split(Regex("[\\s_\\-\\.]+")).filter { it.isNotBlank() }
+    return when {
+        words.size >= 2 -> {
+            val first = words[0].firstOrNull()?.uppercase() ?: ""
+            val second = words[1].firstOrNull()?.uppercase() ?: ""
+            "$first$second"
+        }
+        cleaned.length >= 2 -> cleaned.take(2).uppercase()
+        else -> cleaned.take(1).uppercase()
+    }
+}
+
+@Composable
+private fun PremiumCoverPlaceholder(
+    modifier: Modifier = Modifier,
+    title: String? = null,
+    subtitle: String? = null,
+    cornerRadius: Int = 22,
+    compact: Boolean = false,
+) {
+    val preset = remember(title, subtitle) {
+        resolveCoverPreset(title ?: subtitle)
+    }
+    val isArtist = remember(subtitle) {
+        subtitle?.equals("Artist", ignoreCase = true) == true
+    }
+    val monogram = remember(title) {
+        extractCoverMonogram(title)
+    }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(cornerRadius.dp))
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(preset.bgStart, preset.bgMid, preset.bgEnd),
+                    start = Offset.Zero,
+                    end = Offset.Infinite,
+                ),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val center = Offset(size.width / 2f, size.height / 2f)
+            val maxRadius = kotlin.math.min(size.width, size.height) * 0.48f
+
+            // Concentric vinyl grooves
+            val grooveFractions = if (compact) {
+                floatArrayOf(0.88f, 0.65f, 0.45f)
+            } else {
+                floatArrayOf(0.92f, 0.83f, 0.74f, 0.65f, 0.56f, 0.47f, 0.38f)
+            }
+            for (f in grooveFractions) {
+                drawCircle(
+                    color = Color.White.copy(alpha = 0.065f),
+                    radius = maxRadius * f,
+                    center = center,
+                    style = Stroke(width = 1.dp.toPx()),
+                )
+            }
+
+            // Specular sheen light sweep
+            drawCircle(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.12f),
+                        Color.Transparent,
+                        Color.White.copy(alpha = 0.08f),
+                        Color.Transparent,
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(size.width, size.height),
+                ),
+                radius = maxRadius * 0.96f,
+                center = center,
+            )
+
+            // Outer vinyl groove edge accent
+            drawCircle(
+                color = preset.accent.copy(alpha = 0.24f),
+                radius = maxRadius * 0.96f,
+                center = center,
+                style = Stroke(width = 1.2.dp.toPx()),
+            )
+
+            // Subtle outer border highlight
+            drawRoundRect(
+                brush = Brush.linearGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.20f),
+                        preset.accent.copy(alpha = 0.30f),
+                        Color.White.copy(alpha = 0.06f),
+                    ),
+                ),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(
+                    cornerRadius.dp.toPx(),
+                    cornerRadius.dp.toPx(),
+                ),
+                style = Stroke(width = 1.dp.toPx()),
+            )
+        }
+
+        // Center vinyl label / artist medallion
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            val minDim = kotlin.math.min(maxWidth.value, maxHeight.value)
+            val labelSize = (minDim * if (compact) 0.58f else 0.44f).dp
+
+            Box(
+                modifier = Modifier
+                    .size(labelSize)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                preset.bgMid.copy(alpha = 0.95f),
+                                preset.bgStart.copy(alpha = 0.98f),
+                            ),
+                        ),
+                    )
+                    .border(
+                        width = 1.5.dp,
+                        brush = Brush.linearGradient(
+                            listOf(
+                                preset.accent.copy(alpha = 0.90f),
+                                preset.secondary.copy(alpha = 0.55f),
+                            ),
+                        ),
+                        shape = CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Vinyl center spindle hole
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val spindleRadius = size.minDimension * 0.12f
+                    drawCircle(
+                        color = preset.bgStart,
+                        radius = spindleRadius,
+                        center = center,
+                    )
+                    drawCircle(
+                        color = preset.accent.copy(alpha = 0.75f),
+                        radius = spindleRadius,
+                        center = center,
+                        style = Stroke(width = 1.dp.toPx()),
+                    )
+                }
+
+                if (isArtist) {
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = null,
+                        tint = preset.accent,
+                        modifier = Modifier.size(labelSize * 0.48f),
+                    )
+                } else if (!compact && minDim >= 70) {
+                    Text(
+                        text = monogram,
+                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Black,
+                        fontSize = (minDim * 0.14f).sp,
+                        maxLines = 1,
+                    )
+                } else {
+                    Text(
+                        text = monogram,
+                        color = Color.White,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (minDim * 0.18f).coerceAtLeast(10f).sp,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            // High-fidelity footer pill on larger cards (e.g. 128dp album cards)
+            if (!compact && minDim >= 96) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = if (isArtist) Icons.Rounded.Person else Icons.Rounded.Album,
+                            contentDescription = null,
+                            tint = preset.accent,
+                            modifier = Modifier.size(9.dp),
+                        )
+                        Text(
+                            text = if (isArtist) "ARTIST" else "VINYL",
+                            color = Color.White.copy(alpha = 0.90f),
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun PlaylistArtGrid(trackImageUrls: List<String>, modifier: Modifier = Modifier) {
     val urls = trackImageUrls.take(4)
@@ -4342,7 +6624,7 @@ private fun PlaylistArtGrid(trackImageUrls: List<String>, modifier: Modifier = M
                                 .padding(1.dp),
                             contentAlignment = Alignment.Center,
                         ) {
-                            if (url != null) {
+                            if (!url.isNullOrBlank()) {
                                 AsyncImage(
                                     model = url,
                                     contentDescription = null,
@@ -4350,7 +6632,13 @@ private fun PlaylistArtGrid(trackImageUrls: List<String>, modifier: Modifier = M
                                     contentScale = ContentScale.Crop,
                                 )
                             } else {
-                                Text("♪", color = VantafynColors.Ink)
+                                PremiumCoverPlaceholder(
+                                    title = "${idx + 1}",
+                                    subtitle = "Track",
+                                    cornerRadius = 6,
+                                    compact = true,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
                             }
                         }
                     }
@@ -4361,17 +6649,32 @@ private fun PlaylistArtGrid(trackImageUrls: List<String>, modifier: Modifier = M
 }
 
 @Composable
-private fun MusicArt(imageUrl: String?, modifier: Modifier, cornerRadius: Int = 22) {
+private fun MusicArt(
+    imageUrl: String?,
+    modifier: Modifier,
+    cornerRadius: Int = 22,
+    title: String? = null,
+    subtitle: String? = null,
+) {
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(cornerRadius.dp))
-            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.66f)),
+            .clip(RoundedCornerShape(cornerRadius.dp)),
         contentAlignment = Alignment.Center,
     ) {
-        if (imageUrl != null) {
-            AsyncImage(model = imageUrl, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-        } else {
-            Text("♪", color = VantafynColors.Ink)
+        PremiumCoverPlaceholder(
+            title = title,
+            subtitle = subtitle,
+            cornerRadius = cornerRadius,
+            compact = cornerRadius <= 14,
+            modifier = Modifier.fillMaxSize(),
+        )
+        if (!imageUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
         }
     }
 }
@@ -4543,3 +6846,223 @@ private fun Long.formatTime(): String {
 }
 
 private fun Int.groupedMusicCountLabel(): String = "%,d".format(this)
+
+@Composable
+private fun MusicOfflineEmptyState(
+    onNavigateToDownloads: (() -> Unit)?,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    VantafynGlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawWithContent {
+                drawContent()
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF42D7FF).copy(alpha = 0.16f),
+                            Color(0xFF9B5CFF).copy(alpha = 0.07f),
+                            Color.Transparent,
+                        ),
+                        center = Offset(size.width * 0.5f, size.height * 0.22f),
+                        radius = size.width * 0.65f,
+                    ),
+                )
+            },
+        cornerRadius = 28.dp,
+        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 32.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(112.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.14f),
+                                Color.White.copy(alpha = 0.04f),
+                                Color(0xFF0B1020).copy(alpha = 0.38f),
+                            ),
+                        ),
+                    )
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.linearGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.26f),
+                                Color(0xFF42D7FF).copy(alpha = 0.38f),
+                                Color(0xFFA65CFF).copy(alpha = 0.24f),
+                            ),
+                        ),
+                        shape = RoundedCornerShape(32.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black.copy(alpha = 0.32f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CloudOff,
+                        contentDescription = null,
+                        tint = Color(0xFF42D7FF),
+                        modifier = Modifier.size(34.dp),
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(VantafynColors.Secondary.copy(alpha = 0.12f))
+                    .border(1.dp, VantafynColors.Secondary.copy(alpha = 0.28f), CircleShape)
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(6.dp)
+                            .clip(CircleShape)
+                            .background(VantafynColors.Secondary),
+                    )
+                    Text(
+                        text = "OFFLINE MODE",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.2.sp,
+                        ),
+                        color = VantafynColors.Secondary,
+                    )
+                }
+            }
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    text = "Listening Offline",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Your music server is currently disconnected. All your downloaded tracks, albums, and playlists remain ready for instant playback in your downloads.",
+                    color = VantafynColors.Muted.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
+                    modifier = Modifier.widthIn(max = 340.dp),
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            ) {
+                OfflineFeaturePill(
+                    icon = Icons.Rounded.Bolt,
+                    label = "Zero Buffering",
+                    modifier = Modifier.weight(1f),
+                )
+                OfflineFeaturePill(
+                    icon = Icons.Rounded.GraphicEq,
+                    label = "Full Fidelity",
+                    modifier = Modifier.weight(1f),
+                )
+                OfflineFeaturePill(
+                    icon = Icons.Rounded.DownloadDone,
+                    label = "Cached Library",
+                    modifier = Modifier.weight(1f),
+                )
+            }
+
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (onNavigateToDownloads != null) {
+                    VantafynButton(
+                        text = "Open Downloads Library",
+                        onClick = onNavigateToDownloads,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                VantafynGlassChip(
+                    onClick = onRetry,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = null,
+                            tint = VantafynColors.Ink,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Retry Server Connection",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = VantafynColors.Ink,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfflineFeaturePill(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+) {
+    VantafynGlassSurface(
+        modifier = modifier,
+        cornerRadius = 14.dp,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+        variant = VantafynGlassVariant.Card,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = VantafynColors.Secondary.copy(alpha = 0.9f),
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = VantafynColors.Ink.copy(alpha = 0.85f),
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+            )
+        }
+    }
+}
+

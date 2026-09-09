@@ -189,3 +189,11 @@ data class DownloadStorageSummary(
     val failedCount: Int,
     val totalBytes: Long,
 )
+
+data class MediaDownloadProgress(
+    val completedCount: Int = 0,
+    val totalCount: Int = 0,
+    val isDownloading: Boolean = false,
+    val isCompleted: Boolean = false,
+    val progress: Float = 0f,
+)

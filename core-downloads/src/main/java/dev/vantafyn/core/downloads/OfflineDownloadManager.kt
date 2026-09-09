@@ -202,14 +202,18 @@ class OfflineDownloadManager(
         if (tracks.isEmpty()) return JellyfinResult.Failure("This album does not have any tracks to save.")
         var queued = 0
         var firstFailure: JellyfinResult.Failure? = null
-        tracks.forEach { track ->
+        tracks.forEachIndexed { index, track ->
             val enriched = track.copy(
                 album = track.album ?: album.title,
                 albumId = track.albumId ?: album.id,
                 artworkUrl = track.artworkUrl ?: album.artworkUrl,
             )
             when (val result = queueMusicTrack(session, enriched, requireWifi)) {
-                is JellyfinResult.Success -> queued += 1
+                is JellyfinResult.Success -> {
+                    val ordered = result.value.copy(sortTitle = index.toString().padStart(5, '0') + " ${track.title}")
+                    repository.upsert(ordered)
+                    queued += 1
+                }
                 is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result
             }
         }
@@ -323,6 +327,7 @@ class OfflineDownloadManager(
         val request = OneTimeWorkRequestBuilder<OfflineDownloadWorker>()
             .setInputData(Data.Builder().putString(OfflineDownloadWorker.KEY_RECORD_ID, record.id).build())
             .setConstraints(constraints)
+            .addTag(TAG_ALL_DOWNLOADS)
             .addTag(recordDownloadTag(record.id))
             .apply {
                 record.parentId?.takeIf { it.isNotBlank() }?.let { addTag(parentDownloadTag(it)) }
@@ -453,6 +458,56 @@ class OfflineDownloadManager(
         return completedCount >= expectedTrackCount
     }
 
+    suspend fun getPlaylistDownloadProgress(
+        session: JellyfinSession,
+        playlistId: UUID,
+        expectedTrackCount: Int,
+    ): MediaDownloadProgress {
+        if (expectedTrackCount <= 0) return MediaDownloadProgress()
+        val all = repository.listForUser(
+            serverId = session.server.localId,
+            userId = session.user.id.toString(),
+        )
+        val playlistRecords = all.filter { it.parentId == playlistId.toString() }
+        val completedCount = playlistRecords.count { it.state == DownloadState.Completed }
+        val inProgressCount = playlistRecords.count { it.state == DownloadState.Downloading || it.state == DownloadState.Queued }
+        val isCompleted = completedCount >= expectedTrackCount
+        val isDownloading = inProgressCount > 0 || (playlistRecords.isNotEmpty() && !isCompleted)
+        val progress = if (expectedTrackCount > 0) (completedCount.toFloat() / expectedTrackCount.toFloat()).coerceIn(0f, 1f) else 0f
+        return MediaDownloadProgress(
+            completedCount = completedCount,
+            totalCount = expectedTrackCount,
+            isDownloading = isDownloading && !isCompleted,
+            isCompleted = isCompleted,
+            progress = progress,
+        )
+    }
+
+    suspend fun getAlbumDownloadProgress(
+        session: JellyfinSession,
+        albumId: UUID,
+        expectedTrackCount: Int,
+    ): MediaDownloadProgress {
+        if (expectedTrackCount <= 0) return MediaDownloadProgress()
+        val all = repository.listForUser(
+            serverId = session.server.localId,
+            userId = session.user.id.toString(),
+        )
+        val albumRecords = all.filter { it.albumId == albumId.toString() }
+        val completedCount = albumRecords.count { it.state == DownloadState.Completed }
+        val inProgressCount = albumRecords.count { it.state == DownloadState.Downloading || it.state == DownloadState.Queued }
+        val isCompleted = completedCount >= expectedTrackCount
+        val isDownloading = inProgressCount > 0 || (albumRecords.isNotEmpty() && !isCompleted)
+        val progress = if (expectedTrackCount > 0) (completedCount.toFloat() / expectedTrackCount.toFloat()).coerceIn(0f, 1f) else 0f
+        return MediaDownloadProgress(
+            completedCount = completedCount,
+            totalCount = expectedTrackCount,
+            isDownloading = isDownloading && !isCompleted,
+            isCompleted = isCompleted,
+            progress = progress,
+        )
+    }
+
     fun observePlaylistFullyDownloaded(
         session: JellyfinSession,
         playlistId: UUID,
@@ -470,6 +525,31 @@ class OfflineDownloadManager(
         workManager.workInfosByTagFlow(albumDownloadTag(albumId.toString()))
             .map { isAlbumFullyDownloaded(session, albumId, expectedTrackCount) }
             .distinctUntilChanged()
+
+    fun observePlaylistDownloadProgress(
+        session: JellyfinSession,
+        playlistId: UUID,
+        expectedTrackCount: Int,
+    ): Flow<MediaDownloadProgress> =
+        workManager.workInfosByTagFlow(parentDownloadTag(playlistId.toString()))
+            .map { getPlaylistDownloadProgress(session, playlistId, expectedTrackCount) }
+            .distinctUntilChanged()
+
+    fun observeAlbumDownloadProgress(
+        session: JellyfinSession,
+        albumId: UUID,
+        expectedTrackCount: Int,
+    ): Flow<MediaDownloadProgress> =
+        workManager.workInfosByTagFlow(albumDownloadTag(albumId.toString()))
+            .map { getAlbumDownloadProgress(session, albumId, expectedTrackCount) }
+            .distinctUntilChanged()
+
+    fun observeAnyDownloadUpdates(): Flow<Unit> =
+        workManager.workInfosByTagFlow(TAG_ALL_DOWNLOADS).map { }
+
+    companion object {
+        const val TAG_ALL_DOWNLOADS = "vantafyn-all-downloads"
+    }
 }
 
 private fun WorkManager.workInfosByTagFlow(tag: String): Flow<List<WorkInfo>> = callbackFlow {

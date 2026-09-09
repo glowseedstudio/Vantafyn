@@ -5,6 +5,7 @@ import android.view.KeyEvent
 import androidx.annotation.DrawableRes
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -1132,6 +1133,108 @@ fun VantafynGradientSpinner(
                 ),
                 startAngle = -90f,
                 sweepAngle = 280f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+            )
+        }
+    }
+}
+
+/**
+ * Circular progress indicator that renders using Vantafyn's theme tokens, accent gradients,
+ * and translucent glass track styling instead of default Material 3 colors.
+ */
+@Composable
+fun VantafynCircularProgressIndicator(
+    modifier: Modifier = Modifier,
+    progress: Float? = null,
+    strokeWidth: Dp = 3.dp,
+    trackColor: Color = Color.White.copy(alpha = 0.14f),
+    gradientColors: List<Color> = VantafynGradients.AccentColors,
+) {
+    val sweepColors = remember(gradientColors) {
+        if (gradientColors.size >= 2) {
+            gradientColors + gradientColors.first()
+        } else {
+            listOf(VantafynColors.Primary, VantafynColors.Secondary, VantafynColors.Primary)
+        }
+    }
+
+    if (progress != null && progress > 0f) {
+        val animatedProgress by animateFloatAsState(
+            targetValue = progress.coerceIn(0f, 1f),
+            animationSpec = tween(400, easing = FastOutSlowInEasing),
+            label = "vantafynCircularProgress",
+        )
+        Canvas(modifier = modifier) {
+            val strokePx = strokeWidth.toPx()
+            val arcSize = Size(size.width - strokePx, size.height - strokePx)
+            val topLeft = Offset(strokePx / 2f, strokePx / 2f)
+
+            // Background track ring
+            drawArc(
+                color = trackColor,
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+            )
+
+            // Determinate gradient progress arc starting from 12 o'clock (-90 degrees)
+            rotate(-90f) {
+                drawArc(
+                    brush = Brush.sweepGradient(
+                        colors = sweepColors,
+                        center = Offset(size.width / 2f, size.height / 2f),
+                    ),
+                    startAngle = 0f,
+                    sweepAngle = (animatedProgress * 360f).coerceAtLeast(1.5f),
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                )
+            }
+        }
+    } else {
+        val transition = rememberInfiniteTransition(label = "vantafynCircularSpinner")
+        val rotation by transition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1100, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "vantafynCircularSpinnerRotation",
+        )
+        Canvas(modifier = modifier.graphicsLayer { rotationZ = rotation }) {
+            val strokePx = strokeWidth.toPx()
+            val arcSize = Size(size.width - strokePx, size.height - strokePx)
+            val topLeft = Offset(strokePx / 2f, strokePx / 2f)
+
+            // Background track ring
+            drawArc(
+                color = trackColor,
+                startAngle = 0f,
+                sweepAngle = 360f,
+                useCenter = false,
+                topLeft = topLeft,
+                size = arcSize,
+                style = Stroke(width = strokePx, cap = StrokeCap.Round),
+            )
+
+            // Indeterminate rotating gradient arc
+            drawArc(
+                brush = Brush.sweepGradient(
+                    colors = sweepColors,
+                    center = Offset(size.width / 2f, size.height / 2f),
+                ),
+                startAngle = -90f,
+                sweepAngle = 270f,
                 useCenter = false,
                 topLeft = topLeft,
                 size = arcSize,

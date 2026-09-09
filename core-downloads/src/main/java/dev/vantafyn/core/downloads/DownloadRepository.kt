@@ -5,6 +5,8 @@ interface DownloadRepository {
 
     suspend fun get(id: String): DownloadRecord?
 
+    suspend fun getByItemId(itemId: String): DownloadRecord?
+
     suspend fun getByIdentity(identity: DownloadIdentity): DownloadRecord?
 
     suspend fun listForUser(

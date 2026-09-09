@@ -131,6 +131,39 @@ class SqliteHarmoniaStore(
                 if (cursor.moveToFirst()) cursor.toRecapPreview() else null
             }
         }
+
+    override suspend fun setRecapSaved(recapId: String, isSaved: Boolean) {
+        withContext(ioDispatcher) {
+            val values = ContentValues().apply {
+                put("is_saved", if (isSaved) 1 else 0)
+            }
+            database.writableDatabase.update(
+                "harmonia_recaps",
+                values,
+                "id = ?",
+                arrayOf(recapId),
+            )
+        }
+    }
+
+    override suspend fun savedPreviews(userId: UUID, serverId: String, profileId: String): List<HarmoniaRecapPreview> =
+        withContext(ioDispatcher) {
+            database.readableDatabase.query(
+                "harmonia_recaps",
+                null,
+                "user_id = ? AND server_id = ? AND profile_id = ? AND is_saved = 1",
+                arrayOf(userId.toString(), serverId, profileId),
+                null,
+                null,
+                "period_start_ms DESC, generated_at_ms DESC",
+            ).use { cursor ->
+                buildList {
+                    while (cursor.moveToNext()) {
+                        add(cursor.toRecapPreview())
+                    }
+                }
+            }
+        }
 }
 
 private class HarmoniaDatabase(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
@@ -151,7 +184,8 @@ private class HarmoniaDatabase(context: Context) : SQLiteOpenHelper(context, DAT
                 started_at_ms INTEGER NOT NULL,
                 ended_at_ms INTEGER NOT NULL,
                 listened_ms INTEGER NOT NULL,
-                duration_ms INTEGER
+                duration_ms INTEGER,
+                artwork_url TEXT
             )
             """.trimIndent(),
         )
@@ -180,6 +214,8 @@ private class HarmoniaDatabase(context: Context) : SQLiteOpenHelper(context, DAT
                 record_count INTEGER NOT NULL DEFAULT 0,
                 history_signature TEXT NOT NULL DEFAULT '',
                 is_finalized INTEGER NOT NULL DEFAULT 0,
+                is_saved INTEGER NOT NULL DEFAULT 0,
+                artwork_url TEXT,
                 summary TEXT NOT NULL
             )
             """.trimIndent(),
@@ -204,12 +240,17 @@ private class HarmoniaDatabase(context: Context) : SQLiteOpenHelper(context, DAT
             db.execSQL("ALTER TABLE harmonia_recaps ADD COLUMN history_signature TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE harmonia_recaps ADD COLUMN is_finalized INTEGER NOT NULL DEFAULT 0")
         }
+        if (oldVersion < 4) {
+            db.execSQL("ALTER TABLE harmonia_recaps ADD COLUMN is_saved INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE harmonia_recaps ADD COLUMN artwork_url TEXT")
+            db.execSQL("ALTER TABLE harmonia_playback_records ADD COLUMN artwork_url TEXT")
+        }
         onCreate(db)
     }
 
     private companion object {
         const val DATABASE_NAME = "vantafyn_harmonia.db"
-        const val DATABASE_VERSION = 3
+        const val DATABASE_VERSION = 4
     }
 }
 
@@ -229,6 +270,7 @@ private fun HarmoniaPlaybackRecord.toValues(): ContentValues =
         put("ended_at_ms", endedAt.toEpochMilli())
         put("listened_ms", listenedMs)
         put("duration_ms", durationMs)
+        put("artwork_url", artworkUrl)
     }
 
 private fun HarmoniaRecap.toValues(serverId: String, profileId: String): ContentValues =
@@ -249,6 +291,8 @@ private fun HarmoniaRecap.toValues(serverId: String, profileId: String): Content
         put("record_count", recordCount)
         put("history_signature", historySignature)
         put("is_finalized", if (isFinalized) 1 else 0)
+        put("is_saved", if (isSaved) 1 else 0)
+        put("artwork_url", statistics.topTracks.value?.firstOrNull()?.artworkUrl ?: statistics.topAlbums.value?.firstOrNull()?.artworkUrl)
         put("summary", statistics.summaryText())
     }
 
@@ -268,6 +312,7 @@ private fun android.database.Cursor.toPlaybackRecord(): HarmoniaPlaybackRecord =
         endedAt = Instant.ofEpochMilli(long("ended_at_ms")),
         listenedMs = long("listened_ms"),
         durationMs = nullableLong("duration_ms"),
+        artworkUrl = nullableString("artwork_url"),
     )
 
 private fun android.database.Cursor.toRecapPreview(): HarmoniaRecapPreview =
@@ -286,6 +331,8 @@ private fun android.database.Cursor.toRecapPreview(): HarmoniaRecapPreview =
         recordCount = long("record_count").toInt(),
         historySignature = string("history_signature"),
         isFinalized = long("is_finalized") == 1L,
+        isSaved = (nullableLong("is_saved") ?: 0L) == 1L,
+        artworkUrl = nullableString("artwork_url"),
     )
 
 private fun HarmoniaStatistics.summaryText(): String =

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.DirectionsCar
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Favorite
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.rounded.PersonAdd
 import androidx.compose.material.icons.rounded.PictureInPicture
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
+import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Recommend
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
@@ -397,19 +399,80 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         deepLinkAction = "open_playback_preferences",
     ),
     DiscoverFeature(
-        id = "ambient_display",
-        title = "Ambient Lock Screen Display",
-        shortDescription = "Fullscreen karaoke synced lyrics and playback controls over your lock screen.",
-        category = DiscoverCategory.Music,
-        icon = Icons.Rounded.Fullscreen,
+        id = "in_car_dashboard",
+        title = "In-Car Cinematic Dashboard",
+        shortDescription = "Touch-friendly widescreen media dashboard optimized for car head units and horizontal mounts.",
+        category = DiscoverCategory.Watching,
+        icon = Icons.Rounded.DirectionsCar,
         isNew = true,
-        detailedDescription = "Transform your phone into a dedicated music and karaoke display when docked, charging, or locked. Features large auto-scrolling synced lyrics with dynamic artwork glows, burn-in pixel shift protection, and auto-dimming controls. Toggle auto-launch in Settings \u2192 Ambient Display.",
+        detailedDescription = "When mounted horizontally in your vehicle or running on Android Automotive OS, Vantafyn automatically adapts into a high-visibility, glanceable car dashboard with oversized touch targets, quick access to downloaded media, and parked video playback.",
         steps = listOf(
-            "Play any song with synced lyrics",
-            "Lock your phone or tap the Ambient button in Now Playing",
-            "Enjoy real-time karaoke lyrics over your lock screen",
+            "Rotate your phone or tablet into landscape in your car mount",
+            "Or open Vantafyn on an Android Automotive OS head unit",
+            "Browse downloads, resume watching when safely parked, or stream your music library effortlessly",
         ),
-        deepLinkAction = "open_ambient_preview",
+    ),
+    DiscoverFeature(
+        id = "replaygain",
+        title = "ReplayGain (Loudness Leveling)",
+        shortDescription = "Even out volume across tracks automatically with zero clipping or distortion.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.VolumeUp,
+        isNew = true,
+        detailedDescription = "No more sudden volume spikes or whisper-quiet tracks. Vantafyn reads embedded ReplayGain loudness metadata from your Jellyfin server and uses a custom real-time PCM audio processor to balance playback levels smoothly with peak-limiting anti-clipping protection.",
+        steps = listOf(
+            "Play any music track to open Now Playing",
+            "Tap the \u22ee (More) menu in the bottom-right",
+            "Select Loudness Leveling (ReplayGain)",
+            "Toggle ReplayGain on and adjust pre-amp sliders to your liking",
+        ),
+        deepLinkAction = "open_music",
+    ),
+    DiscoverFeature(
+        id = "autoeq_headphone_profiles",
+        title = "AutoEQ Headphone Profiles",
+        shortDescription = "Apply professional frequency correction curves for thousands of headphones and IEMs.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.Headphones,
+        isNew = true,
+        detailedDescription = "Unlock audiophile sound quality tuned specifically for your hardware. Vantafyn bundles an extensive offline database of AutoEQ acoustic measurements and applies target compensation curves directly via hardware audio effects.",
+        steps = listOf(
+            "Open Now Playing on any track",
+            "Tap the \u22ee (More) menu",
+            "Select Headphone EQ (AutoEQ)",
+            "Search for your headphone or earbud model and tap Apply Profile",
+        ),
+        deepLinkAction = "open_music",
+    ),
+    DiscoverFeature(
+        id = "infinite_radio",
+        title = "Infinite Radio & Smart Mixes",
+        shortDescription = "Generate an endless music station seeded from any favorite song.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.Radio,
+        isNew = true,
+        detailedDescription = "Keep the music going forever without building manual playlists. Vantafyn queries your Jellyfin server's similarity engine and acoustic tags to continuously queue harmonious tracks in real-time.",
+        steps = listOf(
+            "Tap \u22ee on any track or open Now Playing",
+            "Select Start Station Radio",
+            "Sit back as Vantafyn automatically expands and refreshes your queue",
+        ),
+        deepLinkAction = "open_music",
+    ),
+    DiscoverFeature(
+        id = "smart_precaching",
+        title = "Smart Pre-Caching",
+        shortDescription = "Transparent background buffering of upcoming tracks for seamless, zero-buffering playback.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.Bolt,
+        isNew = true,
+        detailedDescription = "Never hear a song stutter or pause when moving between cell towers, riding elevators, or entering tunnels. Vantafyn proactively caches upcoming songs in your queue ahead of time using intelligent background caching.",
+        steps = listOf(
+            "Start playing any playlist, album, or station",
+            "Upcoming queue tracks are pre-buffered automatically in the background",
+            "Enjoy instant track skips and uninterrupted listening even through temporary network drops",
+        ),
+        deepLinkAction = "open_music",
     ),
     DiscoverFeature(
         id = "opensubsonic_backend",

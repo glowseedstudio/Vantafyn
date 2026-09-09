@@ -17,6 +17,10 @@ import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.media.music.MusicResult
+import dev.vantafyn.core.subsonic.SubsonicClient
+import dev.vantafyn.core.subsonic.SubsonicCredentials
+import dev.vantafyn.core.subsonic.SubsonicMusicDataProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
@@ -29,9 +33,12 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     private val appContext = context.applicationContext
     private val repositories = JellyfinRepositoryProvider(appContext)
     private val downloadRepository: DownloadRepository = SqliteDownloadRepository(appContext)
+
     private var session: JellyfinSession? = null
+    private var subsonicProvider: SubsonicMusicDataProvider? = null
     private var home: JellyfinMusicHome? = null
     private val sessionMutex = Mutex()
+
     private val albumTracks = mutableMapOf<UUID, List<JellyfinMusicTrack>>()
     private val artistAlbums = mutableMapOf<UUID, List<JellyfinMusicAlbum>>()
     private val playlistTracks = mutableMapOf<UUID, List<JellyfinMusicTrack>>()
@@ -77,7 +84,14 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                 parentId == DOWNLOADS_ID -> getDownloadedMusicItems()
                 parentId == DOWNLOADS_SONGS_ID -> getDownloadedSongs()
                 parentId.startsWith(DOWNLOAD_ALBUM_PREFIX) -> getDownloadedAlbumTracks(parentId.removePrefix(DOWNLOAD_ALBUM_PREFIX))
-                !ensureReady() -> listOf(signInItem())
+                !ensureReady() -> {
+                    val offlineSongs = getDownloadedSongs()
+                    if (offlineSongs.isNotEmpty()) {
+                        offlineSongs
+                    } else {
+                        listOf(signInItem())
+                    }
+                }
                 parentId == RECENT_ID -> home.orEmpty().recentlyAdded.map { it.toPlayableMediaItem(RECENT_ID) }
                 parentId == SONGS_ID -> home.orEmpty().songs.map { it.toPlayableMediaItem(SONGS_ID) }
                 parentId == ALBUMS_ID -> home.orEmpty().albums.map { it.toAlbumItem() }
@@ -176,6 +190,17 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
         withContext(Dispatchers.IO) {
             val clean = query.trim()
             if (clean.length < 2 || !ensureReady()) return@withContext 0
+
+            val provider = subsonicProvider
+            if (provider != null) {
+                val results = when (val res = provider.searchMusic(clean)) {
+                    is MusicResult.Success -> res.value.tracks.map { it.toJellyfinTrack() }
+                    is MusicResult.Failure -> emptyList()
+                }
+                searchResults[clean.lowercase()] = results
+                return@withContext results.size
+            }
+
             val activeSession = session ?: return@withContext 0
             val results = when (val result = repositories.musicRepository.searchMusic(activeSession, clean, 50)) {
                 is JellyfinResult.Success -> result.value
@@ -217,6 +242,9 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                         containerId == SONGS_ID -> home.orEmpty().songs
                         containerId == QUEUE_ID -> MusicPlaybackController.get(appContext).state.value.queue.map { it.toJellyfinTrack() }
                         containerId.startsWith(ALBUM_PREFIX) -> tracksForAlbum(containerId.removePrefix(ALBUM_PREFIX))
+                        containerId.startsWith(ARTIST_PREFIX) -> albumsForArtist(containerId.removePrefix(ARTIST_PREFIX)).flatMap {
+                            tracksForAlbum(it.id.toString())
+                        }
                         containerId.startsWith(PLAYLIST_PREFIX) -> tracksForPlaylist(containerId.removePrefix(PLAYLIST_PREFIX))
                         containerId.startsWith(SEARCH_PREFIX) -> searchResults[containerId.removePrefix(SEARCH_PREFIX).lowercase()].orEmpty()
                         else -> home.orEmpty().songs
@@ -237,7 +265,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                 browsableItem(
                     mediaId = "vf-downloads-empty",
                     title = "No offline music",
-                    subtitle = "Download tracks or albums to play offline in your car",
+                    subtitle = "Download tracks or albums on phone to play offline in car",
                     mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
                     isGrid = false,
                 ),
@@ -311,44 +339,160 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             durationMs = duration,
             genres = emptyList(),
             artworkUrl = posterUri,
-            hasLyrics = false,
+            hasLyrics = !localLyricsPath.isNullOrBlank() || offlineFeatureFlags?.contains("lyrics") == true,
             streamUrl = localUri,
             isFavorite = false,
         )
     }
 
+    private fun getSubsonicCredentials(): SubsonicCredentials? {
+        val prefs = appContext.getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
+        val url = prefs.getString("subsonic_url", null) ?: return null
+        val user = prefs.getString("subsonic_username", null) ?: return null
+        val pass = prefs.getString("subsonic_password", null) ?: return null
+        if (url.isBlank() || user.isBlank()) return null
+        return SubsonicCredentials(url, user, pass)
+    }
+
     private suspend fun ensureReady(): Boolean {
-        if (session != null && home != null) return true
+        if ((session != null || subsonicProvider != null) && home != null) return true
         return sessionMutex.withLock {
-            if (session != null && home != null) return@withLock true
-            withTimeoutOrNull(12_000L) {
-                val profiles = repositories.authRepository.savedProfiles()
-                if (profiles.isEmpty()) return@withTimeoutOrNull false
-                profiles
-                    .sortedByDescending { it.lastUsedAt }
-                    .firstNotNullOfOrNull { profile ->
-                        val restored = when (val result = repositories.authRepository.restoreSession(profile.id)) {
-                            is JellyfinResult.Success -> result.value
-                            is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
-                        }
-                        val loadedHome = when (val result = repositories.musicRepository.getMusicHome(restored)) {
-                            is JellyfinResult.Success -> result.value
-                            is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
-                        }
-                        restored to loadedHome
+            if ((session != null || subsonicProvider != null) && home != null) return@withLock true
+
+            withTimeoutOrNull(14_000L) {
+                // 1. Try Subsonic first if credentials exist
+                val subsonicCreds = getSubsonicCredentials()
+                if (subsonicCreds != null) {
+                    val client = SubsonicClient(subsonicCreds)
+                    val provider = SubsonicMusicDataProvider(client, appContext)
+                    val homeResult = provider.getMusicHome()
+                    val artistsResult = provider.getArtists(0, null)
+                    val randomSongsResult = provider.getRandomSongs(40)
+
+                    if (homeResult is MusicResult.Success) {
+                        val h = homeResult.value
+                        val artistsList = if (artistsResult is MusicResult.Success) {
+                            artistsResult.value.map {
+                                JellyfinMusicArtist(
+                                    id = it.id,
+                                    name = it.name,
+                                    imageUrl = it.imageUrl,
+                                )
+                            }
+                        } else emptyList()
+
+                        val songsList = if (randomSongsResult is MusicResult.Success) {
+                            randomSongsResult.value.map { it.toJellyfinTrack() }
+                        } else emptyList()
+
+                        val jHome = JellyfinMusicHome(
+                            libraries = emptyList(),
+                            recentlyAdded = h.recentAlbums.map {
+                                JellyfinMusicTrack(
+                                    id = it.id,
+                                    title = it.title,
+                                    artist = it.artist,
+                                    album = it.title,
+                                    albumId = it.id,
+                                    durationMs = 0L,
+                                    genres = it.genres,
+                                    artworkUrl = it.coverUrl,
+                                    hasLyrics = false,
+                                    streamUrl = "",
+                                    isFavorite = false,
+                                )
+                            },
+                            albums = h.recentAlbums.map {
+                                JellyfinMusicAlbum(
+                                    id = it.id,
+                                    title = it.title,
+                                    artist = it.artist,
+                                    year = it.year,
+                                    artworkUrl = it.coverUrl,
+                                )
+                            },
+                            artists = artistsList,
+                            playlists = h.playlists.map {
+                                JellyfinMusicPlaylist(
+                                    id = it.id,
+                                    name = it.title,
+                                    imageUrl = it.coverUrl,
+                                    trackCount = it.trackCount,
+                                )
+                            },
+                            songs = songsList,
+                        )
+                        subsonicProvider = provider
+                        home = jHome
+                        return@withTimeoutOrNull true
                     }
-                    ?.let { (restored, loadedHome) ->
-                        session = restored
-                        home = loadedHome
-                        true
-                    } ?: false
+                }
+
+                // 2. Try Jellyfin Saved Profiles
+                val profiles = repositories.authRepository.savedProfiles()
+                if (profiles.isNotEmpty()) {
+                    val candidate = profiles
+                        .sortedByDescending { it.lastUsedAt }
+                        .firstNotNullOfOrNull { profile ->
+                            val restored = when (val result = repositories.authRepository.restoreSession(profile.id)) {
+                                is JellyfinResult.Success -> result.value
+                                is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+                            }
+                            val loadedHome = when (val result = repositories.musicRepository.getMusicHome(restored)) {
+                                is JellyfinResult.Success -> result.value
+                                is JellyfinResult.Failure -> return@firstNotNullOfOrNull null
+                            }
+                            restored to loadedHome
+                        }
+                    if (candidate != null) {
+                        session = candidate.first
+                        home = candidate.second
+                        return@withTimeoutOrNull true
+                    }
+                }
+
+                // 3. Fallback to offline completed downloads if any exist
+                val downloadedSongs = downloadRepository.listAllCompleted().filter(::isMusicRecord)
+                if (downloadedSongs.isNotEmpty()) {
+                    home = JellyfinMusicHome(
+                        libraries = emptyList(),
+                        recentlyAdded = downloadedSongs.take(20).map { it.toJellyfinTrack() },
+                        albums = downloadedSongs.filter { !it.albumName.isNullOrBlank() }.groupBy { it.albumId ?: it.albumName.orEmpty() }.map { (key, list) ->
+                            val first = list.first()
+                            JellyfinMusicAlbum(
+                                id = UUID.nameUUIDFromBytes(key.toByteArray()),
+                                title = first.albumName ?: first.title,
+                                artist = first.artistName ?: "Various",
+                                year = first.year,
+                                artworkUrl = first.localPosterPath?.let { "file://$it" } ?: first.remotePosterUrl,
+                            )
+                        },
+                        artists = emptyList(),
+                        playlists = emptyList(),
+                        songs = downloadedSongs.map { it.toJellyfinTrack() },
+                    )
+                    return@withTimeoutOrNull true
+                }
+
+                false
             } == true
         }
     }
 
     private suspend fun tracksForAlbum(rawId: String): List<JellyfinMusicTrack> {
-        val activeSession = session ?: return emptyList()
         val albumId = rawId.toUuidOrNull() ?: return emptyList()
+
+        val provider = subsonicProvider
+        if (provider != null) {
+            return albumTracks.getOrPut(albumId) {
+                when (val result = provider.getAlbumDetail(albumId)) {
+                    is MusicResult.Success -> result.value.tracks.map { it.toJellyfinTrack() }
+                    is MusicResult.Failure -> emptyList()
+                }
+            }
+        }
+
+        val activeSession = session ?: return emptyList()
         return albumTracks.getOrPut(albumId) {
             when (val result = repositories.musicRepository.getAlbumTracks(activeSession, albumId)) {
                 is JellyfinResult.Success -> result.value
@@ -358,8 +502,27 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     }
 
     private suspend fun albumsForArtist(rawId: String): List<JellyfinMusicAlbum> {
-        val activeSession = session ?: return emptyList()
         val artistId = rawId.toUuidOrNull() ?: return emptyList()
+
+        val provider = subsonicProvider
+        if (provider != null) {
+            return artistAlbums.getOrPut(artistId) {
+                when (val result = provider.getArtistDetail(artistId)) {
+                    is MusicResult.Success -> result.value.albums.map {
+                        JellyfinMusicAlbum(
+                            id = it.id,
+                            title = it.title,
+                            artist = it.artist,
+                            year = it.year,
+                            artworkUrl = it.coverUrl,
+                        )
+                    }
+                    is MusicResult.Failure -> emptyList()
+                }
+            }
+        }
+
+        val activeSession = session ?: return emptyList()
         return artistAlbums.getOrPut(artistId) {
             when (val result = repositories.musicRepository.getArtistAlbums(activeSession, artistId)) {
                 is JellyfinResult.Success -> result.value
@@ -369,8 +532,19 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     }
 
     private suspend fun tracksForPlaylist(rawId: String): List<JellyfinMusicTrack> {
-        val activeSession = session ?: return emptyList()
         val playlistId = rawId.toUuidOrNull() ?: return emptyList()
+
+        val provider = subsonicProvider
+        if (provider != null) {
+            return playlistTracks.getOrPut(playlistId) {
+                when (val result = provider.getPlaylistDetail(playlistId)) {
+                    is MusicResult.Success -> result.value.tracks.map { it.toJellyfinTrack() }
+                    is MusicResult.Failure -> emptyList()
+                }
+            }
+        }
+
+        val activeSession = session ?: return emptyList()
         return playlistTracks.getOrPut(playlistId) {
             when (val result = repositories.musicRepository.getPlaylistItems(activeSession, playlistId)) {
                 is JellyfinResult.Success -> result.value
@@ -503,7 +677,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
         browsableItem(
             mediaId = SIGN_IN_ID,
             title = "Sign in to Vantafyn",
-            subtitle = "Open Vantafyn on your phone to connect Jellyfin.",
+            subtitle = "Open Vantafyn on your phone to connect Jellyfin or Subsonic.",
             mediaType = MediaMetadata.MEDIA_TYPE_FOLDER_MIXED,
             isGrid = false,
         )

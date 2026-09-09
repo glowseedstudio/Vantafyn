@@ -102,7 +102,11 @@ class OfflineDownloadWorker(
             }
             repository.updateProgress(record.id, final.length(), final.length(), System.currentTimeMillis())
             downloadArtwork(record)
-            writeOfflineManifest(record, session, playback)
+            try {
+                writeOfflineManifest(record, session, playback)
+            } catch (t: Throwable) {
+                // Non-fatal: do not abort completed media if manifest/lyrics sidecar fails
+            }
             repository.updateState(record.id, DownloadState.Completed, System.currentTimeMillis())
             Result.success()
         } catch (cancelled: CancellationException) {
@@ -180,16 +184,27 @@ class OfflineDownloadWorker(
             is JellyfinResult.Failure -> emptyList()
         }
         val lyrics = if (record.mediaType == DownloadMediaType.MusicTrack || record.mediaType == DownloadMediaType.Audiobook) {
-            when (val result = jellyfin.musicRepository.getLyrics(session, UUID.fromString(record.identity.itemId))) {
-                is JellyfinResult.Success -> result.value?.let { lyric ->
-                    DownloadOfflineLyrics(
-                        plainText = lyric.plainText,
-                        syncedLines = lyric.syncedLines.map { line ->
+            val trackUuid = runCatching { UUID.fromString(record.identity.itemId) }.getOrNull()
+            if (trackUuid != null) {
+                when (val result = jellyfin.musicRepository.getLyrics(session, trackUuid)) {
+                    is JellyfinResult.Success -> result.value?.let { lyric ->
+                        val synced = lyric.syncedLines.map { line ->
                             DownloadOfflineLyricLine(startMs = line.startMs, text = line.text)
-                        },
-                    )
+                        }
+                        val plain = lyric.plainText.ifBlank {
+                            synced.joinToString("\n") { it.text }
+                        }
+                        if (plain.isNotBlank() || synced.isNotEmpty()) {
+                            DownloadOfflineLyrics(
+                                plainText = plain,
+                                syncedLines = synced,
+                            )
+                        } else null
+                    }
+                    is JellyfinResult.Failure -> null
                 }
-                is JellyfinResult.Failure -> null
+            } else {
+                null
             }
         } else {
             null
@@ -205,17 +220,30 @@ class OfflineDownloadWorker(
             trickplayAvailable = false,
         )
         val metadataTarget = fileStore.targetFor(record.identity, DownloadFileKind.Metadata, "json")
-        if (metadataTarget.tempFile.parentFile?.let { it.exists() || it.mkdirs() } != true) return
-        metadataTarget.tempFile.writeText(manifest.toJsonString())
-        if (metadataTarget.finalFile.exists() && !metadataTarget.finalFile.delete()) return
-        if (!metadataTarget.tempFile.renameTo(metadataTarget.finalFile)) return
+        val metadataPath = if (metadataTarget.tempFile.parentFile?.let { it.exists() || it.mkdirs() } == true) {
+            metadataTarget.tempFile.writeText(manifest.toJsonString())
+            if (metadataTarget.finalFile.exists()) metadataTarget.finalFile.delete()
+            if (!metadataTarget.tempFile.renameTo(metadataTarget.finalFile)) {
+                runCatching {
+                    metadataTarget.tempFile.copyTo(metadataTarget.finalFile, overwrite = true)
+                    metadataTarget.tempFile.delete()
+                }
+            }
+            if (metadataTarget.finalFile.exists()) metadataTarget.finalFile.absolutePath else null
+        } else null
 
         val lyricsPath = lyrics?.let {
             val lyricsTarget = fileStore.targetFor(record.identity, DownloadFileKind.Lyrics, "json")
             if (lyricsTarget.tempFile.parentFile?.let { parent -> parent.exists() || parent.mkdirs() } == true) {
                 lyricsTarget.tempFile.writeText(it.toStandaloneJson())
                 if (lyricsTarget.finalFile.exists()) lyricsTarget.finalFile.delete()
-                if (lyricsTarget.tempFile.renameTo(lyricsTarget.finalFile)) lyricsTarget.finalFile.absolutePath else null
+                if (!lyricsTarget.tempFile.renameTo(lyricsTarget.finalFile)) {
+                    runCatching {
+                        lyricsTarget.tempFile.copyTo(lyricsTarget.finalFile, overwrite = true)
+                        lyricsTarget.tempFile.delete()
+                    }
+                }
+                if (lyricsTarget.finalFile.exists()) lyricsTarget.finalFile.absolutePath else null
             } else {
                 null
             }
@@ -223,7 +251,7 @@ class OfflineDownloadWorker(
         repository.updateLocalSidecarPaths(
             id = record.id,
             localSubtitlePath = subtitles.firstOrNull { !it.localPath.isNullOrBlank() }?.localPath ?: record.localSubtitlePath,
-            localMetadataPath = metadataTarget.finalFile.absolutePath,
+            localMetadataPath = metadataPath ?: record.localMetadataPath,
             localLyricsPath = lyricsPath ?: record.localLyricsPath,
             localChaptersPath = record.localChaptersPath,
             localTrickplayPath = record.localTrickplayPath,

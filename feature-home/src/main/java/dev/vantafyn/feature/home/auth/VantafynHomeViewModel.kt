@@ -209,6 +209,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         refreshOmbiRequestsAvailability()
         refreshAchievementsAvailability()
         refreshSocialAvailability()
+        loadDownloads()
+        startObservingDownloads()
         val appLifecycleObserver = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
@@ -233,6 +235,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         stopSocialPolling()
         watchPartyInviteExpiryJob?.cancel()
         super.onCleared()
+    }
+
+    private fun startObservingDownloads() {
+        viewModelScope.launch {
+            offlineDownloadManager.observeAnyDownloadUpdates()
+                .collect {
+                    loadDownloads()
+                }
+        }
     }
 
     fun onServerUrlChanged(value: String) {
@@ -1321,8 +1332,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination != MobileDestination.Search) {
             searchJob?.cancel()
         }
+        if (destination == MobileDestination.Downloads) {
+            loadDownloads()
+        }
         _state.update {
-            val previous = if (destination.isRootDestination()) {
+            val previous = if (destination.isRootDestination(it.experienceMode)) {
                 it.previousMobileDestination
             } else {
                 it.mobileDestination.rootDestination(it.experienceMode)
@@ -3467,12 +3481,41 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun loadDownloads() {
-        val scope = _state.value.downloadScope() ?: return
+        val scope = _state.value.downloadScope()
         viewModelScope.launch {
             _state.update { it.copy(isDownloadsLoading = true, downloadsError = null) }
             runCatching {
-                downloadRepository.listForUser(scope.serverId, scope.userId) to
-                    downloadRepository.storageSummary(scope.serverId, scope.userId)
+                if (scope != null) {
+                    val userRecords = downloadRepository.listForUser(scope.serverId, scope.userId)
+                    val summary = downloadRepository.storageSummary(scope.serverId, scope.userId)
+                    if (userRecords.isEmpty()) {
+                        val allCompleted = downloadRepository.listAllCompleted()
+                        if (allCompleted.isNotEmpty()) {
+                            val computedSummary = DownloadStorageSummary(
+                                recordCount = allCompleted.size,
+                                completedCount = allCompleted.size,
+                                activeCount = 0,
+                                failedCount = 0,
+                                totalBytes = allCompleted.sumOf { it.totalBytes ?: it.bytesDownloaded },
+                            )
+                            allCompleted to computedSummary
+                        } else {
+                            userRecords to summary
+                        }
+                    } else {
+                        userRecords to summary
+                    }
+                } else {
+                    val allCompleted = downloadRepository.listAllCompleted()
+                    val computedSummary = DownloadStorageSummary(
+                        recordCount = allCompleted.size,
+                        completedCount = allCompleted.size,
+                        activeCount = 0,
+                        failedCount = 0,
+                        totalBytes = allCompleted.sumOf { it.totalBytes ?: it.bytesDownloaded },
+                    )
+                    allCompleted to computedSummary
+                }
             }.onSuccess { (records, summary) ->
                 _state.update {
                     it.copy(
@@ -3627,6 +3670,44 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         return grouped
             .ifEmpty { listOf(record) }
             .sortedWith(compareBy<DownloadRecord> { it.sortTitle ?: it.title }.thenBy { it.title })
+    }
+
+    fun playOfflineAudioQueue(records: List<DownloadRecord>, startIndex: Int = 0) {
+        val selectedRecord = records.getOrNull(startIndex)
+        val queue = records.mapNotNull { it.toOfflineMusicTrack() }
+        if (queue.isEmpty()) {
+            _state.update { it.copy(mobileMessage = "This download is not ready yet") }
+            loadDownloads()
+            return
+        }
+        val targetIndex = if (selectedRecord != null) {
+            val selectedTrack = selectedRecord.toOfflineMusicTrack()
+            val found = queue.indexOfFirst { it.id == selectedTrack?.id }
+            if (found >= 0) found else startIndex.coerceIn(0, queue.lastIndex)
+        } else {
+            startIndex.coerceIn(0, queue.lastIndex)
+        }
+        MusicPlaybackController.get(getApplication()).playQueue(queue, targetIndex)
+    }
+
+    fun playOfflineDownloadNext(record: DownloadRecord) {
+        if (!record.mediaType.isOfflineAudio()) return
+        val records = offlineAudioQueueFor(record)
+        val tracks = records.mapNotNull { it.toOfflineMusicTrack() }
+        if (tracks.isNotEmpty()) {
+            MusicPlaybackController.get(getApplication()).playNextMultiple(tracks)
+            _state.update { it.copy(mobileMessage = "Playing next: ${record.title}") }
+        }
+    }
+
+    fun addOfflineDownloadToQueue(record: DownloadRecord) {
+        if (!record.mediaType.isOfflineAudio()) return
+        val records = offlineAudioQueueFor(record)
+        val tracks = records.mapNotNull { it.toOfflineMusicTrack() }
+        if (tracks.isNotEmpty()) {
+            MusicPlaybackController.get(getApplication()).addMultipleToQueue(tracks)
+            _state.update { it.copy(mobileMessage = "Added to queue: ${record.title}") }
+        }
     }
 
     fun cancelDownload(record: DownloadRecord) {
@@ -5616,6 +5697,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun loadLibraries(session: JellyfinSession) {
+        loadDownloads()
         viewModelScope.launch {
             _state.update {
                 it.copy(
@@ -6059,7 +6141,7 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
 
-private fun DownloadMediaType.isOfflineAudio(): Boolean =
+internal fun DownloadMediaType.isOfflineAudio(): Boolean =
     this == DownloadMediaType.MusicTrack || this == DownloadMediaType.MusicAlbum || this == DownloadMediaType.Audiobook
 
 private fun DownloadRecord.hasPlayableLocalMedia(): Boolean =
@@ -6069,13 +6151,14 @@ private fun DownloadRecord.hasPlayableLocalMedia(): Boolean =
         == true
     )
 
-private fun DownloadRecord.toOfflineMusicTrack(): VantafynMusicTrack? {
+internal fun DownloadRecord.toOfflineMusicTrack(): VantafynMusicTrack? {
     val mediaFile = localMediaPath
         ?.let(::File)
         ?.takeIf { it.exists() && it.length() > 0L }
         ?: return null
     return VantafynMusicTrack(
-        id = runCatching { UUID.fromString(identity.itemId) }.getOrNull() ?: UUID.randomUUID(),
+        id = runCatching { UUID.fromString(identity.itemId) }.getOrNull()
+            ?: UUID.nameUUIDFromBytes(identity.itemId.toByteArray()),
         title = title,
         artist = artistName
             ?: albumName
@@ -6160,7 +6243,7 @@ enum class MobileDestination {
     TvInput,
 }
 
-private fun MobileDestination.isRootDestination(): Boolean =
+private fun MobileDestination.isRootDestination(experienceMode: ExperienceMode = ExperienceMode.FullMedia): Boolean =
     when (this) {
         MobileDestination.Home,
         MobileDestination.Libraries,
@@ -6171,8 +6254,8 @@ private fun MobileDestination.isRootDestination(): Boolean =
         MobileDestination.WatchParty,
         MobileDestination.Admin,
         MobileDestination.Profile -> true
+        MobileDestination.Downloads -> experienceMode == ExperienceMode.MusicOnly
         MobileDestination.AdminUserSettings,
-        MobileDestination.Downloads,
         MobileDestination.HomeLayout,
         MobileDestination.PlaybackPreferences,
         MobileDestination.DeviceQuickConnect,
@@ -6187,7 +6270,7 @@ private fun MobileDestination.isRootDestination(): Boolean =
     }
 
 private fun MobileDestination.rootDestination(experienceMode: ExperienceMode = ExperienceMode.FullMedia): MobileDestination =
-    if (isRootDestination()) this else if (experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home
+    if (isRootDestination(experienceMode)) this else if (experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home
 
 private data class DownloadScope(
     val serverId: String,

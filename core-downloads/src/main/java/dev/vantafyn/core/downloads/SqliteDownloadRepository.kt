@@ -39,6 +39,14 @@ class SqliteDownloadRepository(
         ).firstOrNull()
     }
 
+    override suspend fun getByItemId(itemId: String): DownloadRecord? = withContext(dispatcher) {
+        queryDownload(
+            selection = "item_id = ?",
+            selectionArgs = arrayOf(itemId),
+            orderBy = "CASE WHEN state = 'Completed' THEN 0 ELSE 1 END, updated_at_millis DESC",
+        ).firstOrNull()
+    }
+
     override suspend fun getByIdentity(identity: DownloadIdentity): DownloadRecord? = withContext(dispatcher) {
         queryDownload(
             selection = "server_id = ? AND user_id = ? AND item_id = ? AND media_source_id = ?",

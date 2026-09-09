@@ -25,6 +25,8 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -41,6 +43,8 @@ data class VantafynMusicTrack(
     val streamUrl: String,
     val artworkUrl: String?,
     val isFavorite: Boolean = false,
+    val replayGainTrackGainDb: Float? = null,
+    val replayGainTrackPeak: Float? = null,
 )
 
 enum class VantafynMusicStopReason {
@@ -106,7 +110,58 @@ class MusicPlaybackController private constructor(context: Context) {
     private var lastRegistryTickMs: Long = 0L
     private val tracksByMediaId = mutableMapOf<String, VantafynMusicTrack>()
 
-    internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.musicBuilder(context.applicationContext).build().apply {
+    val preCacheManager: VantafynMediaPreCacheManager by lazy {
+        VantafynMediaPreCacheManager(
+            context = appContext,
+            cache = VantafynMediaCache.getSimpleCache(appContext),
+            cacheDataSourceFactory = VantafynMediaCache.getCacheDataSourceFactory(appContext),
+            prefetchAheadCount = 3,
+            parentScope = scope,
+        )
+    }
+
+    val audioEffectsManager: dev.vantafyn.core.media.autoeq.VantafynAudioEffectsManager by lazy {
+        dev.vantafyn.core.media.autoeq.VantafynAudioEffectsManager(
+            context = appContext,
+            parentScope = scope,
+        )
+    }
+
+    val radioQueueManager: dev.vantafyn.core.media.radio.RadioQueueManager by lazy {
+        dev.vantafyn.core.media.radio.RadioQueueManager(
+            playbackController = this,
+            parentScope = scope,
+        )
+    }
+
+    val replayGainAudioProcessor: dev.vantafyn.core.media.replaygain.ReplayGainAudioProcessor by lazy {
+        dev.vantafyn.core.media.replaygain.ReplayGainAudioProcessor().apply {
+            setConfiguration(
+                enabled = dev.vantafyn.core.media.replaygain.ReplayGainPreferences.isEnabled(appContext),
+                preAmpWithGainDb = dev.vantafyn.core.media.replaygain.ReplayGainPreferences.getPreAmpWithReplayGain(appContext),
+                gainWithoutGainDb = dev.vantafyn.core.media.replaygain.ReplayGainPreferences.getGainWithoutReplayGain(appContext),
+                preventClipping = dev.vantafyn.core.media.replaygain.ReplayGainPreferences.isPreventClipping(appContext),
+            )
+        }
+    }
+
+    init {
+        scope.launch {
+            combine(
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.isEnabledFlow,
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.preAmpWithReplayGainFlow,
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.gainWithoutReplayGainFlow,
+                dev.vantafyn.core.media.replaygain.ReplayGainPreferences.preventClippingFlow,
+            ) { enabled, preAmp, fallback, preventClipping ->
+                replayGainAudioProcessor.setConfiguration(enabled, preAmp, fallback, preventClipping)
+            }.collect()
+        }
+    }
+
+    internal val sessionPlayer: ExoPlayer = VantafynExoPlayerFactory.musicBuilder(
+        context = context.applicationContext,
+        audioProcessors = arrayOf(replayGainAudioProcessor),
+    ).build().apply {
         setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -117,6 +172,19 @@ class MusicPlaybackController private constructor(context: Context) {
         setHandleAudioBecomingNoisy(true)
         setWakeMode(C.WAKE_MODE_NETWORK)
         enableCompatibleAudioOffload()
+        preCacheManager.attachPlayer(this)
+        radioQueueManager.attachPlayer(this)
+        addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onAudioSessionIdChanged(
+                eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
+                audioSessionId: Int,
+            ) {
+                audioEffectsManager.onAudioSessionIdChanged(audioSessionId)
+            }
+        })
+        if (audioSessionId > 0) {
+            audioEffectsManager.onAudioSessionIdChanged(audioSessionId)
+        }
         addListener(
             object : Player.Listener {
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -158,6 +226,12 @@ class MusicPlaybackController private constructor(context: Context) {
                         current?.let { emitEvent(VantafynMusicPlaybackEvent.TrackStarted(it, currentPosition.coerceAtLeast(0L))) }
                     }
                     lastTransitionReason = VantafynMusicStopReason.QueueChange
+                    val trackForReplayGain = tracksByMediaId[mediaItem?.mediaId] ?: current
+                    val gainDb = mediaItem?.mediaMetadata?.extras?.takeIf { it.containsKey(EXTRA_REPLAY_GAIN_DB) }?.getFloat(EXTRA_REPLAY_GAIN_DB)
+                        ?: trackForReplayGain?.replayGainTrackGainDb
+                    val peak = mediaItem?.mediaMetadata?.extras?.takeIf { it.containsKey(EXTRA_REPLAY_GAIN_PEAK) }?.getFloat(EXTRA_REPLAY_GAIN_PEAK)
+                        ?: trackForReplayGain?.replayGainTrackPeak
+                    replayGainAudioProcessor.updateTrackGain(gainDb, peak)
                     if (_state.value.sleepTimerMode == SleepTimerMode.EndOfTrack) {
                         pause()
                         cancelSleepTimer()
@@ -239,6 +313,11 @@ class MusicPlaybackController private constructor(context: Context) {
 
     fun playQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0) {
         if (queue.isEmpty()) return
+        if (radioQueueManager.isRadioActive.value &&
+            !(queue.size == 1 && queue.firstOrNull()?.id == radioQueueManager.currentSeedTrack.value?.id)
+        ) {
+            radioQueueManager.stopRadio("manual_queue_play")
+        }
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
         val previous = _state.value.currentTrack
         val previousPosition = sessionPlayer.currentPosition.coerceAtLeast(0L)
@@ -292,6 +371,8 @@ class MusicPlaybackController private constructor(context: Context) {
         sessionPlayer.playWhenReady = false
         sessionPlayer.stop()
         if (clearQueue) {
+            preCacheManager.cancelAll("queue cleared")
+            radioQueueManager.stopRadio("queue cleared")
             sessionPlayer.clearMediaItems()
         }
         stopPlaybackService()
@@ -384,6 +465,23 @@ class MusicPlaybackController private constructor(context: Context) {
         sessionPlayer.removeMediaItem(index)
         _state.update { state ->
             val newQueue = state.queue.toMutableList().also { if (index in it.indices) it.removeAt(index) }
+            val newIndex = sessionPlayer.currentMediaItemIndex.coerceIn(0, newQueue.size.coerceAtLeast(1) - 1)
+            state.copy(queue = newQueue, queueIndex = newIndex)
+        }
+    }
+
+    fun moveQueueTrack(fromIndex: Int, toIndex: Int) {
+        if (fromIndex !in 0 until sessionPlayer.mediaItemCount ||
+            toIndex !in 0 until sessionPlayer.mediaItemCount ||
+            fromIndex == toIndex
+        ) return
+        sessionPlayer.moveMediaItem(fromIndex, toIndex)
+        _state.update { state ->
+            val newQueue = state.queue.toMutableList()
+            if (fromIndex in newQueue.indices && toIndex in newQueue.indices) {
+                val item = newQueue.removeAt(fromIndex)
+                newQueue.add(toIndex, item)
+            }
             val newIndex = sessionPlayer.currentMediaItemIndex.coerceIn(0, newQueue.size.coerceAtLeast(1) - 1)
             state.copy(queue = newQueue, queueIndex = newIndex)
         }
@@ -584,6 +682,11 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     fun release() {
+        preCacheManager.detachPlayer(sessionPlayer)
+        preCacheManager.cancelAll("controller released")
+        radioQueueManager.detachPlayer(sessionPlayer)
+        radioQueueManager.stopRadio("controller released")
+        audioEffectsManager.release()
         tickerJob?.cancel()
         LongRunningTaskRegistry.stop(MUSIC_TICKER_TASK_ID, "controller released")
         sessionPlayer.release()
@@ -662,10 +765,15 @@ class MusicPlaybackController private constructor(context: Context) {
         playbackServiceStarted = false
     }
 
-    private fun VantafynMusicTrack.toMediaItem(): MediaItem =
-        MediaItem.Builder()
+    private fun VantafynMusicTrack.toMediaItem(): MediaItem {
+        val extras = android.os.Bundle().apply {
+            replayGainTrackGainDb?.let { putFloat(EXTRA_REPLAY_GAIN_DB, it) }
+            replayGainTrackPeak?.let { putFloat(EXTRA_REPLAY_GAIN_PEAK, it) }
+        }
+        return MediaItem.Builder()
             .setUri(streamUrl)
             .setMediaId(id.toString())
+            .setCustomCacheKey(id.toString())
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(title)
@@ -674,9 +782,11 @@ class MusicPlaybackController private constructor(context: Context) {
                     .setArtworkUri(artworkUrl?.let(Uri::parse))
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .setIsPlayable(true)
+                    .setExtras(extras)
                     .build(),
             )
             .build()
+    }
 
     companion object {
         private const val TAG = "MusicPlaybackController"
@@ -684,6 +794,9 @@ class MusicPlaybackController private constructor(context: Context) {
         private const val ForegroundTickerIntervalMs = 1_000L
         private const val BackgroundTickerIntervalMs = 10_000L
         private const val BackgroundRegistryTickIntervalMs = 60_000L
+
+        const val EXTRA_REPLAY_GAIN_DB = "dev.vantafyn.replaygain.GAIN_DB"
+        const val EXTRA_REPLAY_GAIN_PEAK = "dev.vantafyn.replaygain.PEAK"
 
         @Volatile
         private var instance: MusicPlaybackController? = null

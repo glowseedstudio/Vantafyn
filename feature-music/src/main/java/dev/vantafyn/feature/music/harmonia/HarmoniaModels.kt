@@ -52,6 +52,7 @@ data class HarmoniaPlaybackRecord(
     val endedAt: Instant,
     val listenedMs: Long,
     val durationMs: Long?,
+    val artworkUrl: String? = null,
 )
 
 data class HarmoniaRankedItem(
@@ -59,6 +60,8 @@ data class HarmoniaRankedItem(
     val label: String,
     val playCount: Int,
     val listeningTimeMs: Long,
+    val subtitle: String? = null,
+    val artworkUrl: String? = null,
 )
 
 data class HarmoniaDayListening(
@@ -126,6 +129,7 @@ data class HarmoniaRecap(
     val recordCount: Int = 0,
     val historySignature: String = "",
     val isFinalized: Boolean = false,
+    val isSaved: Boolean = false,
 )
 
 data class HarmoniaRecapPreview(
@@ -143,4 +147,6 @@ data class HarmoniaRecapPreview(
     val recordCount: Int = 0,
     val historySignature: String = "",
     val isFinalized: Boolean = false,
+    val isSaved: Boolean = false,
+    val artworkUrl: String? = null,
 )

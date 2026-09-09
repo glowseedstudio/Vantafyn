@@ -54,21 +54,32 @@ class HarmoniaStatisticsCalculator(
         val topTracks = safeRecords.rankBy(
             key = { it.trackId.toString() },
             label = { it.trackTitle },
+            subtitle = { it.artist },
+            artworkUrl = { it.artworkUrl },
         )
         val topArtists = safeRecords.rankBy(
             key = { it.artist.trim().lowercase() },
             label = { it.artist },
+            subtitle = null,
+            artworkUrl = { it.artworkUrl },
         )
         val topAlbums = safeRecords
             .filter { !it.album.isNullOrBlank() }
             .rankBy(
                 key = { it.albumId?.toString() ?: "${it.artist.trim().lowercase()}|${it.album!!.trim().lowercase()}" },
                 label = { it.album.orEmpty() },
+                subtitle = { it.artist },
+                artworkUrl = { it.artworkUrl },
             )
+        val genericGenres = setOf("music", "audio", "general", "unknown", "other", "sound", "track")
         val genreRows = safeRecords.flatMap { record ->
-            record.genres.distinct().filter { it.isNotBlank() }.map { genre ->
-                record.copy(trackId = stableGenreUuid, trackTitle = genre, artist = genre, album = genre, listenedMs = record.listenedMs)
-            }
+            record.genres
+                .distinct()
+                .map { it.trim() }
+                .filter { it.isNotBlank() && it.lowercase() !in genericGenres }
+                .map { genre ->
+                    record.copy(trackId = stableGenreUuid, trackTitle = genre, artist = genre, album = genre, listenedMs = record.listenedMs)
+                }
         }
         val topGenres = genreRows.rankBy(
             key = { it.trackTitle.trim().lowercase() },
@@ -86,8 +97,8 @@ class HarmoniaStatisticsCalculator(
             uniqueTracks = stat(safeRecords.map { it.trackId }.distinct().size, "Count distinct track ids played in the period."),
             uniqueArtists = stat(safeRecords.map { it.artist.trim().lowercase() }.filter { it.isNotBlank() }.distinct().size, "Count distinct artist labels in the period."),
             uniqueAlbums = stat(safeRecords.mapNotNull { it.albumId ?: it.album?.trim()?.lowercase() }.distinct().size, "Count distinct albums in the period."),
-            uniqueGenres = if (safeRecords.any { it.genres.isNotEmpty() }) {
-                stat(safeRecords.flatMap { it.genres }.map { it.trim().lowercase() }.distinct().size, "Count distinct Jellyfin genres present on played tracks.")
+            uniqueGenres = if (genreRows.isNotEmpty()) {
+                stat(genreRows.map { it.trackTitle.lowercase() }.distinct().size, "Count distinct Jellyfin genres present on played tracks.")
             } else {
                 unavailable("Jellyfin did not expose genre values on recorded music tracks.")
             },
@@ -114,7 +125,7 @@ class HarmoniaStatisticsCalculator(
             comparisonListeningDeltaMs = if (comparisonDelta != null) {
                 stat(comparisonDelta, "Current period total listenedMs minus previous matching period total listenedMs.")
             } else {
-                unavailable("No previous matching period records were available.")
+                unavailable("No prior matching completed period found for comparison.")
             },
         )
     }
@@ -125,18 +136,24 @@ class HarmoniaStatisticsCalculator(
     private fun List<HarmoniaPlaybackRecord>.rankBy(
         key: (HarmoniaPlaybackRecord) -> String,
         label: (HarmoniaPlaybackRecord) -> String,
+        subtitle: ((HarmoniaPlaybackRecord) -> String?)? = null,
+        artworkUrl: ((HarmoniaPlaybackRecord) -> String?)? = null,
     ): List<HarmoniaRankedItem> =
         mapNotNull { record ->
             val displayLabel = label(record).trim().takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            key(record).takeIf { it.isNotBlank() }?.let { id -> id to (displayLabel to record) }
+            key(record).takeIf { it.isNotBlank() }?.let { id -> id to record }
         }
             .groupBy({ it.first }, { it.second })
-            .map { (id, rows) ->
+            .map { (id, records) ->
+                val representative = records.first()
+                val art = records.mapNotNull { artworkUrl?.invoke(it) ?: it.artworkUrl }.firstOrNull()
                 HarmoniaRankedItem(
                     id = id,
-                    label = rows.first().first,
-                    playCount = rows.size,
-                    listeningTimeMs = rows.sumOf { it.second.listenedMs },
+                    label = label(representative).trim(),
+                    playCount = records.size,
+                    listeningTimeMs = records.sumOf { it.listenedMs },
+                    subtitle = subtitle?.invoke(representative)?.trim()?.takeIf { it.isNotBlank() },
+                    artworkUrl = art,
                 )
             }
             .sortedWith(compareByDescending<HarmoniaRankedItem> { it.listeningTimeMs }.thenByDescending { it.playCount }.thenBy { it.label })
