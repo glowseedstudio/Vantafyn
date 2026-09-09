@@ -3,30 +3,58 @@
 -keepattributes SourceFile,LineNumberTable
 -keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
 
-# Kotlinx Serialization & Data Models
--if @kotlinx.serialization.Serializable class **
--keepclassmembers class <1> {
-    static <1>$Companion Companion;
+# Kotlin & Kotlinx Serialization
+# Keep Kotlin Metadata so reflection-based and KType dynamic serializer resolution works
+-keep class kotlin.Metadata { *; }
+
+# Keep Companion object static fields of serializable classes
+-keepclassmembers class * {
+    @kotlin.jvm.Transient static <fields>;
 }
 
--if @kotlinx.serialization.Serializable class ** {
-    static **$* *;
-}
--keepclassmembers class <2>$<3> {
+# Keep serializer() method in Companion objects
+-keepclassmembers class * {
     kotlinx.serialization.KSerializer serializer(...);
 }
 
--if @kotlinx.serialization.Serializable class ** {
-    public static ** INSTANCE;
+# Keep classes implementing KSerializer and their constructors/methods
+-keep class * implements kotlinx.serialization.KSerializer {
+    public <init>(...);
+    *;
 }
--keepclassmembers class <1> {
-    public static <1> INSTANCE;
-    kotlinx.serialization.KSerializer serializer(...);
+-keepclassmembers class * implements kotlinx.serialization.KSerializer {
+    public <init>(...);
+    *;
 }
 
--keep class org.jellyfin.sdk.model.** { *; }
--keep class org.jellyfin.sdk.api.** { *; }
--keep class org.jellyfin.sdk.core.** { *; }
+# Keep all generated $$serializer classes and their members
+-keep class **$$serializer {
+    *;
+}
+-keepclassmembers class **$$serializer {
+    *;
+}
+
+# Keep synthetic serialization constructor and write$Self methods
+-keepclassmembers class * {
+    public synthetic <init>(int, ..., kotlinx.serialization.internal.SerializationConstructorMarker);
+    public static void write$Self(...);
+}
+
+# Keep SerialName and other serialization annotations on fields
+-keepclassmembers class * {
+    @kotlinx.serialization.SerialName <fields>;
+}
+
+# Keep kotlinx.serialization core internals
+-keep class kotlinx.serialization.** { *; }
+-keepclassmembers class kotlinx.serialization.** { *; }
+-dontwarn kotlinx.serialization.**
+
+# Jellyfin SDK
+-keep class org.jellyfin.sdk.** { *; }
+-keepclassmembers class org.jellyfin.sdk.** { *; }
+-dontwarn org.jellyfin.sdk.**
 
 -keep class dev.vantafyn.core.jellyfin.** { *; }
 -keep class dev.vantafyn.core.media.** { *; }

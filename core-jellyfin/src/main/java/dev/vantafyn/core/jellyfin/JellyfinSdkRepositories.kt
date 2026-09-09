@@ -2480,7 +2480,28 @@ class SdkJellyfinAdminRepository(
             }
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                val system by api.systemApi.getSystemInfo()
+                val systemInfo = runCatching {
+                    val result by api.systemApi.getSystemInfo()
+                    result
+                }.getOrNull()
+                val publicInfo = if (systemInfo == null) {
+                    runCatching {
+                        val result by api.systemApi.getPublicSystemInfo()
+                        result
+                    }.getOrNull()
+                } else null
+
+                val serverName = systemInfo?.serverName
+                    ?: publicInfo?.serverName
+                    ?: session.server.name
+                val serverVersion = systemInfo?.version
+                    ?: publicInfo?.version
+                    ?: session.server.version
+                val operatingSystem = systemInfo?.operatingSystemDisplayName
+                    ?: systemInfo?.operatingSystem?.takeIf { it.isNotBlank() }
+                    ?: publicInfo?.operatingSystem?.takeIf { it.isNotBlank() }
+                    ?: "Linux"
+
                 val allSessions = runCatching {
                     val result by api.sessionApi.getSessions()
                     result
@@ -2501,66 +2522,69 @@ class SdkJellyfinAdminRepository(
                             { it.id ?: it.deviceId ?: it.userId?.toString().orEmpty() },
                         ),
                     )
-                    .map { dto ->
-                        val sessionItem = dto.nowPlayingItem
-                        val technicalItem = sessionItem?.id?.let { nowPlayingDetails[it] }
-                        val playState = dto.playState
-                        val transcode = dto.transcodingInfo
-                        val mediaSource = technicalItem?.mediaSources.orEmpty().firstOrNull()
-                        val mediaStreams = mediaSource?.mediaStreams.orEmpty().ifEmpty {
-                            technicalItem?.mediaStreams.orEmpty().ifEmpty { sessionItem?.mediaStreams.orEmpty() }
-                        }
-                        val videoStream = mediaStreams.firstOrNull { it.type == MediaStreamType.VIDEO }
-                        val audioStream = mediaStreams.firstOrNull { it.type == MediaStreamType.AUDIO }
-                        JellyfinAdminSession(
-                            id = dto.id ?: dto.deviceId ?: dto.userId?.toString().orEmpty(),
-                            userId = dto.userId,
-                            userName = dto.userName,
-                            userImageUrl = dto.userId?.let { publicUserImageUrl(api, it, dto.userPrimaryImageTag) },
-                            client = dto.client,
-                            deviceName = dto.deviceName,
-                            remoteEndPoint = dto.remoteEndPoint,
-                            nowPlayingTitle = sessionItem?.name,
-                            nowPlayingSubtitle = run {
-                                val isAudio = sessionItem?.type == BaseItemKind.AUDIO
-                                if (isAudio) null else sessionItem?.seasonEpisodeLabel()
-                            } ?: sessionItem?.productionYear?.toString(),
-                            nowPlayingImageUrl = run {
-                                val isEpisode = sessionItem?.type == BaseItemKind.EPISODE
-                                if (isEpisode) {
-                                    val seriesId = sessionItem?.seriesId
-                                    val seriesTag = sessionItem?.seriesPrimaryImageTag
-                                    if (seriesId != null && !seriesTag.isNullOrBlank()) {
-                                        itemImageUrl(api, seriesId, ImageType.PRIMARY, seriesTag, maxWidth = 420)
+                    .mapNotNull { dto ->
+                        runCatching {
+                            val sessionItem = dto.nowPlayingItem
+                            val technicalItem = sessionItem?.id?.let { nowPlayingDetails[it] }
+                            val playState = dto.playState
+                            val transcode = dto.transcodingInfo
+                            val mediaSource = technicalItem?.mediaSources.orEmpty().firstOrNull()
+                            val mediaStreams = mediaSource?.mediaStreams.orEmpty().ifEmpty {
+                                technicalItem?.mediaStreams.orEmpty().ifEmpty { sessionItem?.mediaStreams.orEmpty() }
+                            }
+                            val videoStream = mediaStreams.firstOrNull { it.type == MediaStreamType.VIDEO }
+                            val audioStream = mediaStreams.firstOrNull { it.type == MediaStreamType.AUDIO }
+                            JellyfinAdminSession(
+                                id = dto.id ?: dto.deviceId ?: dto.userId?.toString().orEmpty(),
+                                userId = dto.userId,
+                                userName = dto.userName,
+                                userImageUrl = dto.userId?.let { publicUserImageUrl(api, it, dto.userPrimaryImageTag) },
+                                client = dto.client,
+                                deviceName = dto.deviceName,
+                                remoteEndPoint = dto.remoteEndPoint,
+                                nowPlayingTitle = sessionItem?.name,
+                                nowPlayingSubtitle = run {
+                                    val isAudio = sessionItem?.type == BaseItemKind.AUDIO
+                                    if (isAudio) null else sessionItem?.seasonEpisodeLabel()
+                                } ?: sessionItem?.productionYear?.toString(),
+                                nowPlayingImageUrl = run {
+                                    val isEpisode = sessionItem?.type == BaseItemKind.EPISODE
+                                    if (isEpisode) {
+                                        val seriesId = sessionItem?.seriesId
+                                        val seriesTag = sessionItem?.seriesPrimaryImageTag
+                                        if (seriesId != null && !seriesTag.isNullOrBlank()) {
+                                            itemImageUrl(api, seriesId, ImageType.PRIMARY, seriesTag, maxWidth = 420)
+                                        } else {
+                                            sessionItem?.primaryImageUrl(api, 420)
+                                        }
                                     } else {
-                                        sessionItem?.primaryImageUrl(api, 420)
+                                        sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520)
                                     }
-                                } else {
-                                    sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520)
-                                }
-                            },
-                            nowPlayingBackdropUrl = sessionItem?.backdropImageUrl(api, 760) ?: sessionItem?.thumbImageUrl(api, 760),
-                            nowPlayingType = sessionItem?.type?.serialName ?: sessionItem?.type?.name,
-                            playMethod = playState?.playMethod?.let { method ->
-                                when (method) {
-                                    PlayMethod.DIRECT_PLAY -> "Direct Play"
-                                    PlayMethod.DIRECT_STREAM -> "Direct Stream"
-                                    PlayMethod.TRANSCODE -> "Transcoding"
-                                }
-                            } ?: if (transcode != null) "Transcoding" else "Unknown",
-                            isPaused = playState?.isPaused == true,
-                            positionTicks = playState?.positionTicks,
-                            runtimeTicks = sessionItem?.runTimeTicks ?: technicalItem?.runTimeTicks,
-                            streamQuality = videoStream?.videoQualityLabel(),
-                            videoCodec = transcode?.videoCodec ?: videoStream?.codec,
-                            audioCodec = transcode?.audioCodec ?: audioStream?.codec,
-                            container = transcode?.container ?: mediaSource?.container ?: technicalItem?.container ?: sessionItem?.container,
-                            bitrate = transcode?.bitrate ?: mediaSource?.bitrate ?: mediaStreams.sumOf { it.bitRate ?: 0 }.takeIf { it > 0 },
-                            transcodeReasons = transcode?.transcodeReasons.orEmpty().map { it.serialName },
-                            lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
-                            isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
-                            supportsDisplayMessage = dto.supportedCommands.orEmpty().contains(GeneralCommandType.DISPLAY_MESSAGE),
-                        )
+                                },
+                                nowPlayingBackdropUrl = sessionItem?.backdropImageUrl(api, 760) ?: sessionItem?.thumbImageUrl(api, 760),
+                                nowPlayingType = sessionItem?.type?.serialName ?: sessionItem?.type?.name,
+                                playMethod = playState?.playMethod?.let { method ->
+                                    when (method) {
+                                        PlayMethod.DIRECT_PLAY -> "Direct Play"
+                                        PlayMethod.DIRECT_STREAM -> "Direct Stream"
+                                        PlayMethod.TRANSCODE -> "Transcoding"
+                                        else -> method.name
+                                    }
+                                } ?: if (transcode != null) "Transcoding" else "Unknown",
+                                isPaused = playState?.isPaused == true,
+                                positionTicks = playState?.positionTicks,
+                                runtimeTicks = sessionItem?.runTimeTicks ?: technicalItem?.runTimeTicks,
+                                streamQuality = videoStream?.videoQualityLabel(),
+                                videoCodec = transcode?.videoCodec ?: videoStream?.codec,
+                                audioCodec = transcode?.audioCodec ?: audioStream?.codec,
+                                container = transcode?.container ?: mediaSource?.container ?: technicalItem?.container ?: sessionItem?.container,
+                                bitrate = transcode?.bitrate ?: mediaSource?.bitrate ?: mediaStreams.sumOf { it.bitRate ?: 0 }.takeIf { it > 0 },
+                                transcodeReasons = transcode?.transcodeReasons.orEmpty().mapNotNull { runCatching { it.serialName }.getOrNull() ?: it.name },
+                                lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
+                                isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
+                                supportsDisplayMessage = dto.supportedCommands.orEmpty().contains(GeneralCommandType.DISPLAY_MESSAGE),
+                            )
+                        }.getOrNull()
                     }
                 val users = runCatching {
                     val result by api.userApi.getUsers(isHidden = null, isDisabled = null)
@@ -2655,9 +2679,9 @@ class SdkJellyfinAdminRepository(
                 )
                 JellyfinResult.Success(
                     JellyfinAdminOverview(
-                        serverName = system.serverName,
-                        serverVersion = system.version,
-                        operatingSystem = system.operatingSystemDisplayName ?: system.operatingSystem,
+                        serverName = serverName,
+                        serverVersion = serverVersion,
+                        operatingSystem = operatingSystem,
                         activeSessions = sessions,
                         connectedSessionCount = allSessions.size,
                         users = users,
@@ -2681,6 +2705,7 @@ class SdkJellyfinAdminRepository(
                     ),
                 )
             } catch (throwable: Throwable) {
+                Log.e("VantafynAdmin", "getOverview failed with ${throwable.javaClass.name}: ${throwable.message}", throwable)
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }
         }
@@ -5170,6 +5195,7 @@ private fun toProfileImageUserMessage(throwable: Throwable): String {
 }
 
 private fun toUserMessage(throwable: Throwable): String {
+    Log.e("Vantafyn", "toUserMessage: ${throwable.javaClass.name}: ${throwable.message}", throwable)
     val className = throwable.javaClass.name
     val message = throwable.message.orEmpty()
     return when {
@@ -5177,6 +5203,8 @@ private fun toUserMessage(throwable: Throwable): String {
         throwable is AuthenticationException -> throwable.message ?: "Unable to authenticate"
         throwable is SecurityException -> throwable.message ?: "That address belongs to a different Jellyfin server"
         className.contains("InvalidStatusException") && message.contains("401") -> "Invalid username or password"
+        className.contains("InvalidStatusException") && message.contains("403") -> "Admin privileges required on server"
+        className.contains("InvalidContentException") || className.contains("SerializationException") -> "Data parsing error from server"
         message.contains("CLEARTEXT", ignoreCase = true) -> "Android blocked cleartext HTTP for this server"
         className.contains("SSL", ignoreCase = true) ||
             className.contains("Cert", ignoreCase = true) ||
@@ -5188,6 +5216,7 @@ private fun toUserMessage(throwable: Throwable): String {
         className.contains("InvalidStatusException") -> "Server responded but does not look like Jellyfin"
         throwable is PlaybackException -> throwable.message ?: "This item cannot be played yet"
         throwable is IllegalArgumentException -> throwable.message ?: "Invalid server address"
+        message.isNotBlank() && !message.contains("@") -> message
         else -> "Could not reach the Jellyfin server"
     }
 }

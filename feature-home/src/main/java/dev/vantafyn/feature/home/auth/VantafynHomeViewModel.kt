@@ -3055,6 +3055,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
                 is JellyfinResult.Failure -> {
+                    android.util.Log.e("VantafynHomeVM", "refreshAdminOverview failure: ${result.message}", result.cause)
                     if (showLoading) {
                         _state.update { it.copy(isAdminLoading = false, adminError = result.message) }
                     }
