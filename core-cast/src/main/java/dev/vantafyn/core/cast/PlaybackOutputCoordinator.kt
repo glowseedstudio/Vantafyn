@@ -32,7 +32,7 @@ data class PlaybackOutputState(
     val lastErrorMessage: String? = null,
 ) {
     val isCasting: Boolean
-        get() = activeOutput == PlaybackOutputType.GoogleCast &&
+        get() = (activeOutput == PlaybackOutputType.GoogleCast || castState.connectionState == RemoteConnectionState.Connected) &&
             castState.connectionState == RemoteConnectionState.Connected
 }
 
@@ -51,11 +51,21 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
     fun start() {
         castTarget.start()
         if (bridgeJob != null) return
+        var lastConnectionState = castTarget.state.value.connectionState
         bridgeJob = scope.launch {
             castTarget.state.collectLatest { castState ->
+                val prevConnectionState = lastConnectionState
+                lastConnectionState = castState.connectionState
                 _state.update { current -> current.copy(castState = castState) }
                 if (castState.connectionState == RemoteConnectionState.Connected) {
-                    transferCurrentMusicIfNeeded(musicController.state.value, castState)
+                    if (prevConnectionState != RemoteConnectionState.Connected) {
+                        val local = musicController.state.value
+                        if (local.isPlaying && local.currentTrack != null) {
+                            transferCurrentMusicIfNeeded(local, castState)
+                        } else if (castState.hasActiveMedia) {
+                            _state.update { it.copy(activeOutput = PlaybackOutputType.GoogleCast) }
+                        }
+                    }
                 } else if (castState.connectionState == RemoteConnectionState.Disconnected) {
                     loadedSessionId = null
                     _state.update { it.copy(activeOutput = PlaybackOutputType.Local) }
@@ -67,6 +77,7 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
                 val outputState = _state.value
                 if (
                     localState.isPlaying &&
+                    outputState.activeOutput != PlaybackOutputType.GoogleCast &&
                     outputState.castState.connectionState == RemoteConnectionState.Connected
                 ) {
                     transferCurrentMusicIfNeeded(localState, outputState.castState)
@@ -226,10 +237,7 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
     private suspend fun transferCurrentMusicIfNeeded(localState: VantafynMusicPlaybackState, castState: RemotePlaybackState) {
         val track = localState.currentTrack ?: return
         val sessionId = "${track.id}:${localState.queueIndex}:${localState.queue.size}"
-        if (loadedSessionId == sessionId) {
-            musicController.suspendLocalPlaybackForCast(localState.positionMs)
-            return
-        }
+        if (loadedSessionId == sessionId) return
         val queue = localState.queue.map { it.toRemoteQueueItem() }
         val position = localState.positionMs
         // Suspend local phone audio before loading remote queue to avoid dual playback

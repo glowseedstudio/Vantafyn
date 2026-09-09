@@ -125,7 +125,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.5",
+            version = "0.9.6",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -1664,6 +1664,7 @@ class SdkJellyfinMusicRepository(
                         sortOrder = listOf(SortOrder.DESCENDING),
                         fields = musicItemFields,
                         includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                        enableUserData = true,
                         enableImages = true,
                         imageTypeLimit = 2,
                         enableImageTypes = listOf(ImageType.PRIMARY),
@@ -2246,6 +2247,7 @@ class SdkJellyfinMusicRepository(
                 sortOrder = listOf(SortOrder.DESCENDING),
                 fields = musicItemFields,
                 includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
+                enableUserData = true,
                 enableImages = true,
                 imageTypeLimit = 2,
                 enableImageTypes = listOf(ImageType.PRIMARY),
@@ -2284,6 +2286,7 @@ class SdkJellyfinMusicRepository(
                 sortOrder = listOf(SortOrder.ASCENDING),
                 fields = musicItemFields,
                 includeItemTypes = listOf(BaseItemKind.PLAYLIST),
+                enableUserData = true,
                 enableImages = true,
                 imageTypeLimit = 1,
                 enableImageTypes = listOf(ImageType.PRIMARY),
@@ -4194,6 +4197,7 @@ private val mediaItemTypes = listOf(
     BaseItemKind.AUDIO,
     BaseItemKind.MUSIC_ALBUM,
     BaseItemKind.BOOK,
+    BaseItemKind.PLAYLIST,
 )
 
 private fun includeTypesFor(collectionType: String?): List<BaseItemKind> =
@@ -4214,7 +4218,7 @@ private fun String?.isLiveTvCollection(): Boolean =
 
 private fun shapeFor(type: BaseItemKind?): JellyfinMediaCardShape =
     when (type) {
-        BaseItemKind.EPISODE, BaseItemKind.AUDIO -> JellyfinMediaCardShape.Wide
+        BaseItemKind.EPISODE -> JellyfinMediaCardShape.Wide
         else -> JellyfinMediaCardShape.Poster
     }
 
@@ -4370,6 +4374,7 @@ private fun BaseItemDto.toMusicAlbum(api: ApiClient): JellyfinMusicAlbum =
                 !it.equals("general", ignoreCase = true) &&
                 !it.equals("unknown", ignoreCase = true)
         },
+        isFavorite = userData?.isFavorite == true,
     )
 
 private fun BaseItemDto.toMusicArtist(api: ApiClient): JellyfinMusicArtist =
@@ -4386,6 +4391,7 @@ private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: In
         imageUrl = primaryImageUrl(api, 520),
         trackCount = classifiedTrackCount ?: childCount ?: recursiveItemCount,
         trackImageUrls = trackImageUrls,
+        isFavorite = userData?.isFavorite == true,
     )
 
 private fun Long.toLyricMillis(): Long = this / 10_000L
@@ -4769,6 +4775,14 @@ private fun BaseItemDto.subtitle(): String? =
             seasonEpisodeLabel(),
             name,
         ).joinToString(" - ").ifBlank { null }
+        type == BaseItemKind.AUDIO -> listOfNotNull(
+            artists?.joinToString(", ")?.takeIf { it.isNotBlank() } ?: albumArtist,
+            album,
+        ).joinToString(" · ").ifBlank { null }
+        type == BaseItemKind.MUSIC_ALBUM -> listOfNotNull(
+            albumArtist ?: artists?.joinToString(", ")?.takeIf { it.isNotBlank() },
+            productionYear?.toString(),
+        ).joinToString(" · ").ifBlank { null }
         productionYear != null -> productionYear.toString()
         else -> type?.serialName
     }

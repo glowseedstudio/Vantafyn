@@ -824,6 +824,7 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("BoxSet", ignoreCase = true) ||
         equals("Audio", ignoreCase = true) ||
         equals("MusicAlbum", ignoreCase = true) ||
+        equals("Playlist", ignoreCase = true) ||
         equals("Book", ignoreCase = true)
 
 private fun detailChipTone(value: String): Color? {

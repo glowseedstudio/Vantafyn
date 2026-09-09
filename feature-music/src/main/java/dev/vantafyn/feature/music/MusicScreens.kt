@@ -395,7 +395,30 @@ fun MusicScreen(
                             MusicHomeHeader()
                         }
                     } else {
-                        MusicTopBackHeader(title = "Music", onBack = viewModel::showHome)
+                        val trailingAction: (@Composable () -> Unit)? = when (val s = state.screen) {
+                            is MusicScreenState.Album -> {
+                                {
+                                    MusicTopFavoriteButton(
+                                        isFavorite = s.album.isFavorite,
+                                        onClick = { viewModel.toggleAlbumFavorite(s.album) },
+                                    )
+                                }
+                            }
+                            is MusicScreenState.Playlist -> {
+                                {
+                                    MusicTopFavoriteButton(
+                                        isFavorite = s.playlist.isFavorite,
+                                        onClick = { viewModel.togglePlaylistFavorite(s.playlist) },
+                                    )
+                                }
+                            }
+                            else -> null
+                        }
+                        MusicTopBackHeader(
+                            title = "Music",
+                            onBack = viewModel::showHome,
+                            trailingAction = trailingAction,
+                        )
                     }
                 }
             val errorMsg = state.errorMessage
@@ -642,6 +665,8 @@ fun MusicScreen(
                                 isDownloaded = state.isPlaylistDownloaded,
                                 isDownloading = state.isPlaylistDownloading,
                                 downloadProgress = state.playlistDownloadProgress,
+                                isFavorite = screen.album.isFavorite,
+                                onToggleFavorite = { viewModel.toggleAlbumFavorite(screen.album) },
                             ) {
                                 screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
                             }
@@ -716,8 +741,10 @@ fun MusicScreen(
                                 trackImageUrls = screen.playlist.trackImageUrls,
                                 onToggleReorder = viewModel::toggleReorderMode,
                                 isReordering = state.isReorderMode,
+                                isFavorite = screen.playlist.isFavorite,
+                                onToggleFavorite = { viewModel.togglePlaylistFavorite(screen.playlist) },
                             ) {
-                                startMusic { viewModel.playPlaylist(screen.playlist) }
+                                screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
                             }
                         }
                     }
@@ -732,7 +759,7 @@ fun MusicScreen(
                             playlists = state.home?.playlists.orEmpty(),
                             pendingTrackId = state.pendingPlayTrackId,
                             currentTrackId = state.playback.currentTrack?.id,
-                            onTrack = { track -> startMusic { viewModel.playPlaylistFromTrack(screen.playlist, track) } },
+                            onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
                             onChoosePlaylist = { playlistPickerTrack = it },
                             onLongPress = { actionTrack = it },
                             animateReveal = true,
@@ -981,7 +1008,7 @@ fun MusicScreen(
                         onDismiss = { musicContextItem = null },
                         onPlay = {
                             musicContextItem = null
-                            viewModel.openAlbum(album)
+                            startMusic { viewModel.playAlbum(album) }
                         },
                         onPlayNext = {
                             musicContextItem = null
@@ -3783,20 +3810,61 @@ private fun MusicSimpleHeader(title: String, onBack: () -> Unit) {
 }
 
 @Composable
-private fun MusicTopBackHeader(title: String, onBack: () -> Unit) {
+private fun MusicTopBackHeader(
+    title: String,
+    onBack: () -> Unit,
+    trailingAction: (@Composable () -> Unit)? = null,
+) {
     Row(
         Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        MusicChevronBackButton(onBack)
-        Text(
-            title,
-            color = VantafynColors.Ink,
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            MusicChevronBackButton(onBack)
+            Text(
+                title,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        if (trailingAction != null) {
+            trailingAction()
+        }
+    }
+}
+
+private val MusicFavoritePink = Color(0xFFFF4B6E)
+
+@Composable
+private fun MusicTopFavoriteButton(
+    isFavorite: Boolean,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(if (isFavorite) MusicFavoritePink.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.08f))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+            tint = if (isFavorite) MusicFavoritePink else VantafynColors.Ink,
+            modifier = Modifier.size(20.dp),
         )
     }
 }
@@ -3820,6 +3888,8 @@ private fun MusicDetailHeader(
     trackImageUrls: List<String> = emptyList(),
     onToggleReorder: (() -> Unit)? = null,
     isReordering: Boolean = false,
+    isFavorite: Boolean = false,
+    onToggleFavorite: (() -> Unit)? = null,
     onPlay: (() -> Unit)?,
 ) {
     Column(
@@ -3867,6 +3937,26 @@ private fun MusicDetailHeader(
                     onClick = onPlay,
                     modifier = Modifier.weight(1f),
                 )
+                if (onToggleFavorite != null) {
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(onClick = onToggleFavorite),
+                        variant = if (isFavorite) VantafynGlassVariant.Panel else VantafynGlassVariant.Card,
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                                contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                                tint = if (isFavorite) MusicFavoritePink else VantafynColors.Ink,
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                }
                 if (onToggleReorder != null) {
                     VantafynGlassSurface(
                         modifier = Modifier
@@ -4443,6 +4533,7 @@ private fun NowPlayingDialog(
                         MusicScrubber(
                             positionMs = state.playback.positionMs,
                             durationMs = state.playback.durationMs,
+                            isPlaying = state.playback.isPlaying,
                             onSeek = viewModel::seekTo,
                         )
                         Row(
@@ -6926,28 +7017,65 @@ private fun IconPill(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun MusicScrubber(positionMs: Long, durationMs: Long, onSeek: (Long) -> Unit) {
+private fun MusicScrubber(
+    positionMs: Long,
+    durationMs: Long,
+    isPlaying: Boolean = false,
+    onSeek: (Long) -> Unit,
+) {
     val duration = durationMs.toFloat().coerceAtLeast(1f)
     val value = positionMs.toFloat().coerceIn(0f, duration)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val squigglyEnabled by dev.vantafyn.core.media.music.SquigglyProgressPreferences.enabledFlow
+        .collectAsStateWithLifecycle(initialValue = dev.vantafyn.core.media.music.SquigglyProgressPreferences.isEnabled(context))
+
+    var isScrubbing by remember { mutableStateOf(false) }
+    var scrubValue by remember { mutableFloatStateOf(0f) }
+
+    val displayValue = if (isScrubbing) scrubValue else value
+    val progress = (displayValue / duration).coerceIn(0f, 1f)
+
     Box(modifier = Modifier.fillMaxWidth()) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.Center)
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.White.copy(alpha = 0.12f)),
-        ) {
+        if (squigglyEnabled) {
+            dev.vantafyn.core.ui.VantafynWavyProgressBar(
+                progress = progress,
+                isPlaying = isPlaying,
+                isScrubbing = isScrubbing,
+                waveHeight = 8.dp,
+                wavelength = 28.dp,
+                strokeWidth = 5.dp,
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp),
+            )
+        } else {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth((value / duration).coerceIn(0f, 1f))
-                    .fillMaxSize()
-                    .background(VantafynGradients.accentHorizontal()),
-            )
+                    .align(Alignment.Center)
+                    .fillMaxWidth()
+                    .height(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.12f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxSize()
+                        .background(VantafynGradients.accentHorizontal()),
+                )
+            }
         }
         Slider(
-            value = value,
-            onValueChange = { onSeek(it.toLong()) },
+            value = displayValue,
+            onValueChange = {
+                isScrubbing = true
+                scrubValue = it
+            },
+            onValueChangeFinished = {
+                onSeek(scrubValue.toLong())
+                isScrubbing = false
+            },
             valueRange = 0f..duration,
             modifier = Modifier
                 .fillMaxWidth()

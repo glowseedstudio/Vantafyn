@@ -15,7 +15,17 @@ class SdkJellyfinAchievementRepository(
     override suspend fun checkAvailability(session: JellyfinSession): Boolean =
         withContext(ioDispatcher) {
             runCatching {
-                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}/summary")
+                val testConn = session.openAuthenticatedConnection("Plugins/AchievementBadges/test")
+                val isTestOk = try {
+                    testConn.connectTimeout = 3_000
+                    testConn.readTimeout = 3_000
+                    testConn.responseCode in 200..299
+                } finally {
+                    testConn.disconnect()
+                }
+                if (isTestOk) return@withContext true
+
+                val conn = session.openAuthenticatedConnection("Plugins/AchievementBadges/users/${session.user.id}")
                 try {
                     conn.connectTimeout = 4_000
                     conn.readTimeout = 4_000
@@ -106,6 +116,33 @@ class SdkJellyfinAchievementRepository(
                 JellyfinResult.Success(unlocks)
             }.getOrElse { error ->
                 JellyfinResult.Failure(error.message ?: "Failed to poll achievement unlocks", error)
+            }
+        }
+
+    override suspend fun getRecentUnlocks(
+        session: JellyfinSession,
+        limit: Int,
+    ): JellyfinResult<List<JellyfinAchievementUnlock>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val path = "Plugins/AchievementBadges/users/${session.user.id}/recent-unlocks?limit=$limit"
+                val conn = session.openAuthenticatedConnection(path)
+                val code = conn.responseCode
+                val body = if (code in 200..299) {
+                    conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                } else {
+                    conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                }
+                conn.disconnect()
+
+                if (code !in 200..299) {
+                    return@withContext JellyfinResult.Failure("Recent achievement unlocks unavailable (HTTP $code)")
+                }
+
+                val unlocks = parseUnlocks(session, body)
+                JellyfinResult.Success(unlocks)
+            }.getOrElse { error ->
+                JellyfinResult.Failure(error.message ?: "Failed to fetch recent achievement unlocks", error)
             }
         }
 
@@ -254,7 +291,9 @@ class SdkJellyfinAchievementRepository(
             trimmed.startsWith("[") -> JSONArray(trimmed)
             trimmed.startsWith("{") -> {
                 val obj = JSONObject(trimmed)
-                obj.optJSONArray("unlocks")
+                obj.optJSONArray("Badges")
+                    ?: obj.optJSONArray("badges")
+                    ?: obj.optJSONArray("unlocks")
                     ?: obj.optJSONArray("Unlocks")
                     ?: obj.optJSONArray("items")
                     ?: obj.optJSONArray("Items")
@@ -267,10 +306,10 @@ class SdkJellyfinAchievementRepository(
             val obj = array.optJSONObject(index) ?: return@mapNotNull null
             val id = obj.optStringOrNull("Id", "id", "UnlockId", "unlockId") ?: UUID.randomUUID().toString()
             val achievementId = obj.optStringOrNull("AchievementId", "achievementId", "BadgeId", "badgeId", "Id", "id") ?: return@mapNotNull null
-            val name = obj.optStringOrNull("Name", "name", "Title", "title") ?: "Achievement Unlocked"
-            val description = obj.optStringOrNull("Description", "description") ?: ""
-            val score = obj.optIntOrNull("Score", "score", "Points", "points") ?: 0
-            val rarityStr = obj.optStringOrNull("Rarity", "rarity")
+            val name = obj.optStringOrNull("Title", "title", "Name", "name", "DisplayName", "displayName") ?: "Achievement Unlocked"
+            val description = obj.optStringOrNull("Description", "description", "Summary", "summary") ?: ""
+            val score = obj.optIntOrNull("Score", "score", "Points", "points", "Value", "value") ?: 0
+            val rarityStr = obj.optStringOrNull("Rarity", "rarity", "Tier", "tier")
             val rarity = JellyfinAchievementRarity.fromString(rarityStr)
             val rawIcon = obj.optStringOrNull(
                 "IconUrl", "iconUrl", "Icon", "icon", "BadgeUrl", "badgeUrl",
@@ -283,7 +322,7 @@ class SdkJellyfinAchievementRepository(
             )
             val iconUrl = if (isWebUrl) toAuthenticatedUrl(session, rawIcon) else null
             val iconName = if (!isWebUrl) rawIcon else null
-            val unlockedAt = obj.optStringOrNull("UnlockedAt", "unlockedAt", "Timestamp", "timestamp")
+            val unlockedAt = obj.optStringOrNull("UnlockedAt", "unlockedAt", "DateUnlocked", "dateUnlocked", "Timestamp", "timestamp")
 
             JellyfinAchievementUnlock(
                 id = id,

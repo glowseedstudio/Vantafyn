@@ -77,4 +77,8 @@ interface JellyfinAchievementRepository {
         sinceIso: String?,
         deviceId: String,
     ): JellyfinResult<List<JellyfinAchievementUnlock>>
+    suspend fun getRecentUnlocks(
+        session: JellyfinSession,
+        limit: Int = 10,
+    ): JellyfinResult<List<JellyfinAchievementUnlock>>
 }

@@ -158,6 +158,7 @@ class SubsonicMusicDataProvider(
                     coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
                     trackCount = obj.optInt("songCount").takeIf { it > 0 },
                     genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
+                    isFavorite = obj.has("starred") || obj.optBoolean("starred", false),
                 )
             )
         }
@@ -235,6 +236,7 @@ class SubsonicMusicDataProvider(
                     year = obj.optInt("year").takeIf { it > 0 },
                     coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
                     trackCount = obj.optInt("songCount"),
+                    isFavorite = obj.has("starred") || obj.optBoolean("starred", false),
                 )
             )
         }
@@ -281,6 +283,7 @@ class SubsonicMusicDataProvider(
             coverUrl = coverUrl,
             genres = listOfNotNull(albumObj.optString("genre").takeIf { it.isNotBlank() }),
             tracks = tracks,
+            isFavorite = albumObj.has("starred") || albumObj.optBoolean("starred", false),
         )
     }.fold(
         onSuccess = { MusicResult.Success(it) },
@@ -301,6 +304,7 @@ class SubsonicMusicDataProvider(
                     trackCount = obj.optInt("songCount"),
                     coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
                     durationMs = obj.optLong("duration") * 1000L,
+                    isFavorite = obj.has("starred") || obj.optBoolean("starred", false),
                 )
             )
         }
@@ -325,6 +329,7 @@ class SubsonicMusicDataProvider(
             title = playlistObj.optString("name", "Untitled Playlist"),
             owner = playlistObj.optString("owner"),
             tracks = tracks,
+            isFavorite = playlistObj.has("starred") || playlistObj.optBoolean("starred", false),
         )
     }.fold(
         onSuccess = { MusicResult.Success(it) },
@@ -361,6 +366,7 @@ class SubsonicMusicDataProvider(
                     artistId = obj.optString("artistId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
                     year = obj.optInt("year").takeIf { it > 0 },
                     coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
+                    isFavorite = obj.has("starred") || obj.optBoolean("starred", false),
                 )
             )
         }

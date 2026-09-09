@@ -33,6 +33,7 @@ data class MusicAlbum(
     val coverUrl: String? = null,
     val trackCount: Int? = null,
     val genres: List<String> = emptyList(),
+    val isFavorite: Boolean = false,
 )
 
 data class MusicAlbumDetail(
@@ -44,6 +45,7 @@ data class MusicAlbumDetail(
     val coverUrl: String? = null,
     val genres: List<String> = emptyList(),
     val tracks: List<VantafynMusicTrack> = emptyList(),
+    val isFavorite: Boolean = false,
 )
 
 data class MusicPlaylist(
@@ -53,6 +55,7 @@ data class MusicPlaylist(
     val trackCount: Int? = null,
     val coverUrl: String? = null,
     val durationMs: Long? = null,
+    val isFavorite: Boolean = false,
 )
 
 data class MusicPlaylistDetail(
@@ -60,6 +63,7 @@ data class MusicPlaylistDetail(
     val title: String,
     val owner: String? = null,
     val tracks: List<VantafynMusicTrack> = emptyList(),
+    val isFavorite: Boolean = false,
 )
 
 data class MusicLyricLine(

@@ -700,6 +700,7 @@ data class JellyfinMusicAlbum(
     val year: Int?,
     val artworkUrl: String?,
     val genres: List<String> = emptyList(),
+    val isFavorite: Boolean = false,
 )
 
 data class JellyfinMusicArtist(
@@ -714,6 +715,7 @@ data class JellyfinMusicPlaylist(
     val imageUrl: String?,
     val trackCount: Int?,
     val trackImageUrls: List<String> = emptyList(),
+    val isFavorite: Boolean = false,
 )
 
 data class JellyfinMusicHome(

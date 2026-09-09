@@ -124,6 +124,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.AdminPanelSettings
@@ -2579,22 +2580,25 @@ private fun EditableProfileAvatar(
     onClick: () -> Unit,
 ) {
     Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .clickable(onClick = onClick),
+        modifier = modifier.clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         ProfileAvatar(name = name, imageUrl = imageUrl, modifier = Modifier.fillMaxSize())
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .size(27.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.Black.copy(alpha = 0.62f))
-                .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(999.dp)),
+                .size(28.dp)
+                .clip(CircleShape)
+                .background(Color(0xFF161A24).copy(alpha = 0.92f))
+                .border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            Text("+", color = VantafynColors.Ink, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Icon(
+                imageVector = Icons.Rounded.Add,
+                contentDescription = "Change photo",
+                tint = VantafynColors.Ink,
+                modifier = Modifier.size(16.dp),
+            )
         }
     }
 }
@@ -3748,7 +3752,8 @@ private fun MobileShellScreen(
                                 if (state.experienceMode == ExperienceMode.MusicOnly) {
                                     val favItem = state.favorites.firstOrNull { it.id == mediaId }
                                     val creds = getSubsonicCredentials(context)
-                                    if (favItem?.itemType in listOf("Audio", "MusicTrack", "Song") && creds != null && state.musicBackendType == MusicBackendType.OpenSubsonic) {
+                                    val isMusicSong = favItem?.itemType in listOf("Audio", "MusicTrack", "Song")
+                                    if (isMusicSong && creds != null && state.musicBackendType == MusicBackendType.OpenSubsonic) {
                                         val controller = dev.vantafyn.core.media.MusicPlaybackController.get(context)
                                         val track = dev.vantafyn.core.media.VantafynMusicTrack(
                                             id = favItem!!.id,
@@ -3758,6 +3763,22 @@ private fun MobileShellScreen(
                                             albumId = null,
                                             durationMs = null,
                                             streamUrl = dev.vantafyn.core.subsonic.SubsonicClient(creds).buildStreamUrl(favItem.id.toString()),
+                                            artworkUrl = favItem.imageUrl ?: favItem.backdropUrl,
+                                            isFavorite = true,
+                                        )
+                                        controller.playQueue(listOf(track), 0)
+                                    } else if (isMusicSong && state.session != null) {
+                                        val session = state.session
+                                        val streamUrl = "${session.server.url.trimEnd('/')}/Audio/${favItem!!.id}/stream"
+                                        val controller = dev.vantafyn.core.media.MusicPlaybackController.get(context)
+                                        val track = dev.vantafyn.core.media.VantafynMusicTrack(
+                                            id = favItem.id,
+                                            title = favItem.title,
+                                            artist = favItem.subtitle?.substringBefore(" · ").orEmpty().ifBlank { "Unknown Artist" },
+                                            album = favItem.subtitle?.substringAfter(" · ", "")?.ifBlank { null },
+                                            albumId = null,
+                                            durationMs = null,
+                                            streamUrl = streamUrl,
                                             artworkUrl = favItem.imageUrl ?: favItem.backdropUrl,
                                             isFavorite = true,
                                         )
@@ -5836,17 +5857,29 @@ private fun VantafynCardSpacing.toDp() =
         VantafynCardSpacing.Spacious -> 20.dp
     }
 
+private fun JellyfinMediaCard.isMusicItem(): Boolean {
+    val type = itemType?.lowercase() ?: return false
+    return type in setOf("audio", "musictrack", "song", "musicalbum", "musicartist", "playlist")
+}
+
+private fun JellyfinMediaItem.isMusicItem(): Boolean {
+    val type = itemType?.lowercase() ?: return false
+    return type in setOf("audio", "musictrack", "song", "musicalbum", "musicartist", "playlist")
+}
+
 private fun JellyfinMediaCard.resolveArtwork(preference: HomeSectionPreference?, wide: Boolean): String? =
     when (preference?.artworkType ?: VantafynArtworkType.Auto) {
         VantafynArtworkType.PrimaryPoster -> imageUrl ?: backdropUrl ?: thumbUrl
         VantafynArtworkType.Backdrop -> backdropUrl ?: thumbUrl ?: imageUrl
         VantafynArtworkType.Thumb -> thumbUrl ?: backdropUrl ?: imageUrl
         VantafynArtworkType.Logo -> logoUrl ?: backdropUrl ?: thumbUrl ?: imageUrl
-        VantafynArtworkType.Auto -> if (wide) backdropUrl ?: thumbUrl ?: imageUrl else imageUrl ?: backdropUrl ?: thumbUrl
+        VantafynArtworkType.Auto -> if (isMusicItem()) imageUrl ?: thumbUrl ?: backdropUrl else if (wide) backdropUrl ?: thumbUrl ?: imageUrl else imageUrl ?: backdropUrl ?: thumbUrl
     }
 
 private fun JellyfinMediaItem.resolveArtwork(wide: Boolean): String? =
-    if (wide) backdropUrl ?: thumbUrl ?: imageUrl else imageUrl ?: backdropUrl ?: thumbUrl
+    if (isMusicItem()) imageUrl ?: thumbUrl ?: backdropUrl
+    else if (wide) backdropUrl ?: thumbUrl ?: imageUrl
+    else imageUrl ?: backdropUrl ?: thumbUrl
 
 @Composable
 private fun homeResumeProgressBrush(): Brush = remember {
@@ -5922,20 +5955,34 @@ private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPre
 
 @Composable
 private fun MediaItemCard(item: JellyfinMediaItem, onClick: () -> Unit, onLongPress: () -> Unit = {}) {
-    val wide = item.shape == JellyfinMediaCardShape.Wide || item.shape == JellyfinMediaCardShape.Library
+    val isMusic = item.isMusicItem()
+    val wide = !isMusic && (item.shape == JellyfinMediaCardShape.Wide || item.shape == JellyfinMediaCardShape.Library)
+    val cardWidth = when {
+        isMusic -> 156.dp
+        wide -> 226.dp
+        else -> 142.dp
+    }
+    val cardHeight = when {
+        isMusic -> 156.dp
+        wide -> 128.dp
+        else -> 214.dp
+    }
     Column(
-        modifier = Modifier.width(if (wide) 226.dp else 142.dp),
+        modifier = Modifier.width(cardWidth),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
     ) {
         ArtworkBox(
             imageUrl = item.resolveArtwork(wide),
             title = item.title,
             wide = wide,
-            progress = item.progress,
-            isPlayed = item.isPlayed,
-            unplayedItemCount = item.unplayedItemCount,
+            progress = if (isMusic) null else item.progress,
+            isPlayed = if (isMusic) false else item.isPlayed,
+            unplayedItemCount = if (isMusic) 0 else item.unplayedItemCount,
             onClick = onClick,
             onLongPress = onLongPress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(cardHeight),
         )
         Text(
             item.title,
@@ -11682,6 +11729,9 @@ private fun SettingsScreen(
     var soundEffectsOn by remember {
         mutableStateOf(dev.vantafyn.core.ui.VantafynSoundEffects.isSoundEffectsEnabled(context))
     }
+    var squigglyProgressOn by remember {
+        mutableStateOf(dev.vantafyn.core.media.music.SquigglyProgressPreferences.isEnabled(context))
+    }
     var currentSubScreen by rememberSaveable { mutableStateOf(SettingsSubScreen.Main) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
@@ -12007,6 +12057,40 @@ private fun SettingsScreen(
                         item { SettingsGroupHeader("Streaming Fidelity") }
                         item {
                             MusicStreamingQualitySettingsCard()
+                        }
+                        item { SettingsGroupHeader("Music Player Styling") }
+                        item {
+                            GlassPanel {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(18.dp))
+                                        .clickable(onClick = {
+                                            val next = !squigglyProgressOn
+                                            squigglyProgressOn = next
+                                            dev.vantafyn.core.media.music.SquigglyProgressPreferences.setEnabled(context, next)
+                                        })
+                                        .padding(vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    SettingsRowIcon(Icons.Rounded.GraphicEq)
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "Squiggly Progress Bar",
+                                            color = VantafynColors.Ink,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Text(
+                                            "Animated wavy progress line on Now Playing and popup player",
+                                            color = VantafynColors.Muted,
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                    VantafynPremiumSwitchVisual(checked = squigglyProgressOn)
+                                }
+                            }
                         }
                         item { SettingsGroupHeader("Atmospheric Audio") }
                         item {
@@ -19619,20 +19703,38 @@ private fun MiniMusicProgress(playback: VantafynMusicPlaybackState) {
     } else {
         0f
     }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val squigglyEnabled by dev.vantafyn.core.media.music.SquigglyProgressPreferences.enabledFlow
+        .collectAsStateWithLifecycle(initialValue = dev.vantafyn.core.media.music.SquigglyProgressPreferences.isEnabled(context))
+
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(5.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.White.copy(alpha = 0.12f)),
-        ) {
+        if (squigglyEnabled) {
+            dev.vantafyn.core.ui.VantafynWavyProgressBar(
+                progress = progress,
+                isPlaying = playback.isPlaying,
+                isScrubbing = false,
+                waveHeight = 6.dp,
+                wavelength = 24.dp,
+                strokeWidth = 4.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(20.dp),
+            )
+        } else {
             Box(
                 modifier = Modifier
-                    .fillMaxWidth(progress)
-                    .fillMaxSize()
-                    .background(VantafynGradients.accentHorizontal()),
-            )
+                    .fillMaxWidth()
+                    .height(5.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.White.copy(alpha = 0.12f)),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .fillMaxSize()
+                        .background(VantafynGradients.accentHorizontal()),
+                )
+            }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(playback.positionMs.toMusicTimeLabel(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge)
@@ -20534,6 +20636,7 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("BoxSet", ignoreCase = true) ||
         equals("Audio", ignoreCase = true) ||
         equals("MusicAlbum", ignoreCase = true) ||
+        equals("Playlist", ignoreCase = true) ||
         equals("Book", ignoreCase = true) ||
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
@@ -20639,7 +20742,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.5"
+private const val VANTAFYN_APP_VERSION = "0.9.6"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

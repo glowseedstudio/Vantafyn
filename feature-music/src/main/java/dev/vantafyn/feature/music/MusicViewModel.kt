@@ -126,16 +126,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             outputCoordinator.state.collect { output ->
                 val cast = output.castState
                 val playback = _state.value.playback
-                val castQueueIndex = cast.currentQueueIndex.coerceIn(0, playback.queue.lastIndex.coerceAtLeast(0))
-                val castTrack = playback.queue.getOrNull(castQueueIndex)
-                if (output.isCasting && castTrack != null && cast.currentItemId == castTrack.id.toString()) {
+                if (output.isCasting && playback.queue.isNotEmpty()) {
+                    val castQueueIndex = cast.currentQueueIndex.coerceIn(0, playback.queue.lastIndex.coerceAtLeast(0))
+                    val resolvedIndex = if (!cast.currentItemId.isNullOrBlank()) {
+                        playback.queue.indexOfFirst { it.id.toString().equals(cast.currentItemId, ignoreCase = true) }
+                            .takeIf { it >= 0 } ?: castQueueIndex
+                    } else {
+                        castQueueIndex
+                    }
                     _state.update {
                         it.copy(
                             playback = it.playback.copy(
-                                queueIndex = castQueueIndex,
+                                queueIndex = resolvedIndex,
                                 isPlaying = cast.isPlaying,
                                 positionMs = cast.positionMs,
-                                durationMs = cast.durationMs.takeIf { duration -> duration > 0L } ?: it.playback.durationMs,
+                                durationMs = cast.durationMs.takeIf { duration -> duration > 0L }
+                                    ?: playback.queue.getOrNull(resolvedIndex)?.durationMs
+                                    ?: it.playback.durationMs,
                                 repeatMode = cast.repeatMode,
                             ),
                         )
@@ -399,6 +406,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val tracks = safeQueue.map { it.toPlaybackTrack() }
             val startIndex = safeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
             if (outputCoordinator.state.value.isCasting) {
+                _state.update {
+                    it.copy(
+                        playback = it.playback.copy(
+                            queue = tracks,
+                            queueIndex = startIndex,
+                            isPlaying = true,
+                            positionMs = 0L,
+                            durationMs = tracks.getOrNull(startIndex)?.durationMs ?: 0L,
+                        ),
+                    )
+                }
                 outputCoordinator.loadMusicQueue(tracks, startIndex, 0L)
             } else {
                 playbackController.playQueue(
@@ -422,13 +440,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     val playbackInfo = preparePlaybackInfo(activeSession, queuedTrack)
                     if (playbackInfo != null) {
                         playbackInfoByTrack[queuedTrack.id] = playbackInfo
-                        queuedTrack.toPlaybackTrack(streamUrl = playbackInfo.streamUrl)
-                    } else {
-                        queuedTrack.toPlaybackTrack()
                     }
+                    val streamUrl = queuedTrack.streamUrl.ifBlank { playbackInfo?.streamUrl.orEmpty() }
+                    queuedTrack.toPlaybackTrack(streamUrl = streamUrl)
                 }
                 val startIndex = safeQueue.indexOfFirst { it.id == track.id }.coerceAtLeast(0)
                 if (outputCoordinator.state.value.isCasting) {
+                    _state.update {
+                        it.copy(
+                            playback = it.playback.copy(
+                                queue = preparedQueue,
+                                queueIndex = startIndex,
+                                isPlaying = true,
+                                positionMs = 0L,
+                                durationMs = preparedQueue.getOrNull(startIndex)?.durationMs ?: 0L,
+                            ),
+                        )
+                    }
                     outputCoordinator.loadMusicQueue(preparedQueue, startIndex, 0L)
                 } else {
                     playbackController.playQueue(
@@ -473,7 +501,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                             }
                             tracks.firstOrNull()?.let { playTrack(it, tracks) }
-                            openAlbum(album)
+                            val curScreen = _state.value.screen
+                            if (curScreen !is MusicScreenState.Album || curScreen.album.id != album.id) {
+                                openAlbum(album)
+                            }
                         }
                         is MusicResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
                     }
@@ -486,7 +517,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = musicRepository.getAlbumTracks(activeSession, album.id)) {
                 is JellyfinResult.Success -> {
                     result.value.firstOrNull()?.let { playTrack(it, result.value) }
-                    openAlbum(album)
+                    val curScreen = _state.value.screen
+                    if (curScreen !is MusicScreenState.Album || curScreen.album.id != album.id) {
+                        openAlbum(album)
+                    }
                     if (result.value.isEmpty()) _state.update { it.copy(errorMessage = "No tracks found for this album.") }
                 }
                 is JellyfinResult.Failure -> {
@@ -520,7 +554,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 )
                             }
                             tracks.firstOrNull()?.let { playTrack(it, tracks) }
-                            openPlaylist(playlist)
+                            val curScreen = _state.value.screen
+                            if (curScreen !is MusicScreenState.Playlist || curScreen.playlist.id != playlist.id) {
+                                openPlaylist(playlist)
+                            }
                         }
                         is MusicResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
                     }
@@ -533,7 +570,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
                 is JellyfinResult.Success -> {
                     result.value.firstOrNull()?.let { playTrack(it, result.value) }
-                    openPlaylist(playlist)
+                    val curScreen = _state.value.screen
+                    if (curScreen !is MusicScreenState.Playlist || curScreen.playlist.id != playlist.id) {
+                        openPlaylist(playlist)
+                    }
                     if (result.value.isEmpty()) _state.update { it.copy(errorMessage = "This playlist is empty.") }
                 }
                 is JellyfinResult.Failure -> {
@@ -544,6 +584,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playPlaylistFromTrack(playlist: JellyfinMusicPlaylist, track: JellyfinMusicTrack) {
+        val currentScreen = _state.value.screen
+        if (currentScreen is MusicScreenState.Playlist && currentScreen.playlist.id == playlist.id && currentScreen.tracks.isNotEmpty()) {
+            playTrack(track, currentScreen.tracks)
+            return
+        }
         val activeSession = session ?: return
         viewModelScope.launch {
             when (val result = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
@@ -602,10 +647,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 pageSize = tracks.size,
                                 totalItems = tracks.size,
                             )
+                            val updatedAlbum = album.copy(isFavorite = result.value.isFavorite)
                             _state.update {
                                 it.copy(
-                                    screen = MusicScreenState.Album(album, page),
+                                    screen = MusicScreenState.Album(updatedAlbum, page),
                                     isMusicPageLoading = false,
+                                    home = it.home?.copyWithAlbumFavorite(album.id, result.value.isFavorite),
                                 )
                             }
                         }
@@ -636,6 +683,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     observeAlbumDownloadStatus(activeSession, album.id, result.value.totalItems)
+                    val favResult = mediaRepository.refreshFavoriteState(activeSession, album.id)
+                    if (favResult is JellyfinResult.Success) {
+                        val isFav = favResult.value
+                        _state.update { current ->
+                            val curScreen = current.screen
+                            if (curScreen is MusicScreenState.Album && curScreen.album.id == album.id) {
+                                current.copy(
+                                    screen = curScreen.copy(album = curScreen.album.copy(isFavorite = isFav)),
+                                    home = current.home?.copyWithAlbumFavorite(album.id, isFav),
+                                )
+                            } else {
+                                current
+                            }
+                        }
+                    }
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(isMusicPageLoading = false, errorMessage = result.message)
@@ -681,10 +743,12 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 pageSize = tracks.size,
                                 totalItems = tracks.size,
                             )
+                            val updatedPlaylist = playlist.copy(isFavorite = result.value.isFavorite)
                             _state.update {
                                 it.copy(
-                                    screen = MusicScreenState.Playlist(playlist, page),
+                                    screen = MusicScreenState.Playlist(updatedPlaylist, page),
                                     isMusicPageLoading = false,
+                                    home = it.home?.copyWithPlaylistFavorite(playlist.id, result.value.isFavorite),
                                 )
                             }
                         }
@@ -715,6 +779,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                     observePlaylistDownloadStatus(activeSession, playlist.id, result.value.totalItems)
+                    val favResult = mediaRepository.refreshFavoriteState(activeSession, playlist.id)
+                    if (favResult is JellyfinResult.Success) {
+                        val isFav = favResult.value
+                        _state.update { current ->
+                            val curScreen = current.screen
+                            if (curScreen is MusicScreenState.Playlist && curScreen.playlist.id == playlist.id) {
+                                current.copy(
+                                    screen = curScreen.copy(playlist = curScreen.playlist.copy(isFavorite = isFav)),
+                                    home = current.home?.copyWithPlaylistFavorite(playlist.id, isFav),
+                                )
+                            } else {
+                                current
+                            }
+                        }
+                    }
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(isMusicPageLoading = false, errorMessage = result.message)
@@ -1378,6 +1457,170 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
                 is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
+            }
+        }
+    }
+
+    fun toggleAlbumFavorite(album: JellyfinMusicAlbum) {
+        val targetFavorite = !album.isFavorite
+        _state.update { current ->
+            val curScreen = current.screen
+            val newScreen = if (curScreen is MusicScreenState.Album && curScreen.album.id == album.id) {
+                curScreen.copy(album = curScreen.album.copy(isFavorite = targetFavorite))
+            } else {
+                curScreen
+            }
+            current.copy(
+                screen = newScreen,
+                home = current.home?.copyWithAlbumFavorite(album.id, targetFavorite),
+            )
+        }
+        if (isSubsonicActive()) {
+            val creds = getSubsonicCredentials() ?: return
+            val provider = createSubsonicProvider(creds)
+            viewModelScope.launch {
+                when (val result = provider.setFavorite(album.id, targetFavorite)) {
+                    is MusicResult.Success -> {
+                        _state.update {
+                            it.copy(
+                                message = if (targetFavorite) "Added to Favorites" else "Removed from Favorites",
+                            )
+                        }
+                    }
+                    is MusicResult.Failure -> {
+                        _state.update { current ->
+                            val curScreen = current.screen
+                            val newScreen = if (curScreen is MusicScreenState.Album && curScreen.album.id == album.id) {
+                                curScreen.copy(album = curScreen.album.copy(isFavorite = !targetFavorite))
+                            } else {
+                                curScreen
+                            }
+                            current.copy(
+                                screen = newScreen,
+                                home = current.home?.copyWithAlbumFavorite(album.id, !targetFavorite),
+                                errorMessage = result.message,
+                            )
+                        }
+                    }
+                }
+            }
+            return
+        }
+        val activeSession = session ?: return
+        viewModelScope.launch {
+            when (val result = mediaRepository.setFavorite(activeSession, album.id, targetFavorite)) {
+                is JellyfinResult.Success -> {
+                    _state.update { current ->
+                        val curScreen = current.screen
+                        val newScreen = if (curScreen is MusicScreenState.Album && curScreen.album.id == album.id) {
+                            curScreen.copy(album = curScreen.album.copy(isFavorite = result.value))
+                        } else {
+                            curScreen
+                        }
+                        current.copy(
+                            screen = newScreen,
+                            home = current.home?.copyWithAlbumFavorite(album.id, result.value),
+                            message = if (result.value) "Added to Favorites" else "Removed from Favorites",
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { current ->
+                        val curScreen = current.screen
+                        val newScreen = if (curScreen is MusicScreenState.Album && curScreen.album.id == album.id) {
+                            curScreen.copy(album = curScreen.album.copy(isFavorite = !targetFavorite))
+                        } else {
+                            curScreen
+                        }
+                        current.copy(
+                            screen = newScreen,
+                            home = current.home?.copyWithAlbumFavorite(album.id, !targetFavorite),
+                            errorMessage = result.message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun togglePlaylistFavorite(playlist: JellyfinMusicPlaylist) {
+        val targetFavorite = !playlist.isFavorite
+        _state.update { current ->
+            val curScreen = current.screen
+            val newScreen = if (curScreen is MusicScreenState.Playlist && curScreen.playlist.id == playlist.id) {
+                curScreen.copy(playlist = curScreen.playlist.copy(isFavorite = targetFavorite))
+            } else {
+                curScreen
+            }
+            current.copy(
+                screen = newScreen,
+                home = current.home?.copyWithPlaylistFavorite(playlist.id, targetFavorite),
+            )
+        }
+        if (isSubsonicActive()) {
+            val creds = getSubsonicCredentials() ?: return
+            val provider = createSubsonicProvider(creds)
+            viewModelScope.launch {
+                when (val result = provider.setFavorite(playlist.id, targetFavorite)) {
+                    is MusicResult.Success -> {
+                        _state.update {
+                            it.copy(
+                                message = if (targetFavorite) "Added to Favorites" else "Removed from Favorites",
+                            )
+                        }
+                    }
+                    is MusicResult.Failure -> {
+                        _state.update { current ->
+                            val curScreen = current.screen
+                            val newScreen = if (curScreen is MusicScreenState.Playlist && curScreen.playlist.id == playlist.id) {
+                                curScreen.copy(playlist = curScreen.playlist.copy(isFavorite = !targetFavorite))
+                            } else {
+                                curScreen
+                            }
+                            current.copy(
+                                screen = newScreen,
+                                home = current.home?.copyWithPlaylistFavorite(playlist.id, !targetFavorite),
+                                errorMessage = result.message,
+                            )
+                        }
+                    }
+                }
+            }
+            return
+        }
+        val activeSession = session ?: return
+        viewModelScope.launch {
+            when (val result = mediaRepository.setFavorite(activeSession, playlist.id, targetFavorite)) {
+                is JellyfinResult.Success -> {
+                    _state.update { current ->
+                        val curScreen = current.screen
+                        val newScreen = if (curScreen is MusicScreenState.Playlist && curScreen.playlist.id == playlist.id) {
+                            curScreen.copy(playlist = curScreen.playlist.copy(isFavorite = result.value))
+                        } else {
+                            curScreen
+                        }
+                        current.copy(
+                            screen = newScreen,
+                            home = current.home?.copyWithPlaylistFavorite(playlist.id, result.value),
+                            message = if (result.value) "Added to Favorites" else "Removed from Favorites",
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { current ->
+                        val curScreen = current.screen
+                        val newScreen = if (curScreen is MusicScreenState.Playlist && curScreen.playlist.id == playlist.id) {
+                            curScreen.copy(playlist = curScreen.playlist.copy(isFavorite = !targetFavorite))
+                        } else {
+                            curScreen
+                        }
+                        current.copy(
+                            screen = newScreen,
+                            home = current.home?.copyWithPlaylistFavorite(playlist.id, !targetFavorite),
+                            errorMessage = result.message,
+                        )
+                    }
+                }
             }
         }
     }
@@ -2401,7 +2644,7 @@ private fun MusicUiState.musicTrackPageFor(parentId: UUID?, startIndex: Int): Je
         else -> null
     }
     return JellyfinMusicTrackPage(
-        tracks = emptyList(),
+        tracks = if (currentPage != null && startIndex == currentPage.startIndex) currentPage.tracks else emptyList(),
         startIndex = startIndex.coerceAtLeast(0),
         pageSize = currentPage?.pageSize ?: MusicTrackPageSize,
         totalItems = currentPage?.totalItems ?: 0,
@@ -2463,6 +2706,16 @@ private fun JellyfinMusicHome.copyWithFavorite(trackId: UUID, isFavorite: Boolea
     copy(
         recentlyAdded = recentlyAdded.mapFavorite(trackId, isFavorite),
         songs = songs.mapFavorite(trackId, isFavorite),
+    )
+
+private fun JellyfinMusicHome.copyWithAlbumFavorite(albumId: UUID, isFavorite: Boolean): JellyfinMusicHome =
+    copy(
+        albums = albums.map { if (it.id == albumId) it.copy(isFavorite = isFavorite) else it },
+    )
+
+private fun JellyfinMusicHome.copyWithPlaylistFavorite(playlistId: UUID, isFavorite: Boolean): JellyfinMusicHome =
+    copy(
+        playlists = playlists.map { if (it.id == playlistId) it.copy(isFavorite = isFavorite) else it },
     )
 
 private fun JellyfinMusicHome.incrementPlaylistCount(playlistId: UUID): JellyfinMusicHome =

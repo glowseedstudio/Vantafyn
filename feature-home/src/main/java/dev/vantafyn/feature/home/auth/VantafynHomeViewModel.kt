@@ -1447,6 +1447,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             _state.update { it.copy(isAchievementsAvailable = available) }
             if (available) {
                 startAchievementPolling()
+                pollAchievementUnlocks()
             } else {
                 stopAchievementPolling()
             }
@@ -1515,25 +1516,56 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         achievementPollingJob = null
     }
 
+    private val pendingAchievementUnlocks = mutableListOf<JellyfinAchievementUnlock>()
+
     private suspend fun pollAchievementUnlocksOnce(session: JellyfinSession, deviceId: String) {
         val checkpointKey = "last_checkpoint_${session.server.url.trimEnd('/')}_${session.user.id}_$deviceId"
         val seenKey = "seen_unlocks_${session.server.url.trimEnd('/')}_${session.user.id}"
         val lastCheckpoint = achievementPrefs.getString(checkpointKey, null)
-        when (val result = achievementRepository.getUnlocksSince(session, lastCheckpoint, deviceId)) {
+        val hasSeenSet = achievementPrefs.contains(seenKey)
+
+        // Try recent-unlocks first as it is not restricted by originating-device scope
+        val recentResult = achievementRepository.getRecentUnlocks(session, limit = 15)
+        val result = if (recentResult is JellyfinResult.Success && recentResult.value.isNotEmpty()) {
+            recentResult
+        } else {
+            achievementRepository.getUnlocksSince(session, lastCheckpoint, deviceId)
+        }
+
+        when (result) {
             is JellyfinResult.Success -> {
                 val seenSet = achievementPrefs.getStringSet(seenKey, emptySet()) ?: emptySet()
-                val newUnlocks = result.value.filter { it.id !in seenSet }
+                val rawList = result.value
+                val newUnlocks = if (!hasSeenSet && seenSet.isEmpty()) {
+                    val twoHoursAgo = System.currentTimeMillis() - 7_200_000L
+                    val recent = rawList.filter { unlock ->
+                        val timeMs = parseUnlockIsoTime(unlock.unlockedAt)
+                        timeMs > twoHoursAgo
+                    }
+                    val allEarnedIds = rawList.map { it.id } + rawList.map { it.achievementId }
+                    achievementPrefs.edit().putStringSet(seenKey, allEarnedIds.toSet()).apply()
+                    recent
+                } else {
+                    rawList.filter { it.id !in seenSet && it.achievementId !in seenSet }
+                }
+
                 if (newUnlocks.isNotEmpty()) {
-                    val latest = newUnlocks.first()
-                    val updatedSeen = seenSet + newUnlocks.map { it.id }
+                    val updatedSeen = seenSet + newUnlocks.map { it.id } + newUnlocks.map { it.achievementId }
                     achievementPrefs.edit().putStringSet(seenKey, updatedSeen).apply()
-                    _state.update {
-                        it.copy(
-                            hasUnseenAchievements = true,
-                            activeAchievementUnlock = latest,
-                        )
+
+                    synchronized(pendingAchievementUnlocks) {
+                        for (unlock in newUnlocks) {
+                            if (pendingAchievementUnlocks.none { it.id == unlock.id || it.achievementId == unlock.achievementId }) {
+                                pendingAchievementUnlocks.add(unlock)
+                            }
+                        }
+                    }
+
+                    if (_state.value.activeAchievementUnlock == null) {
+                        showNextPendingAchievementUnlock()
                     }
                 }
+
                 val nowIso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
                     timeZone = TimeZone.getTimeZone("UTC")
                 }.format(Date())
@@ -1545,8 +1577,36 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun showNextPendingAchievementUnlock() {
+        val next = synchronized(pendingAchievementUnlocks) {
+            if (pendingAchievementUnlocks.isNotEmpty()) pendingAchievementUnlocks.removeAt(0) else null
+        }
+        if (next != null) {
+            _state.update {
+                it.copy(
+                    hasUnseenAchievements = true,
+                    activeAchievementUnlock = next,
+                )
+            }
+        }
+    }
+
+    private fun parseUnlockIsoTime(iso: String?): Long {
+        if (iso.isNullOrBlank()) return 0L
+        return runCatching {
+            val dateStr = iso.take(19).replace(' ', 'T')
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.parse(dateStr)?.time ?: 0L
+        }.getOrDefault(0L)
+    }
+
     fun dismissAchievementUnlock() {
         _state.update { it.copy(activeAchievementUnlock = null) }
+        viewModelScope.launch {
+            delay(500)
+            showNextPendingAchievementUnlock()
+        }
     }
 
     private fun resolveDeviceId(): String =
@@ -4341,6 +4401,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             refreshAchievementsAvailability()
             if (_state.value.isAchievementsAvailable) {
                 startAchievementPolling()
+                pollAchievementUnlocks()
             }
             if (_state.value.socialEnabled) {
                 viewModelScope.launch { socialRepository.reportPresence(session) }
@@ -6137,6 +6198,7 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("BoxSet", ignoreCase = true) ||
         equals("Audio", ignoreCase = true) ||
         equals("MusicAlbum", ignoreCase = true) ||
+        equals("Playlist", ignoreCase = true) ||
         equals("Book", ignoreCase = true) ||
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
@@ -6728,7 +6790,7 @@ private const val KEY_WATCH_PARTY_INVITE_EXPIRY_SECONDS = "watch_party_invite_ex
 private const val KEY_ADMIN_SPEED_LIMIT_MBPS = "admin_speed_limit_mbps"
 private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
 private const val LibraryScanStartGraceMs = 20_000L
-private const val ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS = 120_000L
+private const val ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS = 30_000L
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 60
 
