@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Vantafyn — The Next Evolution of Jellyfin</title>
   <meta name="description" content="A premium, fluid Android & Android TV client for Jellyfin. Built with Jetpack Compose, AndroidX Media3, Audiophile AutoEQ DSP, gamified achievements, and native social messaging." />
-  <link rel="icon" type="image/png" href="../assets/logo.png" />
+  <link rel="icon" type="image/png" href="assets/logo.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet" />
@@ -111,6 +111,9 @@
       height: 36px;
       border-radius: 9px;
       box-shadow: 0 0 16px var(--cyan-glow);
+      flex-shrink: 0;
+      display: block;
+      object-fit: cover;
     }
     .brand-name {
       font-family: var(--font-display);
@@ -765,7 +768,7 @@
   <header>
     <div class="nav-container">
       <a href="#" class="brand">
-        <img src="../assets/logo.png" alt="Vantafyn Logo" />
+        <img src="assets/logo.png" alt="Vantafyn Logo" />
         <span class="brand-name">Vantafyn</span>
         <span class="brand-tag">v0.9.6</span>
       </a>
@@ -811,7 +814,7 @@
       <!-- Hero Media Mockup -->
       <div class="hero-media-wrapper">
         <div class="hero-media-inner">
-          <img src="../assets/preview.gif" alt="Vantafyn Live Interface Showcase" />
+          <img src="assets/preview.gif" alt="Vantafyn Live Interface Showcase" />
         </div>
       </div>
 
@@ -943,7 +946,7 @@
           </a>
         </div>
         <div class="spotlight-preview">
-          <img src="../assets/screenshots/10_now_playing.png" alt="Vantafyn Music Now Playing Screen" />
+          <img src="assets/screenshots/10_now_playing.png" alt="Vantafyn Music Now Playing Screen" />
         </div>
       </div>
     </section>
@@ -968,8 +971,8 @@
       <!-- Screenshot Grid -->
       <div class="gallery-grid" id="galleryGrid">
         <!-- Card 1 -->
-        <div class="gallery-item" data-category="playback" onclick="openLightbox('../assets/screenshots/01_home.png', 'Home & Discovery', 'Hero backdrop carousel, Continue Watching tray, and floating glass dock.')">
-          <img class="gallery-item-img" src="../assets/screenshots/01_home.png" alt="Home Screen" loading="lazy" />
+        <div class="gallery-item" data-category="playback" onclick="openLightbox('assets/screenshots/01_home.png', 'Home & Discovery', 'Hero backdrop carousel, Continue Watching tray, and floating glass dock.')">
+          <img class="gallery-item-img" src="assets/screenshots/01_home.png" alt="Home Screen" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Home & Discovery</div>
             <div class="gallery-item-desc">Hero carousel & continue watching</div>
@@ -977,8 +980,8 @@
         </div>
 
         <!-- Card 2 -->
-        <div class="gallery-item" data-category="playback" onclick="openLightbox('../assets/screenshots/05_details.png', 'Media Details', '4K HDR stream badges, audio/subtitle selectors, and quick resume.')">
-          <img class="gallery-item-img" src="../assets/screenshots/05_details.png" alt="Media Details" loading="lazy" />
+        <div class="gallery-item" data-category="playback" onclick="openLightbox('assets/screenshots/05_details.png', 'Media Details', '4K HDR stream badges, audio/subtitle selectors, and quick resume.')">
+          <img class="gallery-item-img" src="assets/screenshots/05_details.png" alt="Media Details" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Media Details</div>
             <div class="gallery-item-desc">High-res backdrop & stream selectors</div>
@@ -986,8 +989,8 @@
         </div>
 
         <!-- Card 3 -->
-        <div class="gallery-item" data-category="playback" onclick="openLightbox('../assets/screenshots/03_libraries.png', 'Media Libraries', 'Grid and list views for Movies, TV, Live TV, and Audiobooks.')">
-          <img class="gallery-item-img" src="../assets/screenshots/03_libraries.png" alt="Media Libraries" loading="lazy" />
+        <div class="gallery-item" data-category="playback" onclick="openLightbox('assets/screenshots/03_libraries.png', 'Media Libraries', 'Grid and list views for Movies, TV, Live TV, and Audiobooks.')">
+          <img class="gallery-item-img" src="assets/screenshots/03_libraries.png" alt="Media Libraries" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Media Libraries</div>
             <div class="gallery-item-desc">Multi-media library browser</div>
@@ -995,8 +998,8 @@
         </div>
 
         <!-- Card 4 -->
-        <div class="gallery-item" data-category="music" onclick="openLightbox('../assets/screenshots/10_now_playing.png', 'Now Playing Player', 'High-res album art, ambient light glow, AutoEQ pill, and squiggly wave scrubber.')">
-          <img class="gallery-item-img" src="../assets/screenshots/10_now_playing.png" alt="Now Playing Music" loading="lazy" />
+        <div class="gallery-item" data-category="music" onclick="openLightbox('assets/screenshots/10_now_playing.png', 'Now Playing Player', 'High-res album art, ambient light glow, AutoEQ pill, and squiggly wave scrubber.')">
+          <img class="gallery-item-img" src="assets/screenshots/10_now_playing.png" alt="Now Playing Music" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Music Now Playing</div>
             <div class="gallery-item-desc">Squiggly wave & ambient artwork glow</div>
@@ -1004,8 +1007,8 @@
         </div>
 
         <!-- Card 5 -->
-        <div class="gallery-item" data-category="music" onclick="openLightbox('../assets/screenshots/11_synced_lyrics.png', 'Synchronized Lyrics', 'Real-time scrolling karaoke-style lyrics synced to playback position.')">
-          <img class="gallery-item-img" src="../assets/screenshots/11_synced_lyrics.png" alt="Synced Lyrics" loading="lazy" />
+        <div class="gallery-item" data-category="music" onclick="openLightbox('assets/screenshots/11_synced_lyrics.png', 'Synchronized Lyrics', 'Real-time scrolling karaoke-style lyrics synced to playback position.')">
+          <img class="gallery-item-img" src="assets/screenshots/11_synced_lyrics.png" alt="Synced Lyrics" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Synchronized Lyrics</div>
             <div class="gallery-item-desc">Live karaoke lyric tracking</div>
@@ -1013,8 +1016,8 @@
         </div>
 
         <!-- Card 6 -->
-        <div class="gallery-item" data-category="music" onclick="openLightbox('../assets/screenshots/09_music_playlist.png', 'Playlists & Queues', 'Artwork collage, track listings, durations, and quick add.')">
-          <img class="gallery-item-img" src="../assets/screenshots/09_music_playlist.png" alt="Music Playlists" loading="lazy" />
+        <div class="gallery-item" data-category="music" onclick="openLightbox('assets/screenshots/09_music_playlist.png', 'Playlists & Queues', 'Artwork collage, track listings, durations, and quick add.')">
+          <img class="gallery-item-img" src="assets/screenshots/09_music_playlist.png" alt="Music Playlists" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Playlists & Queues</div>
             <div class="gallery-item-desc">Artwork collages & track management</div>
@@ -1022,8 +1025,8 @@
         </div>
 
         <!-- Card 7 -->
-        <div class="gallery-item" data-category="social" onclick="openLightbox('../assets/screenshots/12_achievements_hub.png', 'Achievements Hub', 'Rank progression (Bronze to Mythic), points, milestone badges, and rarity tiers.')">
-          <img class="gallery-item-img" src="../assets/screenshots/12_achievements_hub.png" alt="Achievements Hub" loading="lazy" />
+        <div class="gallery-item" data-category="social" onclick="openLightbox('assets/screenshots/12_achievements_hub.png', 'Achievements Hub', 'Rank progression (Bronze to Mythic), points, milestone badges, and rarity tiers.')">
+          <img class="gallery-item-img" src="assets/screenshots/12_achievements_hub.png" alt="Achievements Hub" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Achievements Hub</div>
             <div class="gallery-item-desc">Gamified badges & rank progression</div>
@@ -1031,8 +1034,8 @@
         </div>
 
         <!-- Card 8 -->
-        <div class="gallery-item" data-category="social" onclick="openLightbox('../assets/screenshots/13_achievement_detail.png', 'Achievement Modal', 'Signature animated chromatic modal border, unlock dates, and criteria.')">
-          <img class="gallery-item-img" src="../assets/screenshots/13_achievement_detail.png" alt="Achievement Details" loading="lazy" />
+        <div class="gallery-item" data-category="social" onclick="openLightbox('assets/screenshots/13_achievement_detail.png', 'Achievement Modal', 'Signature animated chromatic modal border, unlock dates, and criteria.')">
+          <img class="gallery-item-img" src="assets/screenshots/13_achievement_detail.png" alt="Achievement Details" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Badge Inspection</div>
             <div class="gallery-item-desc">Chromatic animated glowing borders</div>
@@ -1040,8 +1043,8 @@
         </div>
 
         <!-- Card 9 -->
-        <div class="gallery-item" data-category="social" onclick="openLightbox('../assets/screenshots/15_chat_conversation.png', '1-to-1 Chat Thread', 'Real-time messaging, seen receipts, and interactive Watch Now movie cards.')">
-          <img class="gallery-item-img" src="../assets/screenshots/15_chat_conversation.png" alt="Chat Conversation" loading="lazy" />
+        <div class="gallery-item" data-category="social" onclick="openLightbox('assets/screenshots/15_chat_conversation.png', '1-to-1 Chat Thread', 'Real-time messaging, seen receipts, and interactive Watch Now movie cards.')">
+          <img class="gallery-item-img" src="assets/screenshots/15_chat_conversation.png" alt="Chat Conversation" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">1-to-1 Direct Chat</div>
             <div class="gallery-item-desc">Interactive movie cards & read receipts</div>
@@ -1049,8 +1052,8 @@
         </div>
 
         <!-- Card 10 -->
-        <div class="gallery-item" data-category="social" onclick="openLightbox('../assets/screenshots/16_chat_reactions.png', 'Emoji Reactions', 'Long-press any message or title to react with floating emoji badges.')">
-          <img class="gallery-item-img" src="../assets/screenshots/16_chat_reactions.png" alt="Touch & Hold Reactions" loading="lazy" />
+        <div class="gallery-item" data-category="social" onclick="openLightbox('assets/screenshots/16_chat_reactions.png', 'Emoji Reactions', 'Long-press any message or title to react with floating emoji badges.')">
+          <img class="gallery-item-img" src="assets/screenshots/16_chat_reactions.png" alt="Touch & Hold Reactions" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Touch & Hold Reactions</div>
             <div class="gallery-item-desc">Instant floating emoji badges</div>
@@ -1058,8 +1061,8 @@
         </div>
 
         <!-- Card 11 -->
-        <div class="gallery-item" data-category="admin" onclick="openLightbox('../assets/screenshots/06_admin_dashboard.png', 'Server Administration', 'Trigger library scans, manage user accounts, and track live bandwidth.')">
-          <img class="gallery-item-img" src="../assets/screenshots/06_admin_dashboard.png" alt="Admin Dashboard" loading="lazy" />
+        <div class="gallery-item" data-category="admin" onclick="openLightbox('assets/screenshots/06_admin_dashboard.png', 'Server Administration', 'Trigger library scans, manage user accounts, and track live bandwidth.')">
+          <img class="gallery-item-img" src="assets/screenshots/06_admin_dashboard.png" alt="Admin Dashboard" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Server Administration</div>
             <div class="gallery-item-desc">Live sessions & user controls</div>
@@ -1067,8 +1070,8 @@
         </div>
 
         <!-- Card 12 -->
-        <div class="gallery-item" data-category="admin" onclick="openLightbox('../assets/screenshots/07_server_stats.png', 'Server Analytics', 'Content breakdown charts and viewing trends via Playback Reporting.')">
-          <img class="gallery-item-img" src="../assets/screenshots/07_server_stats.png" alt="Server Analytics" loading="lazy" />
+        <div class="gallery-item" data-category="admin" onclick="openLightbox('assets/screenshots/07_server_stats.png', 'Server Analytics', 'Content breakdown charts and viewing trends via Playback Reporting.')">
+          <img class="gallery-item-img" src="assets/screenshots/07_server_stats.png" alt="Server Analytics" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Analytics & Trends</div>
             <div class="gallery-item-desc">Viewing metrics & media breakdowns</div>
@@ -1076,8 +1079,8 @@
         </div>
 
         <!-- Card 13 -->
-        <div class="gallery-item" data-category="admin" onclick="openLightbox('../assets/screenshots/04_home_customizer.png', 'Live Home Customizer', 'Reorder rows, toggle visibility, and tweak card sizing with live previews.')">
-          <img class="gallery-item-img" src="../assets/screenshots/04_home_customizer.png" alt="Home Customizer" loading="lazy" />
+        <div class="gallery-item" data-category="admin" onclick="openLightbox('assets/screenshots/04_home_customizer.png', 'Live Home Customizer', 'Reorder rows, toggle visibility, and tweak card sizing with live previews.')">
+          <img class="gallery-item-img" src="assets/screenshots/04_home_customizer.png" alt="Home Customizer" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Home Customizer</div>
             <div class="gallery-item-desc">Reorder & customize screen layout</div>
@@ -1085,8 +1088,8 @@
         </div>
 
         <!-- Card 14 -->
-        <div class="gallery-item" data-category="admin" onclick="openLightbox('../assets/screenshots/08_appearance.png', 'Appearance Settings', 'Nebula and Midnight theme color systems, wallpapers, and breathing rail glows.')">
-          <img class="gallery-item-img" src="../assets/screenshots/08_appearance.png" alt="Appearance Themes" loading="lazy" />
+        <div class="gallery-item" data-category="admin" onclick="openLightbox('assets/screenshots/08_appearance.png', 'Appearance Settings', 'Nebula and Midnight theme color systems, wallpapers, and breathing rail glows.')">
+          <img class="gallery-item-img" src="assets/screenshots/08_appearance.png" alt="Appearance Themes" loading="lazy" />
           <div class="gallery-item-caption">
             <div class="gallery-item-title">Appearance Themes</div>
             <div class="gallery-item-desc">Nebula & Midnight glass presets</div>
@@ -1184,7 +1187,7 @@
     <div class="footer-container">
       <div class="footer-left">
         <div class="brand">
-          <img src="../assets/logo.png" alt="Vantafyn Logo" style="width: 24px; height: 24px;" />
+          <img src="assets/logo.png" alt="Vantafyn Logo" style="width: 24px; height: 24px;" />
           <span style="font-weight: 700;">Vantafyn</span>
         </div>
         <p style="font-size: 13px; color: var(--text-subtle);">
