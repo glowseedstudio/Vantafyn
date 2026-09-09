@@ -33,6 +33,11 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Headphones
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Warning
+import android.content.Intent
+import android.net.Uri
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -40,6 +45,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
@@ -75,6 +81,7 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 
 @Composable
 fun AutoEqSearchScreen(
@@ -92,6 +99,7 @@ fun AutoEqSearchScreen(
     var selectedBrandFilter by remember { mutableStateOf<String?>(null) }
     var presets by remember { mutableStateOf<List<AutoEqPreset>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var showCreditsDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(searchQuery, selectedBrandFilter) {
         isLoading = true
@@ -161,19 +169,39 @@ fun AutoEqSearchScreen(
                     }
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.08f)),
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = VantafynColors.Ink,
-                        modifier = Modifier.size(20.dp),
-                    )
+                    IconButton(
+                        onClick = { showCreditsDialog = true },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Info,
+                            contentDescription = "About AutoEQ & Licenses",
+                            tint = VantafynColors.Ink,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f)),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = VantafynColors.Ink,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
                 }
             }
 
@@ -318,6 +346,10 @@ fun AutoEqSearchScreen(
                     )
                 }
             }
+        }
+
+        if (showCreditsDialog) {
+            AutoEqCreditsDialog(onDismiss = { showCreditsDialog = false })
         }
     }
 }
@@ -683,3 +715,137 @@ private fun formatFreq(freqHz: Int): String {
         "${freqHz}"
     }
 }
+
+@Composable
+private fun AutoEqCreditsDialog(onDismiss: () -> Unit) {
+    val context = LocalContext.current
+
+    AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .vantafynAnimatedModalBorder(cornerRadius = 24.dp),
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(
+                    text = "Got it",
+                    color = Color(0xFF21D8FF),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://autoeq.app")))
+                    }
+                },
+            ) {
+                Text(
+                    text = "autoeq.app",
+                    color = VantafynColors.Muted,
+                )
+            }
+        },
+        containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+        shape = RoundedCornerShape(24.dp),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF21D8FF).copy(alpha = 0.15f))
+                        .border(1.dp, Color(0xFF21D8FF).copy(alpha = 0.30f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.GraphicEq,
+                        contentDescription = null,
+                        tint = Color(0xFF21D8FF),
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Column {
+                    Text(
+                        text = "AutoEQ & Dataset Credits",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Open Source License & Attribution",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = "Headphone equalization compensation curves and target profiles are powered by Jaakko Pasanen's open-source AutoEq project, released under the permissive MIT License.",
+                    color = VantafynColors.Ink.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+
+                VantafynGlassSurface(
+                    modifier = Modifier.fillMaxWidth(),
+                    variant = VantafynGlassVariant.Panel,
+                    cornerRadius = 14.dp,
+                    contentPadding = PaddingValues(12.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = "MEASUREMENT SOURCES & CONTRIBUTORS",
+                            color = Color(0xFF21D8FF),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp,
+                            ),
+                        )
+                        Text(
+                            text = "• oratory1990 (Harman target ear simulator measurements)\n" +
+                                "• crinacle (IEM & headphone frequency response database)\n" +
+                                "• Rtings (Standardized acoustic laboratory tests)\n" +
+                                "• Innerfidelity (Legacy database by Tyll Hertsens)\n" +
+                                "• Super Review & Headphone.com Legacy",
+                            color = VantafynColors.Ink.copy(alpha = 0.8f),
+                            style = MaterialTheme.typography.bodySmall,
+                            lineHeight = 18.sp,
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Shield,
+                        contentDescription = null,
+                        tint = Color(0xFF21D8FF),
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        text = "MIT License · Copyright © Jaakko Pasanen",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        },
+    )
+}
+
