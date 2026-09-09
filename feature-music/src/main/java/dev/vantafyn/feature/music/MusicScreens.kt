@@ -4536,25 +4536,31 @@ private fun NowPlayingDialog(
                             isPlaying = state.playback.isPlaying,
                             onSeek = viewModel::seekTo,
                         )
-                        Row(
+                        Box(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                            contentAlignment = Alignment.Center,
                         ) {
                             Text(
                                 text = state.playback.positionMs.formatTime(),
                                 color = VantafynColors.Muted,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                modifier = Modifier.align(Alignment.CenterStart),
                             )
                             AudioQualityBadgePill(
                                 audioStreamInfo = state.playback.audioStreamInfo,
                                 track = track,
                                 onClick = { showAudioStreamDetailsSheet = true },
+                                modifier = Modifier.align(Alignment.Center),
                             )
                             Text(
                                 text = state.playback.durationMs.formatTime(),
                                 color = VantafynColors.Muted,
-                                style = MaterialTheme.typography.bodySmall,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFeatureSettings = "tnum",
+                                ),
+                                modifier = Modifier.align(Alignment.CenterEnd),
                             )
                         }
                     }
