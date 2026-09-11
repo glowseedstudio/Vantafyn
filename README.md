@@ -11,6 +11,7 @@
 
 <p align="center">
   <a href="https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.7"><img src="https://img.shields.io/badge/Release-v0.9.7-21D8FF.svg?style=flat-square" alt="Version 0.9.7" /></a>
+  <a href="https://jellyfin.org"><img src="https://img.shields.io/badge/Jellyfin-v12_Ready-00A4DC.svg?style=flat-square&logo=jellyfin&logoColor=white" alt="Jellyfin v12 Ready" /></a>
   <a href="https://glowseedstudio.github.io/Vantafyn/"><img src="https://img.shields.io/badge/Website-Live_Showcase-E026FF.svg?style=flat-square" alt="Live Showcase" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?style=flat-square&logo=android&logoColor=white" alt="Jetpack Compose" /></a>
   <a href="https://developer.android.com/guide/topics/media/media3"><img src="https://img.shields.io/badge/Media3-ExoPlayer-3DDC84.svg?style=flat-square&logo=android&logoColor=white" alt="Media3" /></a>
@@ -23,6 +24,12 @@
   <a href="#-quick-start"><strong>🚀 Quick Start</strong></a> &nbsp;•&nbsp;
   <a href="docs/ARCHITECTURE.md"><strong>📖 Architecture Docs</strong></a>
 </p>
+
+---
+
+> [!TIP]
+> **🚀 Jellyfin 12 Support is Here!**
+> Vantafyn is fully optimized for **Jellyfin 12** and **10.10+**. Take advantage of Jellyfin 12's new BoxSet collection linking on Mobile and Android TV ("Part of Collection" shelves), updated native Base64 user avatar management, and high-density 3-column library browsing with 100 items per page!
 
 ---
 
@@ -47,9 +54,11 @@ Vantafyn is crafted from the ground up to make your self-hosted Jellyfin server 
     <td width="50%" valign="top">
       <h3>🎬 Cinema Video Engine</h3>
       <ul>
+        <li><strong>Jellyfin 12 Collection Linking</strong>: Dedicated "Part of Collection" shelf on Mobile and Android TV detail screens with 1-tap franchise browsing.</li>
         <li><strong>High-Performance Streaming</strong>: Built on AndroidX Media3 & ExoPlayer with automatic resume points.</li>
         <li><strong>4K HDR & Dolby Vision</strong>: Streamlined hardware-accelerated video pipelines.</li>
         <li><strong>Playback Enhancements</strong>: Multi-track audio/subtitle switching, zoom/stretch aspect ratios, Up Next countdowns, and Intro/Credit skipping.</li>
+        <li><strong>Compact 3-Row Grid</strong>: High-density 3-column library browsing with 100 items/page.</li>
         <li><strong>Google Cast & PiP</strong>: Native Cast sender integration and Picture-in-Picture support.</li>
       </ul>
     </td>
