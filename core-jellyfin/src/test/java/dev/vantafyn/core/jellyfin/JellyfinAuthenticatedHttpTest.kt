@@ -20,7 +20,7 @@ class JellyfinAuthenticatedHttpTest {
         val header = testSession.mediaBrowserAuthHeader()
 
         assertEquals(
-            "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"profile-uuid-1234\", Version=\"0.9.6\", Token=\"secret-token-xyz\"",
+            "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"profile-uuid-1234\", Version=\"0.9.7\", Token=\"secret-token-xyz\"",
             header,
         )
     }
@@ -40,5 +40,19 @@ class JellyfinAuthenticatedHttpTest {
         assertEquals("secret-token-xyz", conn.getRequestProperty("X-Emby-Token"))
         assertEquals("secret-token-xyz", conn.getRequestProperty("X-MediaBrowser-Token"))
         assertEquals(expectedAuthHeader, conn.getRequestProperty("X-Emby-Authorization"))
+    }
+
+    @Test
+    fun checkUserImageUrl() {
+        val id = UUID.fromString("12345678-1234-1234-1234-123456789abc")
+        val url = buildUserImageUrl(
+            baseUrl = "https://jellyfin.example.com",
+            userId = id,
+            imageTag = "tag123",
+            token = "token456",
+        )
+        assertTrue(url.startsWith("https://jellyfin.example.com/Users/12345678-1234-1234-1234-123456789abc/Images/Primary?tag=tag123"))
+        assertTrue(url.contains("X-Emby-Token=token456"))
+        assertFalse(url.contains("/UserImage"))
     }
 }

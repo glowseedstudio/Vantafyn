@@ -353,11 +353,17 @@ class SdkJellyfinAchievementRepository(
             !fallbackPath.isNullOrBlank() -> "$baseUrl$fallbackPath"
             else -> return null
         }
-        return if (path.contains("api_key=") || session.accessToken.isBlank()) {
-            path
-        } else {
-            path + if (path.contains("?")) "&api_key=${session.accessToken}" else "?api_key=${session.accessToken}"
-        }
+        if (session.accessToken.isBlank()) return path
+        val hasApiKey = path.contains("api_key=", ignoreCase = false)
+        val hasApiKeyCap = path.contains("ApiKey=", ignoreCase = false)
+        val hasEmbyToken = path.contains("X-Emby-Token=", ignoreCase = false)
+        val delimiter = if (path.contains("?")) "&" else "?"
+        val tokenParams = buildList {
+            if (!hasApiKeyCap) add("ApiKey=${session.accessToken}")
+            if (!hasApiKey) add("api_key=${session.accessToken}")
+            if (!hasEmbyToken) add("X-Emby-Token=${session.accessToken}")
+        }.joinToString("&")
+        return if (tokenParams.isEmpty()) path else "$path$delimiter$tokenParams"
     }
 
     private fun JSONObject.optStringOrNull(vararg keys: String): String? =

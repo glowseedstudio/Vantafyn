@@ -28,7 +28,22 @@ import androidx.media3.session.MediaLibraryService.LibraryParams
 import androidx.media3.session.MediaLibraryService.MediaLibrarySession
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaStyleNotificationHelper
+import androidx.media3.session.CommandButton
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionCommands
+import androidx.media3.session.SessionResult
+import androidx.media3.common.Player
+import android.os.Bundle
 import android.net.Uri
+import com.google.common.collect.ImmutableList
+import dev.vantafyn.core.experience.ExperienceMode
+import dev.vantafyn.core.experience.ExperiencePreferences
+import dev.vantafyn.core.experience.MusicBackendType
+import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
+import dev.vantafyn.core.jellyfin.JellyfinResult
+import dev.vantafyn.core.subsonic.SubsonicClient
+import dev.vantafyn.core.subsonic.SubsonicCredentials
+import dev.vantafyn.core.subsonic.SubsonicMusicDataProvider
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
@@ -48,6 +63,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var lastNotificationTrackId: UUID? = null
     private var lastNotificationPlaying: Boolean? = null
+    private var lastNotificationFavorite: Boolean? = null
+    private var lastNotificationShuffle: Boolean? = null
     private var lastWidgetTrackId: UUID? = null
     private var lastWidgetPlaying: Boolean? = null
     private var lastWidgetArtworkUrl: String? = null
@@ -118,20 +135,39 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         )
             .setBitmapLoader(bitmapLoader)
             .setSessionActivity(createLaunchPendingIntent())
+            .setMediaButtonPreferences(buildCustomLayout(playbackController.state.value))
+            .setCustomLayout(buildCustomLayout(playbackController.state.value))
             .build()
+        val initialButtons = buildCustomLayout(playbackController.state.value)
+        mediaSession?.let { session ->
+            session.setMediaButtonPreferences(initialButtons)
+            session.setCustomLayout(initialButtons)
+            syncLegacySessionCommands(session, initialButtons)
+        }
 
         serviceScope.launch {
             playbackController.state.collect { state ->
                 val trackId = state.currentTrack?.id
-                if (trackId != lastNotificationTrackId || state.isPlaying != lastNotificationPlaying) {
+                val isPlaying = state.isPlaying
+                val isFavorite = state.currentTrack?.isFavorite
+                val isShuffle = state.shuffleEnabled
+                val needsNotificationUpdate = trackId != lastNotificationTrackId ||
+                    isPlaying != lastNotificationPlaying ||
+                    isFavorite != lastNotificationFavorite ||
+                    isShuffle != lastNotificationShuffle
+
+                if (needsNotificationUpdate) {
                     lastNotificationTrackId = trackId
-                    lastNotificationPlaying = state.isPlaying
+                    lastNotificationPlaying = isPlaying
+                    lastNotificationFavorite = isFavorite
+                    lastNotificationShuffle = isShuffle
+                    updateCustomLayout(state)
                     if (!isForegroundService) {
-                        Log.d(TAG, "State change → startForeground (track=${trackId?.toString()?.take(8)}, playing=${state.isPlaying})")
+                        Log.d(TAG, "State change → startForeground (track=${trackId?.toString()?.take(8)}, playing=$isPlaying)")
                         mediaSession?.let { session -> startForegroundWithMediaNotification(session, state, loadLargeIcon = true) }
                             ?: triggerNotificationUpdate()
                     } else {
-                        Log.d(TAG, "State change → notify (track=${trackId?.toString()?.take(8)}, playing=${state.isPlaying})")
+                        Log.d(TAG, "State change → notify (track=${trackId?.toString()?.take(8)}, playing=$isPlaying)")
                         updateNotificationOnly(state, loadLargeIcon = true)
                     }
                 }
@@ -152,6 +188,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             ACTION_TOGGLE_PLAYBACK -> playbackController.togglePlayPause()
             ACTION_PREVIOUS -> playbackController.previous()
             ACTION_NEXT -> playbackController.next()
+            ACTION_TOGGLE_FAVORITE -> toggleFavoriteFromSystem()
+            ACTION_TOGGLE_SHUFFLE -> {
+                playbackController.toggleShuffle()
+                updateCustomLayout()
+            }
             ACTION_STOP -> {
                 playbackController.stop(reason = VantafynMusicStopReason.User)
                 stopSelf()
@@ -182,6 +223,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
 
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
         val state = if (::playbackController.isInitialized) playbackController.state.value else MusicPlaybackController.get(this).state.value
+        updateCustomLayout(state)
         try {
             if (!isForegroundService) {
                 startForegroundWithMediaNotification(session, state, loadLargeIcon = true)
@@ -328,6 +370,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 state.positionMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
                 state.durationMs <= 0L,
             )
+            .addAction(
+                if (state.shuffleEnabled) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
+                if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                serviceIntent(ACTION_TOGGLE_SHUFFLE, 6),
+            )
             .addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
             .addAction(
                 if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
@@ -335,9 +382,20 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
             )
             .addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
+            .addAction(
+                if (track?.isFavorite == true) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+                if (track?.isFavorite == true) "Unlike" else "Like",
+                serviceIntent(ACTION_TOGGLE_FAVORITE, 5),
+            )
             .setStyle(
                 MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(0, 1, 2),
+                    .setShowActionsInCompactView(
+                        *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            intArrayOf(0, 1, 2, 3, 4)
+                        } else {
+                            intArrayOf(1, 2, 3)
+                        })
+                    ),
             )
             .build()
 
@@ -388,6 +446,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 state.positionMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
                 state.durationMs <= 0L,
             )
+            .addAction(
+                if (state.shuffleEnabled) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
+                if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                serviceIntent(ACTION_TOGGLE_SHUFFLE, 6),
+            )
             .addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
             .addAction(
                 if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
@@ -395,9 +458,20 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
             )
             .addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
+            .addAction(
+                if (track?.isFavorite == true) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+                if (track?.isFavorite == true) "Unlike" else "Like",
+                serviceIntent(ACTION_TOGGLE_FAVORITE, 5),
+            )
             .setStyle(
                 MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(0, 1, 2),
+                    .setShowActionsInCompactView(
+                        *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            intArrayOf(0, 1, 2, 3, 4)
+                        } else {
+                            intArrayOf(1, 2, 3)
+                        })
+                    ),
             )
             .build()
 
@@ -533,6 +607,164 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         notificationManager.createNotificationChannel(channel)
     }
 
+    private fun buildCustomLayout(state: VantafynMusicPlaybackState): List<CommandButton> {
+        val track = state.currentTrack
+        val isFavorite = track?.isFavorite == true
+        val isShuffle = state.shuffleEnabled
+
+        val shuffleIcon = if (isShuffle) CommandButton.ICON_SHUFFLE_ON else CommandButton.ICON_SHUFFLE_OFF
+        val shuffleButton = CommandButton.Builder(shuffleIcon)
+            .setDisplayName(if (isShuffle) "Shuffle on" else "Shuffle off")
+            .setCustomIconResId(if (isShuffle) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle)
+            .setSessionCommand(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_BACK_SECONDARY)
+            .setEnabled(true)
+            .build()
+
+        val favoriteIcon = if (isFavorite) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED
+        val favoriteButton = CommandButton.Builder(favoriteIcon)
+            .setDisplayName(if (isFavorite) "Unlike" else "Like")
+            .setCustomIconResId(if (isFavorite) R.drawable.ic_heart_filled else R.drawable.ic_heart)
+            .setSessionCommand(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
+            .setSlots(CommandButton.SLOT_FORWARD_SECONDARY)
+            .setEnabled(true)
+            .build()
+
+        return listOf(shuffleButton, favoriteButton)
+    }
+
+    private fun findField(startClass: Class<*>?, name: String): java.lang.reflect.Field? {
+        var clazz = startClass
+        while (clazz != null) {
+            try {
+                return clazz.getDeclaredField(name).apply { isAccessible = true }
+            } catch (_: NoSuchFieldException) {
+                clazz = clazz.superclass
+            }
+        }
+        return null
+    }
+
+    private fun findMethod(startClass: Class<*>?, name: String, vararg parameterTypes: Class<*>): java.lang.reflect.Method? {
+        var clazz = startClass
+        while (clazz != null) {
+            try {
+                return clazz.getDeclaredMethod(name, *parameterTypes).apply { isAccessible = true }
+            } catch (_: NoSuchMethodException) {
+                clazz = clazz.superclass
+            }
+        }
+        return null
+    }
+
+    private fun syncLegacySessionCommands(session: MediaSession, buttons: List<CommandButton>) {
+        runCatching {
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .build()
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .add(Player.COMMAND_SET_SHUFFLE_MODE)
+                .build()
+
+            val implField = findField(session.javaClass, "impl") ?: return@runCatching
+            val impl = implField.get(session) ?: return@runCatching
+            val stubField = findField(impl.javaClass, "sessionLegacyStub") ?: return@runCatching
+            val stub = stubField.get(impl) ?: return@runCatching
+
+            val setAvailableCommandsMethod = findMethod(
+                stub.javaClass,
+                "setAvailableCommands",
+                SessionCommands::class.java,
+                Player.Commands::class.java,
+            )
+            setAvailableCommandsMethod?.invoke(stub, sessionCommands, playerCommands)
+
+            val setPlatformCustomLayoutMethod = findMethod(
+                stub.javaClass,
+                "setPlatformCustomLayout",
+                ImmutableList::class.java,
+            )
+            setPlatformCustomLayoutMethod?.invoke(stub, ImmutableList.copyOf(buttons))
+
+            val setPlatformMediaButtonPrefsMethod = findMethod(
+                stub.javaClass,
+                "setPlatformMediaButtonPreferences",
+                ImmutableList::class.java,
+            )
+            setPlatformMediaButtonPrefsMethod?.invoke(stub, ImmutableList.copyOf(buttons))
+
+            val getPlayerWrapperMethod = findMethod(impl.javaClass, "getPlayerWrapper")
+            val playerWrapper = getPlayerWrapperMethod?.invoke(impl)
+            if (playerWrapper != null) {
+                val updatePlaybackStateMethod = findMethod(
+                    stub.javaClass,
+                    "updateLegacySessionPlaybackState",
+                    playerWrapper.javaClass,
+                )
+                updatePlaybackStateMethod?.invoke(stub, playerWrapper)
+            }
+            Log.d(TAG, "Synced legacy session commands and custom layout to MediaSessionLegacyStub successfully")
+        }.onFailure { e ->
+            Log.w(TAG, "Failed to sync legacy session commands: ${e.message}", e)
+        }
+    }
+
+    private fun updateCustomLayout(state: VantafynMusicPlaybackState = playbackController.state.value) {
+        val buttons = buildCustomLayout(state)
+        mediaSession?.let { session ->
+            session.setMediaButtonPreferences(buttons)
+            session.setCustomLayout(buttons)
+            syncLegacySessionCommands(session, buttons)
+            for (controller in session.connectedControllers) {
+                session.setMediaButtonPreferences(controller, buttons)
+                session.setCustomLayout(controller, buttons)
+            }
+        }
+    }
+
+    private fun toggleFavoriteFromSystem() {
+        val currentTrack = playbackController.state.value.currentTrack ?: return
+        val targetFavorite = !currentTrack.isFavorite
+        Log.d(TAG, "Toggling favorite from system player for track ${currentTrack.title} -> $targetFavorite")
+
+        playbackController.updateFavorite(currentTrack.id, targetFavorite)
+        val updatedState = playbackController.state.value
+        updateCustomLayout(updatedState)
+        if (isForegroundService) {
+            updateNotificationOnly(updatedState, loadLargeIcon = false)
+        }
+
+        serviceScope.launch(Dispatchers.IO) {
+            runCatching {
+                val context = applicationContext
+                val mode = ExperiencePreferences.getExperienceMode(context)
+                val backend = ExperiencePreferences.getMusicBackendType(context)
+                if (mode == ExperienceMode.MusicOnly && backend == MusicBackendType.OpenSubsonic) {
+                    val prefs = context.getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
+                    val url = prefs.getString("subsonic_url", null)
+                    val user = prefs.getString("subsonic_username", null)
+                    val pass = prefs.getString("subsonic_password", null)
+                    if (url != null && user != null && pass != null) {
+                        SubsonicMusicDataProvider(SubsonicClient(SubsonicCredentials(url, user, pass)), context).setFavorite(currentTrack.id, targetFavorite)
+                    }
+                } else {
+                    val repositories = JellyfinRepositoryProvider(context)
+                    val profiles = repositories.authRepository.savedProfiles()
+                    val profile = profiles.maxByOrNull { it.lastUsedAt }
+                    if (profile != null) {
+                        val sessionResult = repositories.authRepository.restoreSession(profile.id)
+                        if (sessionResult is JellyfinResult.Success) {
+                            repositories.mediaRepository.setFavorite(sessionResult.value, currentTrack.id, targetFavorite)
+                        }
+                    }
+                }
+            }.onFailure { e ->
+                Log.w(TAG, "Failed to persist favorite status to server: ${e.message}")
+            }
+        }
+    }
+
     companion object {
         private const val TAG = "MusicPlaybackService"
         const val CHANNEL_ID = "vantafyn_music_controls_v2"
@@ -546,6 +778,10 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         const val ACTION_PREVIOUS = "dev.vantafyn.music.action.PREVIOUS"
         const val ACTION_NEXT = "dev.vantafyn.music.action.NEXT"
         const val ACTION_STOP = "dev.vantafyn.music.action.STOP"
+        const val ACTION_TOGGLE_FAVORITE = "dev.vantafyn.music.action.TOGGLE_FAVORITE"
+        const val ACTION_TOGGLE_SHUFFLE = "dev.vantafyn.music.action.TOGGLE_SHUFFLE"
+        const val CUSTOM_COMMAND_TOGGLE_FAVORITE = "dev.vantafyn.music.command.TOGGLE_FAVORITE"
+        const val CUSTOM_COMMAND_TOGGLE_SHUFFLE = "dev.vantafyn.music.command.TOGGLE_SHUFFLE"
         const val ACTION_PLAYBACK_STATE_CHANGED = "dev.vantafyn.music.action.PLAYBACK_STATE_CHANGED"
         private const val WIDGET_PREFS = "vantafyn_widget_playback"
         private const val KEY_TITLE = "title"
@@ -558,12 +794,67 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         private const val KEY_DURATION_MS = "duration_ms"
     }
 
-    private class LibraryCallback(
+    private inner class LibraryCallback(
         private val serviceScope: CoroutineScope,
         private val mainExecutor: java.util.concurrent.Executor,
         private val playbackController: MusicPlaybackController,
         private val provider: () -> VantafynMusicMediaLibraryProvider,
     ) : MediaLibrarySession.Callback {
+
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .build()
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .add(Player.COMMAND_SET_SHUFFLE_MODE)
+                .build()
+            val buttons = buildCustomLayout(playbackController.state.value)
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(playerCommands)
+                .setMediaButtonPreferences(buttons)
+                .setCustomLayout(buttons)
+                .build()
+        }
+
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            val buttons = buildCustomLayout(playbackController.state.value)
+            session.setMediaButtonPreferences(controller, buttons)
+            session.setCustomLayout(controller, buttons)
+            val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
+                .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .build()
+            val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
+                .add(Player.COMMAND_SET_SHUFFLE_MODE)
+                .build()
+            session.setAvailableCommands(controller, sessionCommands, playerCommands)
+            syncLegacySessionCommands(session, buttons)
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                CUSTOM_COMMAND_TOGGLE_FAVORITE -> {
+                    toggleFavoriteFromSystem()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CUSTOM_COMMAND_TOGGLE_SHUFFLE -> {
+                    playbackController.toggleShuffle()
+                    updateCustomLayout()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+            }
+            return super.onCustomCommand(session, controller, customCommand, args)
+        }
 
         private fun <T> future(block: suspend () -> T): ListenableFuture<T> {
             val settable = SettableFuture.create<T>()

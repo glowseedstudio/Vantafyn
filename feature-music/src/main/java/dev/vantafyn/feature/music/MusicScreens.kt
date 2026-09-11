@@ -131,6 +131,7 @@ import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material.icons.rounded.Bedtime
+import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.ClearAll
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -369,6 +370,117 @@ fun MusicScreen(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
+            val quickPicksTracks = remember(state.home, state.recentlyPlayed) {
+                val h = state.home
+                val candidates = mutableListOf<JellyfinMusicTrack>()
+                if (state.recentlyPlayed.isNotEmpty()) {
+                    candidates.addAll(state.recentlyPlayed.map { track ->
+                        JellyfinMusicTrack(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            albumId = track.albumId,
+                            durationMs = track.durationMs,
+                            artworkUrl = track.artworkUrl,
+                            hasLyrics = true,
+                            streamUrl = track.streamUrl,
+                            isFavorite = track.isFavorite,
+                            genres = track.genres,
+                        )
+                    })
+                }
+                if (h != null && h.onRepeat.isNotEmpty()) {
+                    candidates.addAll(h.onRepeat)
+                }
+                if (h != null && h.recentlyAdded.isNotEmpty()) {
+                    candidates.addAll(h.recentlyAdded)
+                }
+                val seenArtists = mutableSetOf<String>()
+                val result = mutableListOf<JellyfinMusicTrack>()
+                for (t in candidates) {
+                    val norm = t.artist.trim().lowercase()
+                    if (norm.isNotBlank() && norm !in seenArtists) {
+                        seenArtists.add(norm)
+                        result.add(t)
+                        if (result.size >= 8) break
+                    }
+                }
+                if (result.size < 4) {
+                    for (t in candidates) {
+                        if (result.none { it.id == t.id }) {
+                            result.add(t)
+                            if (result.size >= 8) break
+                        }
+                    }
+                }
+                result
+            }
+            val allHomeTracks = remember(state.home, state.recentlyPlayed) {
+                val list = mutableListOf<JellyfinMusicTrack>()
+                state.home?.let { h ->
+                    list.addAll(h.onRepeat)
+                    list.addAll(h.recentlyAdded)
+                    list.addAll(h.songs)
+                }
+                if (state.recentlyPlayed.isNotEmpty()) {
+                    list.addAll(state.recentlyPlayed.map { track ->
+                        JellyfinMusicTrack(
+                            id = track.id,
+                            title = track.title,
+                            artist = track.artist,
+                            album = track.album,
+                            albumId = track.albumId,
+                            durationMs = track.durationMs,
+                            artworkUrl = track.artworkUrl,
+                            hasLyrics = true,
+                            streamUrl = track.streamUrl,
+                            isFavorite = track.isFavorite,
+                            genres = track.genres,
+                        )
+                    })
+                }
+                val seen = mutableSetOf<java.util.UUID>()
+                list.filter { seen.add(it.id) }
+            }
+            val energizeKeywords = remember {
+                listOf("rock", "metal", "electronic", "dance", "techno", "house", "edm", "pop", "hip hop", "rap", "punk", "dnb", "drum and bass", "synth", "hardcore", "party", "club", "upbeat", "alternative")
+            }
+            val energizeTracks = remember(allHomeTracks) {
+                val matched = allHomeTracks.filter { track ->
+                    track.genres.any { g -> energizeKeywords.any { kw -> g.contains(kw, ignoreCase = true) } }
+                }
+                matched.ifEmpty { allHomeTracks.take(15) }
+            }
+            val energizeAlbums = remember(state.home?.albums) {
+                state.home?.albums.orEmpty().filter { album ->
+                    album.genres.any { g -> energizeKeywords.any { kw -> g.contains(kw, ignoreCase = true) } }
+                }
+            }
+            val chillKeywords = remember {
+                listOf("chill", "ambient", "lo-fi", "lofi", "jazz", "acoustic", "classical", "piano", "soul", "r&b", "rnb", "indie", "folk", "downtempo", "relax", "sleep", "mellow", "lounge")
+            }
+            val chillTracks = remember(allHomeTracks) {
+                val matched = allHomeTracks.filter { track ->
+                    track.genres.any { g -> chillKeywords.any { kw -> g.contains(kw, ignoreCase = true) } }
+                }
+                matched.ifEmpty { allHomeTracks.takeLast(15) }
+            }
+            val chillAlbums = remember(state.home?.albums) {
+                state.home?.albums.orEmpty().filter { album ->
+                    album.genres.any { g -> chillKeywords.any { kw -> g.contains(kw, ignoreCase = true) } }
+                }
+            }
+            val favoriteTracks = remember(allHomeTracks) {
+                val matched = allHomeTracks.filter { it.isFavorite }
+                matched.ifEmpty { state.home?.onRepeat.orEmpty().take(10) }
+            }
+            val favoriteAlbums = remember(state.home?.albums) {
+                state.home?.albums.orEmpty().filter { it.isFavorite }
+            }
+            val favoritePlaylists = remember(state.home?.playlists) {
+                state.home?.playlists.orEmpty().filter { it.isFavorite }
+            }
             LazyColumn(
                 state = musicListState,
                 modifier = Modifier
@@ -385,6 +497,7 @@ fun MusicScreen(
                     home.playlists.isEmpty() &&
                     home.songs.isEmpty() &&
                     home.recentlyAdded.isEmpty() &&
+                    home.onRepeat.isEmpty() &&
                     state.recentlyPlayed.isEmpty() &&
                     state.harmoniaRecaps.isEmpty() &&
                     state.savedHarmoniaRecaps.isEmpty()
@@ -449,6 +562,16 @@ fun MusicScreen(
                                 }
                             } else null,
                         )
+                    }
+                }
+                if (state.searchQuery.isBlank()) {
+                    item {
+                        MusicContentReveal(index = 1, animate = homeRevealActive, revealKey = homeRevealKey) {
+                            MusicHomeMoodChips(
+                                selectedMood = state.selectedHomeMood,
+                                onMoodSelected = viewModel::selectHomeMood,
+                            )
+                        }
                     }
                 }
             }
@@ -542,114 +665,345 @@ fun MusicScreen(
                             }
                         } else {
                             state.home?.let { home ->
-                            if (state.harmoniaRecaps.isNotEmpty()) item {
-                                MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    HarmoniaRail(
-                                        recaps = state.harmoniaRecaps,
-                                        onRecap = viewModel::openHarmoniaRecap,
-                                    )
-                                }
-                            }
-                            if (state.recentlyPlayed.isNotEmpty()) item {
-                                MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    val recentJellyfinTracks = remember(state.recentlyPlayed) {
-                                        state.recentlyPlayed.map { track ->
-                                            JellyfinMusicTrack(
-                                                id = track.id,
-                                                title = track.title,
-                                                artist = track.artist,
-                                                album = track.album,
-                                                albumId = track.albumId,
-                                                durationMs = track.durationMs,
-                                                artworkUrl = track.artworkUrl,
-                                                hasLyrics = true,
-                                                streamUrl = track.streamUrl,
-                                                isFavorite = track.isFavorite,
-                                                genres = track.genres,
-                                            )
+                                when (state.selectedHomeMood) {
+                                    MusicHomeMood.All -> {
+                                        if (state.harmoniaRecaps.isNotEmpty()) item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                HarmoniaRail(
+                                                    recaps = state.harmoniaRecaps,
+                                                    onRecap = viewModel::openHarmoniaRecap,
+                                                )
+                                            }
+                                        }
+                                        if (state.recentlyPlayed.isNotEmpty()) item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                val recentJellyfinTracks = remember(state.recentlyPlayed) {
+                                                    state.recentlyPlayed.map { track ->
+                                                        JellyfinMusicTrack(
+                                                            id = track.id,
+                                                            title = track.title,
+                                                            artist = track.artist,
+                                                            album = track.album,
+                                                            albumId = track.albumId,
+                                                            durationMs = track.durationMs,
+                                                            artworkUrl = track.artworkUrl,
+                                                            hasLyrics = true,
+                                                            streamUrl = track.streamUrl,
+                                                            isFavorite = track.isFavorite,
+                                                            genres = track.genres,
+                                                        )
+                                                    }
+                                                }
+                                                MusicTrackRow(
+                                                    title = "Recently Played",
+                                                    tracks = recentJellyfinTracks,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, recentJellyfinTracks) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (quickPicksTracks.isNotEmpty()) item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicQuickPicksRow(
+                                                    tracks = quickPicksTracks,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onStartRadio = { track -> startMusic { viewModel.startRadio(track) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (home.onRepeat.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicOnRepeatRow(
+                                                    tracks = home.onRepeat,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.onRepeat) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (home.rediscover.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicRediscoverRow(
+                                                    tracks = home.rediscover,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.rediscover) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (home.recentlyAdded.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicTrackRow(
+                                                    title = "Recently Added",
+                                                    tracks = home.recentlyAdded,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (home.albums.isNotEmpty()) item {
+                                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicAlbumRow(
+                                                    albums = home.albums,
+                                                    onAlbum = viewModel::openAlbum,
+                                                    onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
+                                                )
+                                            }
+                                        }
+                                        if (home.similarArtists.isNotEmpty() && !home.similarSeedArtist.isNullOrBlank()) item {
+                                            MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicArtistRow(
+                                                    artists = home.similarArtists,
+                                                    onArtist = viewModel::openArtist,
+                                                    onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
+                                                    title = "Similar to ${home.similarSeedArtist}",
+                                                    icon = Icons.Rounded.AutoAwesome,
+                                                )
+                                            }
+                                        }
+                                        if (home.artists.isNotEmpty()) item {
+                                            MusicContentReveal(index = 6, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicArtistRow(
+                                                    artists = home.artists,
+                                                    onArtist = viewModel::openArtist,
+                                                    onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
+                                                )
+                                            }
+                                        }
+                                        if (home.playlists.isNotEmpty()) item {
+                                            MusicContentReveal(index = 7, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
+                                            }
+                                        }
+                                        if (home.songs.isNotEmpty()) item {
+                                            MusicContentReveal(index = 8, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                                    MusicSectionHeader("Songs", "View all", viewModel::showSongs)
+                                                    MusicTrackList(
+                                                        title = "",
+                                                        tracks = home.songs.take(20),
+                                                        playlists = home.playlists,
+                                                        pendingTrackId = state.pendingPlayTrackId,
+                                                        currentTrackId = state.playback.currentTrack?.id,
+                                                        onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
+                                                        onChoosePlaylist = { playlistPickerTrack = it },
+                                                        onLongPress = { actionTrack = it },
+                                                        animateReveal = false,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        if (state.savedHarmoniaRecaps.isNotEmpty()) item {
+                                            MusicContentReveal(index = 8, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                SavedHarmoniaRail(
+                                                    recaps = state.savedHarmoniaRecaps,
+                                                    onRecap = viewModel::openHarmoniaRecap,
+                                                )
+                                            }
+                                        }
+                                        item {
+                                            MusicContentReveal(index = 9, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                // TODO REMOVE_HARMONIA_TEST_GENERATORS_BEFORE_RELEASE
+                                                HarmoniaDeveloperPanel(
+                                                    isGenerating = state.isHarmoniaGenerating,
+                                                    message = state.harmoniaGenerationMessage,
+                                                    onMonthly = { viewModel.generateTestMonthlyHarmonia() },
+                                                    onYearly = viewModel::generateTestYearlyHarmonia,
+                                                )
+                                            }
                                         }
                                     }
-                                    MusicTrackRow(
-                                        title = "Recently Played",
-                                        tracks = recentJellyfinTracks,
-                                        pendingTrackId = state.pendingPlayTrackId,
-                                        onTrack = { track -> startMusic { viewModel.playTrack(track, recentJellyfinTracks) } },
-                                        onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
-                                    )
-                                }
-                            }
-                            if (home.recentlyAdded.isNotEmpty()) item {
-                                MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    MusicTrackRow(
-                                        title = "Recently Added",
-                                        tracks = home.recentlyAdded,
-                                        pendingTrackId = state.pendingPlayTrackId,
-                                        onTrack = { track -> startMusic { viewModel.playTrack(track, home.recentlyAdded) } },
-                                        onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
-                                    )
-                                }
-                            }
-                            if (home.albums.isNotEmpty()) item {
-                                MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    MusicAlbumRow(
-                                        albums = home.albums,
-                                        onAlbum = viewModel::openAlbum,
-                                        onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
-                                    )
-                                }
-                            }
-                            if (home.artists.isNotEmpty()) item {
-                                MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    MusicArtistRow(
-                                        artists = home.artists,
-                                        onArtist = viewModel::openArtist,
-                                        onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
-                                    )
-                                }
-                            }
-                            if (home.playlists.isNotEmpty()) item {
-                                MusicContentReveal(index = 6, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
-                                }
-                            }
-                            if (home.songs.isNotEmpty()) item {
-                                MusicContentReveal(index = 7, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        MusicSectionHeader("Songs", "View all", viewModel::showSongs)
-                                        MusicTrackList(
-                                            title = "",
-                                            tracks = home.songs.take(20),
-                                            playlists = home.playlists,
-                                            pendingTrackId = state.pendingPlayTrackId,
-                                            currentTrackId = state.playback.currentTrack?.id,
-                                            onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
-                                            onChoosePlaylist = { playlistPickerTrack = it },
-                                            onLongPress = { actionTrack = it },
-                                            animateReveal = false,
-                                        )
+                                    MusicHomeMood.Energize -> {
+                                        item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicMoodHeroCard(
+                                                    title = "Energize Mix",
+                                                    subtitle = "High-tempo beats & powerful tracks to pump you up",
+                                                    icon = Icons.Rounded.Bolt,
+                                                    onPlay = {
+                                                        if (energizeTracks.isNotEmpty()) {
+                                                            startMusic { viewModel.playTrack(energizeTracks.first(), energizeTracks) }
+                                                        }
+                                                    },
+                                                    onStartRadio = energizeTracks.firstOrNull()?.let { seed ->
+                                                        { startMusic { viewModel.startRadio(seed) } }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                        if (energizeTracks.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicTrackRow(
+                                                    title = "Energize Songs",
+                                                    tracks = energizeTracks,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, energizeTracks) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (energizeAlbums.isNotEmpty()) item {
+                                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicAlbumRow(
+                                                    albums = energizeAlbums,
+                                                    title = "Energize Albums",
+                                                    onAlbum = viewModel::openAlbum,
+                                                    onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                    MusicHomeMood.Chill -> {
+                                        item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicMoodHeroCard(
+                                                    title = "Chill Vibe",
+                                                    subtitle = "Smooth, mellow, and acoustic rhythms to unwind",
+                                                    icon = Icons.Rounded.GraphicEq,
+                                                    onPlay = {
+                                                        if (chillTracks.isNotEmpty()) {
+                                                            startMusic { viewModel.playTrack(chillTracks.first(), chillTracks) }
+                                                        }
+                                                    },
+                                                    onStartRadio = chillTracks.firstOrNull()?.let { seed ->
+                                                        { startMusic { viewModel.startRadio(seed) } }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                        if (chillTracks.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicTrackRow(
+                                                    title = "Chill Songs",
+                                                    tracks = chillTracks,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, chillTracks) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (chillAlbums.isNotEmpty()) item {
+                                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicAlbumRow(
+                                                    albums = chillAlbums,
+                                                    title = "Chill Albums",
+                                                    onAlbum = viewModel::openAlbum,
+                                                    onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
+                                                )
+                                            }
+                                        }
+                                    }
+                                    MusicHomeMood.OnRepeat -> {
+                                        item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicMoodHeroCard(
+                                                    title = "Your Heavy Rotation",
+                                                    subtitle = "Tracks you have been spinning on repeat recently",
+                                                    icon = Icons.Rounded.Repeat,
+                                                    onPlay = {
+                                                        if (home.onRepeat.isNotEmpty()) {
+                                                            startMusic { viewModel.playTrack(home.onRepeat.first(), home.onRepeat) }
+                                                        }
+                                                    },
+                                                    onStartRadio = home.onRepeat.firstOrNull()?.let { seed ->
+                                                        { startMusic { viewModel.startRadio(seed) } }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                        if (home.onRepeat.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicOnRepeatRow(
+                                                    tracks = home.onRepeat,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.onRepeat) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (home.rediscover.isNotEmpty()) item {
+                                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicRediscoverRow(
+                                                    tracks = home.rediscover,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, home.rediscover) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (home.onRepeat.isNotEmpty()) item {
+                                            MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                                    MusicSectionHeader("Most Played", "View all", viewModel::showSongs)
+                                                    MusicTrackList(
+                                                        title = "",
+                                                        tracks = home.onRepeat,
+                                                        playlists = home.playlists,
+                                                        pendingTrackId = state.pendingPlayTrackId,
+                                                        currentTrackId = state.playback.currentTrack?.id,
+                                                        onTrack = { track -> startMusic { viewModel.playTrack(track, home.onRepeat) } },
+                                                        onChoosePlaylist = { playlistPickerTrack = it },
+                                                        onLongPress = { actionTrack = it },
+                                                        animateReveal = false,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    MusicHomeMood.Favorites -> {
+                                        item {
+                                            MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicMoodHeroCard(
+                                                    title = "Liked & Loved",
+                                                    subtitle = "Your favorite tracks, albums, and curated playlists",
+                                                    icon = Icons.Rounded.Favorite,
+                                                    onPlay = {
+                                                        if (favoriteTracks.isNotEmpty()) {
+                                                            startMusic { viewModel.playTrack(favoriteTracks.first(), favoriteTracks) }
+                                                        }
+                                                    },
+                                                    onStartRadio = favoriteTracks.firstOrNull()?.let { seed ->
+                                                        { startMusic { viewModel.startRadio(seed) } }
+                                                    },
+                                                )
+                                            }
+                                        }
+                                        if (favoriteTracks.isNotEmpty()) item {
+                                            MusicContentReveal(index = 3, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicTrackRow(
+                                                    title = "Favorite Songs",
+                                                    tracks = favoriteTracks,
+                                                    pendingTrackId = state.pendingPlayTrackId,
+                                                    onTrack = { track -> startMusic { viewModel.playTrack(track, favoriteTracks) } },
+                                                    onLongPress = { track -> musicContextItem = MusicContextItem.Track(track) },
+                                                )
+                                            }
+                                        }
+                                        if (favoriteAlbums.isNotEmpty()) item {
+                                            MusicContentReveal(index = 4, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicAlbumRow(
+                                                    albums = favoriteAlbums,
+                                                    title = "Favorite Albums",
+                                                    onAlbum = viewModel::openAlbum,
+                                                    onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
+                                                )
+                                            }
+                                        }
+                                        if (favoritePlaylists.isNotEmpty()) item {
+                                            MusicContentReveal(index = 5, animate = homeRevealActive, revealKey = homeRevealKey) {
+                                                MusicPlaylistRow(
+                                                    playlists = favoritePlaylists,
+                                                    title = "Favorite Playlists",
+                                                    onPlaylist = viewModel::openPlaylist,
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            if (state.savedHarmoniaRecaps.isNotEmpty()) item {
-                                MusicContentReveal(index = 8, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    SavedHarmoniaRail(
-                                        recaps = state.savedHarmoniaRecaps,
-                                        onRecap = viewModel::openHarmoniaRecap,
-                                    )
-                                }
-                            }
-                            item {
-                                MusicContentReveal(index = 9, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                    // TODO REMOVE_HARMONIA_TEST_GENERATORS_BEFORE_RELEASE
-                                    HarmoniaDeveloperPanel(
-                                        isGenerating = state.isHarmoniaGenerating,
-                                        message = state.harmoniaGenerationMessage,
-                                        onMonthly = { viewModel.generateTestMonthlyHarmonia() },
-                                        onYearly = viewModel::generateTestYearlyHarmonia,
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }
@@ -693,7 +1047,13 @@ fun MusicScreen(
                 is MusicScreenState.Artist -> {
                     item {
                         MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = contentRevealKey) {
-                            MusicDetailHeader(screen.artist.name, "Artist", screen.artist.imageUrl, onBack = viewModel::showHome, onPlay = null)
+                            MusicDetailHeader(
+                                title = screen.artist.name,
+                                subtitle = "Artist",
+                                imageUrl = screen.artist.imageUrl,
+                                onBack = viewModel::showHome,
+                                onPlay = { startMusic { viewModel.startArtistRadio(screen.artist) } },
+                            )
                         }
                     }
                     item {
@@ -721,7 +1081,24 @@ fun MusicScreen(
                                     }
                                 }
                             } else {
-                                MusicAlbumRow(screen.albums, onAlbum = viewModel::openAlbum)
+                                MusicAlbumRow(
+                                    albums = screen.albums,
+                                    onAlbum = viewModel::openAlbum,
+                                    onLongPress = { album -> musicContextItem = MusicContextItem.Album(album) },
+                                )
+                            }
+                        }
+                    }
+                    if (screen.similarArtists.isNotEmpty()) {
+                        item {
+                            MusicContentReveal(index = 2, animate = nestedRevealActive, revealKey = contentRevealKey) {
+                                MusicArtistRow(
+                                    artists = screen.similarArtists,
+                                    onArtist = viewModel::openArtist,
+                                    onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
+                                    title = "Fans Also Like",
+                                    icon = Icons.Rounded.AutoAwesome,
+                                )
                             }
                         }
                     }
@@ -1024,6 +1401,10 @@ fun MusicScreen(
                             musicContextItem = null
                             viewModel.downloadAlbum(album.id)
                         },
+                        onStartRadio = {
+                            musicContextItem = null
+                            startMusic { viewModel.startAlbumRadio(album) }
+                        },
                     )
                 }
                 is MusicContextItem.Artist -> {
@@ -1048,6 +1429,10 @@ fun MusicScreen(
                         onToggleFavorite = null,
                         onAddToPlaylist = null,
                         onDownload = null,
+                        onStartRadio = {
+                            musicContextItem = null
+                            startMusic { viewModel.startArtistRadio(artist) }
+                        },
                     )
                 }
             }
@@ -3319,6 +3704,428 @@ private fun musicSkeletonBrush(): Brush {
     return VantafynSkeletonBrush()
 }
 
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MusicQuickPicksRow(
+    tracks: List<JellyfinMusicTrack>,
+    pendingTrackId: java.util.UUID?,
+    onStartRadio: (JellyfinMusicTrack) -> Unit,
+    onLongPress: ((JellyfinMusicTrack) -> Unit)? = null,
+) {
+    if (tracks.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Radio,
+                    contentDescription = null,
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "Quick Picks",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = "Infinite Station Radio",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            itemsIndexed(tracks, key = { index, track -> "qp-${track.id}-$index" }) { _, track ->
+                MusicQuickPickCard(
+                    track = track,
+                    isLoading = pendingTrackId == track.id,
+                    onClick = { onStartRadio(track) },
+                    onLongClick = { onLongPress?.invoke(track) },
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun MusicQuickPickCard(
+    track: JellyfinMusicTrack,
+    isLoading: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+) {
+    Column(
+        modifier = Modifier
+            .width(144.dp)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(144.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            MusicArt(track.artworkUrl, Modifier.size(144.dp), cornerRadius = 20, title = track.title, subtitle = track.artist)
+            // Gradient vignette at bottom
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.55f to Color.Transparent,
+                            1f to Color.Black.copy(alpha = 0.75f),
+                        ),
+                    ),
+            )
+            // Floating radio station badge at top-end
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(28.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.Black.copy(alpha = 0.65f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(999.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Radio,
+                    contentDescription = null,
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier.size(15.dp),
+                )
+            }
+            // Station pill at bottom-start
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(VantafynColors.SurfaceHigh.copy(alpha = 0.85f))
+                    .border(0.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(999.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier.size(12.dp),
+                )
+                Text(
+                    text = "Radio",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.SemiBold,
+                        color = VantafynColors.Ink,
+                    ),
+                )
+            }
+            if (isLoading) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(Color.Black.copy(alpha = 0.40f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    VantafynGradientLoadingRing(modifier = Modifier.size(32.dp), strokeWidth = 2.dp)
+                }
+            }
+        }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = track.title,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rememberLifecycleAwareMarquee()),
+            )
+            Text(
+                text = "${track.artist} Radio",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(rememberLifecycleAwareMarquee()),
+            )
+        }
+    }
+}
+
+@Composable
+private fun MusicOnRepeatRow(
+    tracks: List<JellyfinMusicTrack>,
+    pendingTrackId: java.util.UUID?,
+    onTrack: (JellyfinMusicTrack) -> Unit,
+    onLongPress: ((JellyfinMusicTrack) -> Unit)? = null,
+) {
+    if (tracks.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Repeat,
+                    contentDescription = null,
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "On Repeat",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = "Most Played",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            itemsIndexed(tracks, key = { index, track -> "repeat-${track.id}-$index" }) { _, track ->
+                MusicArtworkTile(
+                    imageUrl = track.artworkUrl,
+                    title = track.title,
+                    subtitle = track.artist,
+                    badgeText = track.playCount?.takeIf { it > 0 }?.let { if (it == 1) "1 play" else "$it plays" } ?: "On Repeat",
+                    isLoading = pendingTrackId == track.id,
+                    onClick = { onTrack(track) },
+                    onLongClick = { onLongPress?.invoke(track) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicRediscoverRow(
+    tracks: List<JellyfinMusicTrack>,
+    pendingTrackId: java.util.UUID?,
+    onTrack: (JellyfinMusicTrack) -> Unit,
+    onLongPress: ((JellyfinMusicTrack) -> Unit)? = null,
+) {
+    if (tracks.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Replay,
+                    contentDescription = null,
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = "Forgotten Favorites",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Text(
+                text = "Rediscover",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            itemsIndexed(tracks, key = { index, track -> "rediscover-${track.id}-$index" }) { _, track ->
+                MusicArtworkTile(
+                    imageUrl = track.artworkUrl,
+                    title = track.title,
+                    subtitle = track.artist,
+                    badgeText = "Rediscover",
+                    isLoading = pendingTrackId == track.id,
+                    onClick = { onTrack(track) },
+                    onLongClick = { onLongPress?.invoke(track) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicHomeMoodChips(
+    selectedMood: MusicHomeMood,
+    onMoodSelected: (MusicHomeMood) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    LazyRow(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp),
+    ) {
+        items(MusicHomeMood.entries, key = { it.name }) { mood ->
+            val isSelected = selectedMood == mood
+            val icon = when (mood) {
+                MusicHomeMood.All -> Icons.Rounded.MusicNote
+                MusicHomeMood.Energize -> Icons.Rounded.Bolt
+                MusicHomeMood.Chill -> Icons.Rounded.GraphicEq
+                MusicHomeMood.OnRepeat -> Icons.Rounded.Repeat
+                MusicHomeMood.Favorites -> Icons.Rounded.Favorite
+            }
+
+            VantafynGlassChip(
+                selected = isSelected,
+                onClick = { onMoodSelected(mood) },
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = mood.label,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                        color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MusicMoodHeroCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    onPlay: () -> Unit,
+    onStartRadio: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    VantafynGlassCard(
+        modifier = modifier.fillMaxWidth(),
+        cornerRadius = 22.dp,
+        contentPadding = PaddingValues(18.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                modifier = Modifier.weight(1f),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                    )
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (onStartRadio != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(999.dp))
+                            .clickable(onClick = onStartRadio),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Radio,
+                            contentDescription = "Start Radio",
+                            tint = VantafynColors.Ink,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(VantafynGradients.accentHorizontal())
+                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(999.dp))
+                        .clickable(onClick = onPlay),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = "Play",
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun MusicTrackRow(
     title: String,
@@ -3349,9 +4156,11 @@ private fun MusicAlbumRow(
     albums: List<JellyfinMusicAlbum>,
     onAlbum: (JellyfinMusicAlbum) -> Unit,
     onLongPress: ((JellyfinMusicAlbum) -> Unit)? = null,
+    title: String = "Albums",
 ) {
+    if (albums.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-        Text("Albums", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(albums, key = { index, album -> "${album.id}-$index" }) { _, album ->
                 MusicArtworkTile(
@@ -3371,9 +4180,25 @@ private fun MusicArtistRow(
     artists: List<JellyfinMusicArtist>,
     onArtist: (JellyfinMusicArtist) -> Unit,
     onLongPress: ((JellyfinMusicArtist) -> Unit)? = null,
+    title: String = "Artists",
+    icon: ImageVector? = null,
 ) {
+    if (artists.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-        Text("Artists", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (icon != null) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = VantafynColors.Ink,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(artists, key = { index, artist -> "${artist.id}-$index" }) { _, artist ->
                 MusicArtworkTile(
@@ -3389,9 +4214,14 @@ private fun MusicArtistRow(
 }
 
 @Composable
-private fun MusicPlaylistRow(playlists: List<JellyfinMusicPlaylist>, onPlaylist: (JellyfinMusicPlaylist) -> Unit) {
+private fun MusicPlaylistRow(
+    playlists: List<JellyfinMusicPlaylist>,
+    onPlaylist: (JellyfinMusicPlaylist) -> Unit,
+    title: String = "Playlists",
+) {
+    if (playlists.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-        Text("Playlists", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+        Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(playlists, key = { index, playlist -> "${playlist.id}-$index" }) { _, playlist ->
                 MusicArtworkTile(playlist.imageUrl, playlist.name, "${playlist.trackCount ?: 0} tracks", trackImageUrls = playlist.trackImageUrls) { onPlaylist(playlist) }
@@ -4102,6 +4932,7 @@ private fun MusicArtworkTile(
     title: String,
     subtitle: String,
     isLoading: Boolean = false,
+    badgeText: String? = null,
     trackImageUrls: List<String> = emptyList(),
     onLongClick: (() -> Unit)? = null,
     onClick: () -> Unit,
@@ -4120,6 +4951,27 @@ private fun MusicArtworkTile(
                 PlaylistArtGrid(trackImageUrls, Modifier.size(128.dp))
             } else {
                 MusicArt(imageUrl, Modifier.size(128.dp), title = title, subtitle = subtitle)
+            }
+            if (badgeText != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(6.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.Black.copy(alpha = 0.72f))
+                        .border(0.5.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = badgeText,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = androidx.compose.ui.unit.TextUnit(10f, androidx.compose.ui.unit.TextUnitType.Sp),
+                            fontWeight = FontWeight.SemiBold,
+                            color = VantafynColors.Ink,
+                        ),
+                        maxLines = 1,
+                    )
+                }
             }
             if (isLoading) {
                 Box(
@@ -4597,6 +5449,19 @@ private fun NowPlayingDialog(
                     }
                 }
             }
+            if (state.isCasting) {
+                item {
+                    MusicContentReveal(index = 5, animate = revealActive) {
+                        CastDeviceVolumeBar(
+                            deviceName = state.castReceiverName ?: "Cast device",
+                            volume = state.castVolume,
+                            isMuted = state.isCastMuted,
+                            onVolumeChange = viewModel::setCastVolume,
+                            onToggleMute = viewModel::toggleCastMute,
+                        )
+                    }
+                }
+            }
             item {
                 MusicContentReveal(index = 5, animate = revealActive) {
                     Row(
@@ -5057,6 +5922,92 @@ private fun MusicProgressStrip(progress: Float, modifier: Modifier = Modifier, h
                 .fillMaxSize()
                 .background(VantafynGradients.accentHorizontal()),
         )
+    }
+}
+
+@Composable
+private fun CastDeviceVolumeBar(
+    deviceName: String,
+    volume: Float,
+    isMuted: Boolean,
+    onVolumeChange: (Float) -> Unit,
+    onToggleMute: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.70f))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp)),
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f, fill = false),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Cast,
+                        contentDescription = "Casting",
+                        tint = VantafynColors.Primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = deviceName,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                        color = VantafynColors.Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = "${if (isMuted) 0 else (volume * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontFeatureSettings = "tnum",
+                        color = VantafynColors.Muted,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                IconButton(
+                    onClick = onToggleMute,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isMuted || volume == 0f) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp,
+                        contentDescription = if (isMuted) "Unmute" else "Mute",
+                        tint = if (isMuted) VantafynColors.Muted else VantafynColors.Primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Slider(
+                    value = if (isMuted) 0f else volume.coerceIn(0f, 1f),
+                    onValueChange = onVolumeChange,
+                    valueRange = 0f..1f,
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(
+                        thumbColor = VantafynColors.Primary,
+                        activeTrackColor = VantafynColors.Primary,
+                        inactiveTrackColor = Color.White.copy(alpha = 0.18f),
+                    ),
+                )
+            }
+        }
     }
 }
 

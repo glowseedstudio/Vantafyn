@@ -1,6 +1,7 @@
 package dev.vantafyn.core.cast
 
 import android.content.Context
+import com.google.android.gms.cast.Cast
 import com.google.android.gms.cast.MediaInfo
 import com.google.android.gms.cast.MediaLoadRequestData
 import com.google.android.gms.cast.MediaMetadata
@@ -94,6 +95,18 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
         override fun onAdBreakStatusUpdated() = Unit
     }
     private var remoteClient: RemoteMediaClient? = null
+    private var currentCastSession: CastSession? = null
+    private val castListener = object : Cast.Listener() {
+        override fun onVolumeChanged() {
+            val session = currentCastSession ?: return
+            _state.update {
+                it.copy(
+                    volume = session.volume.toFloat(),
+                    isMuted = session.isMute,
+                )
+            }
+        }
+    }
     private var registered = false
     private var positionTickerJob: Job? = null
     private var pendingQueue: List<RemoteQueueItem> = emptyList()
@@ -202,13 +215,25 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
 
     override suspend fun setVolume(volume: Float) {
         val session = castContext?.sessionManager?.currentCastSession ?: throw CastCommandException(CastError.SessionLost)
-        session.setVolume(volume.coerceIn(0f, 1f).toDouble())
+        val clamped = volume.coerceIn(0f, 1f)
+        session.setVolume(clamped.toDouble())
+        _state.update { it.copy(volume = clamped) }
+        syncRemoteState()
+    }
+
+    suspend fun adjustVolume(delta: Float) {
+        val session = castContext?.sessionManager?.currentCastSession ?: throw CastCommandException(CastError.SessionLost)
+        val current = _state.value.volume
+        val newVol = (current + delta).coerceIn(0f, 1f)
+        session.setVolume(newVol.toDouble())
+        _state.update { it.copy(volume = newVol) }
         syncRemoteState()
     }
 
     override suspend fun setMuted(muted: Boolean) {
         val session = castContext?.sessionManager?.currentCastSession ?: throw CastCommandException(CastError.SessionLost)
         session.setMute(muted)
+        _state.update { it.copy(isMuted = muted) }
         syncRemoteState()
     }
 
@@ -255,6 +280,8 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
 
     private fun updateSession(session: CastSession, state: RemoteConnectionState) {
         clearRemoteClient()
+        currentCastSession = session
+        runCatching { session.addCastListener(castListener) }
         remoteClient = session.remoteMediaClient?.also { it.addListener(remoteListener) }
         _state.update {
             it.copy(
@@ -274,6 +301,8 @@ class GoogleCastPlaybackTarget private constructor(context: Context) : RemotePla
     private fun clearRemoteClient() {
         remoteClient?.removeListener(remoteListener)
         remoteClient = null
+        currentCastSession?.let { s -> runCatching { s.removeCastListener(castListener) } }
+        currentCastSession = null
         pendingQueue = emptyList()
         stopPositionTicker("no remote client")
     }

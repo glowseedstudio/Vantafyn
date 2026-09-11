@@ -200,6 +200,10 @@ class MusicPlaybackController private constructor(context: Context) {
         }
         addListener(
             object : Player.Listener {
+                override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
+                    _state.update { it.copy(shuffleEnabled = shuffleModeEnabled) }
+                }
+
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     Log.d(TAG, "isPlaying changed: $isPlaying (track=${_state.value.currentTrack?.title?.take(20)})")
                     _state.update { it.copy(isPlaying = isPlaying, errorMessage = null) }
@@ -345,6 +349,18 @@ class MusicPlaybackController private constructor(context: Context) {
             radioQueueManager.stopRadio("manual_queue_play")
         }
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
+        val sampleTrack = queue.getOrNull(safeIndex) ?: queue.firstOrNull()
+        if (sampleTrack != null && !sampleTrack.streamUrl.startsWith("file:") && !sampleTrack.streamUrl.startsWith("content:")) {
+            val uri = runCatching { Uri.parse(sampleTrack.streamUrl) }.getOrNull()
+            val token = uri?.getQueryParameter("ApiKey")
+                ?: uri?.getQueryParameter("api_key")
+                ?: uri?.getQueryParameter("X-Emby-Token")
+            val devId = uri?.getQueryParameter("deviceId")
+                ?: uri?.getQueryParameter("DeviceId")
+            if (!token.isNullOrBlank()) {
+                VantafynMediaCache.setFallbackCredentials(token, devId)
+            }
+        }
         val previous = _state.value.currentTrack
         val previousPosition = sessionPlayer.currentPosition.coerceAtLeast(0L)
         if (previous != null && previous.id != queue[safeIndex].id) {

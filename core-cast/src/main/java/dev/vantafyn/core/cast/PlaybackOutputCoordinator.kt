@@ -149,6 +149,25 @@ class PlaybackOutputCoordinator private constructor(context: Context) {
         }
     }
 
+    fun setVolume(volume: Float) {
+        scope.launch {
+            runCatching { castTarget.setVolume(volume) }.onFailure { setError(it) }
+        }
+    }
+
+    fun adjustCastVolume(delta: Float) {
+        scope.launch {
+            runCatching { castTarget.adjustVolume(delta) }.onFailure { setError(it) }
+        }
+    }
+
+    fun toggleMute() {
+        scope.launch {
+            val currentMuted = castTarget.state.value.isMuted
+            runCatching { castTarget.setMuted(!currentMuted) }.onFailure { setError(it) }
+        }
+    }
+
     fun disconnect(stopPlayback: Boolean) {
         scope.launch {
             runCatching { castTarget.disconnect(stopPlayback) }.onFailure { setError(it) }

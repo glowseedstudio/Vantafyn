@@ -6,10 +6,12 @@ import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.cache.CacheDataSink
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
+import dev.vantafyn.core.jellyfin.JellyfinSession
 import java.io.File
 
 @OptIn(UnstableApi::class)
@@ -26,6 +28,44 @@ object VantafynMediaCache {
     @Volatile
     var authHeaderProvider: (() -> Map<String, String>)? = null
 
+    @Volatile
+    private var fallbackToken: String? = null
+
+    @Volatile
+    private var fallbackDeviceId: String? = null
+
+    fun setFallbackCredentials(token: String?, deviceId: String? = null) {
+        if (!token.isNullOrBlank()) {
+            fallbackToken = token
+        }
+        if (!deviceId.isNullOrBlank()) {
+            fallbackDeviceId = deviceId
+        }
+    }
+
+    fun updateJellyfinSession(session: JellyfinSession?) {
+        if (session == null) {
+            authHeaderProvider = null
+            fallbackToken = null
+            fallbackDeviceId = null
+        } else {
+            val token = session.accessToken
+            val devId = session.server.localId.ifBlank { "vantafyn-android" }
+            fallbackToken = token
+            fallbackDeviceId = devId
+            authHeaderProvider = {
+                val headers = mutableMapOf<String, String>()
+                if (token.isNotBlank()) {
+                    headers["X-Emby-Token"] = token
+                    val clientAuth = "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"$devId\", Version=\"1.0.0\", Token=\"$token\""
+                    headers["Authorization"] = clientAuth
+                    headers["X-Emby-Authorization"] = clientAuth
+                }
+                headers
+            }
+        }
+    }
+
     @Synchronized
     fun getSimpleCache(context: Context, maxCacheBytes: Long = DEFAULT_MAX_CACHE_BYTES): SimpleCache {
         val appContext = context.applicationContext
@@ -39,19 +79,35 @@ object VantafynMediaCache {
         }
     }
 
-    fun getHttpDataSourceFactory(): DefaultHttpDataSource.Factory {
-        val factory = DefaultHttpDataSource.Factory()
+    fun getHttpDataSourceFactory(): HttpDataSource.Factory {
+        val baseFactory = DefaultHttpDataSource.Factory()
             .setConnectTimeoutMs(15_000)
             .setReadTimeoutMs(30_000)
             .setAllowCrossProtocolRedirects(true)
             .setUserAgent("Vantafyn-Android/${android.os.Build.VERSION.RELEASE}")
 
-        authHeaderProvider?.invoke()?.let { headers ->
-            if (headers.isNotEmpty()) {
-                factory.setDefaultRequestProperties(headers)
+        return object : HttpDataSource.Factory {
+            override fun createDataSource(): HttpDataSource {
+                val dynamicHeaders = authHeaderProvider?.invoke().orEmpty().toMutableMap()
+                if (dynamicHeaders.isEmpty() && !fallbackToken.isNullOrBlank()) {
+                    val token = fallbackToken.orEmpty()
+                    val devId = fallbackDeviceId ?: "vantafyn-android"
+                    dynamicHeaders["X-Emby-Token"] = token
+                    val clientAuth = "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"$devId\", Version=\"1.0.0\", Token=\"$token\""
+                    dynamicHeaders["Authorization"] = clientAuth
+                    dynamicHeaders["X-Emby-Authorization"] = clientAuth
+                }
+                if (dynamicHeaders.isNotEmpty()) {
+                    baseFactory.setDefaultRequestProperties(dynamicHeaders)
+                }
+                return baseFactory.createDataSource()
+            }
+
+            override fun setDefaultRequestProperties(defaultRequestProperties: Map<String, String>): HttpDataSource.Factory {
+                baseFactory.setDefaultRequestProperties(defaultRequestProperties)
+                return this
             }
         }
-        return factory
     }
 
     fun getCacheDataSourceFactory(context: Context): CacheDataSource.Factory {

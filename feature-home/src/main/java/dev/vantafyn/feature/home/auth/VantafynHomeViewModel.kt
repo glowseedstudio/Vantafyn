@@ -128,6 +128,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -205,6 +207,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     val state: StateFlow<VantafynHomeUiState> = _state.asStateFlow()
 
     init {
+        viewModelScope.launch {
+            _state.map { it.session }
+                .distinctUntilChanged()
+                .collect { session ->
+                    dev.vantafyn.core.media.VantafynMediaCache.updateJellyfinSession(session)
+                }
+        }
         loadSavedProfiles()
         refreshOmbiRequestsAvailability()
         refreshAchievementsAvailability()
@@ -1204,9 +1213,19 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             return
         }
         viewModelScope.launch {
-            val records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            var records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            if (records.isEmpty()) {
+                val allCompleted = downloadRepository.listAllCompleted()
+                val userCompleted = allCompleted.filter { it.identity.userId == profile.jellyfinUserId.toString() }
+                if (userCompleted.isNotEmpty()) {
+                    records = userCompleted
+                } else if (allCompleted.isNotEmpty()) {
+                    records = allCompleted
+                }
+            }
             if (reason in setOf(JellyfinRestoreFailureReason.ServerUnreachable, JellyfinRestoreFailureReason.NetworkUnavailable) && records.isNotEmpty()) {
                 _state.update {
+                    val targetDestination = if (it.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Downloads
                     it.copy(
                         step = VantafynSetupStep.Home,
                         selectedProfileId = profile.id,
@@ -1231,7 +1250,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         restoreFailureMessage = null,
                         failedProfileIds = it.failedProfileIds + profile.id,
                         errorMessage = null,
-                        mobileDestination = MobileDestination.Downloads,
+                        mobileDestination = targetDestination,
                         previousMobileDestination = MobileDestination.Profile,
                         offlineDownloads = records,
                         isDownloadsLoading = false,
@@ -3598,15 +3617,28 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun workOfflineFromRecovery() {
-        val profile = _state.value.restoreFailureProfile ?: return
+        val profile = _state.value.restoreFailureProfile
+            ?: _state.value.savedProfiles.firstOrNull { it.id == _state.value.selectedProfileId }
+            ?: _state.value.savedProfiles.firstOrNull()
+            ?: return
         openOfflineDownloads(profile, message = "Working offline")
     }
 
     private fun openOfflineDownloads(profile: SavedProfile, message: String?) {
         viewModelScope.launch {
-            val records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            var records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())
+            if (records.isEmpty()) {
+                val allCompleted = downloadRepository.listAllCompleted()
+                val userCompleted = allCompleted.filter { it.identity.userId == profile.jellyfinUserId.toString() }
+                if (userCompleted.isNotEmpty()) {
+                    records = userCompleted
+                } else if (allCompleted.isNotEmpty()) {
+                    records = allCompleted
+                }
+            }
             val summary = downloadRepository.storageSummary(profile.serverRef, profile.jellyfinUserId.toString())
             _state.update {
+                val targetDestination = if (it.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Downloads
                 it.copy(
                     step = VantafynSetupStep.Home,
                     selectedProfileId = profile.id,
@@ -3629,7 +3661,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     restoreFailureProfile = null,
                     restoreFailureReason = null,
                     restoreFailureMessage = null,
-                    mobileDestination = MobileDestination.Downloads,
+                    mobileDestination = targetDestination,
                     previousMobileDestination = MobileDestination.Profile,
                     offlineDownloads = records,
                     offlineDownloadStorageSummary = summary,
@@ -6793,7 +6825,7 @@ private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
 private const val LibraryScanStartGraceMs = 20_000L
 private const val ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS = 30_000L
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
-private const val LibraryItemsPageSize = 60
+private const val LibraryItemsPageSize = 100
 
 enum class VantafynSetupStep {
     Splash,

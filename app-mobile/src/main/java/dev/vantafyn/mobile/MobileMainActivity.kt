@@ -17,9 +17,31 @@ import dev.vantafyn.core.ui.VantafynTheme
 import dev.vantafyn.core.ui.VantafynPermissionSheet
 import dev.vantafyn.feature.home.VantafynAppContent
 import dev.vantafyn.feature.player.VantafynPipState
+import android.view.KeyEvent
 import androidx.fragment.app.FragmentActivity
 
 class MobileMainActivity : FragmentActivity() {
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val coordinator = PlaybackOutputCoordinator.get(this)
+        if (coordinator.state.value.isCasting) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        coordinator.adjustCastVolume(0.05f)
+                    }
+                    return true
+                }
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    if (event.action == KeyEvent.ACTION_DOWN) {
+                        coordinator.adjustCastVolume(-0.05f)
+                    }
+                    return true
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)

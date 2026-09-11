@@ -447,6 +447,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                     if (candidate != null) {
                         session = candidate.first
                         home = candidate.second
+                        VantafynMediaCache.updateJellyfinSession(candidate.first)
                         return@withTimeoutOrNull true
                     }
                 }

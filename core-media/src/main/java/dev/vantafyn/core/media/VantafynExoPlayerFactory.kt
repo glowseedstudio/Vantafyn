@@ -98,11 +98,27 @@ object VantafynExoPlayerFactory {
     @OptIn(UnstableApi::class)
     fun builder(context: Context): ExoPlayer.Builder =
         ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+            .setMediaSourceFactory(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                    androidx.media3.datasource.DefaultDataSource.Factory(
+                        context.applicationContext,
+                        VantafynMediaCache.getHttpDataSourceFactory(),
+                    ),
+                ),
+            )
             .setLoadControl(videoLoadControl())
 
     @OptIn(UnstableApi::class)
     fun builder(context: Context, trackSelector: DefaultTrackSelector): ExoPlayer.Builder =
         ExoPlayer.Builder(context.applicationContext, renderersFactory(context))
+            .setMediaSourceFactory(
+                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
+                    androidx.media3.datasource.DefaultDataSource.Factory(
+                        context.applicationContext,
+                        VantafynMediaCache.getHttpDataSourceFactory(),
+                    ),
+                ),
+            )
             .setTrackSelector(trackSelector)
             .setLoadControl(videoLoadControl())
 }

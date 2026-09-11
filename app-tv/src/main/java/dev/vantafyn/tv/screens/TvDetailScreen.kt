@@ -208,6 +208,20 @@ fun TvDetailScreen(
                         }
                     }
 
+                    if (detail.collections.isNotEmpty()) {
+                        item(key = "detail_included_collections_${detail.id}") {
+                            CompositionLocalProvider(LocalBringIntoViewSpec provides defaultBringIntoViewSpec) {
+                                TvDetailMediaRail(
+                                    title = "Part of Collection",
+                                    items = detail.collections,
+                                    serverUrl = serverUrl,
+                                    startPadding = contentStartPadding,
+                                    onOpenMedia = onOpenMedia,
+                                )
+                            }
+                        }
+                    }
+
                     if (detail.related.isNotEmpty()) {
                         item(key = "detail_related_${detail.id}") {
                             CompositionLocalProvider(LocalBringIntoViewSpec provides defaultBringIntoViewSpec) {

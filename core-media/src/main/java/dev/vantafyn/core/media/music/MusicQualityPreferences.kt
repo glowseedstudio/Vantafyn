@@ -141,6 +141,23 @@ object MusicQualityPreferences {
             builder.appendQueryParameter("audioBitRate", maxBps.toString())
         }
 
+        if (isJellyfin) {
+            val token = uri.getQueryParameter("ApiKey")
+                ?: uri.getQueryParameter("api_key")
+                ?: uri.getQueryParameter("X-Emby-Token")
+            if (!token.isNullOrBlank()) {
+                if (uri.getQueryParameter("ApiKey") == null) {
+                    builder.appendQueryParameter("ApiKey", token)
+                }
+                if (uri.getQueryParameter("api_key") == null) {
+                    builder.appendQueryParameter("api_key", token)
+                }
+                if (uri.getQueryParameter("X-Emby-Token") == null) {
+                    builder.appendQueryParameter("X-Emby-Token", token)
+                }
+            }
+        }
+
         return builder.build().toString()
     }
 }

@@ -186,6 +186,7 @@ import androidx.compose.material.icons.rounded.Translate
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.ViewAgenda
+import androidx.compose.material.icons.rounded.ViewModule
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.CropPortrait
 import androidx.compose.material.icons.rounded.CropLandscape
@@ -311,6 +312,7 @@ import dev.vantafyn.core.jellyfin.WatchPartyMemberReadyStatus
 import dev.vantafyn.core.jellyfin.WatchPartyRules
 import dev.vantafyn.core.jellyfin.WatchPartySelectedMedia
 import dev.vantafyn.core.jellyfin.WatchPartyVoteValue
+import dev.vantafyn.core.jellyfin.withAccessToken
 import dev.vantafyn.core.media.AppForegroundStateRepository
 import dev.vantafyn.core.media.LongRunningTaskRegistry
 import dev.vantafyn.core.media.LongRunningTaskType
@@ -1279,12 +1281,41 @@ private fun ServerConfirmScreen(
                             url = server?.url ?: state.serverUrl,
                             version = server?.version,
                         ) {
+                            val matchingSavedProfile = server?.serverId?.let { sId ->
+                                state.savedProfiles.firstOrNull { it.serverRef == sId }
+                            } ?: server?.url?.let { sUrl ->
+                                state.savedProfiles.firstOrNull { it.serverUrl.trimEnd('/') == sUrl.trimEnd('/') }
+                            }
                             val avatar = state.publicUsers.firstOrNull { it.isAdministrator && it.imageUrl != null }
+                                ?: state.publicUsers.firstOrNull { it.isAdministrator }
                                 ?: state.publicUsers.firstOrNull { it.displayName == state.session?.user?.name && it.imageUrl != null }
                                 ?: state.publicUsers.firstOrNull { user -> state.savedProfiles.any { it.displayName == user.displayName } && user.imageUrl != null }
+                                ?: (if (matchingSavedProfile != null) state.publicUsers.firstOrNull { it.displayName == matchingSavedProfile.displayName } else null)
+                                ?: state.publicUsers.firstOrNull { it.imageUrl != null }
+                                ?: state.publicUsers.firstOrNull()
+
+                            val avatarImageUrl = avatar?.imageUrl
+                                ?: matchingSavedProfile?.imageUrl
+                                ?: (if (server != null && avatar != null) {
+                                    val base = "${server.url.trimEnd('/')}/Users/${avatar.id}/Images/Primary"
+                                    if (!avatar.primaryImageTag.isNullOrBlank()) "$base?tag=${avatar.primaryImageTag}" else base
+                                } else null)
+
+                            val effectiveAvatarUrl = if (state.session?.accessToken?.isNotBlank() == true && avatarImageUrl != null) {
+                                avatarImageUrl.withAccessToken(state.session.accessToken)
+                            } else {
+                                avatarImageUrl
+                            }
+
+                            val avatarName = avatar?.displayName
+                                ?: matchingSavedProfile?.displayName
+                                ?: state.session?.user?.name
+                                ?: server?.name
+                                ?: "Jellyfin Server"
+
                             ProfileAvatar(
-                                name = avatar?.displayName ?: state.session?.user?.name ?: server?.name ?: "Jellyfin Server",
-                                imageUrl = avatar?.imageUrl,
+                                name = avatarName,
+                                imageUrl = effectiveAvatarUrl,
                             )
                         }
                     }
@@ -1574,7 +1605,8 @@ private fun ConnectionRecoveryScreen(
                             }
                             StatusBlock(state)
 
-                            if (state.offlineDownloads.any { it.state == DownloadState.Completed }) {
+                            val hasCompletedDownloads = state.offlineDownloads.any { it.state == DownloadState.Completed }
+                            if (hasCompletedDownloads) {
                                 VantafynGlassSurface(
                                     modifier = Modifier.fillMaxWidth(),
                                     variant = VantafynGlassVariant.Card,
@@ -1598,22 +1630,26 @@ private fun ConnectionRecoveryScreen(
                                                 fontWeight = FontWeight.SemiBold,
                                             )
                                             Text(
-                                                "Play saved titles while this server reconnects.",
+                                                if (state.experienceMode == ExperienceMode.MusicOnly) {
+                                                    "Play saved tracks and albums while this server reconnects."
+                                                } else {
+                                                    "Play saved titles while this server reconnects."
+                                                },
                                                 color = VantafynColors.Muted,
                                                 style = MaterialTheme.typography.bodyMedium,
                                             )
                                         }
                                     }
                                 }
-                                VantafynButton(
-                                    "Work offline",
-                                    onClick = onWorkOffline,
-                                    enabled = !state.isLoading,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(54.dp),
-                                )
                             }
+                            VantafynButton(
+                                "Work offline",
+                                onClick = onWorkOffline,
+                                enabled = !state.isLoading,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(54.dp),
+                            )
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
@@ -2549,6 +2585,8 @@ private fun AddProfileTile(modifier: Modifier, onClick: () -> Unit) {
 
 @Composable
 private fun ProfileAvatar(name: String, imageUrl: String?, modifier: Modifier = Modifier.fillMaxSize()) {
+    var hasLoadError by remember(imageUrl) { mutableStateOf(false) }
+    android.util.Log.d("VantafynAvatar", "ProfileAvatar: name=$name imageUrl=$imageUrl hasLoadError=$hasLoadError")
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(999.dp))
@@ -2559,12 +2597,16 @@ private fun ProfileAvatar(name: String, imageUrl: String?, modifier: Modifier = 
             ),
         contentAlignment = Alignment.Center,
     ) {
-        if (imageUrl != null) {
+        if (!imageUrl.isNullOrBlank() && !hasLoadError) {
             AsyncImage(
                 model = imageUrl,
                 contentDescription = name,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                onError = {
+                    android.util.Log.e("VantafynAvatar", "ProfileAvatar onError: name=$name imageUrl=$imageUrl")
+                    hasLoadError = true
+                },
             )
         } else {
             Text(initials(name), color = VantafynColors.Ink, style = MaterialTheme.typography.displayLarge)
@@ -4892,13 +4934,23 @@ private fun MobileHomeProfileAvatar(state: VantafynHomeUiState, onProfile: () ->
                 .clickable(onClick = onProfile),
             contentAlignment = Alignment.Center,
         ) {
-            val imageUrl = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }?.imageUrl
-            if (imageUrl != null) {
+            val savedProfile = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }
+            val imageUrl = savedProfile?.imageUrl
+                ?: state.session?.let { session ->
+                    val base = "${session.server.url.trimEnd('/')}/Users/${session.user.id}/Images/Primary"
+                    val tag = session.user.primaryImageTag
+                    val withTag = if (!tag.isNullOrBlank()) "$base?tag=$tag" else base
+                    if (session.accessToken.isNotBlank()) withTag.withAccessToken(session.accessToken) else withTag
+                }
+            android.util.Log.d("VantafynAvatar", "MobileHomeProfileAvatar: imageUrl=$imageUrl savedProfile=${savedProfile?.imageUrl} sessionUser=${state.session?.user?.name}")
+            var hasLoadError by remember(imageUrl) { mutableStateOf(false) }
+            if (!imageUrl.isNullOrBlank() && !hasLoadError) {
                 AsyncImage(
                     model = imageUrl,
                     contentDescription = state.session?.user?.name,
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
+                    onError = { hasLoadError = true },
                 )
             } else {
                 Text(initials(state.session?.user?.name.orEmpty()), color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
@@ -6004,7 +6056,8 @@ private fun MediaItemCard(item: JellyfinMediaItem, onClick: () -> Unit, onLongPr
 private fun LibraryViewToggle(selected: LibraryViewMode, onSelect: (LibraryViewMode) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val icon = when (selected) {
-        LibraryViewMode.Poster -> Icons.Rounded.ViewAgenda
+        LibraryViewMode.Poster -> Icons.Rounded.CropPortrait
+        LibraryViewMode.CompactGrid -> Icons.Rounded.ViewModule
         LibraryViewMode.Landscape -> Icons.Rounded.CropLandscape
         LibraryViewMode.Thumbnail -> Icons.Rounded.GridView
     }
@@ -6031,7 +6084,7 @@ private fun LibraryViewToggle(selected: LibraryViewMode, onSelect: (LibraryViewM
         ) {
             Box(
                 modifier = Modifier
-                    .widthIn(min = 170.dp)
+                    .widthIn(min = 180.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(VantafynColors.Graphite.copy(alpha = 0.96f))
                     .vantafynAnimatedModalBorder(cornerRadius = 16.dp, strokeWidth = 1.5.dp)
@@ -6040,9 +6093,15 @@ private fun LibraryViewToggle(selected: LibraryViewMode, onSelect: (LibraryViewM
                 Column {
                     LibraryViewMenuItem(
                         icon = Icons.Rounded.CropPortrait,
-                        label = "Poster",
+                        label = "Poster (2 rows)",
                         selected = selected == LibraryViewMode.Poster,
                         onClick = { onSelect(LibraryViewMode.Poster); expanded = false },
+                    )
+                    LibraryViewMenuItem(
+                        icon = Icons.Rounded.ViewModule,
+                        label = "Compact (3 rows)",
+                        selected = selected == LibraryViewMode.CompactGrid,
+                        onClick = { onSelect(LibraryViewMode.CompactGrid); expanded = false },
                     )
                     LibraryViewMenuItem(
                         icon = Icons.Rounded.CropLandscape,
@@ -6052,7 +6111,7 @@ private fun LibraryViewToggle(selected: LibraryViewMode, onSelect: (LibraryViewM
                     )
                     LibraryViewMenuItem(
                         icon = Icons.Rounded.GridView,
-                        label = "Compact",
+                        label = "Thumbnail",
                         selected = selected == LibraryViewMode.Thumbnail,
                         onClick = { onSelect(LibraryViewMode.Thumbnail); expanded = false },
                     )
@@ -6222,6 +6281,52 @@ private fun LibraryThumbnailCard(item: JellyfinMediaItem, onClick: () -> Unit, o
 }
 
 @Composable
+private fun CompactMediaItemCard(
+    item: JellyfinMediaItem,
+    onClick: () -> Unit,
+    onLongPress: () -> Unit = {},
+) {
+    val isMusic = item.isMusicItem()
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        ArtworkBox(
+            imageUrl = item.resolveArtwork(wide = false),
+            title = item.title,
+            wide = false,
+            progress = if (isMusic) null else item.progress,
+            isPlayed = if (isMusic) false else item.isPlayed,
+            unplayedItemCount = if (isMusic) 0 else item.unplayedItemCount,
+            onClick = onClick,
+            onLongPress = onLongPress,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(if (isMusic) 1f else 2f / 3f),
+        )
+        Text(
+            item.title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = rememberLifecycleAwareMarquee(),
+        )
+        if (item.itemType != "LiveTvChannel" && item.itemType != "LiveTvProgram") {
+            item.subtitle?.let {
+                Text(
+                    it,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryItemRow(
     row: List<JellyfinMediaItem>,
     viewMode: LibraryViewMode,
@@ -6248,16 +6353,23 @@ private fun LibraryItemRow(
             LibraryLandscapeCard(item = item, onClick = { onClick(item) }, onLongPress = { onLongPress(item) })
         }
     } else {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        val spacing = if (viewMode == LibraryViewMode.CompactGrid) 8.dp else VantafynSpacing.md
+        val expectedCols = if (viewMode == LibraryViewMode.CompactGrid) 3 else 2
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(spacing)) {
             row.forEach { item ->
                 Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.Center) {
                     when (viewMode) {
+                        LibraryViewMode.CompactGrid -> CompactMediaItemCard(item = item, onClick = { onClick(item) }, onLongPress = { onLongPress(item) })
                         LibraryViewMode.Thumbnail -> LibraryThumbnailCard(item = item, onClick = { onClick(item) }, onLongPress = { onLongPress(item) })
                         else -> MediaItemCard(item = item, onClick = { onClick(item) }, onLongPress = { onLongPress(item) })
                     }
                 }
             }
-            if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+            if (row.size < expectedCols) {
+                repeat(expectedCols - row.size) {
+                    Spacer(modifier = Modifier.weight(1f))
+                }
+            }
         }
     }
 }
@@ -6646,7 +6758,11 @@ private fun LibraryDetailScreen(
             val isMusicLibrary = library?.collectionType?.lowercase() == "music"
             val isPlaylists = library?.collectionType?.lowercase() == "playlists" && state.libraryItemsFilter == JellyfinLibraryItemFilter.All
             val viewMode = state.libraryViewMode
-            val chunkSize = if (viewMode == LibraryViewMode.Landscape) 1 else 2
+            val chunkSize = when (viewMode) {
+                LibraryViewMode.Landscape -> 1
+                LibraryViewMode.CompactGrid -> 3
+                else -> 2
+            }
             if (isMusicLibrary) {
                 val albums = visibleItems.filter { it.itemType == "MusicAlbum" }
                 val songs = visibleItems.filter { it.itemType == "Audio" }
@@ -17363,9 +17479,18 @@ private fun MediaDetailScreen(
                     }
                 }
             }
-            if (!isPerson && detail.people.isNotEmpty()) {
+            if (!isPerson && detail.collections.isNotEmpty()) {
                 item {
                     HomeContentReveal(index = 4, animate = detailRevealActive, revealKey = detailRevealKey) {
+                        HomeRowInset {
+                            IncludedInCollectionsSection(detail.collections, onOpenMedia)
+                        }
+                    }
+                }
+            }
+            if (!isPerson && detail.people.isNotEmpty()) {
+                item {
+                    HomeContentReveal(index = 5, animate = detailRevealActive, revealKey = detailRevealKey) {
                         HomeRowInset {
                             PeopleSection(detail, onPerson = { onOpenMedia(it) })
                         }
@@ -17374,7 +17499,7 @@ private fun MediaDetailScreen(
             }
             if (!isPerson && detail.related.isNotEmpty()) {
                 item {
-                    HomeContentReveal(index = 5, animate = detailRevealActive, revealKey = detailRevealKey) {
+                    HomeContentReveal(index = 6, animate = detailRevealActive, revealKey = detailRevealKey) {
                         HomeRowInset {
                             RelatedSection(detail, onOpenMedia)
                         }
@@ -17383,7 +17508,7 @@ private fun MediaDetailScreen(
             }
             if (detail.externalLinks.isNotEmpty()) {
                 item {
-                    HomeContentReveal(index = 6, animate = detailRevealActive, revealKey = detailRevealKey) {
+                    HomeContentReveal(index = 7, animate = detailRevealActive, revealKey = detailRevealKey) {
                         HomeRowInset {
                             ExternalLinksSection(detail, onOpen = onPlaybackComingSoon)
                         }
@@ -18297,6 +18422,18 @@ private fun PeopleSection(detail: JellyfinMediaDetail, onPerson: (java.util.UUID
                     Text(person.name, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyLarge, maxLines = 1, textAlign = TextAlign.Center)
                     Text(person.role ?: person.type.orEmpty(), color = VantafynColors.Muted, style = MaterialTheme.typography.bodyLarge, maxLines = 1, textAlign = TextAlign.Center)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun IncludedInCollectionsSection(collections: List<JellyfinMediaItem>, onOpenMedia: (java.util.UUID) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+        Text("Part of Collection", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+            items(collections, key = { it.id }) { item ->
+                MediaItemCard(item = item, onClick = { onOpenMedia(item.id) })
             }
         }
     }
@@ -20742,7 +20879,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.6"
+private const val VANTAFYN_APP_VERSION = "0.9.7"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable
