@@ -19547,53 +19547,55 @@ private fun RailInteriorAtmosphere(
         val height = size.height
         if (width <= 0f || height <= 0f) return@Canvas
 
-        val bloom1X = width * (0.16f + driftProgress * 0.40f)
-        val bloom2X = width * (0.84f - driftProgress * 0.40f)
+        val bloom1X = width * (0.08f + driftProgress * 0.42f)
+        val bloom2X = width * (0.92f - driftProgress * 0.42f)
         val bloomY = height * 0.5f
 
         val baseAlpha = if (isMusicPlaying) 0.18f * pulseProgress else 0.13f * pulseProgress
 
-        // 1. Electric Cyan Nebula Bloom
+        // 1. Electric Cyan Nebula Bloom (reaches into left curved end cap)
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 1.25f),
-                    Color(0xFF00B0FF).copy(alpha = baseAlpha * 0.60f),
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 1.30f),
+                    Color(0xFF00B0FF).copy(alpha = baseAlpha * 0.65f),
                     Color.Transparent,
                 ),
                 center = Offset(bloom1X, bloomY),
-                radius = width * 0.38f,
+                radius = width * 0.44f,
             ),
             center = Offset(bloom1X, bloomY),
-            radius = width * 0.38f,
+            radius = width * 0.44f,
         )
 
-        // 2. Violet / Indigo Light Bloom
+        // 2. Violet / Indigo Light Bloom (reaches into right curved end cap)
         drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 1.25f),
-                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.60f),
+                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 1.30f),
+                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.65f),
                     Color.Transparent,
                 ),
                 center = Offset(bloom2X, bloomY),
-                radius = width * 0.40f,
+                radius = width * 0.44f,
             ),
             center = Offset(bloom2X, bloomY),
-            radius = width * 0.40f,
+            radius = width * 0.44f,
         )
 
-        // 3. Central ambient connective sheen across the entire dock
+        // 3. Continuous ambient gradient wash across the entire dock interior from edge to edge
         drawRect(
             brush = Brush.horizontalGradient(
                 colors = listOf(
-                    Color.Transparent,
-                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.40f),
-                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.30f),
-                    Color.Transparent,
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.35f),
+                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.45f),
+                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 0.40f),
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.35f),
                 ),
+                startX = 0f,
+                endX = width,
             ),
-            topLeft = Offset(0f, 0f),
+            topLeft = Offset.Zero,
             size = Size(width, height),
         )
     }
@@ -19723,7 +19725,7 @@ private fun BottomRailAccentBorder(
     }
     Canvas(modifier = modifier) {
         val strokeWidth = 1.8.dp.toPx()
-        val cornerRadius = 30.dp.toPx()
+        val cornerRadius = (size.height / 2f).coerceAtMost(30.dp.toPx())
         val halfStroke = strokeWidth / 2f
         drawRoundRect(
             brush = VantafynGradients.accentHorizontal(),
@@ -19910,7 +19912,11 @@ private fun MobileBottomNav(
                 .fillMaxWidth()
                 .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
         ) {
-            VantafynGlassDock(modifier = Modifier.fillMaxWidth()) {
+            VantafynGlassDock(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(0.dp),
+            ) {
                 RailInteriorAtmosphere(
                     isMusicPlaying = isMusicPlaying,
                     modifier = Modifier.matchParentSize(),
@@ -19943,7 +19949,7 @@ private fun MobileBottomNav(
                     BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp),
+                            .height(58.dp),
                     ) {
                         MagneticGlidingCircle(
                             selectedIndex = selectedIndex,
@@ -19954,7 +19960,7 @@ private fun MobileBottomNav(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(54.dp),
+                                .height(58.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             if (!isSocialMode) {
