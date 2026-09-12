@@ -23,6 +23,8 @@ import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -141,54 +143,64 @@ class SubsonicMusicDataProvider(
     private fun getStringId(uuid: UUID): String =
         uuidIdMap[uuid] ?: uuid.toString()
 
-    override suspend fun getMusicHome(): MusicResult<MusicHomeData> = runCatching {
-        val recentAlbumsJson = client.executeGet("getAlbumList2", mapOf("type" to "newest", "size" to "20"))
-        val albumList = recentAlbumsJson.optJSONObject("albumList2")?.optJSONArray("album") ?: JSONArray()
-        val recentAlbums = mutableListOf<MusicAlbum>()
-        for (i in 0 until albumList.length()) {
-            val obj = albumList.getJSONObject(i)
-            val id = getUuid(obj.optString("id"))
-            recentAlbums.add(
-                MusicAlbum(
-                    id = id,
-                    title = obj.optString("title", obj.optString("name", "Untitled")),
-                    artist = obj.optString("artist", "Unknown Artist"),
-                    artistId = obj.optString("artistId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
-                    year = obj.optInt("year").takeIf { it > 0 },
-                    coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
-                    trackCount = obj.optInt("songCount").takeIf { it > 0 },
-                    genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
-                    isFavorite = obj.has("starred") || obj.optBoolean("starred", false),
-                )
-            )
-        }
+    override suspend fun getMusicHome(): MusicResult<MusicHomeData> = withContext(Dispatchers.IO) {
+        runCatching {
+            coroutineScope {
+                val albumsDeferred = async {
+                    val recentAlbumsJson = client.executeGet("getAlbumList2", mapOf("type" to "newest", "size" to "20"))
+                    val albumList = recentAlbumsJson.optJSONObject("albumList2")?.optJSONArray("album") ?: JSONArray()
+                    val recentAlbums = mutableListOf<MusicAlbum>()
+                    for (i in 0 until albumList.length()) {
+                        val obj = albumList.getJSONObject(i)
+                        val id = getUuid(obj.optString("id"))
+                        recentAlbums.add(
+                            MusicAlbum(
+                                id = id,
+                                title = obj.optString("title", obj.optString("name", "Untitled")),
+                                artist = obj.optString("artist", "Unknown Artist"),
+                                artistId = obj.optString("artistId").takeIf { it.isNotBlank() }?.let { getUuid(it) },
+                                year = obj.optInt("year").takeIf { it > 0 },
+                                coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
+                                trackCount = obj.optInt("songCount").takeIf { it > 0 },
+                                genres = listOfNotNull(obj.optString("genre").takeIf { it.isNotBlank() }),
+                                isFavorite = obj.has("starred") || obj.optBoolean("starred", false),
+                            )
+                        )
+                    }
+                    recentAlbums
+                }
 
-        val playlistsJson = client.executeGet("getPlaylists")
-        val playlistArray = playlistsJson.optJSONObject("playlists")?.optJSONArray("playlist") ?: JSONArray()
-        val playlists = mutableListOf<MusicPlaylist>()
-        for (i in 0 until playlistArray.length()) {
-            val obj = playlistArray.getJSONObject(i)
-            val id = getUuid(obj.optString("id"))
-            playlists.add(
-                MusicPlaylist(
-                    id = id,
-                    title = obj.optString("name", "Untitled Playlist"),
-                    owner = obj.optString("owner"),
-                    trackCount = obj.optInt("songCount"),
-                    coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
-                    durationMs = obj.optLong("duration") * 1000L,
-                )
-            )
-        }
+                val playlistsDeferred = async {
+                    val playlistsJson = client.executeGet("getPlaylists")
+                    val playlistArray = playlistsJson.optJSONObject("playlists")?.optJSONArray("playlist") ?: JSONArray()
+                    val playlists = mutableListOf<MusicPlaylist>()
+                    for (i in 0 until playlistArray.length()) {
+                        val obj = playlistArray.getJSONObject(i)
+                        val id = getUuid(obj.optString("id"))
+                        playlists.add(
+                            MusicPlaylist(
+                                id = id,
+                                title = obj.optString("name", "Untitled Playlist"),
+                                owner = obj.optString("owner"),
+                                trackCount = obj.optInt("songCount"),
+                                coverUrl = client.buildCoverArtUrl(obj.optString("coverArt", obj.optString("id"))),
+                                durationMs = obj.optLong("duration") * 1000L,
+                            )
+                        )
+                    }
+                    playlists
+                }
 
-        MusicHomeData(
-            recentAlbums = recentAlbums,
-            playlists = playlists,
+                MusicHomeData(
+                    recentAlbums = albumsDeferred.await(),
+                    playlists = playlistsDeferred.await(),
+                )
+            }
+        }.fold(
+            onSuccess = { MusicResult.Success(it) },
+            onFailure = { MusicResult.Failure(it.message ?: "Failed to load Subsonic music home", it) },
         )
-    }.fold(
-        onSuccess = { MusicResult.Success(it) },
-        onFailure = { MusicResult.Failure(it.message ?: "Failed to load Subsonic music home", it) },
-    )
+    }
 
     override suspend fun getArtists(page: Int, query: String?): MusicResult<List<MusicArtist>> = runCatching {
         val json = client.executeGet("getArtists")

@@ -1650,17 +1650,21 @@ class SdkJellyfinMusicRepository(
         withContext(ioDispatcher) {
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                val views by api.userViewsApi.getUserViews(userId = session.user.id)
-                val libraries = views.items
-                    .filter { it.collectionType?.serialName.equals("music", ignoreCase = true) }
-                    .map {
-                        JellyfinMusicLibrary(
-                            id = it.id,
-                            name = it.name ?: "Music",
-                            imageUrl = it.primaryImageUrl(api, 520),
-                        )
-                    }
                 coroutineScope {
+                    val librariesDef = async {
+                        runCatching {
+                            val views by api.userViewsApi.getUserViews(userId = session.user.id)
+                            views.items
+                                .filter { it.collectionType?.serialName.equals("music", ignoreCase = true) }
+                                .map {
+                                    JellyfinMusicLibrary(
+                                        id = it.id,
+                                        name = it.name ?: "Music",
+                                        imageUrl = it.primaryImageUrl(api, 520),
+                                    )
+                                }
+                        }.getOrDefault(emptyList())
+                    }
                     val recentlyAddedDef = async {
                         runCatching {
                             getMusicTracks(api, session, limit = 24, sortBy = listOf(ItemSortBy.DATE_CREATED), sortOrder = listOf(SortOrder.DESCENDING))
@@ -1693,26 +1697,35 @@ class SdkJellyfinMusicRepository(
                     }
                     val rediscoverDef = async {
                         runCatching {
-                            val played = getMusicTracks(
-                                api = api,
-                                session = session,
-                                limit = 30,
-                                filters = listOf(ItemFilter.IS_PLAYED),
-                                sortBy = listOf(ItemSortBy.DATE_PLAYED),
-                                sortOrder = listOf(SortOrder.ASCENDING),
-                            )
-                            val favorites = getMusicTracks(
-                                api = api,
-                                session = session,
-                                limit = 20,
-                                filters = listOf(ItemFilter.IS_FAVORITE),
-                                sortBy = listOf(ItemSortBy.DATE_PLAYED),
-                                sortOrder = listOf(SortOrder.ASCENDING),
-                            )
-                            (played + favorites).distinctBy { it.id }
+                            coroutineScope {
+                                val playedDef = async {
+                                    getMusicTracks(
+                                        api = api,
+                                        session = session,
+                                        limit = 30,
+                                        filters = listOf(ItemFilter.IS_PLAYED),
+                                        sortBy = listOf(ItemSortBy.DATE_PLAYED),
+                                        sortOrder = listOf(SortOrder.ASCENDING),
+                                    )
+                                }
+                                val favoritesDef = async {
+                                    getMusicTracks(
+                                        api = api,
+                                        session = session,
+                                        limit = 20,
+                                        filters = listOf(ItemFilter.IS_FAVORITE),
+                                        sortBy = listOf(ItemSortBy.DATE_PLAYED),
+                                        sortOrder = listOf(SortOrder.ASCENDING),
+                                    )
+                                }
+                                val played = playedDef.await()
+                                val favorites = favoritesDef.await()
+                                (played + favorites).distinctBy { it.id }
+                            }
                         }.getOrDefault(emptyList())
                     }
 
+                    val libraries = librariesDef.await()
                     val recentlyAdded = recentlyAddedDef.await()
                     val albums = albumsDef.await()
                     val artists = artistsDef.await()

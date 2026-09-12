@@ -18,6 +18,7 @@ import dev.vantafyn.core.downloads.parseOfflineLyrics
 import dev.vantafyn.core.downloads.toJsonString
 import kotlinx.coroutines.Dispatchers
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import dev.vantafyn.core.jellyfin.JellyfinLyricLine
 import dev.vantafyn.core.jellyfin.JellyfinLyrics
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
@@ -222,8 +223,16 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             val creds = getSubsonicCredentials()
             if (creds != null) {
                 val provider = createSubsonicProvider(creds)
+                val cacheKey = "subsonic_${creds.serverUrl}_${creds.username}"
+                val cached = homeCache[cacheKey]
+                if (cached != null && _state.value.home == null) {
+                    _state.update { it.copy(home = cached, isLoading = false) }
+                }
+                loadRecentlyPlayed()
                 viewModelScope.launch {
-                    _state.update { it.copy(isLoading = true, errorMessage = null) }
+                    if (_state.value.home == null) {
+                        _state.update { it.copy(isLoading = true, errorMessage = null) }
+                    }
                     when (val result = provider.getMusicHome()) {
                         is MusicResult.Success -> {
                             val home = result.value
@@ -270,11 +279,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                     )
                                 },
                             )
+                            homeCache[cacheKey] = jHome
                             _state.update { it.copy(isLoading = false, home = jHome, errorMessage = null) }
                             loadRecentlyPlayed()
                         }
                         is MusicResult.Failure -> {
-                            _state.update { it.copy(isLoading = false, errorMessage = result.message) }
+                            if (_state.value.home == null) {
+                                _state.update { it.copy(isLoading = false, errorMessage = result.message) }
+                            }
                         }
                     }
                 }
@@ -283,18 +295,38 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val activeSession = session ?: return
+        val cacheKey = "jellyfin_${activeSession.server.localId}_${activeSession.profileId}"
+        val cached = homeCache[cacheKey]
+        if (cached != null && _state.value.home == null) {
+            _state.update { it.copy(home = cached, isLoading = false) }
+        }
+
+        // Query local DB (Harmonia recaps and recently played) immediately in parallel
+        loadRecentlyPlayed()
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, errorMessage = null) }
+            loadHarmoniaPreviews(activeSession)
+        }
+
+        viewModelScope.launch {
+            if (_state.value.home == null) {
+                _state.update { it.copy(isLoading = true, errorMessage = null) }
+            }
             when (val result = musicRepository.getMusicHome(activeSession)) {
-                is JellyfinResult.Success -> _state.update {
-                    it.copy(isLoading = false, home = result.value, errorMessage = null)
+                is JellyfinResult.Success -> {
+                    homeCache[cacheKey] = result.value
+                    _state.update {
+                        it.copy(isLoading = false, home = result.value, errorMessage = null)
+                    }
+                    loadHarmoniaPreviews(activeSession)
                 }
-                is JellyfinResult.Failure -> _state.update {
-                    it.copy(isLoading = false, errorMessage = result.message)
+                is JellyfinResult.Failure -> {
+                    if (_state.value.home == null) {
+                        _state.update {
+                            it.copy(isLoading = false, errorMessage = result.message)
+                        }
+                    }
                 }
             }
-            loadHarmoniaPreviews(activeSession)
-            loadRecentlyPlayed()
         }
     }
 
@@ -2738,6 +2770,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             if (attempt > 0) delay(700L)
             when (val homeResult = musicRepository.getMusicHome(activeSession)) {
                 is JellyfinResult.Success -> {
+                    val cacheKey = "jellyfin_${activeSession.server.localId}_${activeSession.profileId}"
+                    homeCache[cacheKey] = homeResult.value
                     val found = homeResult.value.playlists.any { playlist ->
                         playlist.id == playlistId || playlist.name.equals(playlistName, ignoreCase = true)
                     }
@@ -2760,6 +2794,10 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
         _state.update { it.copy(isPlaylistSaving = false) }
         return false
+    }
+
+    companion object {
+        private val homeCache = ConcurrentHashMap<String, JellyfinMusicHome>()
     }
 }
 
