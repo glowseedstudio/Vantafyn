@@ -541,11 +541,18 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     ),
     DiscoverFeature(
         id = "playlists",
-        title = "Playlists",
-        shortDescription = "Create, manage and play playlists from your Jellyfin server.",
+        title = "Playlists & Safe Management",
+        shortDescription = "Create, play, and safely delete playlists with a touch and hold.",
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.QueueMusic,
-        detailedDescription = "Browse playlists in the Music section. Create new playlists, add or remove tracks, and play entire playlists with queue management.",
+        isNew = true,
+        detailedDescription = "Browse audio playlists in the Music section. Create new playlists, add or remove tracks, and play entire playlists with queue management. Need to remove a playlist? Touch and hold (long-press) any playlist tile on the Music home screen or tap the delete button in the playlist view. Deleting a playlist is completely safe \u2014 it only removes the playlist itself, leaving all music files untouched in your library.",
+        steps = listOf(
+            "Open the Music tab to find your Playlists rail",
+            "Touch and hold (long-press) any playlist tile to prompt deletion",
+            "Or open the playlist and tap the delete trash button in the header",
+            "Confirm in the dialog \u2014 only the playlist is removed, never your music files",
+        ),
         deepLinkAction = "open_music",
     ),
     DiscoverFeature(
