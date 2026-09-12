@@ -19513,6 +19513,168 @@ private fun GlassPanel(modifier: Modifier = Modifier, content: @Composable Colum
 }
 
 @Composable
+private fun RailInteriorAtmosphere(
+    isMusicPlaying: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val reducedMotion = rememberReducedMotionPreference()
+    val infiniteTransition = rememberInfiniteTransition(label = "railInteriorAtmosphere")
+
+    val driftProgress = if (reducedMotion) 0.5f else infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(6500, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "auroraDrift",
+    ).value
+
+    val pulseProgress = if (reducedMotion) 0.5f else infiniteTransition.animateFloat(
+        initialValue = 0.70f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(if (isMusicPlaying) 1400 else 3200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "auroraPulse",
+    ).value
+
+    Canvas(
+        modifier = modifier.clip(RoundedCornerShape(30.dp)),
+    ) {
+        val width = size.width
+        val height = size.height
+        if (width <= 0f || height <= 0f) return@Canvas
+
+        val bloom1X = width * (0.16f + driftProgress * 0.40f)
+        val bloom2X = width * (0.84f - driftProgress * 0.40f)
+        val bloomY = height * 0.5f
+
+        val baseAlpha = if (isMusicPlaying) 0.18f * pulseProgress else 0.13f * pulseProgress
+
+        // 1. Electric Cyan Nebula Bloom
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 1.25f),
+                    Color(0xFF00B0FF).copy(alpha = baseAlpha * 0.60f),
+                    Color.Transparent,
+                ),
+                center = Offset(bloom1X, bloomY),
+                radius = width * 0.38f,
+            ),
+            center = Offset(bloom1X, bloomY),
+            radius = width * 0.38f,
+        )
+
+        // 2. Violet / Indigo Light Bloom
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 1.25f),
+                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.60f),
+                    Color.Transparent,
+                ),
+                center = Offset(bloom2X, bloomY),
+                radius = width * 0.40f,
+            ),
+            center = Offset(bloom2X, bloomY),
+            radius = width * 0.40f,
+        )
+
+        // 3. Central ambient connective sheen across the entire dock
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color.Transparent,
+                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.40f),
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.30f),
+                    Color.Transparent,
+                ),
+            ),
+            topLeft = Offset(0f, 0f),
+            size = Size(width, height),
+        )
+    }
+}
+
+@Composable
+private fun MagneticGlidingCircle(
+    selectedIndex: Int,
+    totalTabs: Int,
+    totalWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    if (totalTabs <= 0) return
+    val reducedMotion = rememberReducedMotionPreference()
+    val animatedIndex by animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = if (reducedMotion) {
+            snap()
+        } else {
+            spring(dampingRatio = 0.82f, stiffness = 380f)
+        },
+        label = "magneticGlidingCircleIndex",
+    )
+
+    val circleSize = 38.dp
+    val slotWidth = totalWidth / totalTabs
+    val centerOffset = (slotWidth * (animatedIndex + 0.5f)) - (circleSize / 2f)
+    val auraOffset = (slotWidth * (animatedIndex + 0.5f)) - 24.dp
+
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        // Soft ambient radial aura behind the circle
+        Box(
+            modifier = Modifier
+                .offset(x = auraOffset)
+                .size(48.dp)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF5B8CFF).copy(alpha = 0.20f),
+                            Color(0xFF00E5FF).copy(alpha = 0.08f),
+                            Color.Transparent,
+                        ),
+                    ),
+                    shape = CircleShape,
+                ),
+        )
+        // Clean, true glass circle (never stretched or deformed)
+        Box(
+            modifier = Modifier
+                .offset(x = centerOffset)
+                .size(circleSize)
+                .clip(CircleShape)
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF5B8CFF).copy(alpha = 0.24f),
+                            Color(0xFF00E5FF).copy(alpha = 0.12f),
+                            Color(0xFF5B8CFF).copy(alpha = 0.04f),
+                        ),
+                    ),
+                )
+                .border(
+                    BorderStroke(
+                        0.8.dp,
+                        Brush.linearGradient(
+                            colors = listOf(
+                                Color(0xFF7DDCFF).copy(alpha = 0.42f),
+                                Color(0xFFB070FF).copy(alpha = 0.32f),
+                            ),
+                        ),
+                    ),
+                    CircleShape,
+                ),
+        )
+    }
+}
+
+@Composable
 private fun BottomRailAccentBorder(
     mode: BottomRailAccent,
     tapTrigger: Int = 0,
@@ -19749,6 +19911,10 @@ private fun MobileBottomNav(
                 .padding(horizontal = VantafynSpacing.md, vertical = VantafynSpacing.sm),
         ) {
             VantafynGlassDock(modifier = Modifier.fillMaxWidth()) {
+                RailInteriorAtmosphere(
+                    isMusicPlaying = isMusicPlaying,
+                    modifier = Modifier.matchParentSize(),
+                )
                 AnimatedContent(
                     targetState = mode is NavigationRailMode.Social,
                     transitionSpec = {
@@ -19761,98 +19927,108 @@ private fun MobileBottomNav(
                     label = "navigationRailContentMode",
                     modifier = Modifier.fillMaxWidth(),
                 ) { isSocialMode ->
-                    Row(
+                    val totalTabs = if (!isSocialMode) mainTabs.size else socialTabs.size
+                    val selectedIndex = if (!isSocialMode) {
+                        val selected = (mode as? NavigationRailMode.Main)?.selected
+                        mainTabs.indexOfFirst { destination ->
+                            selected == destination ||
+                                (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
+                                (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                        }.coerceAtLeast(0)
+                    } else {
+                        val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
+                        socialTabs.indexOfFirst { it == selectedSocialTab }.coerceAtLeast(0)
+                    }
+
+                    BoxWithConstraints(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(54.dp),
-                        horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
-                        verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (!isSocialMode) {
-                            val selected = (mode as? NavigationRailMode.Main)?.selected
-                            mainTabs.forEach { destination ->
-                                val tabSelected = selected == destination ||
-                                    (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
-                                val interactionSource = remember { MutableInteractionSource() }
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxSize()
-                                        .combinedClickable(
-                                            interactionSource = interactionSource,
-                                            indication = null,
-                                            onClick = { tapTrigger++; onSelected(destination) },
-                                            onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (tabSelected) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .background(Color(0xFF5B8CFF).copy(alpha = 0.10f), RoundedCornerShape(999.dp)),
-                                        )
-                                    }
-                                    MiniNavIcon(
-                                        destination = destination,
-                                        selected = tabSelected,
-                                        activePulse = destination == MobileDestination.Music && isMusicPlaying && !tabSelected,
-                                    )
-                                    if (
-                                        pendingOmbiAccessRequestCount > 0 &&
-                                        (destination == MobileDestination.Requests || destination == MobileDestination.Admin)
+                        MagneticGlidingCircle(
+                            selectedIndex = selectedIndex,
+                            totalTabs = totalTabs,
+                            totalWidth = maxWidth,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(54.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (!isSocialMode) {
+                                val selected = (mode as? NavigationRailMode.Main)?.selected
+                                mainTabs.forEach { destination ->
+                                    val tabSelected = selected == destination ||
+                                        (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
+                                        (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                                    val interactionSource = remember { MutableInteractionSource() }
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxSize()
+                                            .combinedClickable(
+                                                interactionSource = interactionSource,
+                                                indication = null,
+                                                onClick = { tapTrigger++; onSelected(destination) },
+                                                onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
+                                            ),
+                                        contentAlignment = Alignment.Center,
                                     ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(top = 8.dp, end = 10.dp)
-                                                .size(7.dp)
-                                                .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                                        MiniNavIcon(
+                                            destination = destination,
+                                            selected = tabSelected,
+                                            activePulse = destination == MobileDestination.Music && isMusicPlaying && !tabSelected,
                                         )
+                                        if (
+                                            pendingOmbiAccessRequestCount > 0 &&
+                                            (destination == MobileDestination.Requests || destination == MobileDestination.Admin)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(top = 8.dp, end = 10.dp)
+                                                    .size(7.dp)
+                                                    .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                                            )
+                                        }
                                     }
                                 }
-                            }
-                        } else {
-                            val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
-                            socialTabs.forEach { tab ->
-                                val tabSelected = selectedSocialTab == tab
-                                val interactionSource = remember { MutableInteractionSource() }
-                                val badgeCount = when (tab) {
-                                    dev.vantafyn.feature.home.SocialTab.Messages -> unreadMessagesCount
-                                    dev.vantafyn.feature.home.SocialTab.Requests -> incomingFriendRequestsCount
-                                    else -> 0
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxSize()
-                                        .combinedClickable(
-                                            interactionSource = interactionSource,
-                                            indication = null,
-                                            onClick = { tapTrigger++; onSocialTabSelected(tab) },
-                                        ),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    if (tabSelected) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(38.dp)
-                                                .background(Color(0xFF5B8CFF).copy(alpha = 0.10f), RoundedCornerShape(999.dp)),
-                                        )
+                            } else {
+                                val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
+                                socialTabs.forEach { tab ->
+                                    val tabSelected = selectedSocialTab == tab
+                                    val interactionSource = remember { MutableInteractionSource() }
+                                    val badgeCount = when (tab) {
+                                        dev.vantafyn.feature.home.SocialTab.Messages -> unreadMessagesCount
+                                        dev.vantafyn.feature.home.SocialTab.Requests -> incomingFriendRequestsCount
+                                        else -> 0
                                     }
-                                    SocialNavIcon(
-                                        tab = tab,
-                                        selected = tabSelected,
-                                    )
-                                    if (badgeCount > 0) {
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .padding(top = 7.dp, end = 12.dp)
-                                                .size(7.5.dp)
-                                                .background(Color(0xFFFF3366), RoundedCornerShape(999.dp)),
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .fillMaxSize()
+                                            .combinedClickable(
+                                                interactionSource = interactionSource,
+                                                indication = null,
+                                                onClick = { tapTrigger++; onSocialTabSelected(tab) },
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        SocialNavIcon(
+                                            tab = tab,
+                                            selected = tabSelected,
                                         )
+                                        if (badgeCount > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .align(Alignment.TopEnd)
+                                                    .padding(top = 7.dp, end = 12.dp)
+                                                    .size(7.5.dp)
+                                                    .background(Color(0xFFFF3366), RoundedCornerShape(999.dp)),
+                                            )
+                                        }
                                     }
                                 }
                             }
