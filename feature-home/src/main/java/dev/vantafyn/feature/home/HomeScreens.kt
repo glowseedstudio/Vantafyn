@@ -122,7 +122,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.automirrored.rounded.NavigateNext
@@ -3161,6 +3165,7 @@ private fun HomeScreen(
             onPreviousLibraryPage = viewModel::previousLibraryItemsPage,
             onNextLibraryPage = viewModel::nextLibraryItemsPage,
             onRefreshAdmin = viewModel::pollAdminOverview,
+            onRefreshAdminManual = viewModel::refreshAdminOverviewManual,
             onOpenMedia = viewModel::openMedia,
             onMarkWhatsNewSeen = viewModel::markWhatsNewSeen,
             onToggleWhatsNew = viewModel::toggleWhatsNew,
@@ -3385,6 +3390,7 @@ private fun MobileShellScreen(
     onPreviousLibraryPage: () -> Unit,
     onNextLibraryPage: () -> Unit,
     onRefreshAdmin: () -> Unit,
+    onRefreshAdminManual: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
     onMarkWhatsNewSeen: () -> Unit,
     onToggleWhatsNew: () -> Unit,
@@ -3862,6 +3868,7 @@ private fun MobileShellScreen(
                             onOpenSettings = { onNavigate(MobileDestination.Profile) },
                             onCreateUser = onCreateAdminUser,
                             onRefresh = onRefreshAdmin,
+                            onManualRefresh = onRefreshAdminManual,
                             onScanLibrary = onScanAdminLibrary,
                             onRunTask = onRunAdminTask,
                             onStopTask = onStopAdminTask,
@@ -8058,6 +8065,7 @@ private fun MyListEmptyHint(label: String, value: String, modifier: Modifier = M
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AdminScreen(
     state: VantafynHomeUiState,
@@ -8065,6 +8073,7 @@ private fun AdminScreen(
     onOpenSettings: () -> Unit,
     onCreateUser: (String, String) -> Unit,
     onRefresh: () -> Unit,
+    onManualRefresh: () -> Unit,
     onScanLibrary: () -> Unit,
     onRunTask: (String) -> Unit,
     onStopTask: (String) -> Unit,
@@ -8114,7 +8123,22 @@ private fun AdminScreen(
             }
         }
     }
-    Box(Modifier.fillMaxSize()) {
+    val pullToRefreshState = rememberPullToRefreshState()
+    PullToRefreshBox(
+        isRefreshing = state.isAdminRefreshing,
+        state = pullToRefreshState,
+        onRefresh = onManualRefresh,
+        modifier = Modifier.fillMaxSize(),
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullToRefreshState,
+                isRefreshing = state.isAdminRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+                containerColor = VantafynColors.SurfaceHigh,
+                color = VantafynColors.Primary,
+            )
+        },
+    ) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -11796,6 +11820,250 @@ private fun SettingsGroupHeader(title: String, modifier: Modifier = Modifier) {
     )
 }
 
+private object SettingsUsageTracker {
+    private const val PREFS_NAME = "vantafyn_settings_usage"
+    private const val KEY_PREFIX = "action_count_"
+
+    fun recordAction(context: Context, actionKey: String) {
+        try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val count = prefs.getInt(KEY_PREFIX + actionKey, 0)
+            prefs.edit().putInt(KEY_PREFIX + actionKey, count + 1).apply()
+        } catch (_: Throwable) {}
+    }
+
+    fun getUsageCount(context: Context, actionKey: String): Int {
+        return try {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            prefs.getInt(KEY_PREFIX + actionKey, 0)
+        } catch (_: Throwable) {
+            0
+        }
+    }
+}
+
+private data class SettingsQuickActionItem(
+    val id: String,
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val accentColor: Color,
+    val defaultOrder: Int,
+    val activeBadge: String? = null,
+    val onClick: () -> Unit,
+)
+
+@Composable
+private fun SettingsQuickActionsSection(
+    state: VantafynHomeUiState,
+    onSelectExperienceMode: (ExperienceMode) -> Unit,
+    onPairTv: () -> Unit,
+    onNavigateSubScreen: (SettingsSubScreen) -> Unit,
+    onSwitchUser: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var usageVersion by remember { mutableStateOf(0) }
+
+    val isMusicOnly = state.experienceMode == ExperienceMode.MusicOnly
+    val currentThemeLabel = state.selectedTheme.label
+
+    val actions = remember(state.experienceMode, currentThemeLabel, state.session?.user?.name, state.hasUnseenWhatsNew, usageVersion) {
+        val items = listOf(
+            SettingsQuickActionItem(
+                id = "experience_mode",
+                title = "Experience",
+                subtitle = if (isMusicOnly) "Music Only" else "Full Media",
+                icon = if (isMusicOnly) Icons.Rounded.MusicNote else Icons.Rounded.Movie,
+                accentColor = Color(0xFF58D7FF),
+                defaultOrder = 0,
+                activeBadge = if (isMusicOnly) "MUSIC" else "FULL",
+                onClick = {
+                    val next = if (state.experienceMode == ExperienceMode.FullMedia) {
+                        ExperienceMode.MusicOnly
+                    } else {
+                        ExperienceMode.FullMedia
+                    }
+                    onSelectExperienceMode(next)
+                },
+            ),
+            SettingsQuickActionItem(
+                id = "pair_tv",
+                title = "Pair TV",
+                subtitle = "Connect screen",
+                icon = Icons.Rounded.Tv,
+                accentColor = Color(0xFFFFB347),
+                defaultOrder = 1,
+                onClick = onPairTv,
+            ),
+            SettingsQuickActionItem(
+                id = "appearance",
+                title = "Appearance",
+                subtitle = currentThemeLabel,
+                icon = Icons.Rounded.Palette,
+                accentColor = Color(0xFFB070FF),
+                defaultOrder = 2,
+                onClick = { onNavigateSubScreen(SettingsSubScreen.AppearanceAndExperience) },
+            ),
+            SettingsQuickActionItem(
+                id = "switch_user",
+                title = "Switch User",
+                subtitle = state.session?.user?.name ?: "Profile",
+                icon = Icons.Rounded.SwitchAccount,
+                accentColor = Color(0xFF48D8A3),
+                defaultOrder = 3,
+                onClick = onSwitchUser,
+            ),
+            SettingsQuickActionItem(
+                id = "audio_playback",
+                title = "Audio & EQ",
+                subtitle = "Soundscapes & fidelity",
+                icon = Icons.Rounded.GraphicEq,
+                accentColor = Color(0xFFFF7EA8),
+                defaultOrder = 4,
+                onClick = { onNavigateSubScreen(SettingsSubScreen.AudioAndPlayback) },
+            ),
+            SettingsQuickActionItem(
+                id = "integrations_advanced",
+                title = "Integrations",
+                subtitle = "Advanced & tools",
+                icon = Icons.Rounded.Tune,
+                accentColor = Color(0xFF38BDF8),
+                defaultOrder = 5,
+                onClick = { onNavigateSubScreen(SettingsSubScreen.IntegrationsAndAdvanced) },
+            ),
+        )
+        items.sortedByDescending { item ->
+            val usage = SettingsUsageTracker.getUsageCount(context, item.id)
+            val baseScore = 100 - (item.defaultOrder * 10)
+            baseScore + (usage * 15)
+        }
+    }
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Quick Actions",
+                color = VantafynColors.Muted.copy(alpha = 0.9f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            actions.forEach { action ->
+                SettingsQuickActionCard(
+                    title = action.title,
+                    subtitle = action.subtitle,
+                    icon = action.icon,
+                    accentColor = action.accentColor,
+                    activeBadge = action.activeBadge,
+                    onClick = {
+                        SettingsUsageTracker.recordAction(context, action.id)
+                        usageVersion++
+                        action.onClick()
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsQuickActionCard(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    accentColor: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    activeBadge: String? = null,
+) {
+    VantafynGlassCard(
+        modifier = modifier
+            .width(136.dp)
+            .height(104.dp)
+            .clickable(onClick = onClick),
+        cornerRadius = 20.dp,
+        contentPadding = PaddingValues(13.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(11.dp))
+                        .background(accentColor.copy(alpha = 0.16f))
+                        .border(1.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(11.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accentColor,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                if (activeBadge != null) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(accentColor.copy(alpha = 0.18f))
+                            .border(0.75.dp, accentColor.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = activeBadge,
+                            color = accentColor,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                        )
+                    }
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = subtitle,
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
 private enum class SettingsSubScreen {
     Main,
     AccountAndProfiles,
@@ -11925,6 +12193,17 @@ private fun SettingsScreen(
                         }
                         item {
                             HomeContentReveal(index = 3, animate = revealActive) {
+                                SettingsQuickActionsSection(
+                                    state = state,
+                                    onSelectExperienceMode = onSelectExperienceMode,
+                                    onPairTv = { showPairTvSheet = true },
+                                    onNavigateSubScreen = { currentSubScreen = it },
+                                    onSwitchUser = onSwitchUser,
+                                )
+                            }
+                        }
+                        item {
+                            HomeContentReveal(index = 4, animate = revealActive) {
                                 SettingsCardGroup(
                                     items = listOf(
                                         {
@@ -11932,7 +12211,10 @@ private fun SettingsScreen(
                                                 title = "Account & Profiles",
                                                 subtitle = "Switch user, login preferences, TV pairing, security",
                                                 icon = Icons.Rounded.ManageAccounts,
-                                                onClick = { currentSubScreen = SettingsSubScreen.AccountAndProfiles },
+                                                onClick = {
+                                                    SettingsUsageTracker.recordAction(context, "switch_user")
+                                                    currentSubScreen = SettingsSubScreen.AccountAndProfiles
+                                                },
                                             )
                                         },
                                         {
@@ -11940,7 +12222,10 @@ private fun SettingsScreen(
                                                 title = "Appearance & Experience",
                                                 subtitle = "Themes, dynamic backgrounds, rail accent, mode",
                                                 icon = Icons.Rounded.Palette,
-                                                onClick = { currentSubScreen = SettingsSubScreen.AppearanceAndExperience },
+                                                onClick = {
+                                                    SettingsUsageTracker.recordAction(context, "appearance")
+                                                    currentSubScreen = SettingsSubScreen.AppearanceAndExperience
+                                                },
                                             )
                                         },
                                         {
@@ -11948,7 +12233,10 @@ private fun SettingsScreen(
                                                 title = "Audio & Playback",
                                                 subtitle = "Theme music, soundscapes, streaming fidelity",
                                                 icon = Icons.Rounded.GraphicEq,
-                                                onClick = { currentSubScreen = SettingsSubScreen.AudioAndPlayback },
+                                                onClick = {
+                                                    SettingsUsageTracker.recordAction(context, "audio_playback")
+                                                    currentSubScreen = SettingsSubScreen.AudioAndPlayback
+                                                },
                                             )
                                         },
                                         {
@@ -11956,8 +12244,10 @@ private fun SettingsScreen(
                                                 title = "Integrations & Advanced",
                                                 subtitle = "Achievements, messaging, admin, permissions, version",
                                                 icon = Icons.Rounded.Tune,
-                                                badge = if (state.hasUnseenWhatsNew) "Update" else null,
-                                                onClick = { currentSubScreen = SettingsSubScreen.IntegrationsAndAdvanced },
+                                                onClick = {
+                                                    SettingsUsageTracker.recordAction(context, "integrations_advanced")
+                                                    currentSubScreen = SettingsSubScreen.IntegrationsAndAdvanced
+                                                },
                                             )
                                         },
                                     ),
@@ -12356,12 +12646,10 @@ private fun SettingsScreen(
                         }
                         item { SettingsGroupHeader("Device Permissions") }
                         item {
-                            GlassPanel {
-                                PermissionStatusGrid(
-                                    notificationPermissionState = notificationPermissionState,
-                                    onShowPermission = { permissionDetail = it },
-                                )
-                            }
+                            PermissionStatusCardGroup(
+                                notificationPermissionState = notificationPermissionState,
+                                onShowPermission = { permissionDetail = it },
+                            )
                         }
                         item { SettingsGroupHeader("About") }
                         item {
@@ -13714,7 +14002,7 @@ private fun ThemeMusicVolumeSelector(
 }
 
 @Composable
-private fun PermissionStatusGrid(
+private fun PermissionStatusCardGroup(
     notificationPermissionState: VantafynPermissionUiState,
     onShowPermission: (PermissionDetail) -> Unit,
 ) {
@@ -13725,36 +14013,46 @@ private fun PermissionStatusGrid(
         VantafynPermissionStatus.Denied,
         VantafynPermissionStatus.PermanentlyDenied -> PermissionTone.NeedsAttention
     }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        PermissionStatusRow(
-            title = "Internet",
-            state = "Allowed",
-            icon = Icons.Rounded.Cloud,
-            tone = PermissionTone.Allowed,
-            onClick = { onShowPermission(PermissionDetail.Internet) },
-        )
-        PermissionStatusRow(
-            title = "Downloads service",
-            state = "Allowed",
-            icon = Icons.Rounded.Download,
-            tone = PermissionTone.Allowed,
-            onClick = { onShowPermission(PermissionDetail.DownloadsService) },
-        )
-        PermissionStatusRow(
-            title = "Music service",
-            state = "Allowed",
-            icon = Icons.Rounded.MusicNote,
-            tone = PermissionTone.Allowed,
-            onClick = { onShowPermission(PermissionDetail.MusicService) },
-        )
-        PermissionStatusRow(
-            title = "Notifications",
-            state = notificationPermissionState.statusLabel,
-            icon = Icons.Rounded.Notifications,
-            tone = notificationTone,
-            onClick = { onShowPermission(PermissionDetail.Notifications) },
-        )
-    }
+    SettingsCardGroup(
+        items = listOf(
+            {
+                PermissionStatusRow(
+                    title = "Internet",
+                    state = "Allowed",
+                    icon = Icons.Rounded.Cloud,
+                    tone = PermissionTone.Allowed,
+                    onClick = { onShowPermission(PermissionDetail.Internet) },
+                )
+            },
+            {
+                PermissionStatusRow(
+                    title = "Downloads service",
+                    state = "Allowed",
+                    icon = Icons.Rounded.Download,
+                    tone = PermissionTone.Allowed,
+                    onClick = { onShowPermission(PermissionDetail.DownloadsService) },
+                )
+            },
+            {
+                PermissionStatusRow(
+                    title = "Music service",
+                    state = "Allowed",
+                    icon = Icons.Rounded.MusicNote,
+                    tone = PermissionTone.Allowed,
+                    onClick = { onShowPermission(PermissionDetail.MusicService) },
+                )
+            },
+            {
+                PermissionStatusRow(
+                    title = "Notifications",
+                    state = notificationPermissionState.statusLabel,
+                    icon = Icons.Rounded.Notifications,
+                    tone = notificationTone,
+                    onClick = { onShowPermission(PermissionDetail.Notifications) },
+                )
+            },
+        ),
+    )
 }
 
 private enum class PermissionDetail(
@@ -13887,47 +14185,43 @@ private fun PermissionStatusRow(
     state: String,
     icon: ImageVector,
     tone: PermissionTone,
+    modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
 ) {
-    val shape = RoundedCornerShape(18.dp)
-    VantafynGlassCard(
-        modifier = Modifier
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 58.dp)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier),
-        cornerRadius = 18.dp,
-        contentPadding = PaddingValues(horizontal = VantafynSpacing.md, vertical = 12.dp),
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-            verticalAlignment = Alignment.CenterVertically,
+        SettingsRowIcon(icon, destructive = tone == PermissionTone.NeedsAttention)
+        Text(
+            title,
+            color = VantafynColors.Ink,
+            style = MaterialTheme.typography.bodyLarge,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.weight(1f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Box(
+            modifier = Modifier
+                .clip(shape)
+                .background(permissionToneBackground(tone))
+                .padding(horizontal = 10.dp, vertical = 5.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            SettingsRowIcon(icon, destructive = tone == PermissionTone.NeedsAttention)
             Text(
-                title,
-                color = VantafynColors.Ink,
-                style = MaterialTheme.typography.bodyLarge,
+                state,
+                color = permissionToneText(tone),
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            Box(
-                modifier = Modifier
-                    .clip(shape)
-                    .background(permissionToneBackground(tone))
-                    .padding(horizontal = 10.dp, vertical = 5.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    state,
-                    color = permissionToneText(tone),
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
         }
     }
 }

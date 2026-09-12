@@ -1937,19 +1937,23 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
             for (targetIndex in currentTracks.indices) {
                 val targetTrack = currentTracks[targetIndex]
-                val currentPos = workingList.indexOfFirst { it.playlistItemId == targetTrack.playlistItemId }
+                val currentPos = workingList.indexOfFirst {
+                    if (it.playlistItemId != null && targetTrack.playlistItemId != null) {
+                        it.playlistItemId == targetTrack.playlistItemId
+                    } else {
+                        it.id == targetTrack.id
+                    }
+                }
                 if (currentPos != -1 && currentPos != targetIndex) {
-                    val playlistItemId = targetTrack.playlistItemId
-                    if (playlistItemId != null) {
-                        val globalIndex = screen.page.startIndex + targetIndex
-                        val result = musicRepository.movePlaylistItem(activeSession, screen.playlist.id, playlistItemId, globalIndex)
-                        if (result is JellyfinResult.Success) {
-                            val moved = workingList.removeAt(currentPos)
-                            workingList.add(targetIndex, moved)
-                        } else {
-                            anyFailed = true
-                            break
-                        }
+                    val playlistItemId = targetTrack.playlistItemId ?: targetTrack.id.toString()
+                    val globalIndex = screen.page.startIndex + targetIndex
+                    val result = musicRepository.movePlaylistItem(activeSession, screen.playlist.id, playlistItemId, globalIndex)
+                    if (result is JellyfinResult.Success) {
+                        val moved = workingList.removeAt(currentPos)
+                        workingList.add(targetIndex, moved)
+                    } else {
+                        anyFailed = true
+                        break
                     }
                 }
             }
@@ -2181,12 +2185,123 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun addCurrentToPlaylist(playlist: JellyfinMusicPlaylist) {
-        val activeSession = session ?: return
         val current = playbackController.state.value.currentTrack ?: return
+        addTracksToPlaylist(playlist, listOf(current.toJellyfinTrack()))
+    }
+
+    fun addTrackToPlaylist(track: JellyfinMusicTrack, playlist: JellyfinMusicPlaylist) {
+        addTracksToPlaylist(playlist, listOf(track))
+    }
+
+    fun addTracksToPlaylist(
+        playlist: JellyfinMusicPlaylist,
+        tracks: List<JellyfinMusicTrack>,
+        bypassDuplicateCheck: Boolean = false,
+    ) {
+        val activeSession = session ?: return
+        if (tracks.isEmpty()) return
+
+        if (!bypassDuplicateCheck) {
+            viewModelScope.launch {
+                _state.update { it.copy(isCheckingPlaylistDuplicates = true, errorMessage = null) }
+                val existingTracks = when (val res = musicRepository.getPlaylistItems(activeSession, playlist.id)) {
+                    is JellyfinResult.Success -> res.value
+                    is JellyfinResult.Failure -> emptyList()
+                }
+                _state.update { it.copy(isCheckingPlaylistDuplicates = false) }
+
+                if (existingTracks.isNotEmpty()) {
+                    val existingIds = existingTracks.map { it.id }.toSet()
+                    val duplicates = tracks.filter { existingIds.contains(it.id) }
+                    val newOnes = tracks.filterNot { existingIds.contains(it.id) }
+                    if (duplicates.isNotEmpty()) {
+                        _state.update {
+                            it.copy(
+                                playlistDuplicatePrompt = PlaylistDuplicatePrompt(
+                                    playlist = playlist,
+                                    candidateTracks = tracks,
+                                    duplicateTracks = duplicates,
+                                    newTracks = newOnes,
+                                )
+                            )
+                        }
+                        return@launch
+                    }
+                }
+
+                performAddToPlaylist(activeSession, playlist, tracks)
+            }
+        } else {
+            viewModelScope.launch {
+                performAddToPlaylist(activeSession, playlist, tracks)
+            }
+        }
+    }
+
+    private suspend fun performAddToPlaylist(
+        activeSession: dev.vantafyn.core.jellyfin.JellyfinSession,
+        playlist: JellyfinMusicPlaylist,
+        tracks: List<JellyfinMusicTrack>,
+    ) {
+        when (val result = musicRepository.addToPlaylist(activeSession, playlist.id, tracks.map { it.id })) {
+            is JellyfinResult.Success -> {
+                val count = tracks.size
+                val msg = if (count == 1) {
+                    "Added \"${tracks.first().title}\" to ${playlist.name}"
+                } else {
+                    "Added $count tracks to ${playlist.name}"
+                }
+                _state.update {
+                    it.copy(
+                        message = msg,
+                        playlistDuplicatePrompt = null,
+                        home = it.home?.incrementPlaylistCount(playlist.id, delta = count),
+                    )
+                }
+            }
+            is JellyfinResult.Failure -> {
+                _state.update { it.copy(errorMessage = result.message, playlistDuplicatePrompt = null) }
+            }
+        }
+    }
+
+    fun confirmDuplicateAddToPlaylist(playlist: JellyfinMusicPlaylist, tracks: List<JellyfinMusicTrack>) {
+        addTracksToPlaylist(playlist, tracks, bypassDuplicateCheck = true)
+    }
+
+    fun dismissPlaylistDuplicatePrompt() {
+        _state.update { it.copy(playlistDuplicatePrompt = null) }
+    }
+
+    fun removeTracksFromPlaylist(playlist: JellyfinMusicPlaylist, tracks: List<JellyfinMusicTrack>) {
+        val activeSession = session ?: return
+        if (tracks.isEmpty()) return
+
         viewModelScope.launch {
-            when (val result = musicRepository.addToPlaylist(activeSession, playlist.id, listOf(current.id))) {
+            val itemIds = tracks.mapNotNull { it.playlistItemId ?: it.id.toString() }
+            when (val result = musicRepository.removeFromPlaylist(activeSession, playlist.id, itemIds)) {
                 is JellyfinResult.Success -> {
-                    _state.update { it.copy(message = "Added to ${playlist.name}", home = it.home?.incrementPlaylistCount(playlist.id)) }
+                    val removedTrackIds = tracks.map { it.id }.toSet()
+                    val removedCount = tracks.size
+                    _state.update { state ->
+                        val updatedScreen = if (state.screen is MusicScreenState.Playlist && state.screen.playlist.id == playlist.id) {
+                            val currentTracks = state.screen.tracks
+                            val remainingTracks = currentTracks.filterNot { removedTrackIds.contains(it.id) }
+                            state.screen.copy(
+                                page = state.screen.page.copy(
+                                    tracks = remainingTracks,
+                                    totalItems = (state.screen.page.totalItems - removedCount).coerceAtLeast(0)
+                                )
+                            )
+                        } else {
+                            state.screen
+                        }
+                        state.copy(
+                            screen = updatedScreen,
+                            message = if (removedCount == 1) "Removed from ${playlist.name}" else "Removed $removedCount tracks from ${playlist.name}",
+                            home = state.home?.decrementPlaylistCount(playlist.id, count = removedCount),
+                        )
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(errorMessage = result.message) }
@@ -2195,19 +2310,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addTrackToPlaylist(track: JellyfinMusicTrack, playlist: JellyfinMusicPlaylist) {
+    fun createPlaylistAndAddTracks(name: String, tracks: List<JellyfinMusicTrack>) {
         val activeSession = session ?: return
-        viewModelScope.launch {
-            when (val result = musicRepository.addToPlaylist(activeSession, playlist.id, listOf(track.id))) {
-                is JellyfinResult.Success -> _state.update { it.copy(message = "Added to ${playlist.name}", home = it.home?.incrementPlaylistCount(playlist.id)) }
-                is JellyfinResult.Failure -> _state.update { it.copy(errorMessage = result.message) }
-            }
-        }
-    }
-
-    fun createPlaylistAndAddTrack(name: String, track: JellyfinMusicTrack?) {
-        val activeSession = session ?: return
-        val trackIds = listOfNotNull(track?.id)
+        val trackIds = tracks.map { it.id }
         viewModelScope.launch {
             _state.update { it.copy(isPlaylistSaving = true, errorMessage = null, message = null) }
             when (val result = musicRepository.createPlaylist(activeSession, name, trackIds)) {
@@ -2227,6 +2332,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+    }
+
+    fun createPlaylistAndAddTrack(name: String, track: JellyfinMusicTrack?) {
+        createPlaylistAndAddTracks(name, listOfNotNull(track))
+    }
+
+    fun showMessage(message: String) {
+        _state.update { it.copy(message = message) }
     }
 
     fun clearMessage() {
@@ -2650,6 +2763,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 }
 
+data class PlaylistDuplicatePrompt(
+    val playlist: JellyfinMusicPlaylist,
+    val candidateTracks: List<JellyfinMusicTrack>,
+    val duplicateTracks: List<JellyfinMusicTrack>,
+    val newTracks: List<JellyfinMusicTrack>,
+)
+
 data class MusicUiState(
     val isLoading: Boolean = false,
     val isSearchLoading: Boolean = false,
@@ -2693,6 +2813,8 @@ data class MusicUiState(
     val harmoniaRecapError: String? = null,
     val recentlyPlayed: List<VantafynMusicTrack> = emptyList(),
     val selectedHomeMood: MusicHomeMood = MusicHomeMood.All,
+    val playlistDuplicatePrompt: PlaylistDuplicatePrompt? = null,
+    val isCheckingPlaylistDuplicates: Boolean = false,
 )
 
 enum class MusicHomeMood(val label: String) {
@@ -2839,11 +2961,22 @@ private fun JellyfinMusicHome.copyWithPlaylistFavorite(playlistId: UUID, isFavor
         playlists = playlists.map { if (it.id == playlistId) it.copy(isFavorite = isFavorite) else it },
     )
 
-private fun JellyfinMusicHome.incrementPlaylistCount(playlistId: UUID): JellyfinMusicHome =
+private fun JellyfinMusicHome.incrementPlaylistCount(playlistId: UUID, delta: Int = 1): JellyfinMusicHome =
     copy(
         playlists = playlists.map { playlist ->
             if (playlist.id == playlistId) {
-                playlist.copy(trackCount = playlist.trackCount?.plus(1))
+                playlist.copy(trackCount = playlist.trackCount?.plus(delta))
+            } else {
+                playlist
+            }
+        },
+    )
+
+private fun JellyfinMusicHome.decrementPlaylistCount(playlistId: UUID, count: Int = 1): JellyfinMusicHome =
+    copy(
+        playlists = playlists.map { playlist ->
+            if (playlist.id == playlistId) {
+                playlist.copy(trackCount = playlist.trackCount?.minus(count)?.coerceAtLeast(0))
             } else {
                 playlist
             }
@@ -2852,6 +2985,29 @@ private fun JellyfinMusicHome.incrementPlaylistCount(playlistId: UUID): Jellyfin
 
 private fun List<JellyfinMusicTrack>.mapFavorite(trackId: UUID, isFavorite: Boolean): List<JellyfinMusicTrack> =
     map { if (it.id == trackId) it.copy(isFavorite = isFavorite) else it }
+
+private fun VantafynMusicTrack.toJellyfinTrack(): JellyfinMusicTrack =
+    JellyfinMusicTrack(
+        id = id,
+        title = title,
+        artist = artist,
+        album = album,
+        albumId = albumId,
+        durationMs = durationMs,
+        artworkUrl = artworkUrl,
+        hasLyrics = false,
+        streamUrl = streamUrl,
+        isFavorite = isFavorite,
+        genres = genres,
+        replayGainTrackGainDb = replayGainTrackGainDb,
+        replayGainTrackPeak = replayGainTrackPeak,
+        container = container,
+        codec = codec,
+        bitrate = bitrate,
+        sampleRate = sampleRate,
+        bitDepth = bitDepth,
+        channels = channels,
+    )
 
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L

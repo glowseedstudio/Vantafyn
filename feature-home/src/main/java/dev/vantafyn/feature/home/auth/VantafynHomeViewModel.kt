@@ -3049,12 +3049,18 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         refreshAdminOverview(showLoading = false)
     }
 
-    private fun refreshAdminOverview(showLoading: Boolean) {
+    fun refreshAdminOverviewManual() {
+        refreshAdminOverview(showLoading = false, isManualRefresh = true)
+    }
+
+    private fun refreshAdminOverview(showLoading: Boolean, isManualRefresh: Boolean = false) {
         val session = _state.value.session ?: return
         if (!session.user.isAdministrator) return
         viewModelScope.launch {
             if (showLoading) {
                 _state.update { it.copy(isAdminLoading = true, adminError = null) }
+            } else if (isManualRefresh) {
+                _state.update { it.copy(isAdminRefreshing = true, adminError = null) }
             }
             when (val result = adminRepository.getOverview(session, _state.value.libraries)) {
                 is JellyfinResult.Success -> {
@@ -3062,6 +3068,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         val tracking = state.libraryScanTrackingAfter(result.value)
                         state.copy(
                             isAdminLoading = false,
+                            isAdminRefreshing = false,
                             adminOverview = result.value,
                             isLibraryScanTracking = tracking.isTracking,
                             libraryScanTrackingStartedAt = if (tracking.isTracking) {
@@ -3075,8 +3082,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
                 is JellyfinResult.Failure -> {
                     android.util.Log.e("VantafynHomeVM", "refreshAdminOverview failure: ${result.message}", result.cause)
-                    if (showLoading) {
-                        _state.update { it.copy(isAdminLoading = false, adminError = result.message) }
+                    _state.update {
+                        it.copy(
+                            isAdminLoading = false,
+                            isAdminRefreshing = false,
+                            adminError = if (showLoading || isManualRefresh) result.message else it.adminError,
+                        )
                     }
                 }
             }
@@ -5986,6 +5997,7 @@ data class VantafynHomeUiState(
     val downloadsError: String? = null,
     val adminOverview: JellyfinAdminOverview? = null,
     val isAdminLoading: Boolean = false,
+    val isAdminRefreshing: Boolean = false,
     val isAdminActionRunning: Boolean = false,
     val isAdminSessionMessageSending: Boolean = false,
     val adminSessionMessageSentKey: Long = 0L,

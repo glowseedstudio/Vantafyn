@@ -83,7 +83,15 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalConfiguration
+import kotlinx.coroutines.isActive
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -283,17 +291,41 @@ fun MusicScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     var actionTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
     var musicContextItem by remember { mutableStateOf<MusicContextItem?>(null) }
-    var playlistPickerTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
+    var playlistPickerTracks by remember { mutableStateOf<List<JellyfinMusicTrack>>(emptyList()) }
+    val choosePlaylistForTrack: (JellyfinMusicTrack) -> Unit = { track ->
+        playlistPickerTracks = listOf(track)
+    }
     var showCurrentPlaylistPicker by remember { mutableStateOf(false) }
     var detailsTrack by remember { mutableStateOf<MusicTrackDetails?>(null) }
     var showCreatePlaylistDialog by remember { mutableStateOf(false) }
-    var createPlaylistTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
+    var createPlaylistTracks by remember { mutableStateOf<List<JellyfinMusicTrack>>(emptyList()) }
+    var selectedTrackIds by remember(state.screen) { mutableStateOf<Set<java.util.UUID>>(emptySet()) }
+    var trackToRemoveFromPlaylist by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
+    var showBulkRemoveConfirmation by remember { mutableStateOf(false) }
+    val toggleSelectTrack: (JellyfinMusicTrack) -> Unit = { track ->
+        selectedTrackIds = if (selectedTrackIds.contains(track.id)) {
+            selectedTrackIds - track.id
+        } else {
+            selectedTrackIds + track.id
+        }
+    }
+    val currentScreenTracks = when (val s = state.screen) {
+        is MusicScreenState.Album -> s.tracks
+        is MusicScreenState.Playlist -> s.tracks
+        is MusicScreenState.Songs -> {
+            val query = state.songsSearchQuery.trim().lowercase()
+            if (query.isEmpty()) s.tracks
+            else s.tracks.filter { it.title.lowercase().contains(query) || it.artist.lowercase().contains(query) }
+        }
+        else -> state.searchResults.ifEmpty { state.home?.songs?.take(20).orEmpty() }
+    }
     val startMusic: (() -> Unit) -> Unit = { action -> onRequestMusicControlsPermission(action) }
     val showInitialLoading = state.isLoading &&
         state.home == null &&
         state.searchResults.isEmpty() &&
         state.screen == MusicScreenState.Home
     val musicListState = rememberLazyListState()
+    var musicListBoundsInWindow by remember { mutableStateOf<Rect?>(null) }
     val screenScrollKey = state.screen.scrollResetKey()
     val contentRevealKey = when (val s = state.screen) {
         is MusicScreenState.Album -> "album:${s.album.id}"
@@ -486,7 +518,10 @@ fun MusicScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
-                    .imePadding(),
+                    .imePadding()
+                    .onGloballyPositioned { coords ->
+                        musicListBoundsInWindow = runCatching { coords.boundsInWindow() }.getOrNull()
+                    },
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
                 verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
             ) {
@@ -594,7 +629,7 @@ fun MusicScreen(
                                     pendingTrackId = state.pendingPlayTrackId,
                                     currentTrackId = state.playback.currentTrack?.id,
                                     onTrack = { track -> startMusic { viewModel.playTrack(track, state.searchResults) } },
-                                    onChoosePlaylist = { playlistPickerTrack = it },
+                                    onChoosePlaylist = choosePlaylistForTrack,
                                     onLongPress = { actionTrack = it },
                                     animateReveal = false,
                                 )
@@ -789,7 +824,7 @@ fun MusicScreen(
                                                         pendingTrackId = state.pendingPlayTrackId,
                                                         currentTrackId = state.playback.currentTrack?.id,
                                                         onTrack = { track -> startMusic { viewModel.playTrack(track, home.songs) } },
-                                                        onChoosePlaylist = { playlistPickerTrack = it },
+                                                        onChoosePlaylist = choosePlaylistForTrack,
                                                         onLongPress = { actionTrack = it },
                                                         animateReveal = false,
                                                     )
@@ -945,7 +980,7 @@ fun MusicScreen(
                                                         pendingTrackId = state.pendingPlayTrackId,
                                                         currentTrackId = state.playback.currentTrack?.id,
                                                         onTrack = { track -> startMusic { viewModel.playTrack(track, home.onRepeat) } },
-                                                        onChoosePlaylist = { playlistPickerTrack = it },
+                                                        onChoosePlaylist = choosePlaylistForTrack,
                                                         onLongPress = { actionTrack = it },
                                                         animateReveal = false,
                                                     )
@@ -1037,8 +1072,11 @@ fun MusicScreen(
                             playlists = state.home?.playlists.orEmpty(),
                             pendingTrackId = state.pendingPlayTrackId,
                             currentTrackId = state.playback.currentTrack?.id,
+                            selectedTrackIds = selectedTrackIds,
+                            onToggleSelectTrack = toggleSelectTrack,
+                            onLongPressTrack = toggleSelectTrack,
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onChoosePlaylist = { playlistPickerTrack = it },
+                            onChoosePlaylist = choosePlaylistForTrack,
                             onLongPress = { actionTrack = it },
                             animateReveal = true,
                         )
@@ -1136,13 +1174,18 @@ fun MusicScreen(
                             playlists = state.home?.playlists.orEmpty(),
                             pendingTrackId = state.pendingPlayTrackId,
                             currentTrackId = state.playback.currentTrack?.id,
+                            selectedTrackIds = selectedTrackIds,
+                            onToggleSelectTrack = toggleSelectTrack,
+                            onLongPressTrack = toggleSelectTrack,
                             onTrack = { track -> startMusic { viewModel.playTrack(track, screen.tracks) } },
-                            onChoosePlaylist = { playlistPickerTrack = it },
+                            onChoosePlaylist = choosePlaylistForTrack,
                             onLongPress = { actionTrack = it },
                             animateReveal = true,
                             isReorderMode = state.isReorderMode,
                             onReorder = viewModel::movePlaylistTrack,
                             onToggleReorderMode = viewModel::toggleReorderMode,
+                            lazyListState = musicListState,
+                            viewportBoundsInWindow = musicListBoundsInWindow,
                         )
                     }
                 }
@@ -1193,8 +1236,11 @@ fun MusicScreen(
                                 playlists = state.home?.playlists.orEmpty(),
                                 pendingTrackId = state.pendingPlayTrackId,
                                 currentTrackId = state.playback.currentTrack?.id,
-                            onTrack = { track -> startMusic { viewModel.playTrack(track, filteredTracks) } },
-                                onChoosePlaylist = { playlistPickerTrack = it },
+                                selectedTrackIds = selectedTrackIds,
+                                onToggleSelectTrack = toggleSelectTrack,
+                                onLongPressTrack = toggleSelectTrack,
+                                onTrack = { track -> startMusic { viewModel.playTrack(track, filteredTracks) } },
+                                onChoosePlaylist = choosePlaylistForTrack,
                                 onLongPress = { actionTrack = it },
                                 animateReveal = false,
                             )
@@ -1279,10 +1325,11 @@ fun MusicScreen(
             }
         }
         if (state.isPlaylistSaving) {
-            VantafynGlassPanel(
+            VantafynGlassModalPanel(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(start = 20.dp, end = 20.dp, bottom = 150.dp),
+                    .padding(start = 20.dp, end = 20.dp, bottom = 150.dp)
+                    .vantafynAnimatedModalBorder(cornerRadius = 22.dp, strokeWidth = 1.2.dp),
                 cornerRadius = 22.dp,
                 contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
             ) {
@@ -1324,7 +1371,7 @@ fun MusicScreen(
                 },
                 onChoosePlaylist = {
                     actionTrack = null
-                    playlistPickerTrack = track
+                    choosePlaylistForTrack(track)
                 },
                 onGoToAlbum = {
                     actionTrack = null
@@ -1333,6 +1380,16 @@ fun MusicScreen(
                 onTrackDetails = {
                     actionTrack = null
                     detailsTrack = track.toDetails()
+                },
+                onRemoveFromPlaylist = if (state.screen is MusicScreenState.Playlist) {
+                    {
+                        actionTrack = null
+                        trackToRemoveFromPlaylist = track
+                    }
+                } else null,
+                onSelectTracks = {
+                    actionTrack = null
+                    selectedTrackIds = setOf(track.id)
                 },
             )
         }
@@ -1368,7 +1425,7 @@ fun MusicScreen(
                         },
                         onAddToPlaylist = {
                             musicContextItem = null
-                            playlistPickerTrack = track
+                            choosePlaylistForTrack(track)
                         },
                         onDownload = {
                             musicContextItem = null
@@ -1443,17 +1500,18 @@ fun MusicScreen(
                 onDismiss = { detailsTrack = null },
             )
         }
-        playlistPickerTrack?.let { track ->
+        if (playlistPickerTracks.isNotEmpty()) {
             MusicPlaylistPickerSheet(
                 playlists = state.home?.playlists.orEmpty(),
-                onDismiss = { playlistPickerTrack = null },
+                onDismiss = { playlistPickerTracks = emptyList() },
                 onPlaylist = { playlist ->
-                    playlistPickerTrack = null
-                    viewModel.addTrackToPlaylist(track, playlist)
+                    val tracksToAdd = playlistPickerTracks
+                    playlistPickerTracks = emptyList()
+                    viewModel.addTracksToPlaylist(playlist, tracksToAdd)
                 },
                 onCreateNew = {
-                    playlistPickerTrack = null
-                    createPlaylistTrack = track
+                    createPlaylistTracks = playlistPickerTracks
+                    playlistPickerTracks = emptyList()
                     showCreatePlaylistDialog = true
                 },
             )
@@ -1468,6 +1526,7 @@ fun MusicScreen(
                 },
                 onCreateNew = {
                     showCurrentPlaylistPicker = false
+                    createPlaylistTracks = emptyList()
                     showCreatePlaylistDialog = true
                 },
             )
@@ -1481,7 +1540,7 @@ fun MusicScreen(
                 onDismissRequest = { showCreatePlaylistDialog = false },
                 containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
                 shape = RoundedCornerShape(28.dp),
-                title = { Text("New playlist") },
+                title = { Text("New playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Bold) },
                 text = {
                     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
                         VantafynTextField(
@@ -1495,17 +1554,117 @@ fun MusicScreen(
                     TextButton(
                         onClick = {
                             val name = newName.trim().ifBlank { "Vantafyn Playlist" }
-                            val track = createPlaylistTrack
+                            val tracks = createPlaylistTracks
                             showCreatePlaylistDialog = false
-                            createPlaylistTrack = null
-                            viewModel.createPlaylistAndAddTrack(name, track)
+                            createPlaylistTracks = emptyList()
+                            viewModel.createPlaylistAndAddTracks(name, tracks)
                         },
                         enabled = newName.isNotBlank(),
                     ) {
-                        Text("Create")
+                        Text("Create", color = VantafynColors.Primary, fontWeight = FontWeight.Bold)
                     }
                 },
-                dismissButton = { TextButton(onClick = { showCreatePlaylistDialog = false }) { Text("Cancel") } },
+                dismissButton = { TextButton(onClick = { showCreatePlaylistDialog = false }) { Text("Cancel", color = VantafynColors.Muted) } },
+            )
+        }
+        state.playlistDuplicatePrompt?.let { prompt ->
+            MusicPlaylistDuplicateDialog(
+                prompt = prompt,
+                onConfirm = { tracksToAdd ->
+                    viewModel.confirmDuplicateAddToPlaylist(prompt.playlist, tracksToAdd)
+                },
+                onDismiss = viewModel::dismissPlaylistDuplicatePrompt,
+            )
+        }
+        trackToRemoveFromPlaylist?.let { track ->
+            val playlist = (state.screen as? MusicScreenState.Playlist)?.playlist
+            if (playlist != null) {
+                AlertDialog(
+                    modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 28.dp),
+                    onDismissRequest = { trackToRemoveFromPlaylist = null },
+                    containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+                    shape = RoundedCornerShape(28.dp),
+                    title = { Text("Remove from playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Bold) },
+                    text = { Text("Are you sure you want to remove \"${track.title}\" from \"${playlist.name}\"?", color = VantafynColors.Ink.copy(alpha = 0.85f)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                val toRemove = track
+                                trackToRemoveFromPlaylist = null
+                                viewModel.removeTracksFromPlaylist(playlist, listOf(toRemove))
+                            }
+                        ) {
+                            Text("Remove", color = VantafynColors.Destructive, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { trackToRemoveFromPlaylist = null }) {
+                            Text("Cancel", color = VantafynColors.Muted)
+                        }
+                    },
+                )
+            }
+        }
+        if (showBulkRemoveConfirmation) {
+            val playlist = (state.screen as? MusicScreenState.Playlist)?.playlist
+            if (playlist != null) {
+                val tracksToRemove = currentScreenTracks.filter { selectedTrackIds.contains(it.id) }
+                AlertDialog(
+                    modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 28.dp),
+                    onDismissRequest = { showBulkRemoveConfirmation = false },
+                    containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+                    shape = RoundedCornerShape(28.dp),
+                    title = { Text("Remove from playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Bold) },
+                    text = { Text("Remove ${tracksToRemove.size} songs from \"${playlist.name}\"?", color = VantafynColors.Ink.copy(alpha = 0.85f)) },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showBulkRemoveConfirmation = false
+                                selectedTrackIds = emptySet()
+                                viewModel.removeTracksFromPlaylist(playlist, tracksToRemove)
+                            }
+                        ) {
+                            Text("Remove", color = VantafynColors.Destructive, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showBulkRemoveConfirmation = false }) {
+                            Text("Cancel", color = VantafynColors.Muted)
+                        }
+                    },
+                )
+            }
+        }
+        if (selectedTrackIds.isNotEmpty()) {
+            val isAllSelected = currentScreenTracks.isNotEmpty() && currentScreenTracks.all { selectedTrackIds.contains(it.id) }
+            MusicMultiSelectActionBar(
+                selectedCount = selectedTrackIds.size,
+                isAllSelected = isAllSelected,
+                onToggleSelectAll = {
+                    selectedTrackIds = if (isAllSelected) {
+                        emptySet()
+                    } else {
+                        currentScreenTracks.map { it.id }.toSet()
+                    }
+                },
+                onAddToPlaylist = {
+                    val selected = currentScreenTracks.filter { selectedTrackIds.contains(it.id) }
+                    selectedTrackIds = emptySet()
+                    playlistPickerTracks = selected
+                },
+                onQueue = {
+                    val selected = currentScreenTracks.filter { selectedTrackIds.contains(it.id) }
+                    selectedTrackIds = emptySet()
+                    selected.forEach { viewModel.addToQueue(it) }
+                    viewModel.showMessage("Added ${selected.size} tracks to queue")
+                },
+                onRemoveFromPlaylist = if (state.screen is MusicScreenState.Playlist) {
+                    { showBulkRemoveConfirmation = true }
+                } else null,
+                onClose = { selectedTrackIds = emptySet() },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(start = 16.dp, end = 16.dp, bottom = if (state.playback.currentTrack != null) 166.dp else 108.dp),
             )
         }
     }
@@ -3985,6 +4144,40 @@ private fun MusicRediscoverRow(
     }
 }
 
+private data class MusicMoodTheme(
+    val primaryColor: Color,
+    val secondaryColor: Color,
+    val icon: ImageVector,
+)
+
+private fun MusicHomeMood.theme(): MusicMoodTheme = when (this) {
+    MusicHomeMood.All -> MusicMoodTheme(
+        primaryColor = Color(0xFF00E5FF),
+        secondaryColor = Color(0xFF00B0FF),
+        icon = Icons.Rounded.MusicNote,
+    )
+    MusicHomeMood.Energize -> MusicMoodTheme(
+        primaryColor = Color(0xFFFF9100),
+        secondaryColor = Color(0xFFFF3D00),
+        icon = Icons.Rounded.Bolt,
+    )
+    MusicHomeMood.Chill -> MusicMoodTheme(
+        primaryColor = Color(0xFF00E676),
+        secondaryColor = Color(0xFF00BFA5),
+        icon = Icons.Rounded.GraphicEq,
+    )
+    MusicHomeMood.OnRepeat -> MusicMoodTheme(
+        primaryColor = Color(0xFFD500F9),
+        secondaryColor = Color(0xFF7C3AED),
+        icon = Icons.Rounded.Repeat,
+    )
+    MusicHomeMood.Favorites -> MusicMoodTheme(
+        primaryColor = Color(0xFFFF1744),
+        secondaryColor = Color(0xFFE11D48),
+        icon = Icons.Rounded.Favorite,
+    )
+}
+
 @Composable
 private fun MusicHomeMoodChips(
     selectedMood: MusicHomeMood,
@@ -3998,34 +4191,63 @@ private fun MusicHomeMoodChips(
     ) {
         items(MusicHomeMood.entries, key = { it.name }) { mood ->
             val isSelected = selectedMood == mood
-            val icon = when (mood) {
-                MusicHomeMood.All -> Icons.Rounded.MusicNote
-                MusicHomeMood.Energize -> Icons.Rounded.Bolt
-                MusicHomeMood.Chill -> Icons.Rounded.GraphicEq
-                MusicHomeMood.OnRepeat -> Icons.Rounded.Repeat
-                MusicHomeMood.Favorites -> Icons.Rounded.Favorite
-            }
+            val theme = mood.theme()
 
-            VantafynGlassChip(
-                selected = isSelected,
-                onClick = { onMoodSelected(mood) },
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xFF0F131D).copy(alpha = 0.72f))
+                    .background(
+                        if (isSelected) {
+                            Brush.horizontalGradient(
+                                listOf(
+                                    theme.primaryColor.copy(alpha = 0.32f),
+                                    theme.secondaryColor.copy(alpha = 0.18f),
+                                ),
+                            )
+                        } else {
+                            Brush.horizontalGradient(
+                                listOf(
+                                    theme.primaryColor.copy(alpha = 0.10f),
+                                    theme.primaryColor.copy(alpha = 0.04f),
+                                ),
+                            )
+                        },
+                    )
+                    .then(
+                        if (isSelected) {
+                            Modifier.vantafynAnimatedModalBorder(
+                                cornerRadius = 999.dp,
+                                strokeWidth = 1.4.dp,
+                                durationMillis = 4200,
+                            )
+                        } else {
+                            Modifier.border(
+                                1.dp,
+                                theme.primaryColor.copy(alpha = 0.30f),
+                                RoundedCornerShape(999.dp),
+                            )
+                        },
+                    )
+                    .clickable { onMoodSelected(mood) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
-                        imageVector = icon,
+                        imageVector = theme.icon,
                         contentDescription = null,
-                        tint = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                        tint = if (isSelected) Color.White else theme.primaryColor.copy(alpha = 0.90f),
                         modifier = Modifier.size(15.dp),
                     )
                     Text(
                         text = mood.label,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                        color = if (isSelected) Color.White else theme.primaryColor.copy(alpha = 0.95f),
                     )
                 }
             }
@@ -4400,6 +4622,9 @@ private fun MusicTrackList(
     playlists: List<JellyfinMusicPlaylist> = emptyList(),
     pendingTrackId: java.util.UUID? = null,
     currentTrackId: java.util.UUID? = null,
+    selectedTrackIds: Set<java.util.UUID> = emptySet(),
+    onToggleSelectTrack: ((JellyfinMusicTrack) -> Unit)? = null,
+    onLongPressTrack: ((JellyfinMusicTrack) -> Unit)? = null,
     onTrack: (JellyfinMusicTrack) -> Unit,
     onChoosePlaylist: (JellyfinMusicTrack) -> Unit = {},
     onLongPress: (JellyfinMusicTrack) -> Unit = {},
@@ -4407,6 +4632,8 @@ private fun MusicTrackList(
     isReorderMode: Boolean = false,
     onReorder: ((fromIndex: Int, toIndex: Int) -> Unit)? = null,
     onToggleReorderMode: (() -> Unit)? = null,
+    lazyListState: LazyListState? = null,
+    viewportBoundsInWindow: Rect? = null,
 ) {
     val trackRevealKey = "${page?.startIndex ?: 0}:${page?.totalItems ?: tracks.size}:${tracks.size}:${tracks.firstOrNull()?.id}:${tracks.lastOrNull()?.id}"
     var hasPlayed by remember(trackRevealKey) { mutableStateOf(false) }
@@ -4424,25 +4651,92 @@ private fun MusicTrackList(
     }
 
     var localTracks by remember(tracks) { mutableStateOf(tracks) }
-    var draggedIndex by remember { mutableStateOf<Int?>(null) }
+    var draggedTrackId by remember { mutableStateOf<String?>(null) }
     var dragStartIndex by remember { mutableStateOf<Int?>(null) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var currentPointerWindowY by remember { mutableFloatStateOf(-1f) }
     var itemHeightPx by remember { mutableFloatStateOf(0f) }
     val haptic = LocalHapticFeedback.current
     val density = LocalDensity.current
+    val config = LocalConfiguration.current
     val spacingPx = with(density) { 10.dp.toPx() }
+    val isSelectionActive = selectedTrackIds.isNotEmpty()
 
     LaunchedEffect(tracks) {
-        if (draggedIndex == null) {
+        if (draggedTrackId == null) {
             localTracks = tracks
+        }
+    }
+
+    LaunchedEffect(draggedTrackId) {
+        val activeTrackId = draggedTrackId ?: return@LaunchedEffect
+        val listState = lazyListState ?: return@LaunchedEffect
+        val step = if (itemHeightPx > 0f) itemHeightPx + spacingPx else with(density) { 76.dp.toPx() }
+        val maxScrollSpeedPx = with(density) { 14.dp.toPx() }
+        val topThresholdPx = with(density) { 110.dp.toPx() }
+        val bottomThresholdPx = with(density) { 150.dp.toPx() }
+
+        while (isActive && draggedTrackId == activeTrackId) {
+            val pointerY = currentPointerWindowY
+            val bounds = viewportBoundsInWindow
+            val topLimit = bounds?.top ?: with(density) { 70.dp.toPx() }
+            val bottomLimit = bounds?.bottom ?: with(density) { (config.screenHeightDp.dp - 100.dp).toPx() }
+
+            val topZone = topLimit + topThresholdPx
+            val bottomZone = bottomLimit - bottomThresholdPx
+
+            val scrollDelta = if (pointerY > 0f && pointerY < topZone) {
+                val factor = ((topZone - pointerY) / topThresholdPx).coerceIn(0.15f, 1f)
+                -maxScrollSpeedPx * factor
+            } else if (pointerY > bottomZone && pointerY <= bottomLimit + with(density) { 60.dp.toPx() }) {
+                val factor = ((pointerY - bottomZone) / bottomThresholdPx).coerceIn(0.15f, 1f)
+                maxScrollSpeedPx * factor
+            } else {
+                0f
+            }
+
+            if (scrollDelta != 0f) {
+                val consumed = listState.scrollBy(scrollDelta)
+                if (consumed != 0f) {
+                    dragOffsetY += consumed
+                    val curr = localTracks.indexOfFirst { (it.playlistItemId ?: it.id.toString()) == activeTrackId }
+                    if (curr != -1) {
+                        if (dragOffsetY > step * 0.5f && curr < localTracks.lastIndex) {
+                            val next = curr + 1
+                            val list = localTracks.toMutableList()
+                            val item = list.removeAt(curr)
+                            list.add(next, item)
+                            localTracks = list
+                            dragOffsetY -= step
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        } else if (dragOffsetY < -step * 0.5f && curr > 0) {
+                            val prev = curr - 1
+                            val list = localTracks.toMutableList()
+                            val item = list.removeAt(curr)
+                            list.add(prev, item)
+                            localTracks = list
+                            dragOffsetY += step
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        } else if (curr == 0 && dragOffsetY < -step * 0.5f) {
+                            dragOffsetY = -step * 0.5f
+                        } else if (curr == localTracks.lastIndex && dragOffsetY > step * 0.5f) {
+                            dragOffsetY = step * 0.5f
+                        }
+                    }
+                }
+            }
+            delay(16L)
         }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (title.isNotBlank()) Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         localTracks.forEachIndexed { index, track ->
-            key(track.id) {
-                val isItemDragged = draggedIndex == index
+            val trackKey = track.playlistItemId ?: track.id.toString()
+            key(trackKey) {
+                val isItemDragged = draggedTrackId == trackKey
+                val isTrackSelected = selectedTrackIds.contains(track.id)
+                var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
                 MusicContentReveal(index = index, animate = revealTrackRows, revealKey = trackRevealKey) {
                     VantafynGlassCard(
                         modifier = Modifier
@@ -4465,20 +4759,30 @@ private fun MusicTrackList(
                                 }
                             }
                             .then(
-                                if (track.id == currentTrackId) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
+                                if (isTrackSelected) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.6.dp)
+                                else if (track.id == currentTrackId) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
                                 else Modifier
                             )
                             .combinedClickable(
                                 onClick = {
-                                    if (isReorderMode && onToggleReorderMode != null) {
+                                    if (isSelectionActive && onToggleSelectTrack != null) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        onToggleSelectTrack(track)
+                                    } else if (isReorderMode && onToggleReorderMode != null) {
                                         onToggleReorderMode()
                                     } else {
                                         onTrack(track)
                                     }
                                 },
                                 onLongClick = {
-                                    if (onToggleReorderMode != null) onToggleReorderMode()
-                                    else onLongPress(track)
+                                    if (isReorderMode && onToggleReorderMode != null) {
+                                        onToggleReorderMode()
+                                    } else if (onLongPressTrack != null) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onLongPressTrack(track)
+                                    } else {
+                                        onLongPress(track)
+                                    }
                                 },
                             ),
                         cornerRadius = 18.dp,
@@ -4488,23 +4792,68 @@ private fun MusicTrackList(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
+                            if (isSelectionActive) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(24.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            if (isTrackSelected) Brush.horizontalGradient(listOf(VantafynColors.Primary, VantafynColors.Secondary))
+                                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                                        )
+                                        .then(
+                                            if (!isTrackSelected) Modifier.border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                                            else Modifier
+                                        ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (isTrackSelected) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Check,
+                                            contentDescription = "Selected",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            }
                             if (isReorderMode && onReorder != null) {
                                 Box(
                                     modifier = Modifier
                                         .size(36.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         .background(Color.White.copy(alpha = 0.08f))
-                                        .pointerInput(track.id, isReorderMode) {
+                                        .onGloballyPositioned { coords ->
+                                            handleCoords = coords
+                                        }
+                                        .pointerInput(trackKey, isReorderMode) {
                                             detectDragGestures(
                                                 onDragStart = {
-                                                    draggedIndex = index
-                                                    dragStartIndex = index
+                                                    val initialPos = localTracks.indexOfFirst {
+                                                        (it.playlistItemId ?: it.id.toString()) == trackKey
+                                                    }
+                                                    if (initialPos == -1) return@detectDragGestures
+                                                    draggedTrackId = trackKey
+                                                    dragStartIndex = initialPos
                                                     dragOffsetY = 0f
+                                                    currentPointerWindowY = handleCoords?.let { coords ->
+                                                        runCatching { coords.positionInWindow().y }.getOrNull()
+                                                    } ?: -1f
                                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                 },
                                                 onDrag = { change, dragAmount ->
                                                     change.consume()
-                                                    val curr = draggedIndex ?: return@detectDragGestures
+                                                    if (draggedTrackId != trackKey) return@detectDragGestures
+                                                    val curr = localTracks.indexOfFirst {
+                                                        (it.playlistItemId ?: it.id.toString()) == trackKey
+                                                    }
+                                                    if (curr == -1) return@detectDragGestures
+                                                    handleCoords?.let { coords ->
+                                                        val winY = runCatching { coords.positionInWindow().y }.getOrNull()
+                                                        if (winY != null) {
+                                                            currentPointerWindowY = winY + change.position.y
+                                                        }
+                                                    }
                                                     dragOffsetY += dragAmount.y
                                                     val step = if (itemHeightPx > 0f) itemHeightPx + spacingPx else with(density) { 76.dp.toPx() }
 
@@ -4514,7 +4863,6 @@ private fun MusicTrackList(
                                                         val item = list.removeAt(curr)
                                                         list.add(next, item)
                                                         localTracks = list
-                                                        draggedIndex = next
                                                         dragOffsetY -= step
                                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     } else if (dragOffsetY < -step * 0.5f && curr > 0) {
@@ -4523,25 +4871,32 @@ private fun MusicTrackList(
                                                         val item = list.removeAt(curr)
                                                         list.add(prev, item)
                                                         localTracks = list
-                                                        draggedIndex = prev
                                                         dragOffsetY += step
                                                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    } else if (curr == 0 && dragOffsetY < -step * 0.5f) {
+                                                        dragOffsetY = -step * 0.5f
+                                                    } else if (curr == localTracks.lastIndex && dragOffsetY > step * 0.5f) {
+                                                        dragOffsetY = step * 0.5f
                                                     }
                                                 },
                                                 onDragEnd = {
                                                     val start = dragStartIndex
-                                                    val finish = draggedIndex
-                                                    draggedIndex = null
+                                                    val finish = localTracks.indexOfFirst {
+                                                        (it.playlistItemId ?: it.id.toString()) == trackKey
+                                                    }
+                                                    draggedTrackId = null
                                                     dragStartIndex = null
                                                     dragOffsetY = 0f
-                                                    if (start != null && finish != null && start != finish) {
+                                                    currentPointerWindowY = -1f
+                                                    if (start != null && finish != -1 && start != finish) {
                                                         onReorder(start, finish)
                                                     }
                                                 },
                                                 onDragCancel = {
-                                                    draggedIndex = null
+                                                    draggedTrackId = null
                                                     dragStartIndex = null
                                                     dragOffsetY = 0f
+                                                    currentPointerWindowY = -1f
                                                     localTracks = tracks
                                                 },
                                             )
@@ -4565,7 +4920,7 @@ private fun MusicTrackList(
                             if (pendingTrackId == track.id) {
                                 VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                             }
-                            if (playlists.isNotEmpty()) {
+                            if (playlists.isNotEmpty() && !isSelectionActive) {
                                 Box(
                                     modifier = Modifier
                                         .size(38.dp)
@@ -7039,12 +7394,11 @@ private fun LyricsEmptyState(title: String, subtitle: String) {
 
 @Composable
 private fun MusicSuccessToast(message: String, modifier: Modifier = Modifier) {
-    Box(
+    VantafynGlassModalPanel(
         modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color(0xFF0D1322).copy(alpha = 0.96f))
-            .border(1.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(999.dp))
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.2.dp),
+        cornerRadius = 999.dp,
+        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 12.dp),
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -7143,6 +7497,8 @@ private fun MusicTrackContextMenu(
     onChoosePlaylist: () -> Unit,
     onGoToAlbum: () -> Unit,
     onTrackDetails: () -> Unit,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
+    onSelectTracks: (() -> Unit)? = null,
 ) {
     AlertDialog(
         modifier = Modifier.vantafynAnimatedModalBorder(),
@@ -7161,12 +7517,33 @@ private fun MusicTrackContextMenu(
                 MusicMenuAction(Icons.Rounded.PlayArrow, "Play", onPlay)
                 MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
                 MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
+                onSelectTracks?.let { action ->
+                    MusicMenuAction(Icons.Rounded.Check, "Select tracks", action)
+                }
                 MusicMenuAction(Icons.Rounded.Download, "Save offline", onDownload)
                 if (playlists.isNotEmpty()) {
                     MusicMenuAction(Icons.Rounded.PlaylistAdd, "Add to playlist", onChoosePlaylist)
                 }
                 if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
                 MusicMenuAction(Icons.Rounded.Info, "View track details", onTrackDetails)
+                onRemoveFromPlaylist?.let { action ->
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable(onClick = action),
+                        variant = VantafynGlassVariant.Card,
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Rounded.Delete, contentDescription = null, tint = VantafynColors.Destructive)
+                            Text("Remove from playlist", color = VantafynColors.Destructive, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
             }
         },
     )
@@ -8332,4 +8709,197 @@ private fun OfflineFeaturePill(
         }
     }
 }
+
+@Composable
+private fun MusicPlaylistDuplicateDialog(
+    prompt: PlaylistDuplicatePrompt,
+    onConfirm: (List<JellyfinMusicTrack>) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val isSingle = prompt.candidateTracks.size == 1 && prompt.duplicateTracks.size == 1
+    AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 28.dp),
+        onDismissRequest = onDismiss,
+        containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Text(
+                text = if (isSingle) "Song already in playlist" else "Duplicate songs found",
+                color = VantafynColors.Ink,
+                fontWeight = FontWeight.Bold,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val message = if (isSingle) {
+                    "\"${prompt.duplicateTracks.first().title}\" is already in \"${prompt.playlist.name}\". Would you like to add it again?"
+                } else {
+                    "${prompt.duplicateTracks.size} of ${prompt.candidateTracks.size} songs are already in \"${prompt.playlist.name}\". How would you like to proceed?"
+                }
+                Text(message, color = VantafynColors.Ink.copy(alpha = 0.85f))
+            }
+        },
+        confirmButton = {
+            if (isSingle) {
+                TextButton(onClick = { onConfirm(prompt.candidateTracks) }) {
+                    Text("Add Anyway", color = VantafynColors.Primary, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (prompt.newTracks.isNotEmpty()) {
+                        TextButton(onClick = { onConfirm(prompt.newTracks) }) {
+                            Text("Skip Duplicates (${prompt.newTracks.size})", color = VantafynColors.Primary, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    TextButton(onClick = { onConfirm(prompt.candidateTracks) }) {
+                        Text("Add All (${prompt.candidateTracks.size})", color = VantafynColors.Ink)
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = VantafynColors.Muted)
+            }
+        },
+    )
+}
+
+@Composable
+private fun MusicMultiSelectActionBar(
+    selectedCount: Int,
+    isAllSelected: Boolean,
+    onToggleSelectAll: () -> Unit,
+    onAddToPlaylist: () -> Unit,
+    onQueue: () -> Unit,
+    onRemoveFromPlaylist: (() -> Unit)? = null,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    VantafynGlassDock(
+        modifier = modifier
+            .fillMaxWidth()
+            .vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.3.dp, durationMillis = 4200),
+        cornerRadius = 28.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f, fill = false),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Cancel selection",
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+                Text(
+                    text = "$selectedCount selected",
+                    color = VantafynColors.Ink,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(
+                            if (isAllSelected) VantafynColors.Primary.copy(alpha = 0.18f)
+                            else Color.White.copy(alpha = 0.08f),
+                        )
+                        .border(
+                            0.8.dp,
+                            if (isAllSelected) VantafynColors.Primary.copy(alpha = 0.45f)
+                            else Color.White.copy(alpha = 0.12f),
+                            RoundedCornerShape(999.dp),
+                        )
+                        .clickable(onClick = onToggleSelectAll)
+                        .padding(horizontal = 10.dp, vertical = 5.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (isAllSelected) "Deselect" else "Select All",
+                        color = if (isAllSelected) VantafynColors.Primary else VantafynColors.Ink,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                        .clickable(onClick = onAddToPlaylist),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlaylistAdd,
+                        contentDescription = "Add to playlist",
+                        tint = VantafynColors.Primary,
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(0.8.dp, Color.White.copy(alpha = 0.12f), CircleShape)
+                        .clickable(onClick = onQueue),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.QueueMusic,
+                        contentDescription = "Add to queue",
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                if (onRemoveFromPlaylist != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF2A1215).copy(alpha = 0.65f))
+                            .border(0.8.dp, VantafynColors.Destructive.copy(alpha = 0.40f), CircleShape)
+                            .clickable(onClick = onRemoveFromPlaylist),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Delete,
+                            contentDescription = "Remove from playlist",
+                            tint = VantafynColors.Destructive,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 

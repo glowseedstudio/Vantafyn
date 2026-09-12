@@ -15,6 +15,7 @@ import kotlin.random.Random
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.selects.select
@@ -2837,230 +2838,273 @@ class SdkJellyfinAdminRepository(
             }
             try {
                 val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
-                val systemInfo = runCatching {
-                    val result by api.systemApi.getSystemInfo()
-                    result
-                }.getOrNull()
-                val publicInfo = if (systemInfo == null) {
-                    runCatching {
-                        val result by api.systemApi.getPublicSystemInfo()
-                        result
-                    }.getOrNull()
-                } else null
+                coroutineScope {
+                    val systemInfoDeferred = async {
+                        val systemInfo = runCatching {
+                            val result by api.systemApi.getSystemInfo()
+                            result
+                        }.getOrNull()
+                        val publicInfo = if (systemInfo == null) {
+                            runCatching {
+                                val result by api.systemApi.getPublicSystemInfo()
+                                result
+                            }.getOrNull()
+                        } else null
+                        Triple(
+                            systemInfo?.serverName ?: publicInfo?.serverName ?: session.server.name,
+                            systemInfo?.version ?: publicInfo?.version ?: session.server.version,
+                            systemInfo?.operatingSystemDisplayName
+                                ?: systemInfo?.operatingSystem?.takeIf { it.isNotBlank() }
+                                ?: publicInfo?.operatingSystem?.takeIf { it.isNotBlank() }
+                                ?: "Linux",
+                        )
+                    }
 
-                val serverName = systemInfo?.serverName
-                    ?: publicInfo?.serverName
-                    ?: session.server.name
-                val serverVersion = systemInfo?.version
-                    ?: publicInfo?.version
-                    ?: session.server.version
-                val operatingSystem = systemInfo?.operatingSystemDisplayName
-                    ?: systemInfo?.operatingSystem?.takeIf { it.isNotBlank() }
-                    ?: publicInfo?.operatingSystem?.takeIf { it.isNotBlank() }
-                    ?: "Linux"
+                    val allSessionsDeferred = async {
+                        val allSessions = runCatching {
+                            val result by api.sessionApi.getSessions()
+                            result
+                        }.getOrDefault(emptyList())
+                        val nowPlayingDetails = loadAdminNowPlayingDetails(
+                            api = api,
+                            session = session,
+                            itemIds = allSessions.mapNotNull { it.nowPlayingItem?.id },
+                        )
+                        val sessions = allSessions
+                            .filter { it.nowPlayingItem != null }
+                            .sortedWith(
+                                compareBy(
+                                    { it.userName.orEmpty().lowercase(Locale.US) },
+                                    { it.client.orEmpty().lowercase(Locale.US) },
+                                    { it.deviceName.orEmpty().lowercase(Locale.US) },
+                                    { it.nowPlayingItem?.name.orEmpty().lowercase(Locale.US) },
+                                    { it.id ?: it.deviceId ?: it.userId?.toString().orEmpty() },
+                                ),
+                            )
+                            .mapNotNull { dto ->
+                                runCatching {
+                                    val sessionItem = dto.nowPlayingItem
+                                    val technicalItem = sessionItem?.id?.let { nowPlayingDetails[it] }
+                                    val playState = dto.playState
+                                    val transcode = dto.transcodingInfo
+                                    val mediaSource = technicalItem?.mediaSources.orEmpty().firstOrNull()
+                                    val mediaStreams = mediaSource?.mediaStreams.orEmpty().ifEmpty {
+                                        technicalItem?.mediaStreams.orEmpty().ifEmpty { sessionItem?.mediaStreams.orEmpty() }
+                                    }
+                                    val videoStream = mediaStreams.firstOrNull { it.type == MediaStreamType.VIDEO }
+                                    val audioStream = mediaStreams.firstOrNull { it.type == MediaStreamType.AUDIO }
+                                    JellyfinAdminSession(
+                                        id = dto.id ?: dto.deviceId ?: dto.userId?.toString().orEmpty(),
+                                        userId = dto.userId,
+                                        userName = dto.userName,
+                                        userImageUrl = dto.userId?.let { publicUserImageUrl(api, it, dto.userPrimaryImageTag) },
+                                        client = dto.client,
+                                        deviceName = dto.deviceName,
+                                        remoteEndPoint = dto.remoteEndPoint,
+                                        nowPlayingTitle = sessionItem?.name,
+                                        nowPlayingSubtitle = run {
+                                            val isAudio = sessionItem?.type == BaseItemKind.AUDIO
+                                            if (isAudio) null else sessionItem?.seasonEpisodeLabel()
+                                        } ?: sessionItem?.productionYear?.toString(),
+                                        nowPlayingImageUrl = run {
+                                            val isEpisode = sessionItem?.type == BaseItemKind.EPISODE
+                                            if (isEpisode) {
+                                                val seriesId = sessionItem?.seriesId
+                                                val seriesTag = sessionItem?.seriesPrimaryImageTag
+                                                if (seriesId != null && !seriesTag.isNullOrBlank()) {
+                                                    itemImageUrl(api, seriesId, ImageType.PRIMARY, seriesTag, maxWidth = 420)
+                                                } else {
+                                                    sessionItem?.primaryImageUrl(api, 420)
+                                                }
+                                            } else {
+                                                sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520)
+                                            }
+                                        },
+                                        nowPlayingBackdropUrl = sessionItem?.backdropImageUrl(api, 760) ?: sessionItem?.thumbImageUrl(api, 760),
+                                        nowPlayingType = sessionItem?.type?.serialName ?: sessionItem?.type?.name,
+                                        playMethod = playState?.playMethod?.let { method ->
+                                            when (method) {
+                                                PlayMethod.DIRECT_PLAY -> "Direct Play"
+                                                PlayMethod.DIRECT_STREAM -> "Direct Stream"
+                                                PlayMethod.TRANSCODE -> "Transcoding"
+                                                else -> method.name
+                                            }
+                                        } ?: if (transcode != null) "Transcoding" else "Unknown",
+                                        isPaused = playState?.isPaused == true,
+                                        positionTicks = playState?.positionTicks,
+                                        runtimeTicks = sessionItem?.runTimeTicks ?: technicalItem?.runTimeTicks,
+                                        streamQuality = videoStream?.videoQualityLabel(),
+                                        videoCodec = transcode?.videoCodec ?: videoStream?.codec,
+                                        audioCodec = transcode?.audioCodec ?: audioStream?.codec,
+                                        container = transcode?.container ?: mediaSource?.container ?: technicalItem?.container ?: sessionItem?.container,
+                                        bitrate = transcode?.bitrate ?: mediaSource?.bitrate ?: mediaStreams.sumOf { it.bitRate ?: 0 }.takeIf { it > 0 },
+                                        transcodeReasons = transcode?.transcodeReasons.orEmpty().mapNotNull { runCatching { it.serialName }.getOrNull() ?: it.name },
+                                        lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
+                                        isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
+                                        supportsDisplayMessage = dto.supportedCommands.orEmpty().contains(GeneralCommandType.DISPLAY_MESSAGE),
+                                    )
+                                }.getOrNull()
+                            }
+                        allSessions.size to sessions
+                    }
 
-                val allSessions = runCatching {
-                    val result by api.sessionApi.getSessions()
-                    result
-                }.getOrDefault(emptyList())
-                val nowPlayingDetails = loadAdminNowPlayingDetails(
-                    api = api,
-                    session = session,
-                    itemIds = allSessions.mapNotNull { it.nowPlayingItem?.id },
-                )
-                val sessions = allSessions
-                    .filter { it.nowPlayingItem != null }
-                    .sortedWith(
-                        compareBy(
-                            { it.userName.orEmpty().lowercase(Locale.US) },
-                            { it.client.orEmpty().lowercase(Locale.US) },
-                            { it.deviceName.orEmpty().lowercase(Locale.US) },
-                            { it.nowPlayingItem?.name.orEmpty().lowercase(Locale.US) },
-                            { it.id ?: it.deviceId ?: it.userId?.toString().orEmpty() },
+                    val usersDeferred = async {
+                        runCatching {
+                            val result by api.userApi.getUsers(isHidden = null, isDisabled = null)
+                            result.map { user ->
+                                JellyfinAdminUser(
+                                    id = user.id,
+                                    name = user.name ?: "Unknown",
+                                    imageUrl = publicUserImageUrl(api, user.id, user.primaryImageTag),
+                                    isAdministrator = user.policy?.isAdministrator == true,
+                                    isDisabled = user.policy?.isDisabled == true,
+                                    isHidden = user.policy?.isHidden == true,
+                                    lastActivity = user.lastActivityDate?.toString(),
+                                    lastLogin = user.lastLoginDate?.toString(),
+                                )
+                            }
+                        }.getOrDefault(emptyList())
+                    }
+
+                    val pluginsDeferred = async {
+                        runCatching {
+                            val result by api.pluginsApi.getPlugins()
+                            result.map {
+                                JellyfinAdminPlugin(
+                                    id = it.id,
+                                    name = it.name,
+                                    version = it.version,
+                                    description = it.description,
+                                    status = it.status?.serialName ?: it.status?.name,
+                                    hasImage = it.hasImage,
+                                    canUninstall = it.canUninstall,
+                                )
+                            }
+                        }.getOrElse { sdkThrowable ->
+                            Log.w("VantafynAdmin", "SDK plugin list failed, falling back to /Plugins: ${sdkThrowable.javaClass.simpleName}")
+                            fetchPluginsFallback(session)
+                        }
+                    }
+
+                    val tasksDeferred = async {
+                        runCatching {
+                            val result by api.scheduledTasksApi.getTasks(isHidden = false, isEnabled = null)
+                            result.map {
+                                JellyfinAdminTask(
+                                    id = it.id ?: it.key ?: it.name.orEmpty(),
+                                    name = it.name ?: it.key ?: "Scheduled task",
+                                    category = it.category,
+                                    state = it.state?.serialName ?: it.state?.name,
+                                    progress = it.currentProgressPercentage,
+                                    lastStatus = it.lastExecutionResult?.status?.serialName ?: it.lastExecutionResult?.status?.name,
+                                    lastEnded = it.lastExecutionResult?.endTimeUtc?.toString(),
+                                )
+                            }
+                        }.getOrDefault(emptyList())
+                    }
+
+                    val recentActivityDeferred = async {
+                        runCatching {
+                            val result by api.activityLogApi.getLogEntries(startIndex = 0, limit = 8, minDate = null, hasUserId = null)
+                            result.items.map {
+                                JellyfinAdminActivity(
+                                    id = it.id,
+                                    name = it.name,
+                                    shortOverview = it.shortOverview ?: it.overview,
+                                    type = it.type,
+                                    date = it.date?.toString(),
+                                    severity = it.severity?.serialName ?: it.severity?.name,
+                                )
+                            }
+                        }.getOrDefault(emptyList())
+                    }
+
+                    val devicesDeferred = async {
+                        runCatching {
+                            val result by api.devicesApi.getDevices(userId = null)
+                            result.items.map {
+                                JellyfinAdminDevice(
+                                    id = it.id.orEmpty(),
+                                    name = it.customName ?: it.name ?: "Unknown device",
+                                    appName = it.appName,
+                                    appVersion = it.appVersion,
+                                    lastUserName = it.lastUserName,
+                                    lastActivity = it.dateLastActivity?.toString(),
+                                    iconUrl = it.iconUrl,
+                                )
+                            }
+                        }.getOrDefault(emptyList())
+                    }
+
+                    val logsDeferred = async {
+                        runCatching {
+                            val result by api.systemApi.getServerLogs()
+                            result.map {
+                                JellyfinAdminLogFile(
+                                    name = it.name,
+                                    sizeBytes = it.size,
+                                    modified = it.dateModified.toString(),
+                                )
+                            }
+                        }.getOrDefault(emptyList())
+                    }
+
+                    val totalItemsDeferred = async { countItems(api, session, null) }
+                    val moviesCountDeferred = async { countItems(api, session, listOf(BaseItemKind.MOVIE)) }
+                    val seriesCountDeferred = async { countItems(api, session, listOf(BaseItemKind.SERIES)) }
+                    val episodesCountDeferred = async { countItems(api, session, listOf(BaseItemKind.EPISODE)) }
+                    val musicCountDeferred = async { countItems(api, session, listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)) }
+
+                    val users = usersDeferred.await()
+                    val plugins = pluginsDeferred.await()
+                    val recentActivity = recentActivityDeferred.await()
+
+                    val statisticsDeferred = async {
+                        loadPlaybackReportingStatistics(
+                            api = api,
+                            session = session,
+                            users = users,
+                            plugins = plugins,
+                            recentActivity = recentActivity,
+                            days = 30,
+                        )
+                    }
+
+                    val (serverName, serverVersion, operatingSystem) = systemInfoDeferred.await()
+                    val (connectedSessionCount, sessions) = allSessionsDeferred.await()
+                    val tasks = tasksDeferred.await()
+                    val devices = devicesDeferred.await()
+                    val logs = logsDeferred.await()
+                    val statistics = statisticsDeferred.await()
+
+                    JellyfinResult.Success(
+                        JellyfinAdminOverview(
+                            serverName = serverName,
+                            serverVersion = serverVersion,
+                            operatingSystem = operatingSystem,
+                            activeSessions = sessions,
+                            connectedSessionCount = connectedSessionCount,
+                            users = users,
+                            libraryCount = libraries.size,
+                            totalItems = totalItemsDeferred.await(),
+                            moviesCount = moviesCountDeferred.await(),
+                            seriesCount = seriesCountDeferred.await(),
+                            episodesCount = episodesCountDeferred.await(),
+                            musicCount = musicCountDeferred.await(),
+                            plugins = plugins,
+                            tasks = tasks,
+                            recentActivity = recentActivity,
+                            devices = devices,
+                            serverLogs = logs,
+                            statistics = statistics,
+                            unavailableStats = if (statistics.capability == JellyfinStatisticsCapability.PlaybackReporting) {
+                                emptyList()
+                            } else {
+                                listOf(statistics.message ?: "Playback Reporting statistics are unavailable.")
+                            },
                         ),
                     )
-                    .mapNotNull { dto ->
-                        runCatching {
-                            val sessionItem = dto.nowPlayingItem
-                            val technicalItem = sessionItem?.id?.let { nowPlayingDetails[it] }
-                            val playState = dto.playState
-                            val transcode = dto.transcodingInfo
-                            val mediaSource = technicalItem?.mediaSources.orEmpty().firstOrNull()
-                            val mediaStreams = mediaSource?.mediaStreams.orEmpty().ifEmpty {
-                                technicalItem?.mediaStreams.orEmpty().ifEmpty { sessionItem?.mediaStreams.orEmpty() }
-                            }
-                            val videoStream = mediaStreams.firstOrNull { it.type == MediaStreamType.VIDEO }
-                            val audioStream = mediaStreams.firstOrNull { it.type == MediaStreamType.AUDIO }
-                            JellyfinAdminSession(
-                                id = dto.id ?: dto.deviceId ?: dto.userId?.toString().orEmpty(),
-                                userId = dto.userId,
-                                userName = dto.userName,
-                                userImageUrl = dto.userId?.let { publicUserImageUrl(api, it, dto.userPrimaryImageTag) },
-                                client = dto.client,
-                                deviceName = dto.deviceName,
-                                remoteEndPoint = dto.remoteEndPoint,
-                                nowPlayingTitle = sessionItem?.name,
-                                nowPlayingSubtitle = run {
-                                    val isAudio = sessionItem?.type == BaseItemKind.AUDIO
-                                    if (isAudio) null else sessionItem?.seasonEpisodeLabel()
-                                } ?: sessionItem?.productionYear?.toString(),
-                                nowPlayingImageUrl = run {
-                                    val isEpisode = sessionItem?.type == BaseItemKind.EPISODE
-                                    if (isEpisode) {
-                                        val seriesId = sessionItem?.seriesId
-                                        val seriesTag = sessionItem?.seriesPrimaryImageTag
-                                        if (seriesId != null && !seriesTag.isNullOrBlank()) {
-                                            itemImageUrl(api, seriesId, ImageType.PRIMARY, seriesTag, maxWidth = 420)
-                                        } else {
-                                            sessionItem?.primaryImageUrl(api, 420)
-                                        }
-                                    } else {
-                                        sessionItem?.primaryImageUrl(api, 420) ?: sessionItem?.thumbImageUrl(api, 520)
-                                    }
-                                },
-                                nowPlayingBackdropUrl = sessionItem?.backdropImageUrl(api, 760) ?: sessionItem?.thumbImageUrl(api, 760),
-                                nowPlayingType = sessionItem?.type?.serialName ?: sessionItem?.type?.name,
-                                playMethod = playState?.playMethod?.let { method ->
-                                    when (method) {
-                                        PlayMethod.DIRECT_PLAY -> "Direct Play"
-                                        PlayMethod.DIRECT_STREAM -> "Direct Stream"
-                                        PlayMethod.TRANSCODE -> "Transcoding"
-                                        else -> method.name
-                                    }
-                                } ?: if (transcode != null) "Transcoding" else "Unknown",
-                                isPaused = playState?.isPaused == true,
-                                positionTicks = playState?.positionTicks,
-                                runtimeTicks = sessionItem?.runTimeTicks ?: technicalItem?.runTimeTicks,
-                                streamQuality = videoStream?.videoQualityLabel(),
-                                videoCodec = transcode?.videoCodec ?: videoStream?.codec,
-                                audioCodec = transcode?.audioCodec ?: audioStream?.codec,
-                                container = transcode?.container ?: mediaSource?.container ?: technicalItem?.container ?: sessionItem?.container,
-                                bitrate = transcode?.bitrate ?: mediaSource?.bitrate ?: mediaStreams.sumOf { it.bitRate ?: 0 }.takeIf { it > 0 },
-                                transcodeReasons = transcode?.transcodeReasons.orEmpty().mapNotNull { runCatching { it.serialName }.getOrNull() ?: it.name },
-                                lastPlaybackCheckIn = dto.lastPlaybackCheckIn?.toString(),
-                                isTranscoding = transcode != null || playState?.playMethod == PlayMethod.TRANSCODE,
-                                supportsDisplayMessage = dto.supportedCommands.orEmpty().contains(GeneralCommandType.DISPLAY_MESSAGE),
-                            )
-                        }.getOrNull()
-                    }
-                val users = runCatching {
-                    val result by api.userApi.getUsers(isHidden = null, isDisabled = null)
-                    result.map { user ->
-                        JellyfinAdminUser(
-                            id = user.id,
-                            name = user.name ?: "Unknown",
-                            imageUrl = publicUserImageUrl(api, user.id, user.primaryImageTag),
-                            isAdministrator = user.policy?.isAdministrator == true,
-                            isDisabled = user.policy?.isDisabled == true,
-                            isHidden = user.policy?.isHidden == true,
-                            lastActivity = user.lastActivityDate?.toString(),
-                            lastLogin = user.lastLoginDate?.toString(),
-                        )
-                    }
-                }.getOrDefault(emptyList())
-                val plugins = runCatching {
-                    val result by api.pluginsApi.getPlugins()
-                    result.map {
-                        JellyfinAdminPlugin(
-                            id = it.id,
-                            name = it.name,
-                            version = it.version,
-                            description = it.description,
-                            status = it.status?.serialName ?: it.status?.name,
-                            hasImage = it.hasImage,
-                            canUninstall = it.canUninstall,
-                        )
-                    }
-                }.getOrElse { sdkThrowable ->
-                    Log.w("VantafynAdmin", "SDK plugin list failed, falling back to /Plugins: ${sdkThrowable.javaClass.simpleName}")
-                    fetchPluginsFallback(session)
                 }
-                val tasks = runCatching {
-                    val result by api.scheduledTasksApi.getTasks(isHidden = false, isEnabled = null)
-                    result.map {
-                        JellyfinAdminTask(
-                            id = it.id ?: it.key ?: it.name.orEmpty(),
-                            name = it.name ?: it.key ?: "Scheduled task",
-                            category = it.category,
-                            state = it.state?.serialName ?: it.state?.name,
-                            progress = it.currentProgressPercentage,
-                            lastStatus = it.lastExecutionResult?.status?.serialName ?: it.lastExecutionResult?.status?.name,
-                            lastEnded = it.lastExecutionResult?.endTimeUtc?.toString(),
-                        )
-                    }
-                }.getOrDefault(emptyList())
-                val recentActivity = runCatching {
-                    val result by api.activityLogApi.getLogEntries(startIndex = 0, limit = 8, minDate = null, hasUserId = null)
-                    result.items.map {
-                        JellyfinAdminActivity(
-                            id = it.id,
-                            name = it.name,
-                            shortOverview = it.shortOverview ?: it.overview,
-                            type = it.type,
-                            date = it.date?.toString(),
-                            severity = it.severity?.serialName ?: it.severity?.name,
-                        )
-                    }
-                }.getOrDefault(emptyList())
-                val devices = runCatching {
-                    val result by api.devicesApi.getDevices(userId = null)
-                    result.items.map {
-                        JellyfinAdminDevice(
-                            id = it.id.orEmpty(),
-                            name = it.customName ?: it.name ?: "Unknown device",
-                            appName = it.appName,
-                            appVersion = it.appVersion,
-                            lastUserName = it.lastUserName,
-                            lastActivity = it.dateLastActivity?.toString(),
-                            iconUrl = it.iconUrl,
-                        )
-                    }
-                }.getOrDefault(emptyList())
-                val logs = runCatching {
-                    val result by api.systemApi.getServerLogs()
-                    result.map {
-                        JellyfinAdminLogFile(
-                            name = it.name,
-                            sizeBytes = it.size,
-                            modified = it.dateModified.toString(),
-                        )
-                    }
-                }.getOrDefault(emptyList())
-                val statistics = loadPlaybackReportingStatistics(
-                    api = api,
-                    session = session,
-                    users = users,
-                    plugins = plugins,
-                    recentActivity = recentActivity,
-                    days = 30,
-                )
-                JellyfinResult.Success(
-                    JellyfinAdminOverview(
-                        serverName = serverName,
-                        serverVersion = serverVersion,
-                        operatingSystem = operatingSystem,
-                        activeSessions = sessions,
-                        connectedSessionCount = allSessions.size,
-                        users = users,
-                        libraryCount = libraries.size,
-                        totalItems = countItems(api, session, null),
-                        moviesCount = countItems(api, session, listOf(BaseItemKind.MOVIE)),
-                        seriesCount = countItems(api, session, listOf(BaseItemKind.SERIES)),
-                        episodesCount = countItems(api, session, listOf(BaseItemKind.EPISODE)),
-                        musicCount = countItems(api, session, listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)),
-                        plugins = plugins,
-                        tasks = tasks,
-                        recentActivity = recentActivity,
-                        devices = devices,
-                        serverLogs = logs,
-                        statistics = statistics,
-                        unavailableStats = if (statistics.capability == JellyfinStatisticsCapability.PlaybackReporting) {
-                            emptyList()
-                        } else {
-                            listOf(statistics.message ?: "Playback Reporting statistics are unavailable.")
-                        },
-                    ),
-                )
             } catch (throwable: Throwable) {
                 Log.e("VantafynAdmin", "getOverview failed with ${throwable.javaClass.name}: ${throwable.message}", throwable)
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
@@ -3133,30 +3177,42 @@ class SdkJellyfinAdminRepository(
         )
 
         return runCatching {
-            val userActivity = playbackReportingJsonArray(
-                session = session,
-                pathAndQuery = "user_usage_stats/user_activity?days=$days&endDate=$endDate&timezoneOffset=$timezoneOffset",
-            )
-            val usersStats = parsePlaybackReportingUsers(userActivity, userImages)
-            val enrichedUsersStats = enrichUserContentBreakdown(session, usersStats, days, endDate, timezoneOffset)
-            val trend = loadPlaybackReportingTrend(session, days, endDate, timezoneOffset)
-            val media = loadPlaybackReportingMediaBreakdown(api, session, days, endDate, timezoneOffset)
-            val totalWatchTimeSeconds = usersStats.sumOf { it.totalWatchTimeSeconds }
-            val totalPlayCount = usersStats.sumOf { it.playCount }
-            JellyfinStatisticsOverview(
-                capability = JellyfinStatisticsCapability.PlaybackReporting,
-                rangeDays = days,
-                rangeLabel = "$days days",
-                totalWatchTimeSeconds = totalWatchTimeSeconds,
-                totalPlayCount = totalPlayCount,
-                mostActiveUser = enrichedUsersStats.maxByOrNull { it.totalWatchTimeSeconds },
-                mostWatchedTitle = media.maxWithOrNull(compareBy<JellyfinMediaWatchStats> { it.totalWatchTimeSeconds }.thenBy { it.playCount }),
-                users = enrichedUsersStats,
-                media = media,
-                trend = trend,
-                recentActivity = recentActivity,
-                message = null,
-            )
+            coroutineScope {
+                val userActivityDeferred = async {
+                    playbackReportingJsonArray(
+                        session = session,
+                        pathAndQuery = "user_usage_stats/user_activity?days=$days&endDate=$endDate&timezoneOffset=$timezoneOffset",
+                    )
+                }
+                val trendDeferred = async {
+                    loadPlaybackReportingTrend(session, days, endDate, timezoneOffset)
+                }
+                val mediaDeferred = async {
+                    loadPlaybackReportingMediaBreakdown(api, session, days, endDate, timezoneOffset)
+                }
+
+                val userActivity = userActivityDeferred.await()
+                val usersStats = parsePlaybackReportingUsers(userActivity, userImages)
+                val enrichedUsersStats = enrichUserContentBreakdown(session, usersStats, days, endDate, timezoneOffset)
+                val trend = trendDeferred.await()
+                val media = mediaDeferred.await()
+                val totalWatchTimeSeconds = usersStats.sumOf { it.totalWatchTimeSeconds }
+                val totalPlayCount = usersStats.sumOf { it.playCount }
+                JellyfinStatisticsOverview(
+                    capability = JellyfinStatisticsCapability.PlaybackReporting,
+                    rangeDays = days,
+                    rangeLabel = "$days days",
+                    totalWatchTimeSeconds = totalWatchTimeSeconds,
+                    totalPlayCount = totalPlayCount,
+                    mostActiveUser = enrichedUsersStats.maxByOrNull { it.totalWatchTimeSeconds },
+                    mostWatchedTitle = media.maxWithOrNull(compareBy<JellyfinMediaWatchStats> { it.totalWatchTimeSeconds }.thenBy { it.playCount }),
+                    users = enrichedUsersStats,
+                    media = media,
+                    trend = trend,
+                    recentActivity = recentActivity,
+                    message = null,
+                )
+            }
         }.getOrElse { fallback }
     }
 
@@ -3195,7 +3251,7 @@ class SdkJellyfinAdminRepository(
             .sortedWith(compareByDescending<JellyfinUserWatchStats> { it.totalWatchTimeSeconds }.thenByDescending { it.playCount })
             .mapIndexed { index, stat -> stat.copy(rank = index + 1) }
 
-    private fun enrichUserContentBreakdown(
+    private suspend fun enrichUserContentBreakdown(
         session: JellyfinSession,
         users: List<JellyfinUserWatchStats>,
         days: Int,
@@ -3203,38 +3259,47 @@ class SdkJellyfinAdminRepository(
         timezoneOffset: String,
     ): List<JellyfinUserWatchStats> {
         if (users.isEmpty()) return users
-        val typeFilters = listOf("Movie" to "moviesCount", "Episode" to "episodesCount", "Audio" to "audioCount")
+        val typeFilters = listOf("Movie", "Episode", "Audio")
         val countsByUserAndType = mutableMapOf<String, MutableMap<String, Int>>()
-        for ((typeName, _) in typeFilters) {
-            val encodedType = URLEncoder.encode(typeName, Charsets.UTF_8.name())
-            runCatching {
-                val rows = playbackReportingJsonArray(
-                    session = session,
-                    pathAndQuery = "user_usage_stats/PlayActivity?filter=$encodedType&days=$days&endDate=$endDate&dataType=count&timezoneOffset=$timezoneOffset",
-                )
-                for (i in 0 until rows.length()) {
-                    val row = rows.optJSONObject(i) ?: continue
-                    val rawUserId = row.optString("user_id").takeIf { it.isNotBlank() } ?: continue
-                    val normalizedUserId = runCatching { java.util.UUID.fromString(rawUserId) }.getOrNull()?.toString()
-                        ?: runCatching {
-                            val d = rawUserId.lowercase(Locale.US)
-                            java.util.UUID.fromString(
-                                "${d.substring(0,8)}-${d.substring(8,12)}-${d.substring(12,16)}-${d.substring(16,20)}-${d.substring(20)}"
-                            ).toString()
-                        }.getOrNull() ?: rawUserId
-                    val usage = row.optJSONObject("user_usage")
-                    val count = if (usage != null) {
-                        var total = 0
-                        usage.keys().forEach { date -> total += usage.optInt(date, 0) }
-                        total
-                    } else {
-                        row.optInt("total_count", row.optInt("count", 0))
+        coroutineScope {
+            typeFilters.map { typeName ->
+                async {
+                    val encodedType = URLEncoder.encode(typeName, Charsets.UTF_8.name())
+                    val list = mutableListOf<Pair<String, Pair<String, Int>>>()
+                    runCatching {
+                        val rows = playbackReportingJsonArray(
+                            session = session,
+                            pathAndQuery = "user_usage_stats/PlayActivity?filter=$encodedType&days=$days&endDate=$endDate&dataType=count&timezoneOffset=$timezoneOffset",
+                        )
+                        for (i in 0 until rows.length()) {
+                            val row = rows.optJSONObject(i) ?: continue
+                            val rawUserId = row.optString("user_id").takeIf { it.isNotBlank() } ?: continue
+                            val normalizedUserId = runCatching { java.util.UUID.fromString(rawUserId) }.getOrNull()?.toString()
+                                ?: runCatching {
+                                    val d = rawUserId.lowercase(Locale.US)
+                                    java.util.UUID.fromString(
+                                        "${d.substring(0,8)}-${d.substring(8,12)}-${d.substring(12,16)}-${d.substring(16,20)}-${d.substring(20)}"
+                                    ).toString()
+                                }.getOrNull() ?: rawUserId
+                            val usage = row.optJSONObject("user_usage")
+                            val count = if (usage != null) {
+                                var total = 0
+                                usage.keys().forEach { date -> total += usage.optInt(date, 0) }
+                                total
+                            } else {
+                                row.optInt("total_count", row.optInt("count", 0))
+                            }
+                            if (count > 0) {
+                                list.add(normalizedUserId to (typeName to count))
+                            }
+                        }
                     }
-                    if (count > 0) {
-                        countsByUserAndType.getOrPut(normalizedUserId) { mutableMapOf() }[typeName] =
-                            (countsByUserAndType[normalizedUserId]?.get(typeName) ?: 0) + count
-                    }
+                    list
                 }
+            }.awaitAll().flatten().forEach { (userId, pair) ->
+                val (typeName, count) = pair
+                countsByUserAndType.getOrPut(userId) { mutableMapOf() }[typeName] =
+                    (countsByUserAndType[userId]?.get(typeName) ?: 0) + count
             }
         }
         if (countsByUserAndType.isEmpty()) return users
@@ -3397,120 +3462,78 @@ class SdkJellyfinAdminRepository(
         session: JellyfinSession,
         items: List<JellyfinMediaWatchStats>,
     ): Map<String, Pair<String?, String?>> {
-        if (items.isEmpty()) return emptyMap()
+        val targets = items.filter { it.posterUrl == null }.take(6)
+        if (targets.isEmpty()) return emptyMap()
         val albumIdByTitle = mutableMapOf<String, java.util.UUID>()
-        val results = items.take(16).mapNotNull { stats ->
-            runCatching {
-                val candidates = stats.title.playbackReportingSearchCandidates()
-                val isAudio = stats.type?.lowercase(Locale.US) in setOf("audio", "song", "track", "music")
-                val normalizedTitle = stats.title.normalizedPlaybackReportingTitle()
+        val results = coroutineScope {
+            targets.map { stats ->
+                async {
+                    runCatching {
+                        withTimeoutOrNull(2000L) {
+                            val candidate = stats.title.playbackReportingSearchTitle().ifBlank { stats.title.trim() }
+                            val normalizedTitle = stats.title.normalizedPlaybackReportingTitle()
+                            val isAudio = stats.type?.lowercase(Locale.US) in setOf("audio", "song", "track", "music")
 
-                var foundPosterUrl: String? = null
-                var foundLogoUrl: String? = null
-                var candidateAlbumId: java.util.UUID? = null
+                            var foundPosterUrl: String? = null
+                            var foundLogoUrl: String? = null
+                            var candidateAlbumId: java.util.UUID? = null
 
-                for (query in candidates) {
-                    if (foundPosterUrl != null) break
-
-                    val itemsResponse = runCatching {
-                        val response by api.itemsApi.getItems(
-                            GetItemsRequest(
-                                userId = session.user.id,
-                                searchTerm = query,
-                                includeItemTypes = listOf(
-                                    BaseItemKind.AUDIO,
-                                    BaseItemKind.MUSIC_ALBUM,
-                                    BaseItemKind.MOVIE,
-                                    BaseItemKind.SERIES,
-                                    BaseItemKind.EPISODE,
-                                ),
-                                recursive = true,
-                                limit = 8,
-                                fields = itemFields,
-                                enableImageTypes = itemImageTypes,
-                                enableImages = true,
-                                enableUserData = false,
-                                enableTotalRecordCount = false,
-                            ),
-                        )
-                        response.items
-                    }.getOrDefault(emptyList())
-
-                    val matchedItem = itemsResponse.firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
-                        ?: if (isAudio) itemsResponse.firstOrNull { it.type == BaseItemKind.AUDIO || it.type == BaseItemKind.MUSIC_ALBUM }
-                        else itemsResponse.firstOrNull()
-
-                    if (matchedItem != null) {
-                        foundLogoUrl = matchedItem.logoImageUrl(api, 420)
-                        val directArt = matchedItem.primaryImageUrl(api, 260) ?: matchedItem.thumbImageUrl(api, 360) ?: matchedItem.backdropImageUrl(api, 360)
-                        if (directArt != null) {
-                            foundPosterUrl = directArt
-                            break
-                        }
-                        if (matchedItem.albumId != null) {
-                            candidateAlbumId = matchedItem.albumId
-                        }
-                    }
-
-                    if (foundPosterUrl == null) {
-                        val hintsResponse = runCatching {
-                            val response by api.searchApi.getSearchHints(
-                                GetSearchHintsRequest(
-                                    userId = session.user.id,
-                                    searchTerm = query,
-                                    includeItemTypes = listOf(
-                                        BaseItemKind.MOVIE,
-                                        BaseItemKind.SERIES,
-                                        BaseItemKind.EPISODE,
-                                        BaseItemKind.AUDIO,
-                                        BaseItemKind.MUSIC_ALBUM,
+                            val hintsResponse = runCatching {
+                                val response by api.searchApi.getSearchHints(
+                                    GetSearchHintsRequest(
+                                        userId = session.user.id,
+                                        searchTerm = candidate,
+                                        includeItemTypes = listOf(
+                                            BaseItemKind.MOVIE,
+                                            BaseItemKind.SERIES,
+                                            BaseItemKind.EPISODE,
+                                            BaseItemKind.AUDIO,
+                                            BaseItemKind.MUSIC_ALBUM,
+                                        ),
+                                        limit = 4,
+                                        mediaTypes = emptyList(),
                                     ),
-                                    limit = 8,
-                                    mediaTypes = emptyList(),
-                                ),
-                            )
-                            response.searchHints
-                        }.getOrDefault(emptyList())
+                                )
+                                response.searchHints
+                            }.getOrDefault(emptyList())
 
-                        val matchedHint = hintsResponse.firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
-                            ?: if (isAudio) hintsResponse.firstOrNull { it.albumId != null || it.primaryImageTag != null }
-                            else hintsResponse.firstOrNull()
+                            val matchedHint = hintsResponse.firstOrNull { it.name?.normalizedPlaybackReportingTitle() == normalizedTitle }
+                                ?: if (isAudio) hintsResponse.firstOrNull { it.albumId != null || it.primaryImageTag != null }
+                                else hintsResponse.firstOrNull()
 
-                        if (matchedHint != null) {
-                            val hintItemId = matchedHint.itemId ?: matchedHint.id
-                            val hintPrimaryTag = matchedHint.primaryImageTag
-                            val hintThumbTag = matchedHint.thumbImageTag
-                            val hintBackdropTag = matchedHint.backdropImageTag
-
-                            val hintPoster: String? = hintItemId?.let { hId ->
-                                hintPrimaryTag?.takeIf { it.isNotBlank() }?.let {
-                                    itemImageUrl(api, hId, ImageType.PRIMARY, it, maxWidth = 260)
-                                } ?: hintThumbTag?.takeIf { it.isNotBlank() }?.let {
-                                    itemImageUrl(api, hId, ImageType.THUMB, it, maxWidth = 360)
-                                } ?: hintBackdropTag?.takeIf { it.isNotBlank() }?.let {
-                                    itemImageUrl(api, hId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+                            if (matchedHint != null) {
+                                val hintItemId = matchedHint.itemId ?: matchedHint.id
+                                val hintPoster: String? = hintItemId?.let { hId ->
+                                    matchedHint.primaryImageTag?.takeIf { it.isNotBlank() }?.let {
+                                        itemImageUrl(api, hId, ImageType.PRIMARY, it, maxWidth = 260)
+                                    } ?: matchedHint.thumbImageTag?.takeIf { it.isNotBlank() }?.let {
+                                        itemImageUrl(api, hId, ImageType.THUMB, it, maxWidth = 360)
+                                    } ?: matchedHint.backdropImageTag?.takeIf { it.isNotBlank() }?.let {
+                                        itemImageUrl(api, hId, ImageType.BACKDROP, it, maxWidth = 360, index = 0)
+                                    }
+                                }
+                                if (hintPoster != null) {
+                                    foundPosterUrl = hintPoster
+                                }
+                                if (matchedHint.albumId != null) {
+                                    candidateAlbumId = matchedHint.albumId
                                 }
                             }
-                            if (hintPoster != null) {
-                                foundPosterUrl = hintPoster
-                                break
-                            }
-                            if (matchedHint.albumId != null) {
-                                candidateAlbumId = matchedHint.albumId
-                            }
-                        }
-                    }
-                }
 
-                if (foundPosterUrl == null && candidateAlbumId != null) {
-                    albumIdByTitle[normalizedTitle] = candidateAlbumId
+                            if (foundPosterUrl == null && candidateAlbumId != null) {
+                                synchronized(albumIdByTitle) {
+                                    albumIdByTitle[normalizedTitle] = candidateAlbumId
+                                }
+                            }
+                            normalizedTitle to (foundPosterUrl to foundLogoUrl)
+                        }
+                    }.getOrNull()
                 }
-                normalizedTitle to (foundPosterUrl to foundLogoUrl)
-            }.getOrNull()
-        }.toMap()
+            }.awaitAll().filterNotNull().toMap()
+        }
 
         if (albumIdByTitle.isNotEmpty()) {
-            val albumArt = loadPlaybackReportingArtwork(api, session, albumIdByTitle.values.distinct().take(36))
+            val albumArt = loadPlaybackReportingArtwork(api, session, albumIdByTitle.values.distinct().take(12))
             return results.mapValues { (title, pair) ->
                 if (pair.first != null) return@mapValues pair
                 val albumId = albumIdByTitle[title]
