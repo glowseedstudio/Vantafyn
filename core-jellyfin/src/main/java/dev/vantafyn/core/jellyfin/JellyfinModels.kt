@@ -719,6 +719,7 @@ data class JellyfinMusicPlaylist(
     val trackCount: Int?,
     val trackImageUrls: List<String> = emptyList(),
     val isFavorite: Boolean = false,
+    val isUserCreated: Boolean = true,
 )
 
 data class JellyfinMusicHome(

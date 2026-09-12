@@ -1504,9 +1504,13 @@ fun MusicScreen(
                 onDismiss = { detailsTrack = null },
             )
         }
+        val albumTitles = remember(state.home?.albums) {
+            state.home?.albums.orEmpty().map { it.title.trim().lowercase() }.toSet()
+        }
         if (playlistPickerTracks.isNotEmpty()) {
             MusicPlaylistPickerSheet(
                 playlists = state.home?.playlists.orEmpty(),
+                albumTitles = albumTitles,
                 onDismiss = { playlistPickerTracks = emptyList() },
                 onPlaylist = { playlist ->
                     val tracksToAdd = playlistPickerTracks
@@ -1523,6 +1527,7 @@ fun MusicScreen(
         if (showCurrentPlaylistPicker) {
             MusicPlaylistPickerSheet(
                 playlists = state.home?.playlists.orEmpty(),
+                albumTitles = albumTitles,
                 onDismiss = { showCurrentPlaylistPicker = false },
                 onPlaylist = { playlist ->
                     showCurrentPlaylistPicker = false
@@ -5902,7 +5907,7 @@ private fun MusicTrackList(
                             if (pendingTrackId == track.id) {
                                 VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
                             }
-                            if (playlists.isNotEmpty() && !isSelectionActive) {
+                            if (!isSelectionActive) {
                                 Box(
                                     modifier = Modifier
                                         .size(38.dp)
@@ -7823,9 +7828,7 @@ private fun CurrentTrackMoreSheet(
                         MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
                         MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
                         MusicMenuAction(Icons.Rounded.PlaylistAdd, "New playlist", onNewPlaylist)
-                        if (playlists.isNotEmpty()) {
-                            MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
-                        }
+                        MusicMenuAction(Icons.Rounded.Add, "Add to playlist", onChoosePlaylist)
                         if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
                         if (canGoToArtist) MusicMenuAction(Icons.Rounded.LibraryMusic, "Go to artist", onGoToArtist)
                         MusicMenuAction(Icons.Rounded.GraphicEq, "Headphone EQ (AutoEQ)", onOpenAutoEq)
@@ -8625,10 +8628,17 @@ private fun MusicSuccessToast(message: String, modifier: Modifier = Modifier) {
 @Composable
 private fun MusicPlaylistPickerSheet(
     playlists: List<JellyfinMusicPlaylist>,
+    albumTitles: Set<String> = emptySet(),
     onDismiss: () -> Unit,
     onPlaylist: (JellyfinMusicPlaylist) -> Unit,
     onCreateNew: () -> Unit,
 ) {
+    val userPlaylists = remember(playlists, albumTitles) {
+        playlists.filter { playlist ->
+            playlist.isUserCreated && playlist.name.trim().lowercase() !in albumTitles
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -8651,7 +8661,12 @@ private fun MusicPlaylistPickerSheet(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    Text("Add to playlist", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        "Add to playlist",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Rounded.Close, contentDescription = "Close", tint = VantafynColors.Ink)
                     }
@@ -8659,7 +8674,7 @@ private fun MusicPlaylistPickerSheet(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(320.dp),
+                        .height(340.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item(key = "__create_new__") {
@@ -8669,12 +8684,98 @@ private fun MusicPlaylistPickerSheet(
                             onClick = { onCreateNew() },
                         )
                     }
-                    items(playlists, key = { it.id }) { playlist ->
-                        MusicMenuAction(
-                            icon = Icons.Rounded.PlaylistAdd,
-                            label = playlist.name,
-                            onClick = { onPlaylist(playlist) },
-                        )
+                    if (userPlaylists.isEmpty()) {
+                        item(key = "__empty__") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 24.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "No user playlists found.\nCreate one above to get started!",
+                                    color = VantafynColors.Muted,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    } else {
+                        items(userPlaylists, key = { it.id }) { playlist ->
+                            VantafynGlassSurface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPlaylist(playlist) },
+                                variant = VantafynGlassVariant.Card,
+                                cornerRadius = 16.dp,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(42.dp)
+                                                .clip(RoundedCornerShape(10.dp)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (playlist.trackImageUrls.size >= 2) {
+                                                PlaylistArtGrid(playlist.trackImageUrls, Modifier.size(42.dp))
+                                            } else if (!playlist.imageUrl.isNullOrBlank()) {
+                                                MusicArt(playlist.imageUrl, Modifier.size(42.dp), title = playlist.name)
+                                            } else {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .background(Color.White.copy(alpha = 0.08f)),
+                                                    contentAlignment = Alignment.Center,
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.PlaylistAdd,
+                                                        contentDescription = null,
+                                                        tint = Color(0xFF21D8FF),
+                                                        modifier = Modifier.size(22.dp),
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        Column {
+                                            Text(
+                                                text = playlist.name,
+                                                color = VantafynColors.Ink,
+                                                style = MaterialTheme.typography.bodyMedium.copy(
+                                                    fontWeight = FontWeight.SemiBold,
+                                                ),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                text = "${playlist.trackCount ?: 0} tracks",
+                                                color = VantafynColors.Muted,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+
+                                    Icon(
+                                        imageVector = Icons.Rounded.Add,
+                                        contentDescription = "Add to playlist",
+                                        tint = Color(0xFF21D8FF),
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -8718,9 +8819,7 @@ private fun MusicTrackContextMenu(
                     MusicMenuAction(Icons.Rounded.Check, "Select tracks", action)
                 }
                 MusicMenuAction(Icons.Rounded.Download, "Save offline", onDownload)
-                if (playlists.isNotEmpty()) {
-                    MusicMenuAction(Icons.Rounded.PlaylistAdd, "Add to playlist", onChoosePlaylist)
-                }
+                MusicMenuAction(Icons.Rounded.PlaylistAdd, "Add to playlist", onChoosePlaylist)
                 if (track.albumId != null) MusicMenuAction(Icons.Rounded.Album, "Go to album", onGoToAlbum)
                 MusicMenuAction(Icons.Rounded.Info, "View track details", onTrackDetails)
                 onRemoveFromPlaylist?.let { action ->

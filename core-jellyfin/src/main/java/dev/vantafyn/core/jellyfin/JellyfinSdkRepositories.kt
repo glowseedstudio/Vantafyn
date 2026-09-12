@@ -2673,23 +2673,68 @@ class SdkJellyfinMusicRepository(
     }
 
     private suspend fun getMusicPlaylists(api: ApiClient, session: JellyfinSession, limit: Int): List<JellyfinMusicPlaylist> {
-        val response by api.itemsApi.getItems(
-            GetItemsRequest(
-                userId = session.user.id,
-                recursive = true,
-                limit = limit,
-                sortBy = listOf(ItemSortBy.SORT_NAME),
-                sortOrder = listOf(SortOrder.ASCENDING),
-                fields = musicItemFields,
-                includeItemTypes = listOf(BaseItemKind.PLAYLIST),
-                enableUserData = true,
-                enableImages = true,
-                imageTypeLimit = 1,
-                enableImageTypes = listOf(ImageType.PRIMARY),
-                enableTotalRecordCount = false,
-            ),
-        )
-        return response.items.mapNotNull { playlist ->
+        val views = runCatching { api.userViewsApi.getUserViews(userId = session.user.id).content }.getOrNull()
+        val playlistsView = views?.items?.firstOrNull {
+            it.collectionType?.serialName.equals("playlists", ignoreCase = true) ||
+                it.name.equals("playlists", ignoreCase = true)
+        }
+        val musicViewIds: Set<java.util.UUID> = views?.items?.filter {
+            it.collectionType?.serialName.equals("music", ignoreCase = true)
+        }?.map { it.id }?.toSet().orEmpty()
+
+        val rawPlaylists = if (playlistsView != null) {
+            runCatching {
+                val fromPlaylistsView by api.itemsApi.getItems(
+                    GetItemsRequest(
+                        userId = session.user.id,
+                        parentId = playlistsView.id,
+                        recursive = true,
+                        limit = limit,
+                        sortBy = listOf(ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                        fields = musicItemFields,
+                        includeItemTypes = listOf(BaseItemKind.PLAYLIST),
+                        enableUserData = true,
+                        enableImages = true,
+                        imageTypeLimit = 1,
+                        enableImageTypes = listOf(ImageType.PRIMARY),
+                        enableTotalRecordCount = false,
+                    ),
+                )
+                fromPlaylistsView.items
+            }.getOrElse { emptyList() }
+        } else {
+            emptyList()
+        }
+
+        val candidates = if (rawPlaylists.isNotEmpty()) {
+            rawPlaylists
+        } else {
+            val response by api.itemsApi.getItems(
+                GetItemsRequest(
+                    userId = session.user.id,
+                    recursive = true,
+                    limit = limit,
+                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                    sortOrder = listOf(SortOrder.ASCENDING),
+                    fields = musicItemFields,
+                    includeItemTypes = listOf(BaseItemKind.PLAYLIST),
+                    enableUserData = true,
+                    enableImages = true,
+                    imageTypeLimit = 1,
+                    enableImageTypes = listOf(ImageType.PRIMARY),
+                    enableTotalRecordCount = false,
+                ),
+            )
+            response.items.filter { playlist ->
+                val parentId = playlist.parentId
+                val isInsideMusicLibrary = parentId != null && musicViewIds.contains(parentId)
+                val hasAlbumAssociation = playlist.albumId != null || !playlist.album.isNullOrBlank()
+                !isInsideMusicLibrary && !hasAlbumAssociation
+            }
+        }
+
+        return candidates.mapNotNull { playlist ->
             val playlistId = playlist.id
             val items = runCatching {
                 val playlistItems by api.playlistsApi.getPlaylistItems(
@@ -2713,12 +2758,22 @@ class SdkJellyfinMusicRepository(
                 it.type in setOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE, BaseItemKind.SERIES, BaseItemKind.BOX_SET) ||
                     it.mediaType == MediaType.VIDEO
             }
+
+            val isAlbumGrouped = playlist.albumId != null ||
+                !playlist.album.isNullOrBlank() ||
+                (hasItems && items.all {
+                    it.album.equals(playlist.name, ignoreCase = true) ||
+                        it.name.equals(playlist.name, ignoreCase = true)
+                })
+
             when {
-                hasItems && audioCount > 0 && videoCount == 0 -> {
+                hasItems && audioCount > 0 && videoCount == 0 && !isAlbumGrouped -> {
                     val trackImageUrls = audioItems.take(4).mapNotNull { it.primaryImageUrl(api, 200) }
-                    playlist.toMusicPlaylist(api, trackImageUrls = trackImageUrls)
+                    playlist.toMusicPlaylist(api, trackImageUrls = trackImageUrls, isUserCreated = true)
                 }
-                hasItems -> null
+                !hasItems && videoCount == 0 && !isAlbumGrouped -> {
+                    playlist.toMusicPlaylist(api, trackImageUrls = emptyList(), isUserCreated = true)
+                }
                 else -> null
             }
         }
@@ -4861,7 +4916,12 @@ private fun BaseItemDto.toMusicArtist(api: ApiClient): JellyfinMusicArtist =
         imageUrl = primaryImageUrl(api, 520),
     )
 
-private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: Int? = null, trackImageUrls: List<String> = emptyList()): JellyfinMusicPlaylist =
+private fun BaseItemDto.toMusicPlaylist(
+    api: ApiClient,
+    classifiedTrackCount: Int? = null,
+    trackImageUrls: List<String> = emptyList(),
+    isUserCreated: Boolean = true,
+): JellyfinMusicPlaylist =
     JellyfinMusicPlaylist(
         id = id,
         name = name ?: "Playlist",
@@ -4869,6 +4929,7 @@ private fun BaseItemDto.toMusicPlaylist(api: ApiClient, classifiedTrackCount: In
         trackCount = classifiedTrackCount ?: childCount ?: recursiveItemCount,
         trackImageUrls = trackImageUrls,
         isFavorite = userData?.isFavorite == true,
+        isUserCreated = isUserCreated,
     )
 
 private fun Long.toLyricMillis(): Long = this / 10_000L
