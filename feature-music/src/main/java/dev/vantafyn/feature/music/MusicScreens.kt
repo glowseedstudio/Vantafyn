@@ -326,6 +326,7 @@ fun MusicScreen(
     var createPlaylistTracks by remember { mutableStateOf<List<JellyfinMusicTrack>>(emptyList()) }
     var selectedTrackIds by remember(state.screen) { mutableStateOf<Set<java.util.UUID>>(emptySet()) }
     var trackToRemoveFromPlaylist by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
+    var playlistToDelete by remember { mutableStateOf<JellyfinMusicPlaylist?>(null) }
     var showBulkRemoveConfirmation by remember { mutableStateOf(false) }
     val toggleSelectTrack: (JellyfinMusicTrack) -> Unit = { track ->
         selectedTrackIds = if (selectedTrackIds.contains(track.id)) {
@@ -830,7 +831,11 @@ fun MusicScreen(
                                         }
                                         if (home.playlists.isNotEmpty()) item {
                                             MusicContentReveal(index = 7, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                                MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
+                                                MusicPlaylistRow(
+                                                    playlists = home.playlists,
+                                                    onPlaylist = viewModel::openPlaylist,
+                                                    onLongPressPlaylist = { playlistToDelete = it },
+                                                )
                                             }
                                         }
                                         if (home.songs.isNotEmpty()) item {
@@ -1042,6 +1047,7 @@ fun MusicScreen(
                                                     playlists = favoritePlaylists,
                                                     title = "Favorite Playlists",
                                                     onPlaylist = viewModel::openPlaylist,
+                                                    onLongPressPlaylist = { playlistToDelete = it },
                                                 )
                                             }
                                         }
@@ -1167,6 +1173,7 @@ fun MusicScreen(
                                 isReordering = state.isReorderMode,
                                 isFavorite = screen.playlist.isFavorite,
                                 onToggleFavorite = { viewModel.togglePlaylistFavorite(screen.playlist) },
+                                onDelete = { playlistToDelete = screen.playlist },
                             ) {
                                 screen.tracks.firstOrNull()?.let { track -> startMusic { viewModel.playTrack(track, screen.tracks) } }
                             }
@@ -1649,6 +1656,57 @@ fun MusicScreen(
                     },
                 )
             }
+        }
+        playlistToDelete?.let { playlist ->
+            AlertDialog(
+                modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 28.dp),
+                onDismissRequest = { playlistToDelete = null },
+                containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
+                shape = RoundedCornerShape(28.dp),
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = null,
+                            tint = VantafynColors.Destructive,
+                        )
+                        Text("Delete playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Bold)
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = "Are you sure you want to delete \"${playlist.name}\"?",
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Text(
+                            text = "Only the playlist itself will be removed. None of your music tracks or audio files will be deleted from your library.",
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            val target = playlist
+                            playlistToDelete = null
+                            viewModel.deletePlaylist(target)
+                        },
+                    ) {
+                        Text("Delete", color = VantafynColors.Destructive, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { playlistToDelete = null }) {
+                        Text("Cancel", color = VantafynColors.Muted)
+                    }
+                },
+            )
         }
         if (selectedTrackIds.isNotEmpty()) {
             val isAllSelected = currentScreenTracks.isNotEmpty() && currentScreenTracks.all { selectedTrackIds.contains(it.id) }
@@ -5528,6 +5586,7 @@ private fun MusicArtistRow(
 private fun MusicPlaylistRow(
     playlists: List<JellyfinMusicPlaylist>,
     onPlaylist: (JellyfinMusicPlaylist) -> Unit,
+    onLongPressPlaylist: ((JellyfinMusicPlaylist) -> Unit)? = null,
     title: String = "Playlists",
 ) {
     if (playlists.isEmpty()) return
@@ -5535,7 +5594,13 @@ private fun MusicPlaylistRow(
         Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(playlists, key = { index, playlist -> "${playlist.id}-$index" }) { _, playlist ->
-                MusicArtworkTile(playlist.imageUrl, playlist.name, "${playlist.trackCount ?: 0} tracks", trackImageUrls = playlist.trackImageUrls) { onPlaylist(playlist) }
+                MusicArtworkTile(
+                    imageUrl = playlist.imageUrl,
+                    title = playlist.name,
+                    subtitle = "${playlist.trackCount ?: 0} tracks",
+                    trackImageUrls = playlist.trackImageUrls,
+                    onLongClick = onLongPressPlaylist?.let { { it(playlist) } },
+                ) { onPlaylist(playlist) }
             }
         }
     }
@@ -6164,6 +6229,7 @@ private fun MusicDetailHeader(
     isReordering: Boolean = false,
     isFavorite: Boolean = false,
     onToggleFavorite: (() -> Unit)? = null,
+    onDelete: (() -> Unit)? = null,
     onPlay: (() -> Unit)?,
 ) {
     Column(
@@ -6323,6 +6389,26 @@ private fun MusicDetailHeader(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+                if (onDelete != null) {
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable(onClick = onDelete),
+                        variant = VantafynGlassVariant.Card,
+                        cornerRadius = 18.dp,
+                        contentPadding = PaddingValues(0.dp),
+                    ) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Rounded.DeleteOutline,
+                                contentDescription = "Delete playlist",
+                                tint = VantafynColors.Destructive,
+                                modifier = Modifier.size(24.dp),
+                            )
                         }
                     }
                 }

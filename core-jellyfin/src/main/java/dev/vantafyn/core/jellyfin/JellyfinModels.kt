@@ -1182,6 +1182,7 @@ interface JellyfinMusicRepository {
     suspend fun searchMusic(session: JellyfinSession, query: String, limit: Int = 50): JellyfinResult<List<JellyfinMusicTrack>>
     suspend fun getLyrics(session: JellyfinSession, trackId: UUID): JellyfinResult<JellyfinLyrics?>
     suspend fun createPlaylist(session: JellyfinSession, name: String, itemIds: List<UUID>): JellyfinResult<UUID>
+    suspend fun deletePlaylist(session: JellyfinSession, playlistId: UUID): JellyfinResult<Unit>
     suspend fun addToPlaylist(session: JellyfinSession, playlistId: UUID, itemIds: List<UUID>): JellyfinResult<Unit>
     suspend fun removeFromPlaylist(session: JellyfinSession, playlistId: UUID, playlistItemIds: List<String>): JellyfinResult<Unit>
     suspend fun movePlaylistItem(session: JellyfinSession, playlistId: UUID, playlistItemId: String, newIndex: Int): JellyfinResult<Unit>

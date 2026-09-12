@@ -2316,6 +2316,17 @@ class SdkJellyfinMusicRepository(
             }
         }
 
+    override suspend fun deletePlaylist(session: JellyfinSession, playlistId: java.util.UUID): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.libraryApi.deleteItem(playlistId)
+                JellyfinResult.Success(Unit)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
     override suspend fun addToPlaylist(session: JellyfinSession, playlistId: java.util.UUID, itemIds: List<java.util.UUID>): JellyfinResult<Unit> =
         withContext(ioDispatcher) {
             try {

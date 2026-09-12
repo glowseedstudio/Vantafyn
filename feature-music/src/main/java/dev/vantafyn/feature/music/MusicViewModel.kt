@@ -2349,6 +2349,36 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun deletePlaylist(playlist: JellyfinMusicPlaylist) {
+        val activeSession = session ?: return
+        viewModelScope.launch {
+            _state.update { state ->
+                val currentHome = state.home
+                val updatedPlaylists = currentHome?.playlists?.filterNot { it.id == playlist.id }.orEmpty()
+                val updatedHome = currentHome?.copy(playlists = updatedPlaylists)
+                val updatedScreen = if (state.screen is MusicScreenState.Playlist && state.screen.playlist.id == playlist.id) {
+                    MusicScreenState.Home
+                } else {
+                    state.screen
+                }
+                state.copy(
+                    home = updatedHome,
+                    screen = updatedScreen,
+                    message = "Deleted playlist \"${playlist.name}\"",
+                )
+            }
+            when (val result = musicRepository.deletePlaylist(activeSession, playlist.id)) {
+                is JellyfinResult.Success -> {
+                    // Deleted successfully
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { it.copy(errorMessage = result.message) }
+                    loadHome()
+                }
+            }
+        }
+    }
+
     fun createPlaylistAndAddTracks(name: String, tracks: List<JellyfinMusicTrack>) {
         val activeSession = session ?: return
         val trackIds = tracks.map { it.id }
