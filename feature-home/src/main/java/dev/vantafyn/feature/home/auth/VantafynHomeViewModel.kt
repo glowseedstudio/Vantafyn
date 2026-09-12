@@ -6245,6 +6245,7 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("MusicAlbum", ignoreCase = true) ||
         equals("Playlist", ignoreCase = true) ||
         equals("Book", ignoreCase = true) ||
+        equals("AudioBook", ignoreCase = true) ||
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
 

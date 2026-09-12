@@ -180,11 +180,11 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     ),
     DiscoverFeature(
         id = "bottom_rail",
-        title = "Bottom Rail Accent",
-        shortDescription = "Add a glow, breathing effect, or touch ripple to your bottom navigation.",
+        title = "Bottom Rail Border Animation",
+        shortDescription = "Add a glow, breathing effect, or touch ripple to your bottom navigation border.",
         category = DiscoverCategory.MakeItYours,
         icon = Icons.Rounded.FiberManualRecord,
-        detailedDescription = "Open Settings \u2192 Appearance \u2192 Bottom Rail Accent. Choose Off, Still Glow, Breathing, or Touch Ripple.",
+        detailedDescription = "Open Settings \u2192 Appearance \u2192 Bottom Rail Border Animation. Choose Off, Still Glow, Breathing, or Touch Ripple.",
         deepLinkAction = "open_settings",
     ),
     DiscoverFeature(

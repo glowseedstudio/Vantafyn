@@ -294,7 +294,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.appearanceItems(
                                 onSelect = onSelectThemeMusicVolume,
                             )
                             TvSegmentedSelector(
-                                title = "Side rail accent",
+                                title = "Side rail border animation",
                                 entries = BottomRailAccent.entries,
                                 label = { it.label },
                                 selected = state.bottomRailAccent,

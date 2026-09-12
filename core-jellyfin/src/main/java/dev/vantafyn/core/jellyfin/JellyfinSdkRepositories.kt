@@ -616,7 +616,7 @@ class SdkJellyfinLibraryRepository(
                             sortBy = listOf(ItemSortBy.DATE_CREATED),
                             sortOrder = listOf(SortOrder.DESCENDING),
                             fields = if (isMusic) musicItemFields else itemFields,
-                            includeItemTypes = includeTypesFor(library.collectionType),
+                            includeItemTypes = includeTypesFor(library.collectionType, library.name),
                             enableUserData = true,
                             imageTypeLimit = 2,
                             enableImageTypes = if (isMusic) listOf(ImageType.PRIMARY) else itemImageTypes,
@@ -624,7 +624,19 @@ class SdkJellyfinLibraryRepository(
                             enableTotalRecordCount = true,
                         ),
                     )
-                    val pageItems = response.items.map { it.toMediaItem(api, shapeFor(it.type)) }
+                    val rawItems = response.items
+                    val isBookOrAudio = isBooksOrAudiobooksCollection(library.collectionType, library.name)
+                    val filteredItems = if (isBookOrAudio) {
+                        val bookIds = rawItems.filter { it.type in setOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK) }.map { it.id }.toSet()
+                        if (bookIds.isNotEmpty()) {
+                            rawItems.filter { it.type != BaseItemKind.AUDIO || (it.parentId !in bookIds) }
+                        } else {
+                            rawItems
+                        }
+                    } else {
+                        rawItems
+                    }
+                    val pageItems = filteredItems.map { it.toMediaItem(api, shapeFor(it.type)) }
                     pageItemCount = pageItems.size
                     totalRecordCount = response.totalRecordCount ?: totalRecordCount
                     allItems += pageItems
@@ -695,7 +707,7 @@ class SdkJellyfinLibraryRepository(
                         sortBy = sortBy,
                         sortOrder = sortOrder,
                         fields = if (isMusic) musicItemFields else itemFields,
-                        includeItemTypes = includeTypesFor(library.collectionType),
+                        includeItemTypes = includeTypesFor(library.collectionType, library.name),
                         isFavorite = true.takeIf { filter == JellyfinLibraryItemFilter.Favorites },
                         isPlayed = false.takeIf { filter == JellyfinLibraryItemFilter.Unwatched },
                         nameStartsWith = normalizedAlphabetKey?.takeIf { it != "#" },
@@ -707,12 +719,24 @@ class SdkJellyfinLibraryRepository(
                         enableTotalRecordCount = true,
                     ),
                 )
+                val rawItems = response.items
+                val isBookOrAudio = isBooksOrAudiobooksCollection(library.collectionType, library.name)
+                val filteredItems = if (isBookOrAudio) {
+                    val bookIds = rawItems.filter { it.type in setOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK) }.map { it.id }.toSet()
+                    if (bookIds.isNotEmpty()) {
+                        rawItems.filter { it.type != BaseItemKind.AUDIO || (it.parentId !in bookIds) }
+                    } else {
+                        rawItems
+                    }
+                } else {
+                    rawItems
+                }
                 JellyfinResult.Success(
                     JellyfinLibraryPage(
-                        items = response.items.map { it.toMediaItem(api, shapeFor(it.type)) },
+                        items = filteredItems.map { it.toMediaItem(api, shapeFor(it.type)) },
                         startIndex = safeStart,
                         pageSize = limit,
-                        totalItems = response.totalRecordCount,
+                        totalItems = if (filteredItems.size != rawItems.size) filteredItems.size else response.totalRecordCount,
                         alphabetKey = normalizedAlphabetKey,
                     ),
                 )
@@ -4628,18 +4652,38 @@ private val mediaItemTypes = listOf(
     BaseItemKind.AUDIO,
     BaseItemKind.MUSIC_ALBUM,
     BaseItemKind.BOOK,
+    BaseItemKind.AUDIO_BOOK,
     BaseItemKind.PLAYLIST,
 )
 
-private fun includeTypesFor(collectionType: String?): List<BaseItemKind> =
-    when (collectionType?.lowercase()) {
-        "movies" -> listOf(BaseItemKind.MOVIE)
-        "tvshows", "series" -> listOf(BaseItemKind.SERIES)
-        "boxsets", "collections" -> listOf(BaseItemKind.BOX_SET)
-        "music" -> listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)
-        "books" -> listOf(BaseItemKind.BOOK)
-        else -> listOf(BaseItemKind.SERIES, BaseItemKind.MOVIE, BaseItemKind.BOX_SET, BaseItemKind.MUSIC_ALBUM, BaseItemKind.BOOK)
+private fun isBooksOrAudiobooksCollection(collectionType: String?, libraryName: String? = null): Boolean {
+    val normType = collectionType?.lowercase()?.replace(" ", "")?.replace("-", "").orEmpty()
+    val normName = libraryName?.lowercase()?.replace(" ", "")?.replace("-", "").orEmpty()
+    return normType in setOf("books", "book", "audiobooks", "audiobook", "ebooks", "ebook") ||
+        normName.contains("audiobook") ||
+        normName.contains("ebook") ||
+        normName == "books"
+}
+
+private fun includeTypesFor(collectionType: String?, libraryName: String? = null): List<BaseItemKind> {
+    val normType = collectionType?.lowercase()?.trim().orEmpty()
+    val isBookOrAudio = isBooksOrAudiobooksCollection(collectionType, libraryName)
+    return when {
+        normType == "movies" -> listOf(BaseItemKind.MOVIE)
+        normType in setOf("tvshows", "series") -> listOf(BaseItemKind.SERIES)
+        normType in setOf("boxsets", "collections") -> listOf(BaseItemKind.BOX_SET)
+        normType == "music" -> listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)
+        isBookOrAudio -> listOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK, BaseItemKind.AUDIO)
+        else -> listOf(
+            BaseItemKind.SERIES,
+            BaseItemKind.MOVIE,
+            BaseItemKind.BOX_SET,
+            BaseItemKind.MUSIC_ALBUM,
+            BaseItemKind.BOOK,
+            BaseItemKind.AUDIO_BOOK,
+        )
     }
+}
 
 private fun String?.isMusicCollection(): Boolean =
     this?.lowercase() == "music"
@@ -5226,6 +5270,10 @@ private fun BaseItemDto.subtitle(): String? =
             albumArtist ?: artists?.joinToString(", ")?.takeIf { it.isNotBlank() },
             productionYear?.toString(),
         ).joinToString(" · ").ifBlank { null }
+        type in setOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK) -> listOfNotNull(
+            artists?.joinToString(", ")?.takeIf { it.isNotBlank() } ?: albumArtist ?: seriesName,
+            productionYear?.toString(),
+        ).joinToString(" · ").ifBlank { null } ?: type?.serialName
         productionYear != null -> productionYear.toString()
         else -> type?.serialName
     }

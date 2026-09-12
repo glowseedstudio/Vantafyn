@@ -40,7 +40,7 @@
     <img src="assets/preview.gif" width="100%" alt="Vantafyn Interface Preview" style="border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.5);" />
   </a>
   <br>
-  <em>(Tap above to visit the <a href="https://glowseedstudio.github.io/Vantafyn/">Interactive Web Showcase</a> or watch the <a href="assets/vantafyn_demo.mp4">1080p full demo video</a>)</em>
+  <em>(Tap above to visit the <a href="https://glowseedstudio.github.io/Vantafyn/">Interactive Web Showcase & Gallery</a>)</em>
 </p>
 
 ---
@@ -101,12 +101,19 @@ Vantafyn is crafted from the ground up to make your self-hosted Jellyfin server 
 <p align="center">
   <a href="https://glowseedstudio.github.io/Vantafyn/">
     <img src="assets/screenshots/01_home.png" width="24%" alt="Home Screen" />
-    <img src="assets/screenshots/05_details.png" width="24%" alt="Media Details" />
-    <img src="assets/screenshots/10_now_playing.png" width="24%" alt="Now Playing Music" />
-    <img src="assets/screenshots/12_achievements_hub.png" width="24%" alt="Achievements Hub" />
+    <img src="assets/screenshots/03_libraries.png" width="24%" alt="Media Libraries" />
+    <img src="assets/screenshots/06_music_home.png" width="24%" alt="Music Hub" />
+    <img src="assets/screenshots/07_now_playing.png" width="24%" alt="Now Playing Music" />
   </a>
-  <br>
-  <em>Explore all 18 full-resolution screens and interactive lightboxes on the <strong><a href="https://glowseedstudio.github.io/Vantafyn/#gallery">Interactive Web Gallery →</a></strong></em>
+  <br><br>
+  <a href="https://glowseedstudio.github.io/Vantafyn/">
+    <img src="assets/screenshots/08_playback_options.png" width="24%" alt="AutoEQ DSP Controls" />
+    <img src="assets/screenshots/09_synced_lyrics.png" width="24%" alt="Synchronized Lyrics" />
+    <img src="assets/screenshots/11_audio_fidelity.png" width="24%" alt="Audio Fidelity Settings" />
+    <img src="assets/screenshots/17_admin_dashboard.png" width="24%" alt="Admin Dashboard" />
+  </a>
+  <br><br>
+  <em>Explore all 21 full-resolution screens and interactive lightboxes on the <strong><a href="https://glowseedstudio.github.io/Vantafyn/#gallery">Interactive Web Gallery →</a></strong></em>
 </p>
 
 ---

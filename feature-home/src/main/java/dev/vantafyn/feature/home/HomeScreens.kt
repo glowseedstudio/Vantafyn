@@ -3050,7 +3050,7 @@ private fun BottomRailAccentSettings(
         ) {
             SettingsRowIcon(Icons.Rounded.AutoAwesome)
             Text(
-                "Bottom rail accent",
+                "Bottom rail border animation",
                 color = VantafynColors.Ink,
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
@@ -4780,7 +4780,7 @@ private fun MobileHomeContent(
                 item(key = "home-my-list") {
                     HomeContentReveal(index = index, animate = homeInitialRevealActive) {
                         HomeRowInset {
-                            MyListHomeRow(items = state.favorites.take(16), onOpenMedia = onOpenMedia, onMediaLongPress = onMediaLongPress)
+                            MyListHomeRow(items = state.favorites.take(36), onOpenMedia = onOpenMedia, onMediaLongPress = onMediaLongPress)
                         }
                     }
                 }
@@ -4885,17 +4885,98 @@ private fun HomeStatusBarScrim(alpha: Float, statusBarHeight: Dp, modifier: Modi
     )
 }
 
+private enum class MyListCategory(val label: String, val sortOrder: Int) {
+    Movies("Movies", 1),
+    TvShows("TV Shows", 2),
+    Music("Music", 3),
+    Books("Books", 4),
+    LiveTv("Live TV", 5),
+    Other("Other", 6);
+
+    companion object {
+        fun from(item: JellyfinMediaItem): MyListCategory {
+            val type = item.itemType?.lowercase().orEmpty()
+            val media = item.mediaType?.lowercase().orEmpty()
+            return when {
+                type in setOf("movie", "boxset") || (media == "video" && type !in setOf("series", "season", "episode") && !type.startsWith("livetv")) -> Movies
+                type in setOf("series", "season", "episode") -> TvShows
+                type in setOf("book", "audiobook", "audio_book", "ebook") || media == "book" -> Books
+                item.isMusicItem() || media == "audio" -> Music
+                type.startsWith("livetv") -> LiveTv
+                else -> Other
+            }
+        }
+    }
+}
+
 @Composable
 private fun MyListHomeRow(
     items: List<JellyfinMediaItem>,
     onOpenMedia: (java.util.UUID) -> Unit,
     onMediaLongPress: (MediaActionTarget) -> Unit,
 ) {
+    if (items.isEmpty()) return
+
+    val availableCategories = remember(items) {
+        items.map { MyListCategory.from(it) }.distinct().sortedBy { it.sortOrder }
+    }
+    var selectedCategory by remember { mutableStateOf<MyListCategory?>(null) }
+    val currentCategory = selectedCategory.takeIf { it in availableCategories }
+
+    val displayedItems = remember(items, currentCategory, availableCategories) {
+        if (currentCategory != null) {
+            items.filter { MyListCategory.from(it) == currentCategory }
+        } else {
+            availableCategories.flatMap { cat ->
+                items.filter { MyListCategory.from(it) == cat }
+            }
+        }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-        Text("My List", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-            items(items, key = { it.id }) { item ->
-                MediaItemCard(item = item, onClick = { onOpenMedia(item.id) }, onLongPress = { onMediaLongPress(item.toMediaActionTarget(inMyList = true)) })
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "My List",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+        if (availableCategories.size > 1) {
+            LazyRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 2.dp),
+            ) {
+                item(key = "my-list-all") {
+                    LibraryFilterChip(
+                        label = "All",
+                        selected = currentCategory == null,
+                        onClick = { selectedCategory = null },
+                    )
+                }
+                items(availableCategories, key = { "my-list-cat-${it.name}" }) { category ->
+                    LibraryFilterChip(
+                        label = category.label,
+                        selected = currentCategory == category,
+                        onClick = { selectedCategory = category },
+                    )
+                }
+            }
+        }
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+            contentPadding = PaddingValues(horizontal = 2.dp),
+        ) {
+            items(displayedItems, key = { it.id }) { item ->
+                MediaItemCard(
+                    item = item,
+                    onClick = { onOpenMedia(item.id) },
+                    onLongPress = { onMediaLongPress(item.toMediaActionTarget(inMyList = true)) },
+                )
             }
         }
     }
@@ -6650,6 +6731,14 @@ private fun LibraryDetailScreen(
 ) {
     val library = state.selectedLibrary
     val liveTv = library?.collectionType.isLiveTvCollection()
+    val isBooksOrAudiobooks = remember(library) {
+        val type = library?.collectionType?.lowercase()?.replace(" ", "")?.replace("-", "").orEmpty()
+        val name = library?.name?.lowercase()?.replace(" ", "")?.replace("-", "").orEmpty()
+        type in setOf("books", "book", "audiobooks", "audiobook", "ebooks", "ebook") ||
+            name.contains("audiobook") ||
+            name.contains("ebook") ||
+            name == "books"
+    }
     val showAlphabetRail = !liveTv && state.libraryItemsFilter.supportsLibraryAlphabetRail()
     val visibleItems = if (state.isLibraryItemsLoading) emptyList() else state.libraryItems
     val screenRevealKey = library?.id?.toString().orEmpty()
@@ -6694,6 +6783,7 @@ private fun LibraryDetailScreen(
                     LibraryFilterChips(
                         selected = state.libraryItemsFilter,
                         isMusic = library?.collectionType?.lowercase() == "music",
+                        isBooksOrAudiobooks = isBooksOrAudiobooks,
                         onSelected = onSetFilter,
                     )
                 }
@@ -6752,6 +6842,8 @@ private fun LibraryDetailScreen(
                 HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) {
                     if (liveTv) {
                         LibraryItemsEmptyState(title = "No Live TV channels", subtitle = "Jellyfin did not return channels for this profile/server.", icon = Icons.Rounded.Tv)
+                    } else if (isBooksOrAudiobooks) {
+                        LibraryItemsEmptyState(title = "No books or audiobooks", subtitle = "This library returned no books or audiobooks.", icon = Icons.Rounded.CollectionsBookmark)
                     } else {
                         LibraryItemsEmptyState(title = "Nothing here yet", subtitle = "This library returned no browsable items.", icon = Icons.Rounded.CollectionsBookmark)
                     }
@@ -6857,7 +6949,12 @@ private fun LibraryDetailScreen(
 }
 
 @Composable
-private fun LibraryFilterChips(selected: JellyfinLibraryItemFilter, isMusic: Boolean, onSelected: (JellyfinLibraryItemFilter) -> Unit) {
+private fun LibraryFilterChips(
+    selected: JellyfinLibraryItemFilter,
+    isMusic: Boolean,
+    isBooksOrAudiobooks: Boolean = false,
+    onSelected: (JellyfinLibraryItemFilter) -> Unit,
+) {
     val entries = if (isMusic) {
         JellyfinLibraryItemFilter.entries.filter { it != JellyfinLibraryItemFilter.Unwatched }
     } else {
@@ -6868,7 +6965,12 @@ private fun LibraryFilterChips(selected: JellyfinLibraryItemFilter, isMusic: Boo
         contentPadding = PaddingValues(horizontal = 2.dp),
     ) {
         items(entries, key = { it.name }) { mode ->
-            LibraryFilterChip(mode.label, selected == mode) { onSelected(mode) }
+            val label = if (isBooksOrAudiobooks && mode == JellyfinLibraryItemFilter.Unwatched) {
+                "Unread / Unplayed"
+            } else {
+                mode.label
+            }
+            LibraryFilterChip(label, selected == mode) { onSelected(mode) }
         }
     }
 }
@@ -12220,7 +12322,7 @@ private fun SettingsScreen(
                                         {
                                             SettingsNavigationRow(
                                                 title = "Appearance & Experience",
-                                                subtitle = "Themes, dynamic backgrounds, rail accent, mode",
+                                                subtitle = "Themes, dynamic backgrounds, rail border animation, mode",
                                                 icon = Icons.Rounded.Palette,
                                                 onClick = {
                                                     SettingsUsageTracker.recordAction(context, "appearance")
@@ -21258,6 +21360,8 @@ private fun String.searchGroupLabel(): String =
         "musicalbum" -> "Albums"
         "musicartist" -> "Artists"
         "playlist" -> "Playlists"
+        "audiobook" -> "Audiobooks"
+        "ebook" -> "eBooks"
         "book" -> "Books"
         "livetvchannel", "livetvprogram" -> "Live TV"
         else -> replaceFirstChar(Char::titlecase)
@@ -21272,6 +21376,7 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("MusicAlbum", ignoreCase = true) ||
         equals("Playlist", ignoreCase = true) ||
         equals("Book", ignoreCase = true) ||
+        equals("AudioBook", ignoreCase = true) ||
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
 
@@ -21354,7 +21459,8 @@ private fun JellyfinMediaDetail.primaryActionLabel(): String {
     val watchedProgress = progress
     return when {
         watchedProgress != null && watchedProgress > 0.05f -> "Resume"
-        itemType.equals("Book", ignoreCase = true) -> "Open"
+        itemType.equals("Book", ignoreCase = true) || itemType.equals("EBook", ignoreCase = true) -> "Open"
+        itemType.equals("AudioBook", ignoreCase = true) || itemType.equals("Audio_Book", ignoreCase = true) -> "Listen"
         itemType.equals("Episode", ignoreCase = true) && subtitle != null -> "Play $subtitle"
         else -> "Play"
     }
