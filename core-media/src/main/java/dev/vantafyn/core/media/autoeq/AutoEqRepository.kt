@@ -102,6 +102,11 @@ class AutoEqRepository(private val context: Context) {
         return loadPresets().firstOrNull { it.id == id }
     }
 
+    suspend fun findMatchesForDevice(deviceName: String): List<AutoEqPreset> {
+        val all = loadPresets()
+        return rankPresetsForDevice(all, deviceName)
+    }
+
     companion object {
         private const val TAG = "AutoEqRepository"
         private const val ASSET_PATH = "autoeq/headphones.json"
@@ -113,5 +118,82 @@ class AutoEqRepository(private val context: Context) {
             instance ?: synchronized(this) {
                 instance ?: AutoEqRepository(context).also { instance = it }
             }
+
+        fun cleanDeviceName(deviceName: String): String {
+            if (deviceName.isBlank()) return ""
+            val cleaned = deviceName
+                .replace(Regex("^LE[-_]", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("[’']s\\b", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\b(Hands-Free|Stereo|Bluetooth|BT|Wireless|Headset|Headphones)\\b", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("[^a-zA-Z0-9\\s-]"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            return if (cleaned.isBlank()) deviceName.trim() else cleaned
+        }
+
+        fun rankPresetsForDevice(all: List<AutoEqPreset>, deviceName: String): List<AutoEqPreset> {
+            if (deviceName.isBlank() || all.isEmpty()) return emptyList()
+
+            val cleaned = cleanDeviceName(deviceName)
+            val cleanedLower = cleaned.lowercase()
+            val cleanedTokens = cleanedLower.split(Regex("[\\s-]+")).filter { it.length >= 2 }
+            if (cleanedTokens.isEmpty()) return emptyList()
+
+            val scored = all.mapNotNull { preset ->
+                val presetNameLower = preset.name.lowercase()
+                val presetBrandLower = preset.brand.lowercase()
+                val fullPresetLower = "$presetBrandLower $presetNameLower"
+
+                var score = 0
+
+                if (presetNameLower == cleanedLower || fullPresetLower == cleanedLower) {
+                    score += 150
+                } else if (presetNameLower.contains(cleanedLower) || cleanedLower.contains(presetNameLower)) {
+                    score += 100
+                } else if (fullPresetLower.contains(cleanedLower) || cleanedLower.contains(fullPresetLower)) {
+                    score += 80
+                }
+
+                var matchedTokens = 0
+                for (token in cleanedTokens) {
+                    if (presetNameLower.contains(token) || presetBrandLower.contains(token)) {
+                        matchedTokens++
+                        if (token.any { it.isDigit() }) {
+                            score += 35
+                        } else {
+                            score += 12
+                        }
+                    }
+                }
+
+                if (score <= 0 && matchedTokens < cleanedTokens.size.coerceAtLeast(1)) {
+                    return@mapNotNull null
+                }
+
+                when (preset.source.lowercase()) {
+                    "oratory1990" -> score += 6
+                    "crinacle" -> score += 5
+                    "rtings" -> score += 4
+                    "super review" -> score += 3
+                }
+
+                if (preset.name.contains("modded", ignoreCase = true) ||
+                    preset.name.contains("earpads", ignoreCase = true) ||
+                    preset.name.contains("filter", ignoreCase = true) ||
+                    preset.name.contains("module", ignoreCase = true)
+                ) {
+                    score -= 20
+                }
+
+                preset to score
+            }
+
+            return scored
+                .sortedByDescending { it.second }
+                .map { it.first }
+                .distinctBy { "${it.brand}_${it.name}" }
+                .take(5)
+        }
     }
 }

@@ -63,6 +63,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material.icons.rounded.Bluetooth
+import androidx.compose.runtime.produceState
+import dev.vantafyn.core.media.autoeq.ConnectedAudioDeviceDetector
+import dev.vantafyn.core.media.autoeq.ConnectedBluetoothAudioDevice
 import dev.vantafyn.core.media.MusicPlaybackController
 import dev.vantafyn.core.media.autoeq.AutoEqHardwareStatus
 import dev.vantafyn.core.media.autoeq.AutoEqPreset
@@ -99,6 +103,24 @@ fun AutoEqSearchScreen(
     var presets by remember { mutableStateOf<List<AutoEqPreset>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
     var showCreditsDialog by remember { mutableStateOf(false) }
+
+    val connectedDevice by produceState<ConnectedBluetoothAudioDevice?>(
+        initialValue = remember { ConnectedAudioDeviceDetector.getConnectedBluetoothDevice(context) },
+    ) {
+        ConnectedAudioDeviceDetector.observeConnectedBluetoothDevice(context).collect {
+            value = it
+        }
+    }
+    var suggestedPresets by remember { mutableStateOf<List<AutoEqPreset>>(emptyList()) }
+
+    LaunchedEffect(connectedDevice?.name) {
+        val devName = connectedDevice?.name
+        suggestedPresets = if (!devName.isNullOrBlank()) {
+            repository.findMatchesForDevice(devName)
+        } else {
+            emptyList()
+        }
+    }
 
     LaunchedEffect(searchQuery, selectedBrandFilter) {
         isLoading = true
@@ -177,37 +199,27 @@ fun AutoEqSearchScreen(
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     IconButton(
                         onClick = { showCreditsDialog = true },
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Info,
                             contentDescription = "About AutoEQ & Licenses",
                             tint = VantafynColors.Ink,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
 
                     IconButton(
                         onClick = onDismiss,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f))
-                            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
                             contentDescription = "Close",
                             tint = VantafynColors.Ink,
-                            modifier = Modifier.size(20.dp),
+                            modifier = Modifier.size(22.dp),
                         )
                     }
                 }
@@ -250,6 +262,23 @@ fun AutoEqSearchScreen(
             if (eqState.hardwareBands.isNotEmpty() && eqState.isEnabled) {
                 Spacer(Modifier.height(12.dp))
                 HardwareBandsVisualizer(bands = eqState.hardwareBands)
+            }
+
+            val currentConnected = connectedDevice
+            if (currentConnected != null && suggestedPresets.isNotEmpty()) {
+                Spacer(Modifier.height(14.dp))
+                ConnectedDeviceSuggestionSection(
+                    deviceName = currentConnected.name,
+                    presets = suggestedPresets,
+                    selectedPreset = eqState.selectedPreset,
+                    isEnabled = eqState.isEnabled,
+                    onSelectPreset = { preset ->
+                        effectsManager.selectPreset(preset)
+                        if (!eqState.isEnabled) {
+                            effectsManager.setEnabled(true)
+                        }
+                    },
+                )
             }
 
             Spacer(Modifier.height(14.dp))
@@ -852,4 +881,245 @@ private fun AutoEqCreditsDialog(onDismiss: () -> Unit) {
         },
     )
 }
+
+@Composable
+private fun ConnectedDeviceSuggestionSection(
+    deviceName: String,
+    presets: List<AutoEqPreset>,
+    selectedPreset: AutoEqPreset?,
+    isEnabled: Boolean,
+    onSelectPreset: (AutoEqPreset) -> Unit,
+) {
+    val topPreset = presets.first()
+    val isTopActive = selectedPreset?.id == topPreset.id && isEnabled
+
+    VantafynGlassSurface(
+        modifier = Modifier.fillMaxWidth(),
+        variant = VantafynGlassVariant.Card,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(14.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header Row: Bluetooth Icon + Connected Headphones Badge + Device Name
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF21D8FF).copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Bluetooth,
+                            contentDescription = null,
+                            tint = Color(0xFF21D8FF),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "CONNECTED HEADPHONES",
+                            color = Color(0xFF21D8FF),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.8.sp,
+                            ),
+                        )
+                        Text(
+                            text = deviceName,
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                if (isTopActive) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(Color(0xFF21D8FF).copy(alpha = 0.18f))
+                            .border(1.dp, Color(0xFF21D8FF).copy(alpha = 0.40f), RoundedCornerShape(999.dp))
+                            .padding(horizontal = 9.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = Color(0xFF21D8FF),
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Text(
+                            text = "CALIBRATED",
+                            color = Color(0xFF21D8FF),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.6.sp,
+                            ),
+                        )
+                    }
+                }
+            }
+
+            // Divider
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(Color.White.copy(alpha = 0.08f)),
+            )
+
+            // Primary Suggestion Card
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        if (isTopActive) Color(0xFF21D8FF).copy(alpha = 0.12f)
+                        else Color.White.copy(alpha = 0.05f),
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (isTopActive) Color(0xFF21D8FF).copy(alpha = 0.35f)
+                        else Color.White.copy(alpha = 0.08f),
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    .clickable { onSelectPreset(topPreset) }
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isTopActive) Color(0xFF21D8FF).copy(alpha = 0.20f)
+                                else Color.White.copy(alpha = 0.08f),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.GraphicEq,
+                            contentDescription = null,
+                            tint = if (isTopActive) Color(0xFF21D8FF) else VantafynColors.Ink,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = topPreset.name,
+                            color = if (isTopActive) Color(0xFF21D8FF) else VantafynColors.Ink,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${topPreset.brand} · ${topPreset.source} · Preamp ${topPreset.preamp} dB",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                Spacer(Modifier.width(8.dp))
+
+                // One-tap action button
+                Row(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (isTopActive) Color(0xFF21D8FF)
+                            else Color(0xFF21D8FF).copy(alpha = 0.18f),
+                        )
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (isTopActive) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = null,
+                            tint = Color(0xFF0C101B),
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            text = "Applied",
+                            color = Color(0xFF0C101B),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else {
+                        Text(
+                            text = "Apply EQ",
+                            color = Color(0xFF21D8FF),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                }
+            }
+
+            // Secondary variations (if multiple presets matched: ANC On/Off, alternate measurements, etc.)
+            if (presets.size > 1) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    presets.drop(1).take(5).forEach { preset ->
+                        val isPresetActive = selectedPreset?.id == preset.id && isEnabled
+                        val label = buildString {
+                            append(preset.source)
+                            val cleanPresetName = preset.name.replace(preset.brand, "").trim()
+                            if (cleanPresetName.isNotEmpty() && cleanPresetName != topPreset.name.replace(preset.brand, "").trim()) {
+                                append(" · ")
+                                append(cleanPresetName)
+                            }
+                        }
+
+                        VantafynGlassChip(
+                            selected = isPresetActive,
+                            onClick = { onSelectPreset(preset) },
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 5.dp),
+                        ) {
+                            Text(
+                                text = label,
+                                color = if (isPresetActive) Color(0xFF21D8FF) else VantafynColors.Muted,
+                                fontSize = 11.sp,
+                                fontWeight = if (isPresetActive) FontWeight.Bold else FontWeight.Normal,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 
