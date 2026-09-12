@@ -2,8 +2,10 @@ package dev.vantafyn.core.media
 
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.util.Log
+import java.io.ByteArrayOutputStream
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -951,6 +953,23 @@ class MusicPlaybackController private constructor(context: Context) {
         _state.update { it.copy(audioStreamInfo = streamInfo) }
     }
 
+    fun updateCurrentTrackArtwork(artworkBytes: ByteArray) {
+        if (sessionPlayer.playbackState != Player.STATE_IDLE) {
+            val currentTrack = _state.value.currentTrack ?: return
+            val currentMeta = sessionPlayer.playlistMetadata
+            val updatedMetadata = currentMeta.buildUpon()
+                .setTitle(currentTrack.title)
+                .setArtist(currentTrack.artist)
+                .setAlbumTitle(currentTrack.album)
+                .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                .setArtworkUri(currentTrack.artworkUrl?.let(Uri::parse))
+                .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                .setIsPlayable(true)
+                .build()
+            sessionPlayer.playlistMetadata = updatedMetadata
+        }
+    }
+
     private fun VantafynMusicTrack.toMediaItem(): MediaItem {
         val extras = android.os.Bundle().apply {
             replayGainTrackGainDb?.let { putFloat(EXTRA_REPLAY_GAIN_DB, it) }
@@ -962,6 +981,16 @@ class MusicPlaybackController private constructor(context: Context) {
             bitDepth?.let { putInt(EXTRA_BIT_DEPTH, it) }
             channels?.let { putInt(EXTRA_CHANNELS, it) }
         }
+        val cachedArtworkBytes = artworkUrl?.let { url ->
+            val bitmap = VantafynArtworkLoader.getCachedBitmap(appContext, url, 384)
+            bitmap?.let { b ->
+                runCatching {
+                    val stream = ByteArrayOutputStream()
+                    b.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+                    stream.toByteArray()
+                }.getOrNull()
+            }
+        }
         return MediaItem.Builder()
             .setUri(streamUrl)
             .setMediaId(id.toString())
@@ -972,6 +1001,11 @@ class MusicPlaybackController private constructor(context: Context) {
                     .setArtist(artist)
                     .setAlbumTitle(album)
                     .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .apply {
+                        if (cachedArtworkBytes != null) {
+                            setArtworkData(cachedArtworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                        }
+                    }
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .setIsPlayable(true)
                     .setExtras(extras)

@@ -36,9 +36,11 @@ import androidx.media3.session.legacy.MediaSessionCompat
 import androidx.media3.session.legacy.PlaybackStateCompat
 import androidx.media3.session.legacy.MediaDescriptionCompat
 import androidx.media3.session.legacy.RatingCompat
+import androidx.media3.session.legacy.MediaMetadataCompat
 import androidx.media3.common.Player
 import android.os.Bundle
 import android.net.Uri
+import java.io.ByteArrayOutputStream
 import com.google.common.collect.ImmutableList
 import dev.vantafyn.core.experience.ExperienceMode
 import dev.vantafyn.core.experience.ExperiencePreferences
@@ -80,6 +82,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private var lastWidgetUpdateAtMs: Long = 0L
     private var isForegroundService = false
     private var isLegacyCallbackWrapped = false
+    private var cachedSessionCompat: MediaSessionCompat? = null
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
     private val artworkCache = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > MAX_ARTWORK_CACHE_SIZE
@@ -171,6 +174,9 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     lastNotificationFavorite = isFavorite
                     lastNotificationShuffle = isShuffle
                     updateCustomLayout(state)
+                    if (state.currentTrack == null) {
+                        getMediaSessionCompat(mediaSession)?.setMetadata(null)
+                    }
                     if (!isForegroundService) {
                         Log.d(TAG, "State change → startForeground (track=${trackId?.toString()?.take(8)}, playing=$isPlaying)")
                         mediaSession?.let { session -> startForegroundWithMediaNotification(session, state, loadLargeIcon = true) }
@@ -254,6 +260,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         LongRunningTaskRegistry.stop(MUSIC_SERVICE_TASK_ID, "service destroyed")
         isForegroundService = false
         isLegacyCallbackWrapped = false
+        cachedSessionCompat = null
         serviceScope.cancel()
         mediaSession?.let { session ->
             runCatching { removeSession(session) }
@@ -422,6 +429,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             startForeground(NOTIFICATION_ID, notification)
         }
         isForegroundService = true
+        val currentArt = largeIcon ?: cachedLargeIcon(track?.artworkUrl)
+        updateSessionCompatMetadata(session, state, currentArt)
         if (loadLargeIcon && track?.artworkUrl != null && largeIcon == null) {
             loadArtworkForNotification(session, state, track.id, track.artworkUrl)
         }
@@ -489,6 +498,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             .build()
 
         notificationManager.notify(NOTIFICATION_ID, notification)
+        val currentArt = cachedLargeIcon(track?.artworkUrl)
+        updateSessionCompatMetadata(session, state, currentArt)
         if (loadLargeIcon && track?.artworkUrl != null && cachedLargeIcon(track.artworkUrl) == null) {
             loadArtworkForNotification(session, state, track.id, track.artworkUrl)
         }
@@ -501,6 +512,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             val latestState = playbackController.state.value
             if (latestState.currentTrack?.id == trackId) {
                 updateNotificationOnly(latestState, loadLargeIcon = false)
+                val artworkBytes = bitmapToArtworkByteArray(bitmap)
+                if (artworkBytes != null) {
+                    playbackController.updateCurrentTrackArtwork(artworkBytes)
+                }
+                updateSessionCompatMetadata(session, latestState, bitmap)
             }
         }
     }
@@ -522,6 +538,85 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             return scaled
         }
         return null
+    }
+
+    private fun getMediaSessionCompat(session: MediaSession? = mediaSession): MediaSessionCompat? {
+        cachedSessionCompat?.let { return it }
+        val s = session ?: return null
+        return runCatching {
+            val implField = findField(s.javaClass, "impl") ?: return null
+            val impl = implField.get(s) ?: return null
+            val stubField = findField(impl.javaClass, "sessionLegacyStub") ?: return null
+            val stub = stubField.get(impl) ?: return null
+            val getSessionCompatMethod = findMethod(stub.javaClass, "getSessionCompat")
+            val compat = (getSessionCompatMethod?.invoke(stub) ?: findField(stub.javaClass, "sessionCompat")?.get(stub)) as? MediaSessionCompat
+            cachedSessionCompat = compat
+            compat
+        }.getOrNull()
+    }
+
+    private fun scaleArtworkForSessionCompat(bitmap: Bitmap, maxDimension: Int = WATCH_ARTWORK_MAX_SIZE): Bitmap {
+        val largestSide = maxOf(bitmap.width, bitmap.height)
+        if (largestSide <= maxDimension) return bitmap
+        val scale = maxDimension.toFloat() / largestSide.toFloat()
+        return Bitmap.createScaledBitmap(
+            bitmap,
+            (bitmap.width * scale).toInt().coerceAtLeast(1),
+            (bitmap.height * scale).toInt().coerceAtLeast(1),
+            true,
+        )
+    }
+
+    private fun bitmapToArtworkByteArray(bitmap: Bitmap, maxDimension: Int = WATCH_ARTWORK_MAX_SIZE): ByteArray? {
+        return runCatching {
+            val scaled = scaleArtworkForSessionCompat(bitmap, maxDimension)
+            val stream = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.JPEG, 85, stream)
+            stream.toByteArray()
+        }.getOrNull()
+    }
+
+    private fun updateSessionCompatMetadata(
+        session: MediaSession?,
+        state: VantafynMusicPlaybackState,
+        artworkBitmap: Bitmap?,
+    ) {
+        val track = state.currentTrack ?: return
+        val sessionCompat = getMediaSessionCompat(session) ?: return
+        runCatching {
+            val art = artworkBitmap ?: cachedLargeIcon(track.artworkUrl) ?: appIconBitmap
+            val watchArtwork = scaleArtworkForSessionCompat(art)
+            val subtitle = listOfNotNull(track.artist, track.album)
+                .filter { it.isNotBlank() }
+                .joinToString(" - ")
+                .ifBlank { "Music" }
+
+            val metadataBuilder = MediaMetadataCompat.Builder()
+                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, track.title.takeIf { it.isNotBlank() } ?: "Vantafyn Music")
+                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, track.artist ?: "")
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, track.album ?: "")
+                .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, track.artist ?: "")
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, track.title)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, track.artist ?: subtitle)
+                .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, track.album ?: "")
+                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, state.durationMs.coerceAtLeast(0L))
+                .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, track.id.toString())
+
+            track.artworkUrl?.let { url ->
+                metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, url)
+                metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, url)
+                metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, url)
+            }
+
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, watchArtwork)
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, watchArtwork)
+            metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, watchArtwork)
+
+            sessionCompat.setMetadata(metadataBuilder.build())
+            Log.d(TAG, "Synced MediaSessionCompat metadata for Galaxy Watch / Wear OS (hasArtwork=${artworkBitmap != null || cachedLargeIcon(track.artworkUrl) != null}, track=${track.title})")
+        }.onFailure { e ->
+            Log.w(TAG, "Failed to update MediaSessionCompat metadata: ${e.message}", e)
+        }
     }
 
     private fun scaleNotificationArtwork(bitmap: Bitmap): Bitmap {
@@ -720,9 +815,9 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 updatePlaybackStateMethod?.invoke(stub, playerWrapper)
             }
 
-            val getSessionCompatMethod = findMethod(stub.javaClass, "getSessionCompat")
-            val sessionCompat = (getSessionCompatMethod?.invoke(stub) ?: findField(stub.javaClass, "sessionCompat")?.get(stub)) as? MediaSessionCompat
+            val sessionCompat = getMediaSessionCompat(session)
             if (sessionCompat != null) {
+                updateSessionCompatMetadata(session, state, cachedLargeIcon(state.currentTrack?.artworkUrl))
                 val currentPlaybackState = sessionCompat.controller.playbackState
                 if (currentPlaybackState != null) {
                     val isShuffle = state.shuffleEnabled
@@ -953,6 +1048,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         private const val MUSIC_SERVICE_TASK_ID = "music.playbackService"
         private const val MAX_ARTWORK_CACHE_SIZE = 8
         private const val NOTIFICATION_ARTWORK_MAX_SIZE = 1024
+        private const val WATCH_ARTWORK_MAX_SIZE = 384
         private const val WIDGET_FOREGROUND_REFRESH_MS = 30_000L
         private const val WIDGET_BACKGROUND_REFRESH_MS = 5 * 60_000L
         const val ACTION_TOGGLE_PLAYBACK = "dev.vantafyn.music.action.TOGGLE_PLAYBACK"
