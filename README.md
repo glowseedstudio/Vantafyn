@@ -33,18 +33,6 @@
 
 ---
 
-## 🎬 Live Motion Preview
-
-<p align="center">
-  <a href="https://glowseedstudio.github.io/Vantafyn/">
-    <img src="assets/preview.gif" width="100%" alt="Vantafyn Interface Preview" style="border-radius: 16px; box-shadow: 0 16px 40px rgba(0,0,0,0.5);" />
-  </a>
-  <br>
-  <em>(Tap above to visit the <a href="https://glowseedstudio.github.io/Vantafyn/">Interactive Web Showcase & Gallery</a>)</em>
-</p>
-
----
-
 ## ✨ Why Vantafyn?
 
 Vantafyn is crafted from the ground up to make your self-hosted Jellyfin server feel indistinguishable from a top-tier streaming service—pairing calm obsidian glassmorphism with high-performance audio/video engines.

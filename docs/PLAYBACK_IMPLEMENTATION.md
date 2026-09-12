@@ -16,7 +16,8 @@
 - Google Cast video handoff is implemented for mobile movies and episodes through the Default Media Receiver.
 - Cast playback uses separate Jellyfin playback negotiation with a Google Cast device profile before loading the receiver.
 - While casting, the fullscreen mobile player switches to a Cast controller instead of showing a blank local video surface.
-- TV playback is not implemented yet, but `app-tv` still builds.
+- Android TV video playback is fully implemented in `app-tv` with 10-foot remote D-pad controls, audio/subtitle selection, and resume point reporting.
+- Jellyfin 12 BoxSet collection linking ("Part of Collection") is integrated across Mobile and TV detail screens for 1-tap franchise browsing.
 
 ## Jellyfin APIs Used
 

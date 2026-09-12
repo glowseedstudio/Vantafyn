@@ -44,6 +44,15 @@ Favorite failures do not use the generic server validation modal. The expected u
 - `Couldn't reach Jellyfin. Check your server connection and try again.`
 - `Session expired. Please sign in again.`
 
+## Category Grouping (Visual Organization)
+
+To ensure high visual cleanliness and consistent card sizing, My List displays items grouped into distinct category sub-rails:
+- **Songs**: Compact square music artwork with artist metadata.
+- **Movies & Shows**: Vertical poster cards with rating and year metadata.
+- **Playlists**: Curated playlist cards with 4-quadrant collage covers.
+
+Grouping prevents mixed card aspect ratios from colliding within a single horizontal scrolling shelf.
+
 ## Regression Checks
 
 - Detail page heart adds and removes My List.

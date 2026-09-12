@@ -2,12 +2,12 @@
 
 ## Current Features
 
-- Server overview with admin profile image, server name, version, and status.
-- User management, including creating Jellyfin users through the Jellyfin API.
-- User detail screens with premium profile-style controls.
-- Active session cards with playback status, artwork, IP address, and direct play/transcoding state.
-- Server tools for plugins, scheduled tasks, and library scans.
-- Jellyfin statistics backed by the Playback Reporting plugin when available.
+- Server overview with admin profile image, server name, Jellyfin 12 version, OS, architecture, and live operational status.
+- Real-time active stream telemetry cards showing playback progress, artwork, client IP, device model, Direct Play vs Transcoding badges, active video/audio codecs, transcode reasons, and live bitrate bandwidth (e.g. 12 Mbps).
+- User management, including creating, editing, and managing Jellyfin users through the Jellyfin API.
+- User detail screens with profile-style controls and permission assignments.
+- Server tools for installed plugins, scheduled tasks, and one-tap library scans.
+- Jellyfin analytics graphs backed by the Playback Reporting plugin when available.
 
 ## Statistics
 
