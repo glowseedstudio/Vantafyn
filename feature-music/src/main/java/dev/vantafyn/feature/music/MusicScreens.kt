@@ -5443,6 +5443,130 @@ private fun VantafynGradientLoadingRing(modifier: Modifier = Modifier, strokeWid
 }
 
 @Composable
+private fun rememberReducedMotionPreference(): Boolean {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    return remember(context) {
+        val resolver = context.contentResolver
+        val animatorScale = runCatching {
+            android.provider.Settings.Global.getFloat(resolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
+        }.getOrDefault(1f)
+        val transitionScale = runCatching {
+            android.provider.Settings.Global.getFloat(resolver, android.provider.Settings.Global.TRANSITION_ANIMATION_SCALE, 1f)
+        }.getOrDefault(1f)
+        animatorScale == 0f || transitionScale == 0f
+    }
+}
+
+@Composable
+private fun MiniPlayerInteriorAtmosphere(
+    fadeAlpha: Float,
+    cornerRadius: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+) {
+    if (fadeAlpha <= 0.005f) return
+
+    val reducedMotion = rememberReducedMotionPreference()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val shouldAnimate = isResumed && !reducedMotion && fadeAlpha > 0.01f
+
+    val (driftProgress, pulseProgress) = if (shouldAnimate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerInteriorAtmosphere")
+        val drift = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(6500, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "miniDrift",
+        ).value
+        val pulse = infiniteTransition.animateFloat(
+            initialValue = 0.70f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1400, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "miniPulse",
+        ).value
+        drift to pulse
+    } else {
+        0.5f to 0.85f
+    }
+
+    Canvas(
+        modifier = modifier.clip(RoundedCornerShape(cornerRadius)),
+    ) {
+        val width = size.width
+        val height = size.height
+        if (width <= 0f || height <= 0f) return@Canvas
+
+        val bloom1X = width * (0.08f + driftProgress * 0.42f)
+        val bloom2X = width * (0.92f - driftProgress * 0.42f)
+        val bloomY = height * 0.5f
+
+        // Soft, subtle luxury intensity: ~50% of the bottom rail so they don't compete,
+        // and modulated by fadeAlpha so it fades off smoothly when music stops.
+        val baseAlpha = (0.09f * pulseProgress) * fadeAlpha
+
+        // 1. Electric Cyan Nebula Bloom (drifts across left side)
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 1.30f),
+                    Color(0xFF00B0FF).copy(alpha = baseAlpha * 0.65f),
+                    Color.Transparent,
+                ),
+                center = Offset(bloom1X, bloomY),
+                radius = width * 0.44f,
+            ),
+            center = Offset(bloom1X, bloomY),
+            radius = width * 0.44f,
+        )
+
+        // 2. Violet / Indigo Light Bloom (drifts across right side)
+        drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 1.30f),
+                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.65f),
+                    Color.Transparent,
+                ),
+                center = Offset(bloom2X, bloomY),
+                radius = width * 0.44f,
+            ),
+            center = Offset(bloom2X, bloomY),
+            radius = width * 0.44f,
+        )
+
+        // 3. Continuous ambient horizontal gradient wash across the entire mini player dock
+        drawRect(
+            brush = Brush.horizontalGradient(
+                colors = listOf(
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.35f),
+                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.45f),
+                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 0.40f),
+                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.35f),
+                ),
+                startX = 0f,
+                endX = width,
+            ),
+            topLeft = Offset.Zero,
+            size = Size(width, height),
+        )
+    }
+}
+
+@Composable
 private fun MusicMiniPlayer(
     track: VantafynMusicTrack,
     isPlaying: Boolean,
@@ -5539,9 +5663,17 @@ private fun MusicMiniPlayer(
             }
             .clickable(onClick = onOpen),
         cornerRadius = 22.dp,
-        contentPadding = PaddingValues(10.dp),
+        contentPadding = PaddingValues(0.dp),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        MiniPlayerInteriorAtmosphere(
+            fadeAlpha = borderAlpha,
+            cornerRadius = 22.dp,
+            modifier = Modifier.matchParentSize(),
+        )
+        Column(
+            modifier = Modifier.padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 MusicArt(track.artworkUrl, Modifier.size(50.dp), cornerRadius = 14, title = track.title, subtitle = track.artist)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
