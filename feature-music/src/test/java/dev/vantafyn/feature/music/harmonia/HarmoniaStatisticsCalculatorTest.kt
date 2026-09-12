@@ -110,7 +110,7 @@ class HarmoniaStatisticsCalculatorTest {
     @Test
     fun automaticGenerationSkipsUnchangedMutableRecapsAndRefreshesWhenHistoryChanges() = runBlocking {
         val store = InMemoryHarmoniaStore()
-        val clock = Clock.fixed(Instant.parse("2026-08-26T12:00:00Z"), zone)
+        val clock = Clock.fixed(Instant.parse("2026-08-30T12:00:00Z"), zone)
         val generator = HarmoniaGenerator(
             historyRepository = store,
             recapRepository = store,
@@ -130,6 +130,69 @@ class HarmoniaStatisticsCalculatorTest {
         assertEquals(1, refreshed.size)
         assertEquals(1, store.recaps.size)
         assertEquals(300_000L, refreshed.first().recap.statistics.totalListeningTimeMs.value)
+    }
+
+    @Test
+    fun monthlyRecapGeneratesOnlyOnOrAfterSecondLastDayOfMonth() = runBlocking {
+        val store = InMemoryHarmoniaStore()
+        store.add(record("m1", trackOne, "Song A", "Artist A", "Album A", albumOne, listOf("Pop"), "2026-08-02T01:00:00Z", 120_000))
+
+        // August has 31 days. Day 29 is before second last day (Day 30).
+        val beforeSecondLastDayClock = Clock.fixed(Instant.parse("2026-08-29T12:00:00Z"), zone)
+        val beforeGenerator = HarmoniaGenerator(
+            historyRepository = store,
+            recapRepository = store,
+            periodCalculator = HarmoniaPeriodCalculator(beforeSecondLastDayClock),
+            statisticsCalculator = HarmoniaStatisticsCalculator(minCompletedTrackPlays = 1),
+            clock = beforeSecondLastDayClock,
+        )
+        val beforeRecaps = beforeGenerator.generateEligibleRecaps(userId, "server", "profile", zone)
+        assertEquals(0, beforeRecaps.size)
+
+        // Day 30 is the second last day of August. Eligible!
+        val secondLastDayClock = Clock.fixed(Instant.parse("2026-08-30T12:00:00Z"), zone)
+        val onDayGenerator = HarmoniaGenerator(
+            historyRepository = store,
+            recapRepository = store,
+            periodCalculator = HarmoniaPeriodCalculator(secondLastDayClock),
+            statisticsCalculator = HarmoniaStatisticsCalculator(minCompletedTrackPlays = 1),
+            clock = secondLastDayClock,
+        )
+        val onDayRecaps = onDayGenerator.generateEligibleRecaps(userId, "server", "profile", zone)
+        assertEquals(1, onDayRecaps.size)
+        assertEquals(HarmoniaPeriod.MONTHLY, onDayRecaps.first().recap.periodType)
+    }
+
+    @Test
+    fun yearlyRecapGeneratesOnlyOnOrAfterDecember15() = runBlocking {
+        val store = InMemoryHarmoniaStore()
+        store.add(record("y1", trackOne, "Song A", "Artist A", "Album A", albumOne, listOf("Pop"), "2026-06-02T01:00:00Z", 120_000))
+
+        // December 14: not eligible yet
+        val dec14Clock = Clock.fixed(Instant.parse("2026-12-14T12:00:00Z"), zone)
+        val beforeGenerator = HarmoniaGenerator(
+            historyRepository = store,
+            recapRepository = store,
+            periodCalculator = HarmoniaPeriodCalculator(dec14Clock),
+            statisticsCalculator = HarmoniaStatisticsCalculator(minCompletedTrackPlays = 1),
+            clock = dec14Clock,
+        )
+        val beforeRecaps = beforeGenerator.generateEligibleRecaps(userId, "server", "profile", zone)
+        assertTrue(beforeRecaps.none { it.recap.periodType == HarmoniaPeriod.YEARLY })
+
+        // December 15: eligible!
+        val dec15Clock = Clock.fixed(Instant.parse("2026-12-15T12:00:00Z"), zone)
+        val onDec15Generator = HarmoniaGenerator(
+            historyRepository = store,
+            recapRepository = store,
+            periodCalculator = HarmoniaPeriodCalculator(dec15Clock),
+            statisticsCalculator = HarmoniaStatisticsCalculator(minCompletedTrackPlays = 1),
+            clock = dec15Clock,
+        )
+        val onDec15Recaps = onDec15Generator.generateEligibleRecaps(userId, "server", "profile", zone)
+        val yearly = onDec15Recaps.firstOrNull { it.recap.periodType == HarmoniaPeriod.YEARLY }
+        assertTrue(yearly != null)
+        assertEquals(HarmoniaPeriod.YEARLY, yearly!!.recap.periodType)
     }
 
     @Test

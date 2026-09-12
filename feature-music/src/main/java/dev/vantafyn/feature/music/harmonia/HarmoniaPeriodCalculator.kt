@@ -32,6 +32,22 @@ class HarmoniaPeriodCalculator(
     fun year(year: Int, zoneId: ZoneId = ZoneId.systemDefault()): HarmoniaPeriodRange =
         Year.of(year).toRange(zoneId)
 
+    fun isCurrentMonthEligible(zoneId: ZoneId = ZoneId.systemDefault()): Boolean {
+        val today = LocalDate.now(clock.withZone(zoneId))
+        return isMonthlyEligibleOn(today)
+    }
+
+    fun isCurrentYearEligible(zoneId: ZoneId = ZoneId.systemDefault()): Boolean {
+        val today = LocalDate.now(clock.withZone(zoneId))
+        return isYearlyEligibleOn(today)
+    }
+
+    fun isMonthlyEligibleOn(date: LocalDate): Boolean =
+        date.dayOfMonth >= (date.lengthOfMonth() - 1)
+
+    fun isYearlyEligibleOn(date: LocalDate): Boolean =
+        date.monthValue == 12 && date.dayOfMonth >= 15
+
     private fun YearMonth.toRange(zoneId: ZoneId): HarmoniaPeriodRange =
         HarmoniaPeriodRange(
             type = HarmoniaPeriod.MONTHLY,

@@ -40,23 +40,25 @@ Vantafyn is crafted from the ground up to make your self-hosted Jellyfin server 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>🎬 Cinema Video Engine</h3>
+      <h3>🎬 Cinema Video & Living Room</h3>
       <ul>
         <li><strong>Jellyfin 12 Collection Linking</strong>: Dedicated "Part of Collection" shelf on Mobile and Android TV detail screens with 1-tap franchise browsing.</li>
         <li><strong>High-Performance Streaming</strong>: Built on AndroidX Media3 & ExoPlayer with automatic resume points.</li>
         <li><strong>4K HDR & Dolby Vision</strong>: Streamlined hardware-accelerated video pipelines.</li>
         <li><strong>Playback Enhancements</strong>: Multi-track audio/subtitle switching, zoom/stretch aspect ratios, Up Next countdowns, and Intro/Credit skipping.</li>
-        <li><strong>Compact 3-Row Grid</strong>: High-density 3-column library browsing with 100 items/page.</li>
+        <li><strong>Living Room TV Pairing & Remote Input</strong>: Instant 6-digit TV code pairing and ECDH + AES-256-GCM encrypted "Send Text to TV" keyboard handoff.</li>
         <li><strong>Google Cast & PiP</strong>: Native Cast sender integration and Picture-in-Picture support.</li>
       </ul>
     </td>
     <td width="50%" valign="top">
-      <h3>🎵 Audiophile DSP & AutoEQ</h3>
+      <h3>🎵 Audiophile DSP, Music & Harmonia</h3>
       <ul>
+        <li><strong>Harmonia Music Recaps</strong>: Spotify Wrapped-caliber animated musical stories, spinning 3D vinyl, listening archetypes, sound palettes, and localized date stats.</li>
         <li><strong>6,000+ Headphone Calibrations</strong>: Full integration of the <a href="https://github.com/jaakkopasanen/AutoEq">AutoEq</a> database (oratory1990, crinacle, Rtings) via hardware equalizer effects.</li>
+        <li><strong>ReplayGain & Dynamic Radio</strong>: Real-time PCM loudness normalization with anti-clipping pre-amp and infinite station radio.</li>
+        <li><strong>Synced Lyrics & Sleep Timer</strong>: Live karaoke lyrics and customizable fade-out sleep timers with end-of-track options.</li>
+        <li><strong>Smart Pre-Caching & OpenSubsonic</strong>: Zero-stutter queue pre-buffering, plus native OpenSubsonic/Navidrome backend support.</li>
         <li><strong>Animated Squiggly Wave</strong>: Dynamic sine wave scrubber that dances during playback and flattens when paused.</li>
-        <li><strong>ReplayGain & Dynamic Radio</strong>: Automatic loudness leveling with anti-clipping pre-amp and infinite station radio.</li>
-        <li><strong>Synced Lyrics & Android Auto</strong>: Live karaoke lyrics and touch-friendly in-car vehicle playback.</li>
       </ul>
     </td>
   </tr>
@@ -66,17 +68,18 @@ Vantafyn is crafted from the ground up to make your self-hosted Jellyfin server 
       <ul>
         <li><strong>Milestone Badges & Rank Tiers</strong>: Progress from Bronze to Mythic with unlocked celebrations and rarity tiers.</li>
         <li><strong>Animated Chromatic Modals</strong>: Signature glowing gradient borders on unlock sheets and inspections.</li>
-        <li><strong>1-to-1 Direct Messaging</strong>: Real-time chat with delivery receipts and battery-efficient lifecycle gating.</li>
-        <li><strong>Media Cards & Reactions</strong>: Share movies directly in chat with "Watch Now" action buttons and touch-and-hold emoji reactions.</li>
+        <li><strong>1-to-1 Direct Messaging & Reactions</strong>: Real-time chat with delivery receipts, typing sounds, and touch-and-hold emoji reactions.</li>
+        <li><strong>Media Sharing & Live Presence</strong>: Share movies directly in chat with "Watch Now" action buttons, and see what server friends are watching in real time.</li>
+        <li><strong>Watch Party & SyncPlay</strong>: SyncPlay group sessions with interactive "Swipe to Match" voting to pick what to watch together.</li>
       </ul>
     </td>
     <td width="50%" valign="top">
       <h3>🚗 In-Car Dashboard & True Offline</h3>
       <ul>
-        <li><strong>Widescreen Automotive Mode</strong>: Touch-optimized head-unit interface for cars and landscape docks.</li>
-        <li><strong>Durable Background Downloads</strong>: WorkManager downloads with offline database and auto-reconciliation on reconnect.</li>
-        <li><strong>Live Server Admin & Stats</strong>: Trigger library scans, monitor active sessions, and inspect viewing trends.</li>
-        <li><strong>Dynamic Customization</strong>: Reorder home rows with live preview, customize card sizing, and toggle Nebula/Midnight themes.</li>
+        <li><strong>Widescreen Automotive & Android Auto</strong>: Touch-optimized head-unit interface for cars, Android Automotive OS, and official Android Auto media browsing.</li>
+        <li><strong>Durable Background Downloads</strong>: WorkManager downloads with offline database for video, music, lyrics, and artwork with auto-reconciliation.</li>
+        <li><strong>Live Server Admin & Stats</strong>: Trigger library scans, monitor active sessions/transcodes, manage users/plugins, and inspect viewing trends.</li>
+        <li><strong>Dynamic Customization & 6 Themes</strong>: Reorder home rows with live preview, customize card sizing, switch between 6 reactive themes (Nebula, Midnight, Aurora, Amethyst, Ember, OLED), and glide across a magnetic glass dock.</li>
       </ul>
     </td>
   </tr>

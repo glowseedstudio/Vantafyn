@@ -1,5 +1,6 @@
 package dev.vantafyn.feature.music
 
+import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
@@ -2272,7 +2273,8 @@ private fun HarmoniaStoryExperience(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val slides = remember(recap, isSaved) { recap?.harmoniaStorySlides(isSaved).orEmpty() }
+    val context = LocalContext.current
+    val slides = remember(recap, isSaved, context) { recap?.harmoniaStorySlides(context, isSaved).orEmpty() }
     val slideCount = slides.size
     var slideIndex by rememberSaveable(preview.id, slideCount) { mutableIntStateOf(0) }
     LaunchedEffect(slideCount) {
@@ -2436,30 +2438,24 @@ private fun HarmoniaStoryExperience(
                             ) {
                                 IconButton(
                                     onClick = { onToggleSave(!isSaved) },
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.12f)),
+                                    modifier = Modifier.size(36.dp),
                                 ) {
                                     Icon(
                                         imageVector = if (isSaved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
                                         contentDescription = if (isSaved) "Saved" else "Save Recap",
                                         tint = if (isSaved) Color(0xFFFFD166) else Color.White,
-                                        modifier = Modifier.size(20.dp),
+                                        modifier = Modifier.size(24.dp),
                                     )
                                 }
                                 IconButton(
                                     onClick = onBack,
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.12f)),
+                                    modifier = Modifier.size(36.dp),
                                 ) {
                                     Icon(
                                         imageVector = Icons.Rounded.Close,
                                         contentDescription = "Close",
                                         tint = Color.White,
-                                        modifier = Modifier.size(20.dp),
+                                        modifier = Modifier.size(24.dp),
                                     )
                                 }
                             }
@@ -3775,7 +3771,8 @@ private fun HarmoniaHeatmapVisual(
                     HarmoniaPill(icon = Icons.Rounded.LocalFireDepartment, text = "$streakDays Day Streak", tint = Color(0xFFFF6B6B))
                 }
                 if (peakDate != null) {
-                    HarmoniaPill(icon = Icons.Rounded.AutoAwesome, text = "Peak: ${peakDate.formatLocalizedDate()}", tint = Color(0xFFFFD166))
+                    val context = LocalContext.current
+                    HarmoniaPill(icon = Icons.Rounded.AutoAwesome, text = "Peak: ${peakDate.formatLocalizedDate(context)}", tint = Color(0xFFFFD166))
                 }
             }
         }
@@ -4448,7 +4445,7 @@ private sealed interface HarmoniaStoryVisual {
     ) : HarmoniaStoryVisual
 }
 
-private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaStorySlide> {
+private fun HarmoniaRecap.harmoniaStorySlides(context: Context, isSaved: Boolean): List<HarmoniaStorySlide> {
     val yearly = periodType == HarmoniaPeriod.YEARLY
     val label = HarmoniaRecapPreview(
         id = id,
@@ -4598,7 +4595,7 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                     kicker = "Activity",
                     title = if (yearly) "Your listening year, day by day" else "Your listening month, day by day",
                     metric = stats.listeningStreakDays.value?.takeIf { it > 1 }?.let { "🔥 $it Day Streak" },
-                    body = stats.longestListeningDay.value?.let { "Peak: ${it.date.formatLocalizedDate()} (${it.listeningTimeMs.formatListeningTime()})" },
+                    body = stats.longestListeningDay.value?.let { "Peak: ${it.date.formatLocalizedDate(context)} (${it.listeningTimeMs.formatListeningTime()})" },
                     visual = HarmoniaStoryVisual.Heatmap(
                         values = heatmap,
                         streakDays = stats.listeningStreakDays.value ?: 0,
@@ -4617,7 +4614,7 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                     kicker = "Time Patterns",
                     title = "Your listening rhythm",
                     metric = activeHour?.let { "Peak hour: $it" },
-                    body = stats.mostActiveDay.value?.date?.let { "Most active day: $it" },
+                    body = stats.mostActiveDay.value?.date?.let { "Most active day: ${it.formatLocalizedDate(context)}" },
                     visual = HarmoniaStoryVisual.Hourly(
                         values = hours.map { it.hour to it.listeningTimeMs },
                         peakHour = stats.mostActiveHour.value?.hour,
@@ -4687,14 +4684,23 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
     }
 }
 
-private fun LocalDate.formatLocalizedDate(): String =
-    try {
+private fun LocalDate.formatLocalizedDate(context: Context? = null): String {
+    if (context != null) {
+        try {
+            val calendar = java.util.Calendar.getInstance().apply {
+                set(year, monthValue - 1, dayOfMonth)
+            }
+            return android.text.format.DateFormat.getMediumDateFormat(context).format(calendar.time)
+        } catch (_: Exception) {}
+    }
+    return try {
         DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
             .withLocale(Locale.getDefault())
             .format(this)
     } catch (_: Exception) {
-        toString()
+        "${dayOfMonth} ${month.getDisplayName(JavaTextStyle.SHORT, Locale.getDefault())} $year"
     }
+}
 
 private fun HarmoniaRecapPreview.periodLabel(): String {
     val date = periodStart.atZone(ZoneId.systemDefault()).toLocalDate()

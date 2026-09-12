@@ -59,15 +59,59 @@ class HarmoniaGenerator(
         profileId: String,
         zoneId: ZoneId = ZoneId.systemDefault(),
     ): List<HarmoniaGenerationResult.Generated> {
-        val monthly = generateIfNeeded(
+        val results = mutableListOf<HarmoniaGenerationResult.Generated>()
+
+        // 1. Current Month: generates on the second last day of the month
+        if (periodCalculator.isCurrentMonthEligible(zoneId)) {
+            val monthly = generateIfNeeded(
+                userId = userId,
+                serverId = serverId,
+                profileId = profileId,
+                period = periodCalculator.currentMonth(zoneId),
+                zoneId = zoneId,
+                previousPeriod = periodCalculator.previousCompletedMonth(zoneId),
+                isFinalized = false,
+            )
+            if (monthly is HarmoniaGenerationResult.Generated) {
+                results.add(monthly)
+            }
+        }
+
+        // 2. Previous Completed Month: its generation date has passed, finalize if needed
+        val previousMonthly = generateIfNeeded(
             userId = userId,
             serverId = serverId,
             profileId = profileId,
-            period = periodCalculator.currentMonth(zoneId),
+            period = periodCalculator.previousCompletedMonth(zoneId),
             zoneId = zoneId,
-            previousPeriod = periodCalculator.previousCompletedMonth(zoneId),
-            isFinalized = false,
+            previousPeriod = HarmoniaPeriodRange(
+                type = HarmoniaPeriod.MONTHLY,
+                start = periodCalculator.previousCompletedMonth(zoneId).start.atZone(zoneId).minusMonths(1).toInstant(),
+                endExclusive = periodCalculator.previousCompletedMonth(zoneId).start,
+            ),
+            isFinalized = true,
         )
+        if (previousMonthly is HarmoniaGenerationResult.Generated) {
+            results.add(previousMonthly)
+        }
+
+        // 3. Current Year: generates on December 15 each year
+        if (periodCalculator.isCurrentYearEligible(zoneId)) {
+            val currentYearly = generateIfNeeded(
+                userId = userId,
+                serverId = serverId,
+                profileId = profileId,
+                period = periodCalculator.currentYear(zoneId),
+                zoneId = zoneId,
+                previousPeriod = null,
+                isFinalized = false,
+            )
+            if (currentYearly is HarmoniaGenerationResult.Generated) {
+                results.add(currentYearly)
+            }
+        }
+
+        // 4. Previous Completed Year: its December 15 date has passed, finalize if needed
         val yearly = generateIfNeeded(
             userId = userId,
             serverId = serverId,
@@ -77,7 +121,11 @@ class HarmoniaGenerator(
             previousPeriod = null,
             isFinalized = true,
         )
-        return listOfNotNull(monthly, yearly).filterIsInstance<HarmoniaGenerationResult.Generated>()
+        if (yearly is HarmoniaGenerationResult.Generated) {
+            results.add(yearly)
+        }
+
+        return results
     }
 
     suspend fun loadRecap(
