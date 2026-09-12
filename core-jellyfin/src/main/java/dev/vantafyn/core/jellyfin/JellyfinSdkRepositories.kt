@@ -2682,6 +2682,7 @@ class SdkJellyfinMusicRepository(
             it.collectionType?.serialName.equals("music", ignoreCase = true)
         }?.map { it.id }?.toSet().orEmpty()
 
+        val fetchLimit = limit.coerceAtLeast(100)
         val rawPlaylists = if (playlistsView != null) {
             runCatching {
                 val fromPlaylistsView by api.itemsApi.getItems(
@@ -2689,7 +2690,7 @@ class SdkJellyfinMusicRepository(
                         userId = session.user.id,
                         parentId = playlistsView.id,
                         recursive = true,
-                        limit = limit,
+                        limit = fetchLimit,
                         sortBy = listOf(ItemSortBy.SORT_NAME),
                         sortOrder = listOf(SortOrder.ASCENDING),
                         fields = musicItemFields,
@@ -2707,14 +2708,14 @@ class SdkJellyfinMusicRepository(
             emptyList()
         }
 
-        val candidates = if (rawPlaylists.isNotEmpty()) {
+        val allRaw = if (rawPlaylists.isNotEmpty()) {
             rawPlaylists
         } else {
             val response by api.itemsApi.getItems(
                 GetItemsRequest(
                     userId = session.user.id,
                     recursive = true,
-                    limit = limit,
+                    limit = fetchLimit,
                     sortBy = listOf(ItemSortBy.SORT_NAME),
                     sortOrder = listOf(SortOrder.ASCENDING),
                     fields = musicItemFields,
@@ -2726,12 +2727,19 @@ class SdkJellyfinMusicRepository(
                     enableTotalRecordCount = false,
                 ),
             )
-            response.items.filter { playlist ->
-                val parentId = playlist.parentId
-                val isInsideMusicLibrary = parentId != null && musicViewIds.contains(parentId)
-                val hasAlbumAssociation = playlist.albumId != null || !playlist.album.isNullOrBlank()
-                !isInsideMusicLibrary && !hasAlbumAssociation
-            }
+            response.items
+        }
+
+        val candidates = allRaw.filter { playlist ->
+            val parentId = playlist.parentId
+            val isInsideMusicLibrary = parentId != null && musicViewIds.contains(parentId)
+            val hasAlbumAssociation = playlist.albumId != null || !playlist.album.isNullOrBlank()
+            val mediaType = playlist.mediaType
+            val isVideo = mediaType == MediaType.VIDEO ||
+                mediaType?.serialName?.equals("video", ignoreCase = true) == true
+            val isNonAudioMediaType = mediaType != null && mediaType != MediaType.AUDIO
+
+            !isInsideMusicLibrary && !hasAlbumAssociation && !isVideo && !isNonAudioMediaType
         }
 
         return candidates.mapNotNull { playlist ->
@@ -2742,7 +2750,7 @@ class SdkJellyfinMusicRepository(
                         playlistId = playlistId,
                         userId = session.user.id,
                         fields = musicItemFields,
-                        limit = 20,
+                        limit = 50,
                         enableImages = true,
                         enableUserData = false,
                         imageTypeLimit = 1,
@@ -2751,12 +2759,26 @@ class SdkJellyfinMusicRepository(
                 )
                 playlistItems.items
             }.getOrElse { emptyList() }
+
             val hasItems = items.isNotEmpty()
             val audioItems = items.filter { it.type == BaseItemKind.AUDIO || it.mediaType == MediaType.AUDIO }
-            val audioCount = audioItems.size
-            val videoCount = items.count {
-                it.type in setOf(BaseItemKind.MOVIE, BaseItemKind.EPISODE, BaseItemKind.SERIES, BaseItemKind.BOX_SET) ||
-                    it.mediaType == MediaType.VIDEO
+            val hasNonAudio = items.any { item ->
+                item.type in setOf(
+                    BaseItemKind.MOVIE,
+                    BaseItemKind.EPISODE,
+                    BaseItemKind.SERIES,
+                    BaseItemKind.SEASON,
+                    BaseItemKind.BOX_SET,
+                    BaseItemKind.VIDEO,
+                    BaseItemKind.TRAILER,
+                    BaseItemKind.MUSIC_VIDEO,
+                    BaseItemKind.BOOK,
+                    BaseItemKind.PHOTO,
+                ) || (item.mediaType != null && item.mediaType != MediaType.AUDIO)
+            }
+
+            if (hasNonAudio) {
+                return@mapNotNull null
             }
 
             val isAlbumGrouped = playlist.albumId != null ||
@@ -2766,17 +2788,31 @@ class SdkJellyfinMusicRepository(
                         it.name.equals(playlist.name, ignoreCase = true)
                 })
 
+            if (isAlbumGrouped) {
+                return@mapNotNull null
+            }
+
             when {
-                hasItems && audioCount > 0 && videoCount == 0 && !isAlbumGrouped -> {
+                hasItems && audioItems.isNotEmpty() -> {
                     val trackImageUrls = audioItems.take(4).mapNotNull { it.primaryImageUrl(api, 200) }
-                    playlist.toMusicPlaylist(api, trackImageUrls = trackImageUrls, isUserCreated = true)
+                    playlist.toMusicPlaylist(
+                        api = api,
+                        classifiedTrackCount = playlist.childCount ?: playlist.recursiveItemCount ?: audioItems.size,
+                        trackImageUrls = trackImageUrls,
+                        isUserCreated = true,
+                    )
                 }
-                !hasItems && videoCount == 0 && !isAlbumGrouped -> {
-                    playlist.toMusicPlaylist(api, trackImageUrls = emptyList(), isUserCreated = true)
+                !hasItems && playlist.mediaType == MediaType.AUDIO -> {
+                    playlist.toMusicPlaylist(
+                        api = api,
+                        classifiedTrackCount = 0,
+                        trackImageUrls = emptyList(),
+                        isUserCreated = true,
+                    )
                 }
                 else -> null
             }
-        }
+        }.take(limit)
     }
 
     private suspend fun waitForCreatedMusicPlaylist(api: ApiClient, session: JellyfinSession, name: String): java.util.UUID? {
