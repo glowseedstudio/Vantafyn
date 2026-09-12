@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.8"><img src="https://img.shields.io/badge/Release-v0.9.8-21D8FF.svg?style=flat-square" alt="Version 0.9.8" /></a>
+  <a href="https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.9"><img src="https://img.shields.io/badge/Release-v0.9.9-21D8FF.svg?style=flat-square" alt="Version 0.9.9" /></a>
   <a href="https://jellyfin.org"><img src="https://img.shields.io/badge/Jellyfin-v12_Ready-00A4DC.svg?style=flat-square&logo=jellyfin&logoColor=white" alt="Jellyfin v12 Ready" /></a>
   <a href="https://glowseedstudio.github.io/Vantafyn/"><img src="https://img.shields.io/badge/Website-Live_Showcase-E026FF.svg?style=flat-square" alt="Live Showcase" /></a>
   <a href="https://developer.android.com/jetpack/compose"><img src="https://img.shields.io/badge/Jetpack_Compose-Material_3-4285F4.svg?style=flat-square&logo=android&logoColor=white" alt="Jetpack Compose" /></a>
@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.8"><strong>⬇️ Download Latest APK (v0.9.8)</strong></a> &nbsp;•&nbsp;
+  <a href="https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.9"><strong>⬇️ Download Latest APK (v0.9.9)</strong></a> &nbsp;•&nbsp;
   <a href="https://glowseedstudio.github.io/Vantafyn/"><strong>🌐 Interactive Website & Gallery</strong></a> &nbsp;•&nbsp;
   <a href="#-quick-start"><strong>🚀 Quick Start</strong></a> &nbsp;•&nbsp;
   <a href="docs/ARCHITECTURE.md"><strong>📖 Architecture Docs</strong></a>
@@ -121,9 +121,9 @@ While Vantafyn works seamlessly out-of-the-box with any standard Jellyfin server
 ## 🚀 Quick Start
 
 ### Direct Download
-Production minified APKs are available on the **[Releases Page](https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.8)**:
-- **Phone / Tablet / Auto**: [`app-mobile-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.8/app-mobile-release.apk) *(51 MB, R8-shrunk)*
-- **Android TV**: [`app-tv-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.8/app-tv-release.apk) *(15 MB)*
+Production minified APKs are available on the **[Releases Page](https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.9)**:
+- **Phone / Tablet / Auto**: [`app-mobile-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.9/app-mobile-release.apk) *(51 MB, R8-shrunk)*
+- **Android TV**: [`app-tv-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.9/app-tv-release.apk) *(15 MB)*
 
 ### Building from Source
 

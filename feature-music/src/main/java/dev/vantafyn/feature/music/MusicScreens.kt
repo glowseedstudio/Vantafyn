@@ -145,6 +145,9 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Fullscreen
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Explore
+import androidx.compose.material.icons.rounded.Headphones
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Bookmark
 import androidx.compose.material.icons.rounded.BookmarkBorder
@@ -230,6 +233,7 @@ import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.media.VantafynMusicRepeatMode
 import dev.vantafyn.core.media.VantafynMusicTrack
 import dev.vantafyn.feature.music.harmonia.HarmoniaPeriod
+import dev.vantafyn.feature.music.harmonia.HarmoniaPersona
 import dev.vantafyn.feature.music.harmonia.HarmoniaRankedItem
 import dev.vantafyn.feature.music.harmonia.HarmoniaRecap
 import dev.vantafyn.feature.music.harmonia.HarmoniaRecapPreview
@@ -258,6 +262,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.time.format.TextStyle as JavaTextStyle
 import java.util.Locale
 import kotlin.math.abs
@@ -286,9 +292,19 @@ fun MusicScreen(
     modifier: Modifier = Modifier,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
     onNavigateToDownloads: (() -> Unit)? = null,
+    onHarmoniaActiveChanged: ((Boolean) -> Unit)? = null,
     viewModel: MusicViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val isHarmoniaActive = state.screen is MusicScreenState.HarmoniaRecap
+    LaunchedEffect(isHarmoniaActive) {
+        onHarmoniaActiveChanged?.invoke(isHarmoniaActive)
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            onHarmoniaActiveChanged?.invoke(false)
+        }
+    }
     var actionTrack by remember { mutableStateOf<JellyfinMusicTrack?>(null) }
     var musicContextItem by remember { mutableStateOf<MusicContextItem?>(null) }
     var playlistPickerTracks by remember { mutableStateOf<List<JellyfinMusicTrack>>(emptyList()) }
@@ -318,6 +334,10 @@ fun MusicScreen(
             else s.tracks.filter { it.title.lowercase().contains(query) || it.artist.lowercase().contains(query) }
         }
         else -> state.searchResults.ifEmpty { state.home?.songs?.take(20).orEmpty() }
+    }
+    val unsavedHarmoniaRecaps = remember(state.harmoniaRecaps, state.savedHarmoniaRecaps) {
+        val savedIds = state.savedHarmoniaRecaps.map { it.id }.toSet()
+        state.harmoniaRecaps.filterNot { it.id in savedIds }
     }
     val startMusic: (() -> Unit) -> Unit = { action -> onRequestMusicControlsPermission(action) }
     val showInitialLoading = state.isLoading &&
@@ -702,10 +722,10 @@ fun MusicScreen(
                             state.home?.let { home ->
                                 when (state.selectedHomeMood) {
                                     MusicHomeMood.All -> {
-                                        if (state.harmoniaRecaps.isNotEmpty()) item {
+                                        if (unsavedHarmoniaRecaps.isNotEmpty()) item {
                                             MusicContentReveal(index = 2, animate = homeRevealActive, revealKey = homeRevealKey) {
                                                 HarmoniaRail(
-                                                    recaps = state.harmoniaRecaps,
+                                                    recaps = unsavedHarmoniaRecaps,
                                                     onRecap = viewModel::openHarmoniaRecap,
                                                 )
                                             }
@@ -827,17 +847,6 @@ fun MusicScreen(
                                                 SavedHarmoniaRail(
                                                     recaps = state.savedHarmoniaRecaps,
                                                     onRecap = viewModel::openHarmoniaRecap,
-                                                )
-                                            }
-                                        }
-                                        item {
-                                            MusicContentReveal(index = 9, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                                // TODO REMOVE_HARMONIA_TEST_GENERATORS_BEFORE_RELEASE
-                                                HarmoniaDeveloperPanel(
-                                                    isGenerating = state.isHarmoniaGenerating,
-                                                    message = state.harmoniaGenerationMessage,
-                                                    onMonthly = { viewModel.generateTestMonthlyHarmonia() },
-                                                    onYearly = viewModel::generateTestYearlyHarmonia,
                                                 )
                                             }
                                         }
@@ -2250,56 +2259,6 @@ private fun SavedHarmoniaCard(
 }
 
 @Composable
-private fun HarmoniaDeveloperPanel(
-    isGenerating: Boolean,
-    message: String?,
-    onMonthly: () -> Unit,
-    onYearly: () -> Unit,
-) {
-    VantafynGlassCard(
-        modifier = Modifier.fillMaxWidth(),
-        cornerRadius = 22.dp,
-        contentPadding = PaddingValues(16.dp),
-    ) {
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    "Harmonia developer tools",
-                    color = VantafynColors.Ink,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "Generate test recaps from real local listening history.",
-                    color = VantafynColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                VantafynButton(
-                    if (isGenerating) "Generating..." else "Generate Test Monthly",
-                    onClick = onMonthly,
-                    enabled = !isGenerating,
-                    modifier = Modifier.weight(1f),
-                )
-                VantafynButton(
-                    if (isGenerating) "Generating..." else "Generate Test Yearly",
-                    onClick = onYearly,
-                    enabled = !isGenerating,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-            message?.let {
-                Text(
-                    it,
-                    color = VantafynColors.Muted,
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun HarmoniaStoryExperience(
     preview: HarmoniaRecapPreview,
     recap: HarmoniaRecap?,
@@ -2438,15 +2397,24 @@ private fun HarmoniaStoryExperience(
                 Text("No story slides are available for this recap yet.", color = VantafynColors.Muted, textAlign = TextAlign.Center)
             }
             else -> {
+                val scaleCard by animateFloatAsState(
+                    targetValue = if (isHolding) 0.97f else 1f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow),
+                    label = "harmoniaHoldScale",
+                )
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .windowInsetsPadding(WindowInsets.safeDrawing)
-                        .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 96.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
+                        .windowInsetsPadding(WindowInsets.safeDrawing),
                 ) {
                     // 1. Top Section: Progress indicators & Header controls
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         HarmoniaStoryProgress(
                             slideIndex = slideIndex,
                             slideCount = slideCount,
@@ -2498,29 +2466,39 @@ private fun HarmoniaStoryExperience(
                         }
                     }
 
-                    // 2. Middle Section: Animated Slide Content
-                    AnimatedContent(
-                        targetState = slides[slideIndex],
-                        transitionSpec = {
-                            (fadeIn(tween(260, easing = FastOutSlowInEasing))) togetherWith fadeOut(tween(160, easing = FastOutSlowInEasing))
-                        },
-                        label = "harmoniaStorySlide",
+                    // 2. Middle Section: Centered Animated Slide Content
+                    Box(
                         modifier = Modifier
                             .weight(1f)
                             .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                    ) { slide ->
-                        HarmoniaStorySlideContent(
-                            slide = slide,
-                            onToggleSave = { onToggleSave(!isSaved) },
-                            onReplay = { slideIndex = 0 },
-                            onBack = onBack,
-                        )
+                            .padding(horizontal = 20.dp)
+                            .scale(scaleCard),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AnimatedContent(
+                            targetState = slides[slideIndex],
+                            transitionSpec = {
+                                (fadeIn(tween(320, easing = FastOutSlowInEasing)) + scaleIn(tween(360, easing = FastOutSlowInEasing), initialScale = 0.93f)) togetherWith
+                                    (fadeOut(tween(180, easing = FastOutSlowInEasing)) + scaleOut(tween(220, easing = FastOutSlowInEasing), targetScale = 1.05f))
+                            },
+                            label = "harmoniaStorySlide",
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { slide ->
+                            HarmoniaStorySlideContent(
+                                slide = slide,
+                                isHolding = isHolding,
+                                onToggleSave = { onToggleSave(!isSaved) },
+                                onReplay = { slideIndex = 0 },
+                                onBack = onBack,
+                            )
+                        }
                     }
 
                     // 3. Bottom Section: Controls
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 18.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -2535,10 +2513,13 @@ private fun HarmoniaStoryExperience(
                             "${slideIndex + 1} / $slideCount",
                             color = VantafynColors.Muted,
                             style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Medium,
                         )
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            VantafynGlassChip(selected = false, onClick = { slideIndex = 0 }) {
-                                Text("Replay", color = VantafynColors.Ink, maxLines = 1)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (slideIndex == slideCount - 1) {
+                                VantafynGlassChip(selected = false, onClick = { slideIndex = 0 }) {
+                                    Text("Replay", color = VantafynColors.Ink, maxLines = 1)
+                                }
                             }
                             VantafynGlassChip(
                                 selected = true,
@@ -2765,97 +2746,401 @@ private fun HarmoniaNebulaBackdrop(slideIndex: Int, artworkUrl: String?) {
 @Composable
 private fun HarmoniaStorySlideContent(
     slide: HarmoniaStorySlide,
+    isHolding: Boolean,
     onToggleSave: () -> Unit,
     onReplay: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val entranceAlpha = remember { Animatable(0f) }
+    val entranceOffset = remember { Animatable(18f) }
+    val visualScale = remember { Animatable(0.85f) }
+
+    LaunchedEffect(slide) {
+        entranceAlpha.snapTo(0f)
+        entranceOffset.snapTo(18f)
+        visualScale.snapTo(0.85f)
+
+        launch {
+            entranceAlpha.animateTo(1f, tween(320, easing = FastOutSlowInEasing))
+        }
+        launch {
+            entranceOffset.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow))
+        }
+        launch {
+            visualScale.animateTo(1f, spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMediumLow))
+        }
+    }
+
     Column(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.SpaceBetween,
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                alpha = entranceAlpha.value
+                translationY = entranceOffset.value
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        val isFinal = slide.visual is HarmoniaStoryVisual.FinalSummary
+        if (isFinal) {
             Text(
-                slide.kicker.uppercase(Locale.getDefault()),
-                color = Color.White.copy(alpha = 0.70f),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp,
-            )
-            Text(
-                slide.title,
+                text = slide.title,
                 color = VantafynColors.Ink,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                maxLines = 3,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.ExtraBold,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
-            slide.metric?.let {
+            Spacer(Modifier.height(10.dp))
+        } else {
+            // Typography header group - strictly centered
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = slide.kicker.uppercase(Locale.getDefault()),
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.2.sp,
+                    )
+                }
                 Text(
-                    it,
+                    text = slide.title,
                     color = VantafynColors.Ink,
-                    style = MaterialTheme.typography.displaySmall,
+                    style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.ExtraBold,
+                    textAlign = TextAlign.Center,
                     maxLines = 2,
-                )
-            }
-            slide.body?.let {
-                Text(
-                    it,
-                    color = VantafynColors.Muted,
-                    style = MaterialTheme.typography.bodyLarge,
-                    maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
+                slide.metric?.let {
+                    Text(
+                        text = it,
+                        color = Color(0xFF00F2FE),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                    )
+                }
+                slide.body?.let {
+                    Text(
+                        text = it,
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                    )
+                }
             }
+            Spacer(Modifier.height(20.dp))
         }
-        when (val visual = slide.visual) {
-            is HarmoniaStoryVisual.HeroTrack -> HarmoniaHeroTrackVisual(visual.item)
-            is HarmoniaStoryVisual.HeroArtist -> HarmoniaHeroArtistVisual(visual.item)
-            is HarmoniaStoryVisual.RankedTracks -> HarmoniaRankedTracksVisual(visual.items)
-            is HarmoniaStoryVisual.RankedArtists -> HarmoniaRankedArtistsVisual(visual.items)
-            is HarmoniaStoryVisual.Albums -> HarmoniaAlbumsVisual(visual.items)
-            is HarmoniaStoryVisual.Genres -> HarmoniaGenreVisual(visual.items)
-            is HarmoniaStoryVisual.Heatmap -> HarmoniaHeatmapVisual(visual.values, visual.streakDays, visual.peakDate, visual.peakTimeMs)
-            is HarmoniaStoryVisual.Hourly -> HarmoniaHourlyVisual(visual.values, visual.peakHour)
-            is HarmoniaStoryVisual.Monthly -> HarmoniaMonthlyVisual(visual.values)
-            is HarmoniaStoryVisual.FinalSummary -> HarmoniaFinalSummaryVisual(
-                summary = visual,
-                onToggleSave = onToggleSave,
-                onReplay = onReplay,
-                onBack = onBack,
-            )
-            HarmoniaStoryVisual.None -> Spacer(Modifier.height(18.dp))
+
+        // Visual presentation with spring scale
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .scale(visualScale.value),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (val visual = slide.visual) {
+                is HarmoniaStoryVisual.Intro -> HarmoniaIntroVisual(visual.totalMs, visual.trackCount)
+                is HarmoniaStoryVisual.Scale -> HarmoniaScaleVisual(visual.tracksPlayed, visual.uniqueArtists, visual.averageSessionMs)
+                is HarmoniaStoryVisual.HeroTrack -> HarmoniaHeroTrackVisual(visual.item, isPlaying = !isHolding)
+                is HarmoniaStoryVisual.HeroArtist -> HarmoniaHeroArtistVisual(visual.item, isBreathing = !isHolding)
+                is HarmoniaStoryVisual.RankedTracks -> HarmoniaRankedTracksVisual(visual.items)
+                is HarmoniaStoryVisual.RankedArtists -> HarmoniaRankedArtistsVisual(visual.items)
+                is HarmoniaStoryVisual.Albums -> HarmoniaAlbumsVisual(visual.items)
+                is HarmoniaStoryVisual.Genres -> HarmoniaGenreVisual(visual.items)
+                is HarmoniaStoryVisual.Persona -> HarmoniaPersonaVisual(visual.persona)
+                is HarmoniaStoryVisual.Heatmap -> HarmoniaHeatmapVisual(visual.values, visual.streakDays, visual.peakDate, visual.peakTimeMs)
+                is HarmoniaStoryVisual.Hourly -> HarmoniaHourlyVisual(visual.values, visual.peakHour)
+                is HarmoniaStoryVisual.Monthly -> HarmoniaMonthlyVisual(visual.values)
+                is HarmoniaStoryVisual.FinalSummary -> HarmoniaFinalSummaryVisual(
+                    summary = visual,
+                    onToggleSave = onToggleSave,
+                    onReplay = onReplay,
+                    onBack = onBack,
+                )
+                HarmoniaStoryVisual.None -> Spacer(Modifier.height(18.dp))
+            }
         }
     }
 }
 
 @Composable
-private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
+private fun HarmoniaIntroVisual(totalMs: Long, trackCount: Int) {
+    val totalMinutes = (totalMs / 60_000L).coerceAtLeast(0L)
+    val animatedMinutes = remember { Animatable(0f) }
+
+    LaunchedEffect(totalMinutes) {
+        animatedMinutes.snapTo(0f)
+        animatedMinutes.animateTo(
+            targetValue = totalMinutes.toFloat(),
+            animationSpec = tween(durationMillis = 1300, easing = FastOutSlowInEasing),
+        )
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "introPulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 0.96f,
+        targetValue = 1.04f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
+        label = "introPulseScale",
+    )
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(
-            modifier = Modifier.size(190.dp),
+            modifier = Modifier
+                .size(190.dp)
+                .scale(pulseScale),
             contentAlignment = Alignment.Center,
         ) {
-            // Vinyl disc peeking out
+            // Luminous backdrop aura rings
             Box(
                 modifier = Modifier
-                    .offset(x = 26.dp)
-                    .size(165.dp)
+                    .size(190.dp)
                     .clip(CircleShape)
-                    .background(Color(0xFF10131A))
-                    .border(1.5.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                Color(0xFF00F2FE).copy(alpha = 0.35f),
+                                Color(0xFF4FACFE).copy(alpha = 0.12f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            // Grooved sound capsule disc
+            Box(
+                modifier = Modifier
+                    .size(160.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF0D111A))
+                    .border(2.dp, VantafynGradients.accentHorizontal(), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
                     modifier = Modifier
-                        .size(105.dp)
+                        .size(110.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape),
+                )
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+            }
+        }
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = "${animatedMinutes.value.toLong().coerceAtLeast(0L)} MINUTES",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.sp,
+            )
+            Text(
+                text = "of pure music discovery",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        if (trackCount > 0) {
+            HarmoniaPill(
+                icon = Icons.Rounded.MusicNote,
+                text = "$trackCount tracks played",
+                tint = Color(0xFF00F2FE),
+            )
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaScaleVisual(
+    tracksPlayed: Int,
+    uniqueArtists: Int,
+    averageSessionMs: Long,
+) {
+    val alphaAnim = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        alphaAnim.animateTo(1f, tween(360, easing = FastOutSlowInEasing))
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(alphaAnim.value),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 20.dp,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(VantafynGradients.accentHorizontal()),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("$tracksPlayed", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Total tracks played", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 20.dp,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(listOf(Color(0xFFFF0844), Color(0xFFFFB199)))),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                }
+                Column(Modifier.weight(1f)) {
+                    Text("$uniqueArtists", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Unique artists explored", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+
+        if (averageSessionMs > 0L) {
+            VantafynGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                cornerRadius = 20.dp,
+                contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(Brush.linearGradient(listOf(Color(0xFFF77737), Color(0xFFFCCC63)))),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Rounded.Schedule, contentDescription = null, tint = Color.White, modifier = Modifier.size(22.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(averageSessionMs.formatListeningTime(), color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text("Average listening session", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem, isPlaying: Boolean) {
+    val vinylSlide = remember { Animatable(0f) }
+    LaunchedEffect(item.id) {
+        vinylSlide.snapTo(0f)
+        vinylSlide.animateTo(
+            targetValue = 40f,
+            animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        )
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "vinylSpin")
+    val spinRotation by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 4000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "spinAngle",
+    )
+    val activeRotation = if (isPlaying) spinRotation else 0f
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(200.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            // Vinyl disc sliding out from behind sleeve and rotating
+            Box(
+                modifier = Modifier
+                    .offset(x = vinylSlide.value.dp)
+                    .size(175.dp)
+                    .graphicsLayer { rotationZ = activeRotation }
+                    .clip(CircleShape)
+                    .background(Color(0xFF0A0D14))
+                    .border(1.5.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                // Vinyl grooves
+                Box(
+                    modifier = Modifier
+                        .size(130.dp)
                         .clip(CircleShape)
                         .border(1.dp, Color.White.copy(alpha = 0.08f), CircleShape),
                 )
+                Box(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.06f), CircleShape),
+                )
+                // Center label
                 Box(
                     modifier = Modifier
                         .size(56.dp)
@@ -2863,14 +3148,20 @@ private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
                         .background(VantafynGradients.accentHorizontal()),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Box(Modifier.size(14.dp).clip(CircleShape).background(Color(0xFF10131A)))
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF0A0D14)),
+                    )
                 }
             }
-            // Album cover sleeve
+
+            // Album jacket cover sleeve
             Box(
                 modifier = Modifier
-                    .offset(x = (-14).dp)
-                    .size(170.dp)
+                    .offset(x = (-16).dp)
+                    .size(175.dp)
                     .clip(RoundedCornerShape(18.dp))
                     .background(VantafynColors.Surface)
                     .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
@@ -2883,15 +3174,29 @@ private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
                         contentScale = ContentScale.Crop,
                     )
                 } else {
-                    Box(Modifier.fillMaxSize().background(VantafynGradients.accentHorizontal()), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White, modifier = Modifier.size(54.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(VantafynGradients.accentHorizontal()),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MusicNote,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(56.dp),
+                        )
                     }
                 }
             }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Text(
-                item.label,
+                text = item.label,
                 color = VantafynColors.Ink,
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
@@ -2901,7 +3206,7 @@ private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
             )
             item.subtitle?.let {
                 Text(
-                    it,
+                    text = it,
                     color = VantafynColors.Muted,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Medium,
@@ -2911,10 +3216,12 @@ private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
                 )
             }
         }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             HarmoniaPill(
                 icon = Icons.Rounded.PlayArrow,
                 text = "${item.playCount} plays",
+                tint = Color(0xFF00F2FE),
             )
             HarmoniaPill(
                 icon = Icons.Rounded.Schedule,
@@ -2925,29 +3232,41 @@ private fun HarmoniaHeroTrackVisual(item: HarmoniaRankedItem) {
 }
 
 @Composable
-private fun HarmoniaHeroArtistVisual(item: HarmoniaRankedItem) {
+private fun HarmoniaHeroArtistVisual(item: HarmoniaRankedItem, isBreathing: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "artistBreathing")
+    val auraScale by infiniteTransition.animateFloat(
+        initialValue = 1.0f,
+        targetValue = 1.15f,
+        animationSpec = infiniteRepeatable(tween(2200, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
+        label = "artistAuraScale",
+    )
+    val activeAuraScale = if (isBreathing) auraScale else 1.0f
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Box(
-            modifier = Modifier.size(165.dp),
+            modifier = Modifier.size(180.dp),
             contentAlignment = Alignment.Center,
         ) {
+            // Outer breathing aura ring
             Box(
                 modifier = Modifier
-                    .size(165.dp)
+                    .size(180.dp)
+                    .scale(activeAuraScale)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
                             listOf(
-                                VantafynGradients.AccentColors.first().copy(alpha = 0.5f),
+                                VantafynGradients.AccentColors.first().copy(alpha = 0.45f),
                                 Color.Transparent,
                             ),
                         ),
                     ),
             )
+            // Artist circular portrait
             Box(
                 modifier = Modifier
                     .size(150.dp)
@@ -2964,13 +3283,22 @@ private fun HarmoniaHeroArtistVisual(item: HarmoniaRankedItem) {
                         contentScale = ContentScale.Crop,
                     )
                 } else {
-                    Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(64.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.Person,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(64.dp),
+                    )
                 }
             }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
             Text(
-                item.label,
+                text = item.label,
                 color = VantafynColors.Ink,
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
@@ -2979,13 +3307,19 @@ private fun HarmoniaHeroArtistVisual(item: HarmoniaRankedItem) {
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                "Your soundtrack wouldn't be the same without them",
+                text = "Your soundtrack wouldn't be the same without them",
                 color = VantafynColors.Muted,
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = TextAlign.Center,
             )
         }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            HarmoniaPill(
+                icon = Icons.Rounded.Star,
+                text = "Top Artist",
+                tint = Color(0xFFFFD166),
+            )
             HarmoniaPill(
                 icon = Icons.Rounded.PlayArrow,
                 text = "${item.playCount} plays",
@@ -3000,10 +3334,27 @@ private fun HarmoniaHeroArtistVisual(item: HarmoniaRankedItem) {
 
 @Composable
 private fun HarmoniaRankedTracksVisual(items: List<HarmoniaRankedItem>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         items.take(5).forEachIndexed { index, item ->
+            val rowAlpha = remember { Animatable(0f) }
+            val rowOffset = remember { Animatable(16f) }
+
+            LaunchedEffect(index) {
+                delay(index * 70L)
+                launch { rowAlpha.animateTo(1f, tween(260, easing = FastOutSlowInEasing)) }
+                launch { rowOffset.animateTo(0f, spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)) }
+            }
+
             VantafynGlassCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = rowAlpha.value
+                        translationY = rowOffset.value
+                    },
                 cornerRadius = 18.dp,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
             ) {
@@ -3011,18 +3362,21 @@ private fun HarmoniaRankedTracksVisual(items: List<HarmoniaRankedItem>) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    val badgeGradient = when (index) {
+                        0 -> listOf(Color(0xFFFFD166), Color(0xFFFF9F1C))
+                        1 -> listOf(Color(0xFFE2E8F0), Color(0xFF94A3B8))
+                        2 -> listOf(Color(0xFFF77737), Color(0xFFC05621))
+                        else -> listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.06f))
+                    }
                     Box(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (index == 0) VantafynGradients.accentHorizontal()
-                                else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.06f))),
-                            ),
+                            .background(Brush.linearGradient(badgeGradient)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "#${index + 1}",
+                            text = "#${index + 1}",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.labelLarge,
@@ -3043,12 +3397,17 @@ private fun HarmoniaRankedTracksVisual(items: List<HarmoniaRankedItem>) {
                                 contentScale = ContentScale.Crop,
                             )
                         } else {
-                            Icon(Icons.Rounded.MusicNote, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            item.label,
+                            text = item.label,
                             color = VantafynColors.Ink,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -3056,7 +3415,7 @@ private fun HarmoniaRankedTracksVisual(items: List<HarmoniaRankedItem>) {
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            listOfNotNull(item.subtitle, "${item.playCount} plays", item.listeningTimeMs.formatListeningTime()).joinToString(" • "),
+                            text = listOfNotNull(item.subtitle, "${item.playCount} plays", item.listeningTimeMs.formatListeningTime()).joinToString(" • "),
                             color = VantafynColors.Muted,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
@@ -3071,10 +3430,27 @@ private fun HarmoniaRankedTracksVisual(items: List<HarmoniaRankedItem>) {
 
 @Composable
 private fun HarmoniaRankedArtistsVisual(items: List<HarmoniaRankedItem>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         items.take(5).forEachIndexed { index, item ->
+            val rowAlpha = remember { Animatable(0f) }
+            val rowOffset = remember { Animatable(16f) }
+
+            LaunchedEffect(index) {
+                delay(index * 70L)
+                launch { rowAlpha.animateTo(1f, tween(260, easing = FastOutSlowInEasing)) }
+                launch { rowOffset.animateTo(0f, spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)) }
+            }
+
             VantafynGlassCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = rowAlpha.value
+                        translationY = rowOffset.value
+                    },
                 cornerRadius = 18.dp,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
             ) {
@@ -3082,18 +3458,21 @@ private fun HarmoniaRankedArtistsVisual(items: List<HarmoniaRankedItem>) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    val badgeGradient = when (index) {
+                        0 -> listOf(Color(0xFFFFD166), Color(0xFFFF9F1C))
+                        1 -> listOf(Color(0xFFE2E8F0), Color(0xFF94A3B8))
+                        2 -> listOf(Color(0xFFF77737), Color(0xFFC05621))
+                        else -> listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.06f))
+                    }
                     Box(
                         modifier = Modifier
                             .size(28.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(
-                                if (index == 0) VantafynGradients.accentHorizontal()
-                                else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.12f), Color.White.copy(alpha = 0.06f))),
-                            ),
+                            .background(Brush.linearGradient(badgeGradient)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
-                            "#${index + 1}",
+                            text = "#${index + 1}",
                             color = Color.White,
                             fontWeight = FontWeight.Bold,
                             style = MaterialTheme.typography.labelLarge,
@@ -3114,12 +3493,17 @@ private fun HarmoniaRankedArtistsVisual(items: List<HarmoniaRankedItem>) {
                                 contentScale = ContentScale.Crop,
                             )
                         } else {
-                            Icon(Icons.Rounded.Person, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.Person,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(20.dp),
+                            )
                         }
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            item.label,
+                            text = item.label,
                             color = VantafynColors.Ink,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
@@ -3127,7 +3511,7 @@ private fun HarmoniaRankedArtistsVisual(items: List<HarmoniaRankedItem>) {
                             style = MaterialTheme.typography.bodyLarge,
                         )
                         Text(
-                            "${item.playCount} plays • ${item.listeningTimeMs.formatListeningTime()}",
+                            text = "${item.playCount} plays • ${item.listeningTimeMs.formatListeningTime()}",
                             color = VantafynColors.Muted,
                             style = MaterialTheme.typography.bodySmall,
                             maxLines = 1,
@@ -3142,10 +3526,27 @@ private fun HarmoniaRankedArtistsVisual(items: List<HarmoniaRankedItem>) {
 
 @Composable
 private fun HarmoniaAlbumsVisual(items: List<HarmoniaRankedItem>) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
         items.take(4).forEachIndexed { index, item ->
+            val rowAlpha = remember { Animatable(0f) }
+            val rowOffset = remember { Animatable(16f) }
+
+            LaunchedEffect(index) {
+                delay(index * 70L)
+                launch { rowAlpha.animateTo(1f, tween(260, easing = FastOutSlowInEasing)) }
+                launch { rowOffset.animateTo(0f, spring(dampingRatio = Spring.DampingRatioLowBouncy, stiffness = Spring.StiffnessLow)) }
+            }
+
             VantafynGlassCard(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        alpha = rowAlpha.value
+                        translationY = rowOffset.value
+                    },
                 cornerRadius = 18.dp,
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
             ) {
@@ -3168,19 +3569,24 @@ private fun HarmoniaAlbumsVisual(items: List<HarmoniaRankedItem>) {
                                 contentScale = ContentScale.Crop,
                             )
                         } else {
-                            Icon(Icons.Rounded.Album, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(22.dp))
+                            Icon(
+                                imageVector = Icons.Rounded.Album,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.7f),
+                                modifier = Modifier.size(22.dp),
+                            )
                         }
                     }
                     Column(Modifier.weight(1f)) {
                         Text(
-                            item.label,
+                            text = item.label,
                             color = VantafynColors.Ink,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                         Text(
-                            listOfNotNull(item.subtitle, "${item.playCount} plays", item.listeningTimeMs.formatListeningTime()).joinToString(" • "),
+                            text = listOfNotNull(item.subtitle, "${item.playCount} plays", item.listeningTimeMs.formatListeningTime()).joinToString(" • "),
                             color = VantafynColors.Muted,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -3205,6 +3611,17 @@ private fun HarmoniaGenreVisual(items: List<HarmoniaRankedItem>) {
         items.take(5).forEachIndexed { index, item ->
             val percentage = ((item.listeningTimeMs * 100) / total).toInt()
             val gradient = paletteGradients[index % paletteGradients.size]
+            val targetRatio = (item.listeningTimeMs.toFloat() / total).coerceIn(0.05f, 1f)
+            val animatedWidth = remember { Animatable(0f) }
+
+            LaunchedEffect(item.id) {
+                delay(index * 70L)
+                animatedWidth.animateTo(
+                    targetValue = targetRatio,
+                    animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+                )
+            }
+
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(
                     Modifier.fillMaxWidth(),
@@ -3245,12 +3662,95 @@ private fun HarmoniaGenreVisual(items: List<HarmoniaRankedItem>) {
                 ) {
                     Box(
                         Modifier
-                            .fillMaxWidth((item.listeningTimeMs.toFloat() / total).coerceIn(0.04f, 1f))
+                            .fillMaxWidth(animatedWidth.value)
                             .height(9.dp)
                             .background(Brush.horizontalGradient(gradient)),
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun HarmoniaPersonaVisual(persona: HarmoniaPersona) {
+    val icon = when {
+        persona.title.contains("Devotee", ignoreCase = true) -> Icons.Rounded.Favorite
+        persona.title.contains("Night Owl", ignoreCase = true) -> Icons.Rounded.NightlightRound
+        persona.title.contains("Morning", ignoreCase = true) -> Icons.Rounded.WbSunny
+        persona.title.contains("Chameleon", ignoreCase = true) -> Icons.Rounded.Explore
+        persona.title.contains("Adventurer", ignoreCase = true) || persona.title.contains("Explorer", ignoreCase = true) -> Icons.Rounded.AutoAwesome
+        else -> Icons.Rounded.Headphones
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "personaGlow")
+    val glowScale by infiniteTransition.animateFloat(
+        initialValue = 0.95f,
+        targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
+        label = "personaGlowScale",
+    )
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(160.dp)
+                .scale(glowScale),
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(160.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.radialGradient(
+                            listOf(
+                                Color(0xFF00F2FE).copy(alpha = 0.35f),
+                                Color(0xFFFF007A).copy(alpha = 0.15f),
+                                Color.Transparent,
+                            ),
+                        ),
+                    ),
+            )
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFF0C101A))
+                    .border(2.5.dp, VantafynGradients.accentHorizontal(), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = Color(0xFFFFD166),
+                    modifier = Modifier.size(54.dp),
+                )
+            }
+        }
+
+        HarmoniaPill(
+            icon = Icons.Rounded.Star,
+            text = "TRAIT • ${persona.dominantTrait.uppercase(Locale.getDefault())}",
+            tint = Color(0xFFFFD166),
+        )
+
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 20.dp,
+            contentPadding = PaddingValues(16.dp),
+        ) {
+            Text(
+                text = "\"${persona.description}\"",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
@@ -3266,12 +3766,17 @@ private fun HarmoniaHeatmapVisual(
     val days = values.keys.sorted()
     val columns = 16
     Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth()) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (streakDays > 1) {
-                HarmoniaPill(icon = Icons.Rounded.LocalFireDepartment, text = "$streakDays Day Streak", tint = Color(0xFFFF6B6B))
-            }
-            if (peakDate != null) {
-                HarmoniaPill(icon = Icons.Rounded.AutoAwesome, text = "Peak: $peakDate", tint = Color(0xFFFFD166))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (streakDays > 1) {
+                    HarmoniaPill(icon = Icons.Rounded.LocalFireDepartment, text = "$streakDays Day Streak", tint = Color(0xFFFF6B6B))
+                }
+                if (peakDate != null) {
+                    HarmoniaPill(icon = Icons.Rounded.AutoAwesome, text = "Peak: ${peakDate.formatLocalizedDate()}", tint = Color(0xFFFFD166))
+                }
             }
         }
         Canvas(modifier = Modifier.fillMaxWidth().height(145.dp)) {
@@ -3312,11 +3817,16 @@ private fun HarmoniaHourlyVisual(
         else -> "Evening Unwind" to "Easing into the evening"
     }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-        HarmoniaPill(
-            icon = if (peakHour in 5..16) Icons.Rounded.WbSunny else Icons.Rounded.NightlightRound,
-            text = "${personality.first} • ${personality.second}",
-            tint = Color(0xFF00F2FE),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            HarmoniaPill(
+                icon = if (peakHour in 5..16) Icons.Rounded.WbSunny else Icons.Rounded.NightlightRound,
+                text = "${personality.first} • ${personality.second}",
+                tint = Color(0xFF00F2FE),
+            )
+        }
         Canvas(modifier = Modifier.fillMaxWidth().height(135.dp)) {
             val barWidth = size.width / 24f
             values.forEach { (hour, value) ->
@@ -3378,84 +3888,498 @@ private fun HarmoniaFinalSummaryVisual(
     onReplay: () -> Unit,
     onBack: () -> Unit,
 ) {
+    val haptic = LocalHapticFeedback.current
+    val totalMinutes = (summary.totalTimeMs / 60_000L).coerceAtLeast(0L)
+
     Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        VantafynGlassCard(
-            modifier = Modifier.fillMaxWidth(),
-            cornerRadius = 24.dp,
-            contentPadding = PaddingValues(16.dp),
+        // Flagship Holographic Recap Poster Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(26.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF0F172A).copy(alpha = 0.94f),
+                            Color(0xFF1E1B4B).copy(alpha = 0.90f),
+                            Color(0xFF0B1120).copy(alpha = 0.96f),
+                        ),
+                        start = Offset.Zero,
+                        end = Offset(600f, 900f),
+                    ),
+                )
+                .border(
+                    1.2.dp,
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF00F2FE).copy(alpha = 0.60f),
+                            Color(0xFF9B5CFF).copy(alpha = 0.50f),
+                            Color(0xFFFF2A85).copy(alpha = 0.55f),
+                            Color(0xFFFFD166).copy(alpha = 0.50f),
+                        ),
+                    ),
+                    RoundedCornerShape(26.dp),
+                ),
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Ambient inner glow
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                Color(0xFF00F2FE).copy(alpha = 0.14f),
+                                Color(0xFF7928CA).copy(alpha = 0.10f),
+                                Color.Transparent,
+                            ),
+                            center = Offset(120f, 80f),
+                            radius = 450f,
+                        ),
+                    ),
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                // Top Header Row: Branding + Total Time Glow Pill
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("Harmonia Recap", color = VantafynColors.Ink, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
-                    Text("${(summary.totalTimeMs / 60_000L)} mins total", color = VantafynColors.Primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    summary.topTrack?.let { track ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.07f))
-                                .padding(10.dp),
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("TOP TRACK", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                Text(track.label, color = VantafynColors.Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                                Text("${track.playCount} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                    summary.topArtist?.let { artist ->
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.07f))
-                                .padding(10.dp),
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("TOP ARTIST", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                                Text(artist.label, color = VantafynColors.Ink, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                                Text("${artist.playCount} plays", color = VantafynColors.Muted, style = MaterialTheme.typography.labelSmall)
-                            }
-                        }
-                    }
-                }
-                summary.topGenre?.let { genre ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text("Top Genre:", color = VantafynColors.Muted, style = MaterialTheme.typography.bodySmall)
-                        HarmoniaPill(icon = Icons.Rounded.MusicNote, text = genre.label, tint = Color(0xFF00F2FE))
+                        Box(
+                            modifier = Modifier
+                                .size(24.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        listOf(Color(0xFFFFD166), Color(0xFFFF6584)),
+                                    ),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = Color.Black,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                        Text(
+                            "VANTAFYN HARMONIA",
+                            color = Color.White.copy(alpha = 0.85f),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.6.sp,
+                        )
                     }
+
+                    // Stat Badge: Total Time
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(0xFF00F2FE).copy(alpha = 0.22f),
+                                        Color(0xFF4FACFE).copy(alpha = 0.15f),
+                                    ),
+                                ),
+                            )
+                            .border(
+                                0.8.dp,
+                                Color(0xFF00F2FE).copy(alpha = 0.40f),
+                                RoundedCornerShape(999.dp),
+                            )
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Icon(
+                                Icons.Rounded.Headphones,
+                                contentDescription = null,
+                                tint = Color(0xFF00F2FE),
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Text(
+                                "$totalMinutes MINS",
+                                color = Color(0xFF00F2FE),
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.ExtraBold,
+                            )
+                        }
+                    }
+                }
+
+                // Persona Banner Centerpiece
+                summary.persona?.let { persona ->
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(0xFF6366F1).copy(alpha = 0.30f),
+                                        Color(0xFFA855F7).copy(alpha = 0.26f),
+                                        Color(0xFFEC4899).copy(alpha = 0.20f),
+                                    ),
+                                ),
+                            )
+                            .border(
+                                1.dp,
+                                Brush.horizontalGradient(
+                                    listOf(
+                                        Color(0xFF818CF8).copy(alpha = 0.50f),
+                                        Color(0xFFC084FC).copy(alpha = 0.40f),
+                                    ),
+                                ),
+                                RoundedCornerShape(16.dp),
+                            )
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.radialGradient(
+                                            listOf(
+                                                Color(0xFFFFD166).copy(alpha = 0.35f),
+                                                Color(0xFFFF9F43).copy(alpha = 0.15f),
+                                                Color.Transparent,
+                                            ),
+                                        ),
+                                    )
+                                    .border(1.dp, Color(0xFFFFD166).copy(alpha = 0.5f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Rounded.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFFD166),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "MUSICAL PERSONA",
+                                    color = Color(0xFFC084FC),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.1.sp,
+                                )
+                                Text(
+                                    persona.title,
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    persona.subtitle,
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Top Media Spotlight Duo (Track & Artist)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Top Track Card
+                    summary.topTrack?.let { track ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                                .padding(10.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    // Album Art Thumbnail
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(RoundedCornerShape(10.dp))
+                                            .background(Color.White.copy(alpha = 0.08f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (!track.artworkUrl.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = track.artworkUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop,
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Rounded.MusicNote,
+                                                contentDescription = null,
+                                                tint = Color(0xFF00F2FE),
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "TOP TRACK",
+                                            color = Color(0xFFFFD166),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp,
+                                        )
+                                        Text(
+                                            track.label,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        track.subtitle ?: "Top track",
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false),
+                                    )
+                                    Text(
+                                        "${track.playCount} plays",
+                                        color = Color(0xFF00F2FE),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Top Artist Card
+                    summary.topArtist?.let { artist ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                                .padding(10.dp),
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    // Artist Portrait Thumbnail
+                                    Box(
+                                        modifier = Modifier
+                                            .size(42.dp)
+                                            .clip(CircleShape)
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .border(1.dp, Color(0xFFC084FC).copy(alpha = 0.45f), CircleShape),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (!artist.artworkUrl.isNullOrBlank()) {
+                                            AsyncImage(
+                                                model = artist.artworkUrl,
+                                                contentDescription = null,
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop,
+                                            )
+                                        } else {
+                                            Icon(
+                                                Icons.Rounded.Person,
+                                                contentDescription = null,
+                                                tint = Color(0xFFC084FC),
+                                                modifier = Modifier.size(20.dp),
+                                            )
+                                        }
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "TOP ARTIST",
+                                            color = Color(0xFFC084FC),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp,
+                                        )
+                                        Text(
+                                            artist.label,
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        "Most played",
+                                        color = Color.White.copy(alpha = 0.65f),
+                                        style = MaterialTheme.typography.labelSmall,
+                                    )
+                                    Text(
+                                        "${artist.playCount} plays",
+                                        color = Color(0xFFFF6584),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Bottom Metadata Chips Row (Genre & Total Tracks)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    summary.topGenre?.let { genre ->
+                        HarmoniaPill(
+                            icon = Icons.Rounded.MusicNote,
+                            text = genre.label,
+                            tint = Color(0xFF00F2FE),
+                        )
+                    }
+                    HarmoniaPill(
+                        icon = Icons.Rounded.Headphones,
+                        text = "${summary.totalTracks} tracks played",
+                        tint = Color(0xFFFFD166),
+                    )
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            VantafynButton(
-                text = if (summary.isSaved) "Saved to Recaps" else "Save Recap",
-                onClick = onToggleSave,
-                modifier = Modifier.weight(1f),
-            )
-            VantafynGlassChip(
-                selected = false,
-                onClick = onReplay,
+
+        // Action Buttons Row (Balanced, tactile and elevated)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Save Recap (Primary Action)
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        if (summary.isSaved) {
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFFFFD166).copy(alpha = 0.25f),
+                                    Color(0xFFFF9F43).copy(alpha = 0.20f),
+                                ),
+                            )
+                        } else {
+                            VantafynGradients.accentHorizontal()
+                        },
+                    )
+                    .border(
+                        1.dp,
+                        if (summary.isSaved) Color(0xFFFFD166).copy(alpha = 0.45f) else Color.White.copy(alpha = 0.20f),
+                        RoundedCornerShape(16.dp),
+                    )
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleSave()
+                    },
+                contentAlignment = Alignment.Center,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Icon(Icons.Rounded.Replay, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-                    Text("Replay", color = Color.White)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = if (summary.isSaved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
+                        contentDescription = null,
+                        tint = if (summary.isSaved) Color(0xFFFFD166) else Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        text = if (summary.isSaved) "Saved in Library" else "Save Recap",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            // Replay Button (Secondary Action)
+            Box(
+                modifier = Modifier
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(16.dp))
+                    .clickable {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onReplay()
+                    }
+                    .padding(horizontal = 18.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.Replay,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Text(
+                        "Replay",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -3495,12 +4419,15 @@ private data class HarmoniaStorySlide(
 
 private sealed interface HarmoniaStoryVisual {
     data object None : HarmoniaStoryVisual
+    data class Intro(val totalMs: Long, val trackCount: Int) : HarmoniaStoryVisual
+    data class Scale(val tracksPlayed: Int, val uniqueArtists: Int, val averageSessionMs: Long) : HarmoniaStoryVisual
     data class HeroTrack(val item: HarmoniaRankedItem) : HarmoniaStoryVisual
     data class HeroArtist(val item: HarmoniaRankedItem) : HarmoniaStoryVisual
     data class RankedTracks(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
     data class RankedArtists(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
     data class Albums(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
     data class Genres(val items: List<HarmoniaRankedItem>) : HarmoniaStoryVisual
+    data class Persona(val persona: HarmoniaPersona) : HarmoniaStoryVisual
     data class Heatmap(
         val values: Map<LocalDate, Long>,
         val streakDays: Int = 0,
@@ -3516,6 +4443,7 @@ private sealed interface HarmoniaStoryVisual {
         val topArtist: HarmoniaRankedItem?,
         val topAlbum: HarmoniaRankedItem?,
         val topGenre: HarmoniaRankedItem?,
+        val persona: HarmoniaPersona? = null,
         val isSaved: Boolean,
     ) : HarmoniaStoryVisual
 }
@@ -3543,52 +4471,68 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
     val topGenreItem = stats.topGenres.value?.firstOrNull()
 
     return buildList {
+        // 1. Intro - Sound Capsule with animated minutes count-up
         add(
             HarmoniaStorySlide(
                 kicker = "Harmonia • $label",
-                title = if (yearly) "Your year in music" else "Your month in music",
+                title = if (yearly) "Your Year in Music" else "Your Month in Music",
                 metric = stats.totalListeningTimeMs.value?.formatListeningTime(),
-                body = "Every late night, morning commute, and quiet afternoon — here is your story.",
+                body = "Every late night, morning commute, and quiet afternoon — here is your sonic journey.",
                 artworkUrl = topTrackItem?.artworkUrl ?: topAlbumItem?.artworkUrl,
-                visual = HarmoniaStoryVisual.None,
+                visual = HarmoniaStoryVisual.Intro(
+                    totalMs = stats.totalListeningTimeMs.value ?: 0L,
+                    trackCount = stats.totalTracksPlayed.value ?: 0,
+                ),
             ),
         )
+
+        // 2. Listening Horizon & Scale
         add(
             HarmoniaStorySlide(
-                kicker = "Listening scale",
-                title = "You played ${stats.totalTracksPlayed.value ?: 0} tracks",
+                kicker = "Listening Scale",
+                title = "You explored ${stats.totalTracksPlayed.value ?: 0} tracks",
                 metric = stats.uniqueArtists.value?.let { "$it artists explored" },
                 body = stats.averageListeningSessionMs.value?.let { "Average session: ${it.formatListeningTime()}" },
                 artworkUrl = topAlbumItem?.artworkUrl,
-                visual = HarmoniaStoryVisual.None,
+                visual = HarmoniaStoryVisual.Scale(
+                    tracksPlayed = stats.totalTracksPlayed.value ?: 0,
+                    uniqueArtists = stats.uniqueArtists.value ?: 0,
+                    averageSessionMs = stats.averageListeningSessionMs.value ?: 0L,
+                ),
             ),
         )
+
+        // 3. Top Artist Spotlight
         topArtistItem?.let { artist ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Top artist",
+                    kicker = "Top Artist",
                     title = artist.label,
                     metric = artist.listeningTimeMs.formatListeningTime(),
-                    body = "${artist.playCount} plays",
+                    body = "${artist.playCount} plays • You spent the most time with them",
                     artworkUrl = artist.artworkUrl,
                     visual = HarmoniaStoryVisual.HeroArtist(artist),
                 ),
             )
         }
+
+        // 4. Top 5 Artists
         stats.topArtists.value?.takeIf { it.size > 1 }?.let { artists ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Top artists",
-                    title = "The voices that stayed with you",
+                    kicker = "Top Artists",
+                    title = "The voices that defined your sound",
                     artworkUrl = artists.firstOrNull()?.artworkUrl,
                     visual = HarmoniaStoryVisual.RankedArtists(artists),
                 ),
             )
         }
+
+        // 5. Top Track Spotlight
         topTrackItem?.let { track ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Top track",
+                    kicker = "Top Track",
                     title = track.label,
                     metric = track.listeningTimeMs.formatListeningTime(),
                     body = listOfNotNull(track.subtitle, "${track.playCount} plays").joinToString(" • "),
@@ -3597,43 +4541,64 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                 ),
             )
         }
+
+        // 6. Top 5 Tracks
         stats.topTracks.value?.takeIf { it.size > 1 }?.let { tracks ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Top tracks",
-                    title = "Heavy rotation",
+                    kicker = "Top Tracks",
+                    title = "Heavy Rotation",
                     artworkUrl = tracks.firstOrNull()?.artworkUrl,
                     visual = HarmoniaStoryVisual.RankedTracks(tracks),
                 ),
             )
         }
+
+        // 7. Top Albums
         stats.topAlbums.value?.takeIf { it.isNotEmpty() }?.let { albums ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Top albums",
+                    kicker = "Top Albums",
                     title = "The records you returned to",
                     artworkUrl = albums.firstOrNull()?.artworkUrl,
                     visual = HarmoniaStoryVisual.Albums(albums),
                 ),
             )
         }
+
+        // 8. Sound Palette / Genres
         stats.topGenres.value?.takeIf { it.isNotEmpty() }?.let { genres ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Top genres",
-                    title = "Your sound palette",
+                    kicker = "Top Genres",
+                    title = "Your Sound Palette",
                     body = genres.firstOrNull()?.let { "Your sound leaned towards ${it.label}." },
                     visual = HarmoniaStoryVisual.Genres(genres),
                 ),
             )
         }
+
+        // 9. Listening Persona / Archetype
+        stats.persona.value?.let { persona ->
+            add(
+                HarmoniaStorySlide(
+                    kicker = "Listening Persona",
+                    title = persona.title,
+                    metric = persona.subtitle,
+                    body = persona.description,
+                    visual = HarmoniaStoryVisual.Persona(persona),
+                ),
+            )
+        }
+
+        // 10. Activity & Heatmap
         stats.dailyHeatmap.value?.takeIf { it.isNotEmpty() }?.let { heatmap ->
             add(
                 HarmoniaStorySlide(
                     kicker = "Activity",
                     title = if (yearly) "Your listening year, day by day" else "Your listening month, day by day",
                     metric = stats.listeningStreakDays.value?.takeIf { it > 1 }?.let { "🔥 $it Day Streak" },
-                    body = stats.longestListeningDay.value?.let { "Peak: ${it.date} (${it.listeningTimeMs.formatListeningTime()})" },
+                    body = stats.longestListeningDay.value?.let { "Peak: ${it.date.formatLocalizedDate()} (${it.listeningTimeMs.formatListeningTime()})" },
                     visual = HarmoniaStoryVisual.Heatmap(
                         values = heatmap,
                         streakDays = stats.listeningStreakDays.value ?: 0,
@@ -3643,11 +4608,13 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                 ),
             )
         }
+
+        // 11. Daily Rhythm
         stats.listeningByHour.value?.takeIf { it.any { hour -> hour.listeningTimeMs > 0L } }?.let { hours ->
             val activeHour = stats.mostActiveHour.value?.hour?.formatHour()
             add(
                 HarmoniaStorySlide(
-                    kicker = "Time patterns",
+                    kicker = "Time Patterns",
                     title = "Your listening rhythm",
                     metric = activeHour?.let { "Peak hour: $it" },
                     body = stats.mostActiveDay.value?.date?.let { "Most active day: $it" },
@@ -3658,10 +4625,12 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                 ),
             )
         }
+
+        // 12. Monthly Journey (if yearly)
         stats.listeningByMonth.value?.takeIf { yearly && it.isNotEmpty() }?.let { months ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Monthly journey",
+                    kicker = "Monthly Journey",
                     title = "The shape of your year",
                     visual = HarmoniaStoryVisual.Monthly(
                         months.map {
@@ -3671,6 +4640,8 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                 ),
             )
         }
+
+        // 13. Month-over-month comparison
         stats.comparisonListeningDeltaMs.value?.let { delta ->
             if (!yearly) {
                 add(
@@ -3682,10 +4653,12 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                 )
             }
         }
+
+        // 14. Replay behavior (if distinct)
         stats.mostReplayedTrack.value?.let { replayed ->
             add(
                 HarmoniaStorySlide(
-                    kicker = "Replay behaviour",
+                    kicker = "Replay Behaviour",
                     title = "You kept coming back to ${replayed.label}",
                     metric = "${replayed.playCount} plays",
                     body = replayed.listeningTimeMs.formatListeningTime(),
@@ -3693,15 +4666,8 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                 ),
             )
         }
-        listOfNotNull(
-            stats.longestListeningDay.value?.let { "Longest day: ${it.date} with ${it.listeningTimeMs.formatListeningTime()}" },
-            stats.listeningStreakDays.value?.takeIf { it > 1 }?.let { "Longest streak: $it days" },
-        ).takeIf { it.isNotEmpty() }?.let {
-            add(HarmoniaStorySlide("Milestones", "Moments that stood out", null, it.joinToString("\n")))
-        }
-        derivedPersonality(stats.topGenres.value, stats.listeningByHour.value?.map { it.hour to it.listeningTimeMs })?.let { insight ->
-            add(insight)
-        }
+
+        // 15. Final Summary Poster
         add(
             HarmoniaStorySlide(
                 kicker = "Harmonia Recap",
@@ -3713,6 +4679,7 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
                     topArtist = topArtistItem,
                     topAlbum = topAlbumItem,
                     topGenre = topGenreItem,
+                    persona = stats.persona.value,
                     isSaved = isSaved,
                 ),
             ),
@@ -3720,21 +4687,19 @@ private fun HarmoniaRecap.harmoniaStorySlides(isSaved: Boolean): List<HarmoniaSt
     }
 }
 
-private fun derivedPersonality(genres: List<HarmoniaRankedItem>?, hours: List<Pair<Int, Long>>?): HarmoniaStorySlide? {
-    val topGenre = genres?.firstOrNull()
-    val topHour = hours?.maxByOrNull { it.second }?.first
-    return when {
-        topGenre != null && topGenre.playCount >= 3 -> HarmoniaStorySlide("Listening insight", "Your sound leaned ${topGenre.label}", null, "Based on your top genre by listening time.")
-        topHour != null && topHour in 22..23 -> HarmoniaStorySlide("Listening insight", "Late-night listening stood out", topHour.formatHour(), "Based on your most active listening hour.")
-        topHour != null && topHour in 5..10 -> HarmoniaStorySlide("Listening insight", "Morning listening stood out", topHour.formatHour(), "Based on your most active listening hour.")
-        else -> null
+private fun LocalDate.formatLocalizedDate(): String =
+    try {
+        DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+            .withLocale(Locale.getDefault())
+            .format(this)
+    } catch (_: Exception) {
+        toString()
     }
-}
 
 private fun HarmoniaRecapPreview.periodLabel(): String {
     val date = periodStart.atZone(ZoneId.systemDefault()).toLocalDate()
     return when (periodType) {
-        HarmoniaPeriod.MONTHLY -> "${date.month.getDisplayName(JavaTextStyle.SHORT, Locale.getDefault())} ${date.year}"
+        HarmoniaPeriod.MONTHLY -> "${date.month.getDisplayName(JavaTextStyle.FULL, Locale.getDefault())} ${date.year}"
         HarmoniaPeriod.YEARLY -> date.year.toString()
     }
 }

@@ -1134,6 +1134,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun loadHarmoniaPreviews(activeSession: JellyfinSession) {
+        runCatching {
+            harmoniaGenerator.generateEligibleRecaps(
+                userId = activeSession.user.id,
+                serverId = activeSession.server.localId,
+                profileId = activeSession.profileId,
+            )
+        }
         val latest = harmoniaStore.latestPreviews(
             userId = activeSession.user.id,
             serverId = activeSession.server.localId,
@@ -2706,6 +2713,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val activeSession = session ?: return
         viewModelScope.launch {
             harmoniaTracker.onTrackStopped(activeSession, track, positionMs, reason)
+            loadHarmoniaPreviews(activeSession)
         }
     }
 

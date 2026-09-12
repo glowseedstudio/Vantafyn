@@ -180,11 +180,11 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     ),
     DiscoverFeature(
         id = "bottom_rail",
-        title = "Bottom Rail Border Animation",
-        shortDescription = "Add a glow, breathing effect, or touch ripple to your bottom navigation border.",
+        title = "Bottom Rail & Magnetic Gliding Dock",
+        shortDescription = "Glass navigation dock with magnetic gliding indicator, touch ripples, and glowing borders.",
         category = DiscoverCategory.MakeItYours,
         icon = Icons.Rounded.FiberManualRecord,
-        detailedDescription = "Open Settings \u2192 Appearance \u2192 Bottom Rail Border Animation. Choose Off, Still Glow, Breathing, or Touch Ripple.",
+        detailedDescription = "Experience a tactile glass dock at the bottom of your screen. Features a smooth magnetic indicator that glides fluidly between tabs, optional breathing ambient borders, and touch ripples configured in Settings \u2192 Appearance.",
         deepLinkAction = "open_settings",
     ),
     DiscoverFeature(
@@ -490,12 +490,45 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         deepLinkAction = "open_settings",
     ),
     DiscoverFeature(
+        id = "harmonia_recaps",
+        title = "Harmonia Music Recaps",
+        shortDescription = "Spotify Wrapped-tier listening recaps, top artists, dynamic genres, and musical personas.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.AutoAwesome,
+        isNew = true,
+        detailedDescription = "Experience your music listening journey like never before. Harmonia breaks down your listening habits into stunning animated recap cards: total listening minutes with live count-up, top tracks with spinning vinyl art, dynamic genre auras, top artists, and your personalized Musical Persona.",
+        steps = listOf(
+            "Navigate to the Music tab",
+            "Tap the Harmonia banner or recap card",
+            "Select your recap timeframe: All-Time, Past 6 Months, or Past 30 Days",
+            "Swipe through the cinematic recap cards or tap Share to export",
+        ),
+        deepLinkAction = "open_music",
+    ),
+    DiscoverFeature(
+        id = "sleep_timer",
+        title = "Sleep Timer",
+        shortDescription = "Fall asleep to your music with automatic fade-out timers and end-of-track options.",
+        category = DiscoverCategory.Music,
+        icon = Icons.Rounded.Bedtime,
+        isNew = true,
+        detailedDescription = "Set a sleep timer to wind down without draining your phone's battery all night. Choose preset durations (15m, 30m, 45m, 1 hour, or end of track), with smooth audio fade-out that gently quiets the music as you drift off.",
+        steps = listOf(
+            "Open the Now Playing screen while listening to any track",
+            "Tap the \u22ee (More) menu or the Sleep Timer icon",
+            "Select your desired duration or 'End of current track'",
+            "Relax as the player automatically fades out and stops when time expires",
+        ),
+        deepLinkAction = "open_music",
+    ),
+    DiscoverFeature(
         id = "music_player",
         title = "Music Player",
         shortDescription = "Full-featured player with artwork, queue controls, and background playback.",
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.Headphones,
         detailedDescription = "Tap any track to start the music player. Enjoy full-screen artwork, lock-screen controls, notification shade controls, and seamless background playback.",
+        deepLinkAction = "open_music",
     ),
     DiscoverFeature(
         id = "lyrics",
@@ -504,6 +537,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.Lyrics,
         detailedDescription = "While music is playing, tap Lyrics to open the lyrics overlay. Synced lyrics highlight line-by-line. Falls back to plain-text when synced data isn\u2019t available.",
+        deepLinkAction = "open_music",
     ),
     DiscoverFeature(
         id = "playlists",
@@ -512,6 +546,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.QueueMusic,
         detailedDescription = "Browse playlists in the Music section. Create new playlists, add or remove tracks, and play entire playlists with queue management.",
+        deepLinkAction = "open_music",
     ),
     DiscoverFeature(
         id = "music_downloads",
@@ -520,6 +555,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.LibraryMusic,
         detailedDescription = "Long-press any track, album, or playlist and choose Download. Downloaded music plays without a network connection. Lyrics and artwork are saved alongside.",
+        deepLinkAction = "open_music",
     ),
     DiscoverFeature(
         id = "android_auto",
@@ -544,6 +580,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.QueueMusic,
         detailedDescription = "On any screen except Music, long-press the Music icon in the bottom navigation bar. A quick player sheet pops up showing the current track with playback controls. Tap the icon normally to go to the full Music screen.",
+        deepLinkAction = "open_music",
     ),
     DiscoverFeature(
         id = "library_browse",
@@ -552,6 +589,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.YourLibrary,
         icon = Icons.Rounded.CollectionsBookmark,
         detailedDescription = "Tap Libraries in the bottom nav. Toggle between grid and list views, switch between poster/landscape/thumbnail cards, and filter by Recently Added, A\u2013Z, Favorites, or Unwatched.",
+        deepLinkAction = "open_libraries",
     ),
     DiscoverFeature(
         id = "search",
@@ -560,14 +598,22 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.YourLibrary,
         icon = Icons.Rounded.Search,
         detailedDescription = "Tap Search in the bottom navigation to search across all content types. Results show movies, TV shows, music, and people with rich artwork cards.",
+        deepLinkAction = "open_search",
     ),
     DiscoverFeature(
         id = "favorites",
-        title = "My List",
-        shortDescription = "Your personal collection of favorited movies, shows and music.",
+        title = "My List & Categorized Collections",
+        shortDescription = "Your personal collection of favorited media, neatly categorized by Movies, TV, and Music.",
         category = DiscoverCategory.YourLibrary,
         icon = Icons.Rounded.Favorite,
-        detailedDescription = "Tap My List in the bottom navigation to see all items you\u2019ve marked as favorites across every library.",
+        isNew = true,
+        detailedDescription = "Organize all your bookmarked content in one clean place. My List automatically groups your saved favorites into dedicated, neatly aligned horizontal rails for Movies, TV Series, Songs, Albums, and Playlists.",
+        steps = listOf(
+            "Tap the heart or bookmark icon on any movie, show, or song",
+            "Tap My List in the bottom navigation",
+            "Browse your organized rails separated cleanly by media category",
+        ),
+        deepLinkAction = "open_favorites",
     ),
     DiscoverFeature(
         id = "downloads",
@@ -576,6 +622,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.YourLibrary,
         icon = Icons.Rounded.Download,
         detailedDescription = "Long-press any movie, episode, or track and choose Download. Manage all downloads from the Downloads screen. WiFi-only mode available. Offline playback syncs when reconnected.",
+        deepLinkAction = "open_downloads",
     ),
     DiscoverFeature(
         id = "media_detail",
@@ -592,6 +639,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.Requests,
         icon = Icons.Rounded.Send,
         detailedDescription = "If your server has Ombi configured, browse discovery rails, search for movies and TV, and submit requests. Track request status from Pending to Available.",
+        deepLinkAction = "open_requests",
     ),
     DiscoverFeature(
         id = "request_discovery",
@@ -600,6 +648,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         category = DiscoverCategory.Requests,
         icon = Icons.Rounded.Dashboard,
         detailedDescription = "The Requests screen shows TMDB-powered browse rails: Popular Movies, Now Playing, Upcoming, Top-Rated, Trending Series, and more. Tap any item to request it.",
+        deepLinkAction = "open_requests",
     ),
     DiscoverFeature(
         id = "admin_overview",

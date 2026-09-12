@@ -127,7 +127,67 @@ class HarmoniaStatisticsCalculator(
             } else {
                 unavailable("No prior matching completed period found for comparison.")
             },
+            persona = stat(
+                calculatePersona(
+                    totalMs = totalMs,
+                    peakHour = hourly.maxWithOrNull(compareBy<HarmoniaHourListening> { it.playCount }.thenBy { it.listeningTimeMs })?.hour,
+                    topArtistMs = topArtists.firstOrNull()?.listeningTimeMs ?: 0L,
+                    genreCount = topGenres.size,
+                    uniqueArtistCount = safeRecords.map { it.artist.trim().lowercase() }.filter { it.isNotBlank() }.distinct().size,
+                    trackCount = safeRecords.size,
+                ),
+                "Algorithmic persona classification based on peak listening hours, artist dedication, and genre breadth.",
+            ),
         )
+    }
+
+    private fun calculatePersona(
+        totalMs: Long,
+        peakHour: Int?,
+        topArtistMs: Long,
+        genreCount: Int,
+        uniqueArtistCount: Int,
+        trackCount: Int,
+    ): HarmoniaPersona {
+        val topArtistRatio = if (totalMs > 0L) topArtistMs.toFloat() / totalMs else 0f
+        return when {
+            topArtistRatio >= 0.35f -> HarmoniaPersona(
+                title = "The Devotee",
+                subtitle = "Unwavering Loyalty",
+                description = "When you fall in love with an artist, they become your entire universe. True, single-minded musical dedication.",
+                dominantTrait = "Top artist made up ${(topArtistRatio * 100).toInt()}% of your sound",
+            )
+            peakHour != null && peakHour in setOf(22, 23, 0, 1, 2, 3, 4) -> HarmoniaPersona(
+                title = "The Night Owl",
+                subtitle = "After-Hours Wanderer",
+                description = "The world sleeps, but your soundtrack comes alive. Your deepest musical connections happen under starlight.",
+                dominantTrait = "Most active during late night hours",
+            )
+            peakHour != null && peakHour in setOf(5, 6, 7, 8, 9) -> HarmoniaPersona(
+                title = "The Morning Ritualist",
+                subtitle = "Dawn Chorus",
+                description = "Music sets the tone for your morning. You greet the sunrise with a steady, uplifting rhythm.",
+                dominantTrait = "Peak listening early in the day",
+            )
+            genreCount >= 4 -> HarmoniaPersona(
+                title = "The Genre Chameleon",
+                subtitle = "Boundless Horizon",
+                description = "You refuse to be boxed into one sound. Your listening shifts fluidly across styles and vibrations.",
+                dominantTrait = "Explored $genreCount diverse genres",
+            )
+            trackCount > 10 && (uniqueArtistCount.toFloat() / trackCount.coerceAtLeast(1)) > 0.45f -> HarmoniaPersona(
+                title = "The Sonic Adventurer",
+                subtitle = "Endless Discovery",
+                description = "Constantly seeking fresh voices and uncharted melodies. You rarely stay in one sonic place for long.",
+                dominantTrait = "$uniqueArtistCount unique artists explored",
+            )
+            else -> HarmoniaPersona(
+                title = "The Audiophile Alchemist",
+                subtitle = "Deep Immersion",
+                description = "A lover of seamless album flows, pure audio craft, and rich soundscapes that resonate for days.",
+                dominantTrait = "Curated, high-fidelity listening sessions",
+            )
+        }
     }
 
     fun hasEnoughData(records: List<HarmoniaPlaybackRecord>): Boolean =

@@ -156,6 +156,39 @@ class HarmoniaStatisticsCalculatorTest {
         assertEquals(120_000L, store.recaps.values.first().statistics.totalListeningTimeMs.value)
     }
 
+    @Test
+    fun calculatesTheDevoteePersonaWhenTopArtistDominates() {
+        val period = HarmoniaPeriodCalculator(Clock.fixed(Instant.parse("2026-08-15T00:00:00Z"), zone)).currentMonth(zone)
+        val records = listOf(
+            record("a", trackOne, "Song A", "Artist A", "Album A", albumOne, listOf("Pop"), "2026-08-02T01:00:00Z", 200_000),
+            record("b", trackOne, "Song A", "Artist A", "Album A", albumOne, listOf("Pop"), "2026-08-02T02:00:00Z", 200_000),
+            record("c", trackTwo, "Song B", "Artist B", "Album B", null, listOf("Pop"), "2026-08-03T03:00:00Z", 50_000),
+        )
+
+        val stats = HarmoniaStatisticsCalculator().calculate(records, period, zone)
+
+        assertEquals(HarmoniaAvailability.Available, stats.persona.availability)
+        assertEquals("The Devotee", stats.persona.value?.title)
+    }
+
+    @Test
+    fun calculatesGenreChameleonWhenListeningIsSpreadAcrossDiverseGenres() {
+        val period = HarmoniaPeriodCalculator(Clock.fixed(Instant.parse("2026-08-15T00:00:00Z"), zone)).currentMonth(zone)
+        val t3 = UUID.randomUUID()
+        val t4 = UUID.randomUUID()
+        val records = listOf(
+            record("a", trackOne, "Song A", "Artist A", null, null, listOf("Pop"), "2026-08-02T02:00:00Z", 100_000),
+            record("b", trackTwo, "Song B", "Artist B", null, null, listOf("Rock"), "2026-08-02T03:00:00Z", 100_000),
+            record("c", t3, "Song C", "Artist C", null, null, listOf("Electronic"), "2026-08-02T04:00:00Z", 100_000),
+            record("d", t4, "Song D", "Artist D", null, null, listOf("Jazz"), "2026-08-02T05:00:00Z", 100_000),
+        )
+
+        val stats = HarmoniaStatisticsCalculator().calculate(records, period, zone)
+
+        assertEquals(HarmoniaAvailability.Available, stats.persona.availability)
+        assertEquals("The Genre Chameleon", stats.persona.value?.title)
+    }
+
     private fun record(
         id: String,
         trackId: UUID,

@@ -3520,8 +3520,12 @@ private fun MobileShellScreen(
     var wasInPlayer by remember { mutableStateOf(false) }
     var isIslandBannerVisible by remember { mutableStateOf(false) }
     var currentDisplayPreview by remember { mutableStateOf<dev.vantafyn.core.jellyfin.JellyfinSocialMessage?>(null) }
+    var isHarmoniaStoryOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(state.mobileDestination) {
+        if (state.mobileDestination != MobileDestination.Music) {
+            isHarmoniaStoryOpen = false
+        }
         if (state.mobileDestination == MobileDestination.Player) {
             wasInPlayer = true
         } else if (wasInPlayer) {
@@ -3792,6 +3796,7 @@ private fun MobileShellScreen(
                             session = state.session,
                             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
                             onNavigateToDownloads = { onNavigate(MobileDestination.Downloads) },
+                            onHarmoniaActiveChanged = { isHarmoniaStoryOpen = it },
                         )
                         MobileDestination.Favorites -> FavoritesScreen(
                             state = state,
@@ -3984,6 +3989,11 @@ private fun MobileShellScreen(
                                     "open_send_text_to_tv" -> onNavigate(MobileDestination.TvInput)
                                     "open_pair_tv" -> onNavigate(MobileDestination.Profile)
                                     "open_music" -> onNavigate(MobileDestination.Music)
+                                    "open_libraries" -> onNavigate(MobileDestination.Libraries)
+                                    "open_search" -> onNavigate(MobileDestination.Search)
+                                    "open_favorites" -> onNavigate(MobileDestination.Favorites)
+                                    "open_downloads" -> onNavigate(MobileDestination.Downloads)
+                                    "open_requests" -> onNavigate(MobileDestination.Requests)
                                     else -> Unit
                                 }
                             },
@@ -4196,7 +4206,8 @@ private fun MobileShellScreen(
                     },
                 )
             }
-            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat && !isCarMode) {
+            val hideBottomNavForHarmonia = state.mobileDestination == MobileDestination.Music && isHarmoniaStoryOpen
+            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat && !isCarMode && !hideBottomNavForHarmonia) {
                 AnimatedVisibility(
                     visible = homeEditorOpen && state.mobileDestination == MobileDestination.Home,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -19750,7 +19761,7 @@ private fun MagneticGlidingCircle(
         modifier = modifier,
         contentAlignment = Alignment.CenterStart,
     ) {
-        // Soft ambient radial aura behind the circle
+        // Soft ambient radial aura behind the circle (restrained so it doesn't wash out the dark lens)
         Box(
             modifier = Modifier
                 .offset(x = auraOffset)
@@ -19758,15 +19769,15 @@ private fun MagneticGlidingCircle(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF5B8CFF).copy(alpha = 0.20f),
-                            Color(0xFF00E5FF).copy(alpha = 0.08f),
+                            Color(0xFF5B8CFF).copy(alpha = 0.08f),
+                            Color(0xFF00E5FF).copy(alpha = 0.03f),
                             Color.Transparent,
                         ),
                     ),
                     shape = CircleShape,
                 ),
         )
-        // Clean, true glass circle (never stretched or deformed)
+        // Clean, true glass circle with dark smoked lens backing so selected icon pops with high contrast
         Box(
             modifier = Modifier
                 .offset(x = centerOffset)
@@ -19775,9 +19786,9 @@ private fun MagneticGlidingCircle(
                 .background(
                     Brush.radialGradient(
                         colors = listOf(
-                            Color(0xFF5B8CFF).copy(alpha = 0.24f),
-                            Color(0xFF00E5FF).copy(alpha = 0.12f),
-                            Color(0xFF5B8CFF).copy(alpha = 0.04f),
+                            Color(0xFF070C18).copy(alpha = 0.70f),
+                            Color(0xFF0C1424).copy(alpha = 0.60f),
+                            Color(0xFF142036).copy(alpha = 0.48f),
                         ),
                     ),
                 )
@@ -19786,8 +19797,8 @@ private fun MagneticGlidingCircle(
                         0.8.dp,
                         Brush.linearGradient(
                             colors = listOf(
-                                Color(0xFF7DDCFF).copy(alpha = 0.42f),
-                                Color(0xFFB070FF).copy(alpha = 0.32f),
+                                Color(0xFF7DDCFF).copy(alpha = 0.36f),
+                                Color(0xFFB070FF).copy(alpha = 0.26f),
                             ),
                         ),
                     ),
@@ -21482,7 +21493,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.8"
+private const val VANTAFYN_APP_VERSION = "0.9.9"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

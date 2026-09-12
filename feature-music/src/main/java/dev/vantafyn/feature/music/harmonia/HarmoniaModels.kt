@@ -64,6 +64,13 @@ data class HarmoniaRankedItem(
     val artworkUrl: String? = null,
 )
 
+data class HarmoniaPersona(
+    val title: String,
+    val subtitle: String,
+    val description: String,
+    val dominantTrait: String,
+)
+
 data class HarmoniaDayListening(
     val date: LocalDate,
     val listeningTimeMs: Long,
@@ -110,6 +117,13 @@ data class HarmoniaStatistics(
     val firstTimeArtists: HarmoniaStatistic<List<HarmoniaRankedItem>>,
     val firstTimeTracks: HarmoniaStatistic<List<HarmoniaRankedItem>>,
     val comparisonListeningDeltaMs: HarmoniaStatistic<Long>,
+    val persona: HarmoniaStatistic<HarmoniaPersona> = HarmoniaStatistic(
+        null,
+        "Vantafyn listening pattern analysis",
+        "Rule-based archetype classification",
+        HarmoniaAvailability.Unavailable,
+        HarmoniaConfidence.Unavailable,
+    ),
 )
 
 sealed interface HarmoniaGenerationResult {

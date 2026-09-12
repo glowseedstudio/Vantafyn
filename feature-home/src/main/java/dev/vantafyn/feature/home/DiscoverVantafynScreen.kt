@@ -375,6 +375,11 @@ private fun DiscoverFeatureCard(
                                         "open_send_text_to_tv" -> "Send Text to TV"
                                         "open_pair_tv" -> "Pair a TV"
                                         "open_music" -> "Open Music"
+                                        "open_libraries" -> "Open Libraries"
+                                        "open_search" -> "Open Search"
+                                        "open_favorites" -> "Open My List"
+                                        "open_downloads" -> "Open Downloads"
+                                        "open_requests" -> "Open Requests"
                                         else -> "Open"
                                     },
                                     color = VantafynColors.Primary,
