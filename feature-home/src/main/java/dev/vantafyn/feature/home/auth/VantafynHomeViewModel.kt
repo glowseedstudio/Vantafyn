@@ -680,6 +680,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             achievementsEnabled = readAchievementsEnabled(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             bottomRailAccent = readBottomRailAccent(result.value.profileId),
+                            bottomRailAtmosphere = readBottomRailAtmosphere(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
                             mediaSegmentBehaviors = readMediaSegmentBehaviors(result.value.profileId),
                             maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(result.value.profileId),
@@ -956,6 +957,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             achievementsEnabled = readAchievementsEnabled(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             bottomRailAccent = readBottomRailAccent(result.value.profileId),
+                            bottomRailAtmosphere = readBottomRailAtmosphere(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
                             mediaSegmentBehaviors = readMediaSegmentBehaviors(result.value.profileId),
                             maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(result.value.profileId),
@@ -1113,6 +1115,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             achievementsEnabled = readAchievementsEnabled(result.value.profileId),
                             selectedBackground = readSelectedBackground(result.value.profileId),
                             bottomRailAccent = readBottomRailAccent(result.value.profileId),
+                            bottomRailAtmosphere = readBottomRailAtmosphere(result.value.profileId),
                             videoPlayerPreference = readVideoPlayerPreference(result.value.profileId),
                             mediaSegmentBehaviors = readMediaSegmentBehaviors(result.value.profileId),
                             maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(result.value.profileId),
@@ -3686,6 +3689,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     achievementsEnabled = readAchievementsEnabled(profile.id),
                     selectedBackground = readSelectedBackground(profile.id),
                     bottomRailAccent = readBottomRailAccent(profile.id),
+                    bottomRailAtmosphere = readBottomRailAtmosphere(profile.id),
                     videoPlayerPreference = readVideoPlayerPreference(profile.id),
                     mediaSegmentBehaviors = readMediaSegmentBehaviors(profile.id),
                     maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(profile.id),
@@ -5723,6 +5727,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun readBottomRailAtmosphere(profileId: String?): BottomRailAtmosphereMode {
+        val key = profileId?.let { homeLayoutStorage.getString("bottom_rail_atmosphere_$it", null) }
+        return key?.let { runCatching { BottomRailAtmosphereMode.valueOf(it) }.getOrNull() }
+            ?: BottomRailAtmosphereMode.Active
+    }
+
+    fun setBottomRailAtmosphere(mode: BottomRailAtmosphereMode) {
+        _state.update { state ->
+            state.session?.profileId?.let { profileId ->
+                homeLayoutStorage.edit().putString("bottom_rail_atmosphere_$profileId", mode.name).apply()
+            }
+            state.copy(bottomRailAtmosphere = mode)
+        }
+    }
+
     fun toggleSoundEffects() {
         val app = getApplication<Application>()
         val next = !dev.vantafyn.core.ui.VantafynSoundEffects.isSoundEffectsEnabled(app)
@@ -5892,6 +5911,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     achievementsEnabled = readAchievementsEnabled(jellyfinSession.profileId),
                                     selectedBackground = readSelectedBackground(jellyfinSession.profileId),
                                     bottomRailAccent = readBottomRailAccent(jellyfinSession.profileId),
+                                    bottomRailAtmosphere = readBottomRailAtmosphere(jellyfinSession.profileId),
                                     videoPlayerPreference = readVideoPlayerPreference(jellyfinSession.profileId),
                                     mediaSegmentBehaviors = readMediaSegmentBehaviors(jellyfinSession.profileId),
                                     maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(jellyfinSession.profileId),
@@ -6032,6 +6052,7 @@ data class VantafynHomeUiState(
     val themeMusicEnabled: Boolean = true,
     val themeMusicVolume: ThemeMusicVolume = ThemeMusicVolume.Soft,
     val bottomRailAccent: BottomRailAccent = BottomRailAccent.Off,
+    val bottomRailAtmosphere: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Active,
     val soundEffectsEnabled: Boolean = true,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
     val selectedTheme: VantafynThemePreset = VantafynThemePreset.Default,
@@ -6860,4 +6881,10 @@ enum class BottomRailAccent(val label: String) {
     StillGlow("Still glow"),
     Breathing("Breath"),
     TouchRipple("Touch ripple"),
+}
+
+enum class BottomRailAtmosphereMode(val label: String) {
+    Active("Continuous"),
+    MusicOnly("Music only"),
+    Off("Off"),
 }

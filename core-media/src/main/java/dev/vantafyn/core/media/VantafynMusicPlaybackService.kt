@@ -32,6 +32,8 @@ import androidx.media3.session.CommandButton
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionResult
+import androidx.media3.session.legacy.MediaSessionCompat
+import androidx.media3.session.legacy.PlaybackStateCompat
 import androidx.media3.common.Player
 import android.os.Bundle
 import android.net.Uri
@@ -140,6 +142,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             .build()
         val initialButtons = buildCustomLayout(playbackController.state.value)
         mediaSession?.let { session ->
+            addSession(session)
             session.setMediaButtonPreferences(initialButtons)
             session.setCustomLayout(initialButtons)
             syncLegacySessionCommands(session, initialButtons)
@@ -245,7 +248,10 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         LongRunningTaskRegistry.stop(MUSIC_SERVICE_TASK_ID, "service destroyed")
         isForegroundService = false
         serviceScope.cancel()
-        mediaSession?.release()
+        mediaSession?.let { session ->
+            runCatching { removeSession(session) }
+            session.release()
+        }
         mediaSession = null
         super.onDestroy()
     }
@@ -657,7 +663,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         return null
     }
 
-    private fun syncLegacySessionCommands(session: MediaSession, buttons: List<CommandButton>) {
+    private fun syncLegacySessionCommands(
+        session: MediaSession,
+        buttons: List<CommandButton>,
+        state: VantafynMusicPlaybackState = if (::playbackController.isInitialized) playbackController.state.value else MusicPlaybackController.get(this).state.value,
+    ) {
         runCatching {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS.buildUpon()
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
@@ -680,12 +690,9 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             )
             setAvailableCommandsMethod?.invoke(stub, sessionCommands, playerCommands)
 
-            val setPlatformCustomLayoutMethod = findMethod(
-                stub.javaClass,
-                "setPlatformCustomLayout",
-                ImmutableList::class.java,
-            )
-            setPlatformCustomLayoutMethod?.invoke(stub, ImmutableList.copyOf(buttons))
+            findField(stub.javaClass, "availableSessionCommands")?.set(stub, sessionCommands)
+            findField(stub.javaClass, "availablePlayerCommands")?.set(stub, playerCommands)
+            findField(stub.javaClass, "mediaButtonPreferences")?.set(stub, ImmutableList.copyOf(buttons))
 
             val setPlatformMediaButtonPrefsMethod = findMethod(
                 stub.javaClass,
@@ -693,6 +700,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 ImmutableList::class.java,
             )
             setPlatformMediaButtonPrefsMethod?.invoke(stub, ImmutableList.copyOf(buttons))
+
+            val setPlatformCustomLayoutMethod = findMethod(
+                stub.javaClass,
+                "setPlatformCustomLayout",
+                ImmutableList::class.java,
+            )
+            setPlatformCustomLayoutMethod?.invoke(stub, ImmutableList.copyOf(buttons))
+            findField(stub.javaClass, "customLayout")?.set(stub, ImmutableList.copyOf(buttons))
 
             val getPlayerWrapperMethod = findMethod(impl.javaClass, "getPlayerWrapper")
             val playerWrapper = getPlayerWrapperMethod?.invoke(impl)
@@ -703,6 +718,48 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     playerWrapper.javaClass,
                 )
                 updatePlaybackStateMethod?.invoke(stub, playerWrapper)
+            }
+
+            val getSessionCompatMethod = findMethod(stub.javaClass, "getSessionCompat")
+            val sessionCompat = (getSessionCompatMethod?.invoke(stub) ?: findField(stub.javaClass, "sessionCompat")?.get(stub)) as? MediaSessionCompat
+            if (sessionCompat != null) {
+                val currentPlaybackState = sessionCompat.controller.playbackState
+                if (currentPlaybackState != null) {
+                    val isShuffle = state.shuffleEnabled
+                    val isFav = state.currentTrack?.isFavorite == true
+
+                    val shuffleAction = PlaybackStateCompat.CustomAction.Builder(
+                        CUSTOM_COMMAND_TOGGLE_SHUFFLE,
+                        if (isShuffle) "Shuffle on" else "Shuffle off",
+                        if (isShuffle) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
+                    ).build()
+
+                    val favoriteAction = PlaybackStateCompat.CustomAction.Builder(
+                        CUSTOM_COMMAND_TOGGLE_FAVORITE,
+                        if (isFav) "Unlike" else "Like",
+                        if (isFav) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+                    ).build()
+
+                    val stateBuilder = PlaybackStateCompat.Builder()
+                        .setState(
+                            currentPlaybackState.state,
+                            currentPlaybackState.position,
+                            currentPlaybackState.playbackSpeed,
+                            currentPlaybackState.lastPositionUpdateTime,
+                        )
+                        .setActions(currentPlaybackState.actions)
+                        .setActiveQueueItemId(currentPlaybackState.activeQueueItemId)
+                        .setBufferedPosition(currentPlaybackState.bufferedPosition)
+                        .setExtras(currentPlaybackState.extras)
+                        .addCustomAction(shuffleAction)
+                        .addCustomAction(favoriteAction)
+
+                    currentPlaybackState.errorMessage?.let { msg ->
+                        stateBuilder.setErrorMessage(currentPlaybackState.errorCode, msg)
+                    }
+
+                    sessionCompat.setPlaybackState(stateBuilder.build())
+                }
             }
             Log.d(TAG, "Synced legacy session commands and custom layout to MediaSessionLegacyStub successfully")
         }.onFailure { e ->
@@ -715,11 +772,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         mediaSession?.let { session ->
             session.setMediaButtonPreferences(buttons)
             session.setCustomLayout(buttons)
-            syncLegacySessionCommands(session, buttons)
             for (controller in session.connectedControllers) {
                 session.setMediaButtonPreferences(controller, buttons)
                 session.setCustomLayout(controller, buttons)
             }
+            syncLegacySessionCommands(session, buttons, state)
         }
     }
 

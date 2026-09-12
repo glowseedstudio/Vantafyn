@@ -190,8 +190,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
@@ -6423,6 +6425,7 @@ private fun rememberReducedMotionPreference(): Boolean {
 @Composable
 private fun MiniPlayerInteriorAtmosphere(
     fadeAlpha: Float,
+    isPlaying: Boolean,
     isScrolling: Boolean,
     cornerRadius: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
@@ -6440,9 +6443,9 @@ private fun MiniPlayerInteriorAtmosphere(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val shouldAnimate = isResumed && !reducedMotion && fadeAlpha > 0.01f
+    val shouldAnimate = isResumed && !reducedMotion && isPlaying && fadeAlpha > 0.01f
 
-    val driftState = if (shouldAnimate) {
+    val driftProgress by if (shouldAnimate) {
         val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerInteriorAtmosphere")
         infiniteTransition.animateFloat(
             initialValue = 0f,
@@ -6453,9 +6456,15 @@ private fun MiniPlayerInteriorAtmosphere(
             ),
             label = "miniDrift",
         )
-    } else null
+    } else {
+        animateFloatAsState(
+            targetValue = 0.5f,
+            animationSpec = tween(1200, easing = FastOutSlowInEasing),
+            label = "miniDriftSettled",
+        )
+    }
 
-    val pulseState = if (shouldAnimate) {
+    val pulseProgress by if (shouldAnimate) {
         val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerPulse")
         infiniteTransition.animateFloat(
             initialValue = 0.70f,
@@ -6466,73 +6475,94 @@ private fun MiniPlayerInteriorAtmosphere(
             ),
             label = "miniPulse",
         )
-    } else null
-
-    Canvas(
-        modifier = modifier.clip(RoundedCornerShape(cornerRadius)),
-    ) {
-        val width = size.width
-        val height = size.height
-        if (width <= 0f || height <= 0f) return@Canvas
-
-        // When actively scrolling, hold steady baseline to prevent GPU shader thrashing during fling
-        val driftProgress = if (isScrolling) 0.5f else (driftState?.value ?: 0.5f)
-        val pulseProgress = if (isScrolling) 0.85f else (pulseState?.value ?: 0.85f)
-
-        val bloom1X = width * (0.08f + driftProgress * 0.42f)
-        val bloom2X = width * (0.92f - driftProgress * 0.42f)
-        val bloomY = height * 0.5f
-
-        // Soft, subtle luxury intensity: ~50% of the bottom rail so they don't compete,
-        // and modulated by fadeAlpha so it fades off smoothly when music stops.
-        val baseAlpha = (0.09f * pulseProgress) * fadeAlpha
-
-        // 1. Electric Cyan Nebula Bloom (drifts across left side)
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 1.30f),
-                    Color(0xFF00B0FF).copy(alpha = baseAlpha * 0.65f),
-                    Color.Transparent,
-                ),
-                center = Offset(bloom1X, bloomY),
-                radius = width * 0.44f,
-            ),
-            center = Offset(bloom1X, bloomY),
-            radius = width * 0.44f,
-        )
-
-        // 2. Violet / Indigo Light Bloom (drifts across right side)
-        drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 1.30f),
-                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.65f),
-                    Color.Transparent,
-                ),
-                center = Offset(bloom2X, bloomY),
-                radius = width * 0.44f,
-            ),
-            center = Offset(bloom2X, bloomY),
-            radius = width * 0.44f,
-        )
-
-        // 3. Continuous ambient horizontal gradient wash across the entire mini player dock
-        drawRect(
-            brush = Brush.horizontalGradient(
-                colors = listOf(
-                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.35f),
-                    Color(0xFF5B8CFF).copy(alpha = baseAlpha * 0.45f),
-                    Color(0xFF9B5CFF).copy(alpha = baseAlpha * 0.40f),
-                    Color(0xFF00E5FF).copy(alpha = baseAlpha * 0.35f),
-                ),
-                startX = 0f,
-                endX = width,
-            ),
-            topLeft = Offset.Zero,
-            size = Size(width, height),
+    } else {
+        animateFloatAsState(
+            targetValue = 0.85f,
+            animationSpec = tween(800, easing = FastOutSlowInEasing),
+            label = "miniPulseSettled",
         )
     }
+
+    Canvas(
+        modifier = modifier
+            .clip(RoundedCornerShape(cornerRadius))
+            .drawWithCache {
+                val width = size.width
+                val height = size.height
+                val radius = width * 0.44f
+                val bloomY = height * 0.5f
+
+                // Pre-allocated static gradient brushes cached per size change (0 allocations during animation)
+                val cyanBrush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 1.30f),
+                        Color(0xFF00B0FF).copy(alpha = 0.65f),
+                        Color.Transparent,
+                    ),
+                    center = Offset.Zero,
+                    radius = radius,
+                )
+                val violetBrush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF9B5CFF).copy(alpha = 1.30f),
+                        Color(0xFF5B8CFF).copy(alpha = 0.65f),
+                        Color.Transparent,
+                    ),
+                    center = Offset.Zero,
+                    radius = radius,
+                )
+                val washBrush = Brush.horizontalGradient(
+                    colors = listOf(
+                        Color(0xFF00E5FF).copy(alpha = 0.35f),
+                        Color(0xFF5B8CFF).copy(alpha = 0.45f),
+                        Color(0xFF9B5CFF).copy(alpha = 0.40f),
+                        Color(0xFF00E5FF).copy(alpha = 0.35f),
+                    ),
+                    startX = 0f,
+                    endX = width,
+                )
+
+                onDrawBehind {
+                    if (width <= 0f || height <= 0f) return@onDrawBehind
+
+                    val drift = if (isScrolling) 0.5f else driftProgress
+                    val pulse = if (isScrolling) 0.85f else pulseProgress
+
+                    val bloom1X = width * (0.08f + drift * 0.42f)
+                    val bloom2X = width * (0.92f - drift * 0.42f)
+
+                    val baseAlpha = (0.09f * pulse) * fadeAlpha
+
+                    // 1. Electric Cyan Nebula Bloom (zero-alloc GPU matrix translation)
+                    translate(left = bloom1X, top = bloomY) {
+                        drawCircle(
+                            brush = cyanBrush,
+                            radius = radius,
+                            center = Offset.Zero,
+                            alpha = baseAlpha,
+                        )
+                    }
+
+                    // 2. Violet / Indigo Light Bloom (zero-alloc GPU matrix translation)
+                    translate(left = bloom2X, top = bloomY) {
+                        drawCircle(
+                            brush = violetBrush,
+                            radius = radius,
+                            center = Offset.Zero,
+                            alpha = baseAlpha,
+                        )
+                    }
+
+                    // 3. Continuous ambient horizontal gradient wash
+                    drawRect(
+                        brush = washBrush,
+                        alpha = baseAlpha,
+                        topLeft = Offset.Zero,
+                        size = androidx.compose.ui.geometry.Size(width, height),
+                    )
+                }
+            },
+    ) { }
 }
 
 @Composable
@@ -6560,6 +6590,7 @@ private fun MusicMiniPlayer(
         animationSpec = tween(durationMillis = if (isPlaying) 900 else 650, easing = FastOutSlowInEasing),
         label = "musicMiniBorderAlpha",
     )
+
     VantafynGlassDock(
         modifier = modifier
             .fillMaxWidth()
@@ -6637,6 +6668,7 @@ private fun MusicMiniPlayer(
     ) {
         MiniPlayerInteriorAtmosphere(
             fadeAlpha = borderAlpha,
+            isPlaying = isPlaying,
             isScrolling = isScrolling,
             cornerRadius = 22.dp,
             modifier = Modifier.matchParentSize(),
@@ -7128,20 +7160,19 @@ private fun InfiniteRadioPill(modifier: Modifier = Modifier) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val radioAlpha = if (isResumed) {
-        val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
+    val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
+    val radioAlphaState = if (isResumed) {
         infiniteTransition.animateFloat(
             initialValue = 0.65f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
-                animation = tween(1000, easing = LinearEasing),
+                animation = tween(1200, easing = LinearEasing),
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "radio_alpha",
-        ).value
-    } else {
-        0.85f
-    }
+        )
+    } else null
+
     val radioGradient = remember {
         Brush.horizontalGradient(
             colors = listOf(
@@ -7159,7 +7190,9 @@ private fun InfiniteRadioPill(modifier: Modifier = Modifier) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
-            modifier = Modifier.alpha(radioAlpha),
+            modifier = Modifier.graphicsLayer {
+                alpha = radioAlphaState?.value ?: 0.95f
+            },
         ) {
             Icon(
                 Icons.Rounded.Radio,

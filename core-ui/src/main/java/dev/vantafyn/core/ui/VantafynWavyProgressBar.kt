@@ -54,16 +54,21 @@ fun VantafynWavyProgressBar(
         label = "wavyAmplitude",
     )
 
-    val infiniteTransition = rememberInfiniteTransition(label = "wavyProgressMotion")
-    val phase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "wavyPhase",
-    )
+    val shouldAnimateWave = isPlaying && !isScrubbing
+    val phase = if (shouldAnimateWave) {
+        val infiniteTransition = rememberInfiniteTransition(label = "wavyProgressMotion")
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 1400, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "wavyPhase",
+        ).value
+    } else {
+        0f
+    }
 
     val safeProgress = progress.coerceIn(0f, 1f)
 
