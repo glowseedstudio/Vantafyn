@@ -58,6 +58,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -956,7 +957,13 @@ fun VantafynTextField(
         value = value,
         onValueChange = onValueChange,
         modifier = textFieldModifier,
-        placeholder = { Text(placeholder ?: label) },
+        placeholder = {
+            Text(
+                text = placeholder ?: label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
         trailingIcon = trailingIcon,
         singleLine = true,
         enabled = enabled,

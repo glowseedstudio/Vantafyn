@@ -38,8 +38,6 @@ import android.net.Uri
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
@@ -78,6 +76,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material3.MaterialTheme
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGlassChip
 import dev.vantafyn.core.ui.VantafynGlassSurface
 import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynTextField
@@ -136,6 +135,7 @@ fun AutoEqSearchScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
@@ -154,20 +154,26 @@ fun AutoEqSearchScreen(
                             modifier = Modifier.size(22.dp),
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
                         Text(
                             text = "AutoEQ Calibration",
                             color = VantafynColors.Ink,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = "Hardware headphone compensation curves",
                             color = VantafynColors.Muted,
                             style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
+
+                Spacer(Modifier.width(10.dp))
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -178,7 +184,8 @@ fun AutoEqSearchScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f)),
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Info,
@@ -193,7 +200,8 @@ fun AutoEqSearchScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.08f)),
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Close,
@@ -251,7 +259,7 @@ fun AutoEqSearchScreen(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
                 label = "Search model",
-                placeholder = "Search model (e.g. WH-1000XM5, AirPods, HD 600)...",
+                placeholder = "Search model (e.g. WH-1000XM5)...",
                 modifier = Modifier.fillMaxWidth(),
                 trailingIcon = if (searchQuery.isNotEmpty()) {
                     {
@@ -285,25 +293,21 @@ fun AutoEqSearchScreen(
             ) {
                 brands.forEach { brand ->
                     val isSelected = if (brand == "All") selectedBrandFilter == null else selectedBrandFilter == brand
-                    FilterChip(
+                    VantafynGlassChip(
                         selected = isSelected,
                         onClick = {
                             selectedBrandFilter = if (brand == "All") null else brand
                         },
-                        label = { Text(brand, fontSize = 12.sp) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF21D8FF).copy(alpha = 0.18f),
-                            selectedLabelColor = Color(0xFF21D8FF),
-                            containerColor = Color.White.copy(alpha = 0.05f),
-                            labelColor = VantafynColors.Muted,
-                        ),
-                        border = FilterChipDefaults.filterChipBorder(
-                            enabled = true,
-                            selected = isSelected,
-                            borderColor = if (isSelected) Color(0xFF21D8FF).copy(alpha = 0.50f) else Color.White.copy(alpha = 0.08f),
-                        ),
-                        shape = RoundedCornerShape(999.dp),
-                    )
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 7.dp),
+                    ) {
+                        Text(
+                            text = brand,
+                            color = if (isSelected) Color(0xFF21D8FF) else VantafynColors.Muted,
+                            fontSize = 12.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
 
