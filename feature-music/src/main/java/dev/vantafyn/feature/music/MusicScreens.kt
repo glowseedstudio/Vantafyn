@@ -799,15 +799,6 @@ fun MusicScreen(
                                                 )
                                             }
                                         }
-                                        if (home.artists.isNotEmpty()) item {
-                                            MusicContentReveal(index = 6, animate = homeRevealActive, revealKey = homeRevealKey) {
-                                                MusicArtistRow(
-                                                    artists = home.artists,
-                                                    onArtist = viewModel::openArtist,
-                                                    onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
-                                                )
-                                            }
-                                        }
                                         if (home.playlists.isNotEmpty()) item {
                                             MusicContentReveal(index = 7, animate = homeRevealActive, revealKey = homeRevealKey) {
                                                 MusicPlaylistRow(home.playlists, onPlaylist = viewModel::openPlaylist)
@@ -1294,6 +1285,7 @@ fun MusicScreen(
                 track = it,
                 isPlaying = state.playback.isPlaying,
                 progress = progressFraction(state.playback.positionMs, state.playback.durationMs),
+                isScrolling = musicListState.isScrollInProgress,
                 onOpen = viewModel::openNowPlaying,
                 onToggle = {
                     if (state.playback.isPlaying) {
@@ -5460,6 +5452,7 @@ private fun rememberReducedMotionPreference(): Boolean {
 @Composable
 private fun MiniPlayerInteriorAtmosphere(
     fadeAlpha: Float,
+    isScrolling: Boolean,
     cornerRadius: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
 ) {
@@ -5478,9 +5471,9 @@ private fun MiniPlayerInteriorAtmosphere(
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val shouldAnimate = isResumed && !reducedMotion && fadeAlpha > 0.01f
 
-    val (driftProgress, pulseProgress) = if (shouldAnimate) {
+    val driftState = if (shouldAnimate) {
         val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerInteriorAtmosphere")
-        val drift = infiniteTransition.animateFloat(
+        infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -5488,8 +5481,12 @@ private fun MiniPlayerInteriorAtmosphere(
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "miniDrift",
-        ).value
-        val pulse = infiniteTransition.animateFloat(
+        )
+    } else null
+
+    val pulseState = if (shouldAnimate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerPulse")
+        infiniteTransition.animateFloat(
             initialValue = 0.70f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -5497,11 +5494,8 @@ private fun MiniPlayerInteriorAtmosphere(
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "miniPulse",
-        ).value
-        drift to pulse
-    } else {
-        0.5f to 0.85f
-    }
+        )
+    } else null
 
     Canvas(
         modifier = modifier.clip(RoundedCornerShape(cornerRadius)),
@@ -5509,6 +5503,10 @@ private fun MiniPlayerInteriorAtmosphere(
         val width = size.width
         val height = size.height
         if (width <= 0f || height <= 0f) return@Canvas
+
+        // When actively scrolling, hold steady baseline to prevent GPU shader thrashing during fling
+        val driftProgress = if (isScrolling) 0.5f else (driftState?.value ?: 0.5f)
+        val pulseProgress = if (isScrolling) 0.85f else (pulseState?.value ?: 0.85f)
 
         val bloom1X = width * (0.08f + driftProgress * 0.42f)
         val bloom2X = width * (0.92f - driftProgress * 0.42f)
@@ -5571,6 +5569,7 @@ private fun MusicMiniPlayer(
     track: VantafynMusicTrack,
     isPlaying: Boolean,
     progress: Float,
+    isScrolling: Boolean = false,
     onOpen: () -> Unit,
     onToggle: () -> Unit,
     onPrevious: () -> Unit,
@@ -5667,6 +5666,7 @@ private fun MusicMiniPlayer(
     ) {
         MiniPlayerInteriorAtmosphere(
             fadeAlpha = borderAlpha,
+            isScrolling = isScrolling,
             cornerRadius = 22.dp,
             modifier = Modifier.matchParentSize(),
         )

@@ -19530,9 +19530,9 @@ private fun RailInteriorAtmosphere(
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val shouldAnimate = isResumed && !reducedMotion
 
-    val (driftProgress, pulseProgress) = if (shouldAnimate) {
+    val driftState = if (shouldAnimate) {
         val infiniteTransition = rememberInfiniteTransition(label = "railInteriorAtmosphere")
-        val drift = infiniteTransition.animateFloat(
+        infiniteTransition.animateFloat(
             initialValue = 0f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -19540,8 +19540,12 @@ private fun RailInteriorAtmosphere(
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "auroraDrift",
-        ).value
-        val pulse = infiniteTransition.animateFloat(
+        )
+    } else null
+
+    val pulseState = if (shouldAnimate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "railInteriorPulse")
+        infiniteTransition.animateFloat(
             initialValue = 0.70f,
             targetValue = 1f,
             animationSpec = infiniteRepeatable(
@@ -19549,11 +19553,8 @@ private fun RailInteriorAtmosphere(
                 repeatMode = RepeatMode.Reverse,
             ),
             label = "auroraPulse",
-        ).value
-        drift to pulse
-    } else {
-        0.5f to 0.85f
-    }
+        )
+    } else null
 
     Canvas(
         modifier = modifier.clip(RoundedCornerShape(30.dp)),
@@ -19561,6 +19562,9 @@ private fun RailInteriorAtmosphere(
         val width = size.width
         val height = size.height
         if (width <= 0f || height <= 0f) return@Canvas
+
+        val driftProgress = driftState?.value ?: 0.5f
+        val pulseProgress = pulseState?.value ?: 0.85f
 
         val bloom1X = width * (0.08f + driftProgress * 0.42f)
         val bloom2X = width * (0.92f - driftProgress * 0.42f)
