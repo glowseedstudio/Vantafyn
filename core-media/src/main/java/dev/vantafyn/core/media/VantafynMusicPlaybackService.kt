@@ -34,6 +34,8 @@ import androidx.media3.session.SessionCommands
 import androidx.media3.session.SessionResult
 import androidx.media3.session.legacy.MediaSessionCompat
 import androidx.media3.session.legacy.PlaybackStateCompat
+import androidx.media3.session.legacy.MediaDescriptionCompat
+import androidx.media3.session.legacy.RatingCompat
 import androidx.media3.common.Player
 import android.os.Bundle
 import android.net.Uri
@@ -43,6 +45,9 @@ import dev.vantafyn.core.experience.ExperiencePreferences
 import dev.vantafyn.core.experience.MusicBackendType
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
+import dev.vantafyn.core.jellyfin.JellyfinServerConfig
+import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.jellyfin.JellyfinUser
 import dev.vantafyn.core.subsonic.SubsonicClient
 import dev.vantafyn.core.subsonic.SubsonicCredentials
 import dev.vantafyn.core.subsonic.SubsonicMusicDataProvider
@@ -74,6 +79,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private var lastWidgetPositionBucket: Long = Long.MIN_VALUE
     private var lastWidgetUpdateAtMs: Long = 0L
     private var isForegroundService = false
+    private var isLegacyCallbackWrapped = false
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
     private val artworkCache = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Bitmap>?): Boolean = size > MAX_ARTWORK_CACHE_SIZE
@@ -247,6 +253,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         Log.d(TAG, "Music service destroyed")
         LongRunningTaskRegistry.stop(MUSIC_SERVICE_TASK_ID, "service destroyed")
         isForegroundService = false
+        isLegacyCallbackWrapped = false
         serviceScope.cancel()
         mediaSession?.let { session ->
             runCatching { removeSession(session) }
@@ -499,29 +506,22 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     }
 
     private fun cachedLargeIcon(artworkUrl: String?): Bitmap? =
-        artworkUrl?.let { synchronized(artworkCache) { artworkCache[it] } }
+        artworkUrl?.let { url ->
+            synchronized(artworkCache) { artworkCache[url] }
+                ?: VantafynArtworkLoader.getCachedBitmap(this, url)
+        }
 
     private suspend fun loadLargeIcon(artworkUrl: String): Bitmap? {
         cachedLargeIcon(artworkUrl)?.let { return it }
-        return withContext(Dispatchers.IO) {
-            runCatching {
-                val connection = (URL(artworkUrl).openConnection() as? java.net.HttpURLConnection)?.apply {
-                    connectTimeout = 8_000
-                    readTimeout = 12_000
-                    instanceFollowRedirects = true
-                } ?: return@runCatching null
-
-                connection.inputStream.use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                }?.let { bitmap ->
-                    val scaled = scaleNotificationArtwork(bitmap)
-                    synchronized(artworkCache) {
-                        artworkCache[artworkUrl] = scaled
-                    }
-                    scaled
-                }
-            }.getOrNull()
+        val loaded = VantafynArtworkLoader.loadArtworkBitmap(this, artworkUrl)
+        if (loaded != null) {
+            val scaled = scaleNotificationArtwork(loaded)
+            synchronized(artworkCache) {
+                artworkCache[artworkUrl] = scaled
+            }
+            return scaled
         }
+        return null
     }
 
     private fun scaleNotificationArtwork(bitmap: Bitmap): Bitmap {
@@ -759,6 +759,85 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     }
 
                     sessionCompat.setPlaybackState(stateBuilder.build())
+
+                    val legacyManagerMethod = findMethod(stub.javaClass, "getConnectedControllersManager")
+                    val legacyManager = legacyManagerMethod?.invoke(stub)
+                    if (legacyManager != null) {
+                        val getConnectedControllersMethod = findMethod(legacyManager.javaClass, "getConnectedControllers")
+                        val updateCommandsMethod = findMethod(
+                            legacyManager.javaClass,
+                            "updateCommandsFromSession",
+                            MediaSession.ControllerInfo::class.java,
+                            SessionCommands::class.java,
+                            Player.Commands::class.java,
+                        )
+                        val controllers = getConnectedControllersMethod?.invoke(legacyManager) as? List<*>
+                        controllers?.forEach { controller ->
+                            if (controller is MediaSession.ControllerInfo) {
+                                updateCommandsMethod?.invoke(legacyManager, controller, sessionCommands, playerCommands)
+                            }
+                        }
+                    }
+
+                    if (!isLegacyCallbackWrapped) {
+                        val legacyCallback = stub as? MediaSessionCompat.Callback
+                        if (legacyCallback != null) {
+                            val appHandler = (findMethod(impl.javaClass, "getApplicationHandler")?.invoke(impl) as? android.os.Handler)
+                                ?: android.os.Handler(android.os.Looper.getMainLooper())
+                            val interceptingCallback = object : MediaSessionCompat.Callback() {
+                                override fun onCustomAction(action: String, extras: Bundle?) {
+                                    when (action) {
+                                        CUSTOM_COMMAND_TOGGLE_FAVORITE, ACTION_TOGGLE_FAVORITE -> {
+                                            toggleFavoriteFromSystem()
+                                            return
+                                        }
+                                        CUSTOM_COMMAND_TOGGLE_SHUFFLE, ACTION_TOGGLE_SHUFFLE -> {
+                                            playbackController.toggleShuffle()
+                                            updateCustomLayout()
+                                            return
+                                        }
+                                    }
+                                    legacyCallback.onCustomAction(action, extras)
+                                }
+
+                                override fun onCommand(command: String, extras: Bundle?, cb: android.os.ResultReceiver?) {
+                                    legacyCallback.onCommand(command, extras, cb)
+                                }
+
+                                override fun onMediaButtonEvent(mediaButtonEvent: Intent): Boolean =
+                                    legacyCallback.onMediaButtonEvent(mediaButtonEvent)
+
+                                override fun onPrepare() = legacyCallback.onPrepare()
+                                override fun onPrepareFromMediaId(mediaId: String?, extras: Bundle?) = legacyCallback.onPrepareFromMediaId(mediaId, extras)
+                                override fun onPrepareFromSearch(query: String?, extras: Bundle?) = legacyCallback.onPrepareFromSearch(query, extras)
+                                override fun onPrepareFromUri(uri: Uri?, extras: Bundle?) = legacyCallback.onPrepareFromUri(uri, extras)
+                                override fun onPlay() = legacyCallback.onPlay()
+                                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) = legacyCallback.onPlayFromMediaId(mediaId, extras)
+                                override fun onPlayFromSearch(query: String?, extras: Bundle?) = legacyCallback.onPlayFromSearch(query, extras)
+                                override fun onPlayFromUri(uri: Uri?, extras: Bundle?) = legacyCallback.onPlayFromUri(uri, extras)
+                                override fun onSkipToQueueItem(id: Long) = legacyCallback.onSkipToQueueItem(id)
+                                override fun onPause() = legacyCallback.onPause()
+                                override fun onSkipToNext() = legacyCallback.onSkipToNext()
+                                override fun onSkipToPrevious() = legacyCallback.onSkipToPrevious()
+                                override fun onFastForward() = legacyCallback.onFastForward()
+                                override fun onRewind() = legacyCallback.onRewind()
+                                override fun onStop() = legacyCallback.onStop()
+                                override fun onSeekTo(pos: Long) = legacyCallback.onSeekTo(pos)
+                                override fun onSetRating(rating: RatingCompat?) = legacyCallback.onSetRating(rating)
+                                override fun onSetRating(rating: RatingCompat?, extras: Bundle?) = legacyCallback.onSetRating(rating, extras)
+                                override fun onSetPlaybackSpeed(speed: Float) = legacyCallback.onSetPlaybackSpeed(speed)
+                                override fun onSetCaptioningEnabled(enabled: Boolean) = legacyCallback.onSetCaptioningEnabled(enabled)
+                                override fun onSetRepeatMode(repeatMode: Int) = legacyCallback.onSetRepeatMode(repeatMode)
+                                override fun onSetShuffleMode(shuffleMode: Int) = legacyCallback.onSetShuffleMode(shuffleMode)
+                                override fun onAddQueueItem(description: MediaDescriptionCompat?) = legacyCallback.onAddQueueItem(description)
+                                override fun onAddQueueItem(description: MediaDescriptionCompat?, index: Int) = legacyCallback.onAddQueueItem(description, index)
+                                override fun onRemoveQueueItem(description: MediaDescriptionCompat?) = legacyCallback.onRemoveQueueItem(description)
+                            }
+                            sessionCompat.setCallback(interceptingCallback, appHandler)
+                            isLegacyCallbackWrapped = true
+                            Log.d(TAG, "Wrapped sessionCompat callback for seamless lockscreen custom actions")
+                        }
+                    }
                 }
             }
             Log.d(TAG, "Synced legacy session commands and custom layout to MediaSessionLegacyStub successfully")
@@ -807,12 +886,57 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     }
                 } else {
                     val repositories = JellyfinRepositoryProvider(context)
-                    val profiles = repositories.authRepository.savedProfiles()
-                    val profile = profiles.maxByOrNull { it.lastUsedAt }
-                    if (profile != null) {
-                        val sessionResult = repositories.authRepository.restoreSession(profile.id)
-                        if (sessionResult is JellyfinResult.Success) {
-                            repositories.mediaRepository.setFavorite(sessionResult.value, currentTrack.id, targetFavorite)
+                    val stored = repositories.sessionStorage.read()
+                    val token = VantafynMediaCache.currentAccessToken ?: stored?.accessToken
+                    val userId = VantafynMediaCache.currentUserId ?: stored?.userId
+                    val candidateUrls = listOfNotNull(
+                        VantafynMediaCache.currentRemoteServerUrl,
+                        VantafynMediaCache.currentLocalServerUrl,
+                        stored?.remoteServerUrl,
+                        stored?.localServerUrl,
+                        stored?.serverUrl,
+                    ).distinct().filter { it.isNotBlank() }
+
+                    var persisted = false
+                    if (token != null && userId != null) {
+                        for (serverUrl in candidateUrls) {
+                            try {
+                                val quickSession = JellyfinSession(
+                                    server = JellyfinServerConfig(url = serverUrl),
+                                    user = JellyfinUser(id = userId, name = ""),
+                                    profileId = stored?.profileId ?: "default",
+                                    accessToken = token,
+                                )
+                                when (val favResult = repositories.mediaRepository.setFavorite(quickSession, currentTrack.id, targetFavorite)) {
+                                    is JellyfinResult.Success -> {
+                                        Log.d(TAG, "Persisted favorite=$targetFavorite for ${currentTrack.title} to Jellyfin server via $serverUrl")
+                                        persisted = true
+                                        break
+                                    }
+                                    is JellyfinResult.Failure -> {
+                                        Log.w(TAG, "Server setFavorite on $serverUrl failed: ${favResult.message}")
+                                    }
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Exception calling setFavorite on $serverUrl: ${e.message}")
+                            }
+                        }
+                    }
+
+                    if (!persisted) {
+                        val profileId = stored?.profileId ?: repositories.authRepository.savedProfiles().maxByOrNull { it.lastUsedAt }?.id
+                        if (profileId != null) {
+                            when (val sessionResult = repositories.authRepository.restoreSession(profileId)) {
+                                is JellyfinResult.Success -> {
+                                    when (val favResult = repositories.mediaRepository.setFavorite(sessionResult.value, currentTrack.id, targetFavorite)) {
+                                        is JellyfinResult.Success -> Log.d(TAG, "Persisted favorite=$targetFavorite for ${currentTrack.title} to Jellyfin server via restoreSession")
+                                        is JellyfinResult.Failure -> Log.w(TAG, "Server setFavorite via restoreSession failed: ${favResult.message}")
+                                    }
+                                }
+                                is JellyfinResult.Failure -> Log.w(TAG, "restoreSession failed: ${sessionResult.message}")
+                            }
+                        } else {
+                            Log.w(TAG, "No profile found to persist favorite status")
                         }
                     }
                 }

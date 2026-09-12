@@ -143,6 +143,7 @@ class JellyfinRepositoryProvider(
         minimumServerVersion = Jellyfin.minimumVersion
     }
     private val storage = SharedPreferencesJellyfinSessionStorage(appContext, ioDispatcher)
+    val sessionStorage: JellyfinSessionStorage = storage
 
     val authRepository: JellyfinAuthRepository =
         SdkJellyfinAuthRepository(jellyfin, storage, ioDispatcher)

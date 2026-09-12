@@ -2699,6 +2699,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 trackHarmoniaStop(it, event.positionMs, event.reason)
                 reportStopped(it, event.positionMs, event.reason)
             }
+            is VantafynMusicPlaybackEvent.FavoriteChanged -> {
+                _state.update {
+                    it.copy(
+                        home = it.home?.copyWithFavorite(event.trackId, event.isFavorite),
+                    )
+                }
+            }
         }
     }
 

@@ -34,9 +34,26 @@ object VantafynMediaCache {
     @Volatile
     private var fallbackDeviceId: String? = null
 
+    @Volatile
+    var currentRemoteServerUrl: String? = null
+        private set
+
+    @Volatile
+    var currentLocalServerUrl: String? = null
+        private set
+
+    @Volatile
+    var currentAccessToken: String? = null
+        private set
+
+    @Volatile
+    var currentUserId: java.util.UUID? = null
+        private set
+
     fun setFallbackCredentials(token: String?, deviceId: String? = null) {
         if (!token.isNullOrBlank()) {
             fallbackToken = token
+            currentAccessToken = token
         }
         if (!deviceId.isNullOrBlank()) {
             fallbackDeviceId = deviceId
@@ -48,11 +65,19 @@ object VantafynMediaCache {
             authHeaderProvider = null
             fallbackToken = null
             fallbackDeviceId = null
+            currentRemoteServerUrl = null
+            currentLocalServerUrl = null
+            currentAccessToken = null
+            currentUserId = null
         } else {
             val token = session.accessToken
             val devId = session.server.localId.ifBlank { "vantafyn-android" }
             fallbackToken = token
             fallbackDeviceId = devId
+            currentRemoteServerUrl = session.server.remoteUrl
+            currentLocalServerUrl = session.server.localUrl ?: session.server.url
+            currentAccessToken = token
+            currentUserId = session.user.id
             authHeaderProvider = {
                 val headers = mutableMapOf<String, String>()
                 if (token.isNotBlank()) {

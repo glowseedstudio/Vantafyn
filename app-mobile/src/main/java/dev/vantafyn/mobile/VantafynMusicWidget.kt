@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import dev.vantafyn.core.media.VantafynArtworkLoader
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
@@ -118,16 +119,15 @@ class VantafynMusicWidget : GlanceAppWidget() {
                 if (cacheFile.exists()) {
                     BitmapFactory.decodeFile(cacheFile.absolutePath)
                 } else {
-                    URL(artworkUrl).openStream().use { stream ->
-                        BitmapFactory.decodeStream(stream)?.let { raw ->
-                            roundCorners(scaleBitmap(raw, ART_SIZE), ART_CORNER_RADIUS).also { rounded ->
-                                cacheFile.parentFile?.mkdirs()
-                                cacheFile.outputStream().use { out ->
-                                    rounded.compress(Bitmap.CompressFormat.PNG, 90, out)
-                                }
+                    val raw = VantafynArtworkLoader.loadArtworkBitmap(context, artworkUrl, ART_SIZE)
+                    if (raw != null) {
+                        roundCorners(scaleBitmap(raw, ART_SIZE), ART_CORNER_RADIUS).also { rounded ->
+                            cacheFile.parentFile?.mkdirs()
+                            cacheFile.outputStream().use { out ->
+                                rounded.compress(Bitmap.CompressFormat.PNG, 90, out)
                             }
                         }
-                    }
+                    } else null
                 }
             }.getOrNull()
         }

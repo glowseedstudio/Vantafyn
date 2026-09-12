@@ -15,6 +15,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.TrackSelectionParameters.AudioOffloadPreferences
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.ShuffleOrder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -107,6 +108,7 @@ sealed interface VantafynMusicPlaybackEvent {
     data class PauseChanged(val track: VantafynMusicTrack, val positionMs: Long, val isPaused: Boolean) : VantafynMusicPlaybackEvent
     data class Seeked(val track: VantafynMusicTrack, val positionMs: Long) : VantafynMusicPlaybackEvent
     data class Stopped(val track: VantafynMusicTrack?, val positionMs: Long, val reason: VantafynMusicStopReason) : VantafynMusicPlaybackEvent
+    data class FavoriteChanged(val trackId: UUID, val isFavorite: Boolean, val track: VantafynMusicTrack? = null) : VantafynMusicPlaybackEvent
 }
 
 class MusicPlaybackController private constructor(context: Context) {
@@ -270,6 +272,19 @@ class MusicPlaybackController private constructor(context: Context) {
                     }
                     updateAudioStreamInfo(audioFormat)
                     if (playbackState == Player.STATE_ENDED) {
+                        if (_state.value.shuffleEnabled && sessionPlayer.mediaItemCount > 1 && _state.value.sleepTimerMode != SleepTimerMode.EndOfQueue) {
+                            val totalCount = sessionPlayer.mediaItemCount
+                            val currentIdx = sessionPlayer.currentMediaItemIndex.coerceIn(0, totalCount - 1)
+                            val remainingIndices = (0 until totalCount).filter { it != currentIdx }.shuffled()
+                            val shuffledOrder = intArrayOf(currentIdx) + remainingIndices.toIntArray()
+                            sessionPlayer.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(shuffledOrder, System.currentTimeMillis()))
+                            if (sessionPlayer.hasNextMediaItem()) {
+                                lastTransitionReason = VantafynMusicStopReason.Ended
+                                sessionPlayer.seekToNextMediaItem()
+                                sessionPlayer.play()
+                                return
+                            }
+                        }
                         emitEvent(
                             VantafynMusicPlaybackEvent.Stopped(
                                 track = _state.value.currentTrack,
@@ -542,9 +557,23 @@ class MusicPlaybackController private constructor(context: Context) {
     }
 
     fun updateFavorite(trackId: UUID, isFavorite: Boolean) {
+        var updatedTrack: VantafynMusicTrack? = null
         _state.update { state ->
-            state.copy(queue = state.queue.map { if (it.id == trackId) it.copy(isFavorite = isFavorite) else it })
+            state.copy(
+                queue = state.queue.map {
+                    if (it.id == trackId) {
+                        val updated = it.copy(isFavorite = isFavorite)
+                        updatedTrack = updated
+                        updated
+                    } else it
+                },
+            )
         }
+        val track = updatedTrack ?: tracksByMediaId[trackId.toString()]?.copy(isFavorite = isFavorite)
+        if (track != null) {
+            tracksByMediaId[trackId.toString()] = track
+        }
+        emitEvent(VantafynMusicPlaybackEvent.FavoriteChanged(trackId, isFavorite, track))
     }
 
     fun playNext(track: VantafynMusicTrack) {
@@ -774,7 +803,18 @@ class MusicPlaybackController private constructor(context: Context) {
 
     fun toggleShuffle() {
         val enabled = !_state.value.shuffleEnabled
-        sessionPlayer.shuffleModeEnabled = enabled
+        if (enabled) {
+            val totalCount = sessionPlayer.mediaItemCount
+            if (totalCount > 1) {
+                val currentIdx = sessionPlayer.currentMediaItemIndex.coerceIn(0, totalCount - 1)
+                val remainingIndices = (0 until totalCount).filter { it != currentIdx }.shuffled()
+                val shuffledOrder = intArrayOf(currentIdx) + remainingIndices.toIntArray()
+                sessionPlayer.setShuffleOrder(ShuffleOrder.DefaultShuffleOrder(shuffledOrder, System.currentTimeMillis()))
+            }
+            sessionPlayer.shuffleModeEnabled = true
+        } else {
+            sessionPlayer.shuffleModeEnabled = false
+        }
         _state.update { it.copy(shuffleEnabled = enabled) }
     }
 

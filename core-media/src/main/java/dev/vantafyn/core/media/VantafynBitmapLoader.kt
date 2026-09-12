@@ -54,8 +54,8 @@ class VantafynBitmapLoader(
                 val rawBitmap = when {
                     uriString.startsWith("http://", ignoreCase = true) ||
                     uriString.startsWith("https://", ignoreCase = true) -> {
-                        URL(uriString).openStream().use { stream ->
-                            BitmapFactory.decodeStream(stream)
+                        kotlinx.coroutines.runBlocking {
+                            VantafynArtworkLoader.loadArtworkBitmap(context, uriString)
                         }
                     }
                     uriString.startsWith("content://", ignoreCase = true) -> {

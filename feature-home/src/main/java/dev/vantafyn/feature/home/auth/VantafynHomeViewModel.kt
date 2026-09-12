@@ -104,6 +104,7 @@ import dev.vantafyn.core.media.AutoplaySettings
 import dev.vantafyn.core.media.LongRunningTaskRegistry
 import dev.vantafyn.core.media.LongRunningTaskType
 import dev.vantafyn.core.media.MusicPlaybackController
+import dev.vantafyn.core.media.VantafynMusicPlaybackEvent
 import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.VantafynPlaybackItem
@@ -213,6 +214,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 .collect { session ->
                     dev.vantafyn.core.media.VantafynMediaCache.updateJellyfinSession(session)
                 }
+        }
+        viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).events.collect { event ->
+                if (event is VantafynMusicPlaybackEvent.FavoriteChanged) {
+                    handlePlaybackFavoriteChanged(event.trackId, event.isFavorite, event.track)
+                }
+            }
         }
         loadSavedProfiles()
         refreshOmbiRequestsAvailability()
@@ -2780,6 +2788,52 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun handlePlaybackFavoriteChanged(trackId: UUID, isFavorite: Boolean, track: VantafynMusicTrack?) {
+        val favoriteItem = track?.let {
+            JellyfinMediaItem(
+                id = it.id,
+                title = it.title,
+                subtitle = listOfNotNull(it.artist, it.album).joinToString(" · "),
+                year = null,
+                itemType = "Audio",
+                imageUrl = it.artworkUrl,
+                backdropUrl = null,
+                thumbUrl = null,
+                logoUrl = null,
+                progress = null,
+                shape = JellyfinMediaCardShape.Poster,
+                isFavorite = isFavorite,
+            )
+        } ?: _state.value.favoriteMediaItem(trackId, isFavorite)
+        _state.update { it.withFavoriteState(trackId, isFavorite, favoriteItem) }
+
+        val isMusicOnly = _state.value.experienceMode == ExperienceMode.MusicOnly
+        val isSubsonic = isMusicOnly && _state.value.musicBackendType == MusicBackendType.OpenSubsonic
+        if (isSubsonic) {
+            val creds = getSubsonicCredentials()
+            if (creds != null) {
+                viewModelScope.launch {
+                    val provider = dev.vantafyn.core.subsonic.SubsonicMusicDataProvider(dev.vantafyn.core.subsonic.SubsonicClient(creds))
+                    provider.setFavorite(trackId, isFavorite)
+                    loadFavorites(null)
+                }
+                return
+            }
+        }
+
+        val session = _state.value.session
+        if (session != null) {
+            viewModelScope.launch {
+                when (val result = mediaRepository.setFavorite(session, trackId, isFavorite)) {
+                    is JellyfinResult.Success -> loadFavorites(session)
+                    is JellyfinResult.Failure -> {
+                        android.util.Log.w("VantafynHomeViewModel", "Failed to persist playback favorite: ${result.message}")
+                    }
+                }
+            }
+        }
+    }
+
     fun toggleMediaPlayed() {
         val snapshot = _state.value
         val session = snapshot.session ?: return
@@ -2968,7 +3022,27 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     isFavorite = true,
                                 )
                             }
-                            _state.update { it.copy(isFavoritesLoading = false, favorites = items) }
+                            val currentTrack = MusicPlaybackController.get(getApplication()).state.value.currentTrack
+                            val merged = if (currentTrack != null && currentTrack.isFavorite && items.none { it.id == currentTrack.id }) {
+                                val pendingItem = JellyfinMediaItem(
+                                    id = currentTrack.id,
+                                    title = currentTrack.title,
+                                    subtitle = listOfNotNull(currentTrack.artist, currentTrack.album).joinToString(" · "),
+                                    year = null,
+                                    itemType = "Audio",
+                                    imageUrl = currentTrack.artworkUrl,
+                                    backdropUrl = null,
+                                    thumbUrl = null,
+                                    logoUrl = null,
+                                    progress = null,
+                                    shape = JellyfinMediaCardShape.Poster,
+                                    isFavorite = true,
+                                )
+                                listOf(pendingItem) + items
+                            } else {
+                                items
+                            }
+                            _state.update { it.copy(isFavoritesLoading = false, favorites = merged) }
                         }
                         is dev.vantafyn.core.media.music.MusicResult.Failure -> {
                             _state.update { it.copy(isFavoritesLoading = false, favoritesError = result.message) }
@@ -2989,7 +3063,27 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     } else {
                         result.value
                     }
-                    _state.update { it.copy(isFavoritesLoading = false, favorites = filtered) }
+                    val currentTrack = MusicPlaybackController.get(getApplication()).state.value.currentTrack
+                    val merged = if (currentTrack != null && currentTrack.isFavorite && filtered.none { it.id == currentTrack.id }) {
+                        val pendingItem = JellyfinMediaItem(
+                            id = currentTrack.id,
+                            title = currentTrack.title,
+                            subtitle = listOfNotNull(currentTrack.artist, currentTrack.album).joinToString(" · "),
+                            year = null,
+                            itemType = "Audio",
+                            imageUrl = currentTrack.artworkUrl,
+                            backdropUrl = null,
+                            thumbUrl = null,
+                            logoUrl = null,
+                            progress = null,
+                            shape = JellyfinMediaCardShape.Poster,
+                            isFavorite = true,
+                        )
+                        listOf(pendingItem) + filtered
+                    } else {
+                        filtered
+                    }
+                    _state.update { it.copy(isFavoritesLoading = false, favorites = merged) }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(isFavoritesLoading = false, favoritesError = result.message) }
@@ -5730,7 +5824,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private fun readBottomRailAtmosphere(profileId: String?): BottomRailAtmosphereMode {
         val key = profileId?.let { homeLayoutStorage.getString("bottom_rail_atmosphere_$it", null) }
         return key?.let { runCatching { BottomRailAtmosphereMode.valueOf(it) }.getOrNull() }
-            ?: BottomRailAtmosphereMode.Active
+            ?: BottomRailAtmosphereMode.Off
     }
 
     fun setBottomRailAtmosphere(mode: BottomRailAtmosphereMode) {
@@ -6052,7 +6146,7 @@ data class VantafynHomeUiState(
     val themeMusicEnabled: Boolean = true,
     val themeMusicVolume: ThemeMusicVolume = ThemeMusicVolume.Soft,
     val bottomRailAccent: BottomRailAccent = BottomRailAccent.Off,
-    val bottomRailAtmosphere: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Active,
+    val bottomRailAtmosphere: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Off,
     val soundEffectsEnabled: Boolean = true,
     val selectedBackground: VantafynAppBackground = VantafynAppBackground.Nebula,
     val selectedTheme: VantafynThemePreset = VantafynThemePreset.Default,
@@ -6884,7 +6978,7 @@ enum class BottomRailAccent(val label: String) {
 }
 
 enum class BottomRailAtmosphereMode(val label: String) {
-    Active("Continuous"),
-    MusicOnly("Music only"),
     Off("Off"),
+    MusicOnly("Music only"),
+    Active("Continuous"),
 }

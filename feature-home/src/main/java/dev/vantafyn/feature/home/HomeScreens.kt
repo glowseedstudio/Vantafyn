@@ -20114,7 +20114,7 @@ private fun MobileBottomNav(
     unreadMessagesCount: Int = 0,
     incomingFriendRequestsCount: Int = 0,
     accentMode: BottomRailAccent = BottomRailAccent.Off,
-    atmosphereMode: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Active,
+    atmosphereMode: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Off,
     experienceMode: ExperienceMode = ExperienceMode.FullMedia,
     modifier: Modifier = Modifier,
 ) {

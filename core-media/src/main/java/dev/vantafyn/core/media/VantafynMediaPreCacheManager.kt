@@ -130,8 +130,27 @@ class VantafynMediaPreCacheManager(
             }
 
             Log.d(TAG, "Starting pre-cache for ${upcomingItems.size} tracks (reason: $reasonLabel)")
+
+            // Also pre-cache current track artwork to ensure it is immediately on disk
+            if (currentIndex in 0 until totalCount) {
+                runCatching {
+                    player.getMediaItemAt(currentIndex).mediaMetadata.artworkUri?.let { artUri ->
+                        launch(Dispatchers.IO) {
+                            VantafynArtworkLoader.preCacheArtwork(appContext, artUri.toString())
+                        }
+                    }
+                }
+            }
+
             for ((offset, mediaItem) in upcomingItems.withIndex()) {
                 if (!isActive) break
+
+                // Pre-cache artwork alongside track audio stream
+                mediaItem.mediaMetadata.artworkUri?.let { artUri ->
+                    launch(Dispatchers.IO) {
+                        VantafynArtworkLoader.preCacheArtwork(appContext, artUri.toString())
+                    }
+                }
 
                 val uri = mediaItem.localConfiguration?.uri ?: continue
                 val cacheKey = mediaItem.localConfiguration?.customCacheKey ?: uri.toString()
