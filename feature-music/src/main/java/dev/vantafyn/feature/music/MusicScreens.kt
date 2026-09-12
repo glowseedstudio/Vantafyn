@@ -160,6 +160,7 @@ import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.animation.core.AnimationEndReason
 import androidx.compose.foundation.layout.offset
@@ -167,8 +168,13 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.layer.drawLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import dev.vantafyn.core.media.SleepTimerMode
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
+import dev.vantafyn.feature.music.harmonia.HarmoniaShareHelper
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -3893,7 +3899,28 @@ private fun HarmoniaFinalSummaryVisual(
     onBack: () -> Unit,
 ) {
     val haptic = LocalHapticFeedback.current
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val graphicsLayer = rememberGraphicsLayer()
+    var isSharing by remember { mutableStateOf(false) }
     val totalMinutes = (summary.totalTimeMs / 60_000L).coerceAtLeast(0L)
+
+    val onShare: () -> Unit = {
+        if (!isSharing) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            coroutineScope.launch {
+                isSharing = true
+                try {
+                    val bitmap = graphicsLayer.toImageBitmap().asAndroidBitmap()
+                    HarmoniaShareHelper.shareRecap(context, bitmap)
+                } catch (e: Exception) {
+                    android.util.Log.e("HarmoniaSummary", "Failed to capture and share recap", e)
+                } finally {
+                    isSharing = false
+                }
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -3906,6 +3933,12 @@ private fun HarmoniaFinalSummaryVisual(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .drawWithContent {
+                    graphicsLayer.record {
+                        this@drawWithContent.drawContent()
+                    }
+                    drawLayer(graphicsLayer)
+                }
                 .clip(RoundedCornerShape(26.dp))
                 .background(
                     Brush.linearGradient(
@@ -3954,7 +3987,7 @@ private fun HarmoniaFinalSummaryVisual(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                // Top Header Row: Branding + Total Time Glow Pill
+                // Top Header Row: Branding + Total Time Glow Pill + Share Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -3991,41 +4024,63 @@ private fun HarmoniaFinalSummaryVisual(
                         )
                     }
 
-                    // Stat Badge: Total Time
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(
-                                        Color(0xFF00F2FE).copy(alpha = 0.22f),
-                                        Color(0xFF4FACFE).copy(alpha = 0.15f),
-                                    ),
-                                ),
-                            )
-                            .border(
-                                0.8.dp,
-                                Color(0xFF00F2FE).copy(alpha = 0.40f),
-                                RoundedCornerShape(999.dp),
-                            )
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        // Stat Badge: Total Time
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            Color(0xFF00F2FE).copy(alpha = 0.22f),
+                                            Color(0xFF4FACFE).copy(alpha = 0.15f),
+                                        ),
+                                    ),
+                                )
+                                .border(
+                                    0.8.dp,
+                                    Color(0xFF00F2FE).copy(alpha = 0.40f),
+                                    RoundedCornerShape(999.dp),
+                                )
+                                .padding(horizontal = 10.dp, vertical = 4.dp),
                         ) {
-                            Icon(
-                                Icons.Rounded.Headphones,
-                                contentDescription = null,
-                                tint = Color(0xFF00F2FE),
-                                modifier = Modifier.size(13.dp),
-                            )
-                            Text(
-                                "$totalMinutes MINS",
-                                color = Color(0xFF00F2FE),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.ExtraBold,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Headphones,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00F2FE),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                Text(
+                                    "$totalMinutes MINS",
+                                    color = Color(0xFF00F2FE),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
+                        }
+
+                        // Share icon button on card
+                        IconButton(
+                            onClick = onShare,
+                            modifier = Modifier.size(30.dp),
+                        ) {
+                            if (isSharing) {
+                                VantafynGradientLoadingRing(modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                            } else {
+                                Icon(
+                                    Icons.Rounded.Share,
+                                    contentDescription = "Share Recap",
+                                    tint = Color(0xFF00F2FE),
+                                    modifier = Modifier.size(17.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -4303,7 +4358,7 @@ private fun HarmoniaFinalSummaryVisual(
         // Action Buttons Row (Balanced, tactile and elevated)
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // Save Recap (Primary Action)
@@ -4337,7 +4392,7 @@ private fun HarmoniaFinalSummaryVisual(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Icon(
                         imageVector = if (summary.isSaved) Icons.Rounded.Bookmark else Icons.Rounded.BookmarkBorder,
@@ -4346,7 +4401,54 @@ private fun HarmoniaFinalSummaryVisual(
                         modifier = Modifier.size(18.dp),
                     )
                     Text(
-                        text = if (summary.isSaved) "Saved in Library" else "Save Recap",
+                        text = if (summary.isSaved) "Saved" else "Save",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+
+            // Share Recap Button
+            Box(
+                modifier = Modifier
+                    .height(48.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                Color(0xFF00F2FE).copy(alpha = 0.25f),
+                                Color(0xFF4FACFE).copy(alpha = 0.20f),
+                            ),
+                        ),
+                    )
+                    .border(
+                        1.dp,
+                        Color(0xFF00F2FE).copy(alpha = 0.45f),
+                        RoundedCornerShape(16.dp),
+                    )
+                    .clickable(enabled = !isSharing) {
+                        onShare()
+                    }
+                    .padding(horizontal = 14.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (isSharing) {
+                        VantafynGradientLoadingRing(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(
+                            Icons.Rounded.Share,
+                            contentDescription = "Share",
+                            tint = Color(0xFF00F2FE),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Text(
+                        "Share",
                         color = Color.White,
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
@@ -4365,7 +4467,7 @@ private fun HarmoniaFinalSummaryVisual(
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         onReplay()
                     }
-                    .padding(horizontal = 18.dp),
+                    .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(
