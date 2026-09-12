@@ -19518,27 +19518,42 @@ private fun RailInteriorAtmosphere(
     modifier: Modifier = Modifier,
 ) {
     val reducedMotion = rememberReducedMotionPreference()
-    val infiniteTransition = rememberInfiniteTransition(label = "railInteriorAtmosphere")
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val shouldAnimate = isResumed && !reducedMotion
 
-    val driftProgress = if (reducedMotion) 0.5f else infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(6500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "auroraDrift",
-    ).value
-
-    val pulseProgress = if (reducedMotion) 0.5f else infiniteTransition.animateFloat(
-        initialValue = 0.70f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(if (isMusicPlaying) 1400 else 3200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "auroraPulse",
-    ).value
+    val (driftProgress, pulseProgress) = if (shouldAnimate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "railInteriorAtmosphere")
+        val drift = infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(6500, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "auroraDrift",
+        ).value
+        val pulse = infiniteTransition.animateFloat(
+            initialValue = 0.70f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(if (isMusicPlaying) 1400 else 3200, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "auroraPulse",
+        ).value
+        drift to pulse
+    } else {
+        0.5f to 0.85f
+    }
 
     Canvas(
         modifier = modifier.clip(RoundedCornerShape(30.dp)),
@@ -19694,7 +19709,6 @@ private fun BottomRailAccentBorder(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val infiniteTransition = rememberInfiniteTransition(label = "railAccent")
     val rippleAnim = remember { Animatable(0f) }
     LaunchedEffect(mode) {
         rippleAnim.snapTo(0f)
@@ -19710,12 +19724,15 @@ private fun BottomRailAccentBorder(
         BottomRailAccent.StillGlow -> 0.38f
         BottomRailAccent.Breathing -> {
             if (reducedMotion || !isResumed) 0.38f
-            else infiniteTransition.animateFloat(
-                initialValue = 0.15f,
-                targetValue = 0.55f,
-                animationSpec = infiniteRepeatable(tween(4200, easing = LinearEasing), RepeatMode.Reverse),
-                label = "breathe",
-            ).value
+            else {
+                val infiniteTransition = rememberInfiniteTransition(label = "railAccent")
+                infiniteTransition.animateFloat(
+                    initialValue = 0.15f,
+                    targetValue = 0.55f,
+                    animationSpec = infiniteRepeatable(tween(4200, easing = LinearEasing), RepeatMode.Reverse),
+                    label = "breathe",
+                ).value
+            }
         }
         BottomRailAccent.TouchRipple -> {
             if (reducedMotion) 0.38f

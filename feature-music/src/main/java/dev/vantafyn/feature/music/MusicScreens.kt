@@ -2676,33 +2676,50 @@ private fun HarmoniaAudioPill(
 
 @Composable
 private fun AnimatedEqualizerBars(isPlaying: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "equalizer")
-    val h1 by infiniteTransition.animateFloat(
-        initialValue = 4f,
-        targetValue = 14f,
-        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
-        label = "bar1",
-    )
-    val h2 by infiniteTransition.animateFloat(
-        initialValue = 12f,
-        targetValue = 5f,
-        animationSpec = infiniteRepeatable(tween(360, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
-        label = "bar2",
-    )
-    val h3 by infiniteTransition.animateFloat(
-        initialValue = 6f,
-        targetValue = 16f,
-        animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
-        label = "bar3",
-    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val shouldAnimate = isPlaying && isResumed
+
+    val (h1, h2, h3) = if (shouldAnimate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "equalizer")
+        val bar1 = infiniteTransition.animateFloat(
+            initialValue = 4f,
+            targetValue = 14f,
+            animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+            label = "bar1",
+        ).value
+        val bar2 = infiniteTransition.animateFloat(
+            initialValue = 12f,
+            targetValue = 5f,
+            animationSpec = infiniteRepeatable(tween(360, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+            label = "bar2",
+        ).value
+        val bar3 = infiniteTransition.animateFloat(
+            initialValue = 6f,
+            targetValue = 16f,
+            animationSpec = infiniteRepeatable(tween(480, easing = LinearEasing), repeatMode = RepeatMode.Reverse),
+            label = "bar3",
+        ).value
+        Triple(bar1, bar2, bar3)
+    } else {
+        Triple(4f, 8f, 5f)
+    }
     Row(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.Bottom,
         modifier = Modifier.size(width = 13.dp, height = 16.dp),
     ) {
-        Box(Modifier.width(2.5.dp).height(if (isPlaying) h1.dp else 4.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
-        Box(Modifier.width(2.5.dp).height(if (isPlaying) h2.dp else 8.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
-        Box(Modifier.width(2.5.dp).height(if (isPlaying) h3.dp else 5.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
+        Box(Modifier.width(2.5.dp).height(h1.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
+        Box(Modifier.width(2.5.dp).height(h2.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
+        Box(Modifier.width(2.5.dp).height(h3.dp).clip(RoundedCornerShape(99.dp)).background(Color.White))
     }
 }
 
@@ -5998,16 +6015,30 @@ private fun NowPlayingDialog(
 
 @Composable
 private fun InfiniteRadioPill(modifier: Modifier = Modifier) {
-    val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
-    val radioAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.65f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "radio_alpha",
-    )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            lifecycleState = lifecycleOwner.lifecycle.currentState
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
+    val radioAlpha = if (isResumed) {
+        val infiniteTransition = rememberInfiniteTransition(label = "radio_pulse")
+        infiniteTransition.animateFloat(
+            initialValue = 0.65f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1000, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "radio_alpha",
+        ).value
+    } else {
+        0.85f
+    }
     val radioGradient = remember {
         Brush.horizontalGradient(
             colors = listOf(
