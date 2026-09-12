@@ -8255,11 +8255,41 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
                     }
                     Text(track.title, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
+
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    FlatMusicIconButton(Icons.Rounded.Close, "Close lyrics", viewModel::closeLyrics)
+                    FlatMusicIconButton(
+                        icon = Icons.Rounded.SkipPrevious,
+                        contentDescription = "Previous track",
+                        onClick = viewModel::previous,
+                        size = 36,
+                    )
+                    FlatMusicIconButton(
+                        icon = if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = if (state.playback.isPlaying) "Pause" else "Play",
+                        onClick = viewModel::togglePlayPause,
+                        size = 38,
+                    )
+                    FlatMusicIconButton(
+                        icon = Icons.Rounded.SkipNext,
+                        contentDescription = "Next track",
+                        onClick = viewModel::next,
+                        size = 36,
+                    )
+                }
+
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    FlatMusicIconButton(
+                        icon = Icons.Rounded.Close,
+                        contentDescription = "Close lyrics",
+                        onClick = viewModel::closeLyrics,
+                        size = 38,
+                    )
                 }
             }
             AnimatedContent(
