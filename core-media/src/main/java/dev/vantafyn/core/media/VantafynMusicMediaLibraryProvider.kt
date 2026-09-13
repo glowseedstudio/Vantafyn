@@ -44,6 +44,11 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     private val playlistTracks = mutableMapOf<UUID, List<JellyfinMusicTrack>>()
     private val searchResults = mutableMapOf<String, List<JellyfinMusicTrack>>()
 
+    private var allSongsCache: List<JellyfinMusicTrack>? = null
+    private var allAlbumsCache: List<JellyfinMusicAlbum>? = null
+    private var allArtistsCache: List<JellyfinMusicArtist>? = null
+    private var allPlaylistsCache: List<JellyfinMusicPlaylist>? = null
+
     fun rootItem(): MediaItem {
         val extras = Bundle().apply {
             putInt(CONTENT_STYLE_BROWSABLE_HINT, CONTENT_STYLE_GRID)
@@ -67,7 +72,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
 
     fun rootChildren(): List<MediaItem> =
         listOf(
-            browsableItem(RECENT_ID, "Recently added", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true),
+            browsableItem(RECENT_ID, "Recents", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true),
             browsableItem(ALBUMS_ID, "Albums", null, MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS, isGrid = true),
             browsableItem(ARTISTS_ID, "Artists", null, MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS, isGrid = true),
             browsableItem(PLAYLISTS_ID, "Playlists", null, MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS, isGrid = true),
@@ -75,6 +80,58 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             browsableItem(DOWNLOADS_ID, "Downloads", "Offline music", MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true),
             browsableItem(QUEUE_ID, "Now playing queue", null, MediaMetadata.MEDIA_TYPE_PLAYLIST, isGrid = false),
         )
+
+    private suspend fun getLibrarySongs(): List<JellyfinMusicTrack> {
+        allSongsCache?.let { return it }
+        val s = session
+        if (s != null) {
+            val result = repositories.musicRepository.getAllSongs(s, limit = 10_000)
+            if (result is JellyfinResult.Success && result.value.isNotEmpty()) {
+                allSongsCache = result.value
+                return result.value
+            }
+        }
+        return home.orEmpty().songs
+    }
+
+    private suspend fun getLibraryAlbums(): List<JellyfinMusicAlbum> {
+        allAlbumsCache?.let { return it }
+        val s = session
+        if (s != null) {
+            val result = repositories.musicRepository.getAllAlbums(s, limit = 10_000)
+            if (result is JellyfinResult.Success && result.value.isNotEmpty()) {
+                allAlbumsCache = result.value
+                return result.value
+            }
+        }
+        return home.orEmpty().albums
+    }
+
+    private suspend fun getLibraryArtists(): List<JellyfinMusicArtist> {
+        allArtistsCache?.let { return it }
+        val s = session
+        if (s != null) {
+            val result = repositories.musicRepository.getAllArtists(s, limit = 10_000)
+            if (result is JellyfinResult.Success && result.value.isNotEmpty()) {
+                allArtistsCache = result.value
+                return result.value
+            }
+        }
+        return home.orEmpty().artists
+    }
+
+    private suspend fun getLibraryPlaylists(): List<JellyfinMusicPlaylist> {
+        allPlaylistsCache?.let { return it }
+        val s = session
+        if (s != null) {
+            val result = repositories.musicRepository.getAllPlaylists(s, limit = 10_000)
+            if (result is JellyfinResult.Success && result.value.isNotEmpty()) {
+                allPlaylistsCache = result.value
+                return result.value
+            }
+        }
+        return home.orEmpty().playlists
+    }
 
     suspend fun getChildrenAsync(parentId: String): List<MediaItem> =
         withContext(Dispatchers.IO) {
@@ -93,10 +150,10 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                     }
                 }
                 parentId == RECENT_ID -> home.orEmpty().recentlyAdded.map { it.toPlayableMediaItem(RECENT_ID) }
-                parentId == SONGS_ID -> home.orEmpty().songs.map { it.toPlayableMediaItem(SONGS_ID) }
-                parentId == ALBUMS_ID -> home.orEmpty().albums.map { it.toAlbumItem() }
-                parentId == ARTISTS_ID -> home.orEmpty().artists.map { it.toArtistItem() }
-                parentId == PLAYLISTS_ID -> home.orEmpty().playlists.map { it.toPlaylistItem() }
+                parentId == SONGS_ID -> getLibrarySongs().map { it.toPlayableMediaItem(SONGS_ID) }
+                parentId == ALBUMS_ID -> getLibraryAlbums().map { it.toAlbumItem() }
+                parentId == ARTISTS_ID -> getLibraryArtists().map { it.toArtistItem() }
+                parentId == PLAYLISTS_ID -> getLibraryPlaylists().map { it.toPlaylistItem() }
                 parentId.startsWith(ALBUM_PREFIX) -> tracksForAlbum(parentId.removePrefix(ALBUM_PREFIX)).map { it.toPlayableMediaItem(parentId) }
                 parentId.startsWith(ARTIST_PREFIX) -> albumsForArtist(parentId.removePrefix(ARTIST_PREFIX)).map { it.toAlbumItem() }
                 parentId.startsWith(PLAYLIST_PREFIX) -> tracksForPlaylist(parentId.removePrefix(PLAYLIST_PREFIX)).map { it.toPlayableMediaItem(parentId) }
@@ -118,7 +175,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
         withContext(Dispatchers.IO) {
             when {
                 mediaId == ROOT_ID -> rootItem()
-                mediaId == RECENT_ID -> browsableItem(RECENT_ID, "Recently added", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true)
+                mediaId == RECENT_ID -> browsableItem(RECENT_ID, "Recents", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true)
                 mediaId == ALBUMS_ID -> browsableItem(ALBUMS_ID, "Albums", null, MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS, isGrid = true)
                 mediaId == ARTISTS_ID -> browsableItem(ARTISTS_ID, "Artists", null, MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS, isGrid = true)
                 mediaId == PLAYLISTS_ID -> browsableItem(PLAYLISTS_ID, "Playlists", null, MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS, isGrid = true)
@@ -175,7 +232,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     fun getItem(mediaId: String): MediaItem? =
         when {
             mediaId == ROOT_ID -> rootItem()
-            mediaId == RECENT_ID -> browsableItem(RECENT_ID, "Recently added", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true)
+            mediaId == RECENT_ID -> browsableItem(RECENT_ID, "Recents", null, MediaMetadata.MEDIA_TYPE_FOLDER_MIXED, isGrid = true)
             mediaId == ALBUMS_ID -> browsableItem(ALBUMS_ID, "Albums", null, MediaMetadata.MEDIA_TYPE_FOLDER_ALBUMS, isGrid = true)
             mediaId == ARTISTS_ID -> browsableItem(ARTISTS_ID, "Artists", null, MediaMetadata.MEDIA_TYPE_FOLDER_ARTISTS, isGrid = true)
             mediaId == PLAYLISTS_ID -> browsableItem(PLAYLISTS_ID, "Playlists", null, MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS, isGrid = true)
@@ -239,7 +296,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                     ensureReady()
                     when {
                         containerId == RECENT_ID -> home.orEmpty().recentlyAdded
-                        containerId == SONGS_ID -> home.orEmpty().songs
+                        containerId == SONGS_ID -> getLibrarySongs()
                         containerId == QUEUE_ID -> MusicPlaybackController.get(appContext).state.value.queue.map { it.toJellyfinTrack() }
                         containerId.startsWith(ALBUM_PREFIX) -> tracksForAlbum(containerId.removePrefix(ALBUM_PREFIX))
                         containerId.startsWith(ARTIST_PREFIX) -> albumsForArtist(containerId.removePrefix(ARTIST_PREFIX)).flatMap {
@@ -247,7 +304,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                         }
                         containerId.startsWith(PLAYLIST_PREFIX) -> tracksForPlaylist(containerId.removePrefix(PLAYLIST_PREFIX))
                         containerId.startsWith(SEARCH_PREFIX) -> searchResults[containerId.removePrefix(SEARCH_PREFIX).lowercase()].orEmpty()
-                        else -> home.orEmpty().songs
+                        else -> getLibrarySongs()
                     }
                 }
             }
@@ -620,7 +677,10 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                     .setArtist(artist)
                     .setAlbumTitle(album)
                     .setDurationMs(durationMs)
-                    .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .setArtworkUri(
+                        if (!artworkUrl.isNullOrBlank()) Uri.parse(artworkUrl)
+                        else VantafynArtworkContentProvider.getPlaceholderUri(appContext, title, artist)
+                    )
                     .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                     .setIsBrowsable(false)
                     .setIsPlayable(true)
@@ -672,6 +732,11 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
             putInt(CONTENT_STYLE_BROWSABLE_HINT, if (isGrid) CONTENT_STYLE_GRID else CONTENT_STYLE_LIST)
             putInt(CONTENT_STYLE_PLAYABLE_HINT, CONTENT_STYLE_LIST)
         }
+        val finalArtworkUri = if (!artworkUrl.isNullOrBlank()) {
+            Uri.parse(artworkUrl)
+        } else {
+            VantafynArtworkContentProvider.getPlaceholderUri(appContext, title, subtitle)
+        }
         return MediaItem.Builder()
             .setMediaId(mediaId)
             .setMediaMetadata(
@@ -680,7 +745,7 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
                     .setDisplayTitle(title)
                     .setSubtitle(subtitle)
                     .setDescription(subtitle)
-                    .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .setArtworkUri(finalArtworkUri)
                     .setMediaType(mediaType)
                     .setIsBrowsable(true)
                     .setIsPlayable(false)

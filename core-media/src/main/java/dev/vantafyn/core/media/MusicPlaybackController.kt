@@ -409,6 +409,34 @@ class MusicPlaybackController private constructor(context: Context) {
         emitEvent(VantafynMusicPlaybackEvent.TrackStarted(queue[safeIndex], 0L))
     }
 
+    fun restoreQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0, startPositionMs: Long = 0L) {
+        if (queue.isEmpty()) return
+        val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
+        val safePosition = startPositionMs.coerceAtLeast(0L)
+        _state.update {
+            it.copy(
+                queue = queue,
+                queueIndex = safeIndex,
+                positionMs = safePosition,
+                durationMs = queue[safeIndex].durationMs ?: 0L,
+                isPlaying = false,
+                errorMessage = null,
+            )
+        }
+        val mediaItems = queue.map { it.toMediaItem() }
+        tracksByMediaId.clear()
+        queue.forEach { track -> tracksByMediaId[track.id.toString()] = track }
+        replayGainAudioProcessor.setTrackQueue(
+            queue.map { it.replayGainTrackGainDb to it.replayGainTrackPeak },
+            safeIndex,
+        )
+        lastAudioFormat = null
+        updateAudioStreamInfo(null)
+        sessionPlayer.setMediaItems(mediaItems, safeIndex, safePosition)
+        sessionPlayer.prepare()
+        sessionPlayer.playWhenReady = false
+    }
+
     fun togglePlayPause() {
         if (sessionPlayer.isPlaying) {
             sessionPlayer.pause()
@@ -982,7 +1010,7 @@ class MusicPlaybackController private constructor(context: Context) {
             channels?.let { putInt(EXTRA_CHANNELS, it) }
         }
         val cachedArtworkBytes = artworkUrl?.let { url ->
-            val bitmap = VantafynArtworkLoader.getCachedBitmap(appContext, url, 384)
+            val bitmap = VantafynArtworkLoader.getMemoryCachedBitmap(url)
             bitmap?.let { b ->
                 runCatching {
                     val stream = ByteArrayOutputStream()

@@ -24,11 +24,13 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
+import org.jellyfin.sdk.api.client.exception.InvalidStatusException
 import org.jellyfin.sdk.api.client.extensions.authenticateUserByName
 import org.jellyfin.sdk.api.client.extensions.authenticateWithQuickConnect
 import org.jellyfin.sdk.api.client.extensions.activityLogApi
 import org.jellyfin.sdk.api.client.extensions.artistsApi
 import org.jellyfin.sdk.api.client.extensions.devicesApi
+import org.jellyfin.sdk.api.client.extensions.genresApi
 import org.jellyfin.sdk.api.client.extensions.imageApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
@@ -656,6 +658,7 @@ class SdkJellyfinLibraryRepository(
         limit: Int,
         filter: JellyfinLibraryItemFilter,
         alphabetKey: String?,
+        genre: String?,
     ): JellyfinResult<JellyfinLibraryPage> =
         withContext(ioDispatcher) {
             try {
@@ -688,14 +691,16 @@ class SdkJellyfinLibraryRepository(
                     JellyfinLibraryItemFilter.All,
                     JellyfinLibraryItemFilter.AZ,
                     JellyfinLibraryItemFilter.Favorites,
-                    JellyfinLibraryItemFilter.Unwatched -> listOf(ItemSortBy.SORT_NAME)
+                    JellyfinLibraryItemFilter.Unwatched,
+                    JellyfinLibraryItemFilter.Genres -> listOf(ItemSortBy.SORT_NAME)
                 }
                 val sortOrder = when (filter) {
                     JellyfinLibraryItemFilter.RecentlyAdded -> listOf(SortOrder.DESCENDING)
                     JellyfinLibraryItemFilter.All,
                     JellyfinLibraryItemFilter.AZ,
                     JellyfinLibraryItemFilter.Favorites,
-                    JellyfinLibraryItemFilter.Unwatched -> listOf(SortOrder.ASCENDING)
+                    JellyfinLibraryItemFilter.Unwatched,
+                    JellyfinLibraryItemFilter.Genres -> listOf(SortOrder.ASCENDING)
                 }
                 val isMusic = library.collectionType.isMusicCollection()
                 val response by api.itemsApi.getItems(
@@ -711,6 +716,7 @@ class SdkJellyfinLibraryRepository(
                         includeItemTypes = includeTypesFor(library.collectionType, library.name),
                         isFavorite = true.takeIf { filter == JellyfinLibraryItemFilter.Favorites },
                         isPlayed = false.takeIf { filter == JellyfinLibraryItemFilter.Unwatched },
+                        genres = genre?.let { listOf(it) },
                         nameStartsWith = normalizedAlphabetKey?.takeIf { it != "#" },
                         nameLessThan = "A".takeIf { normalizedAlphabetKey == "#" },
                         enableUserData = true,
@@ -743,6 +749,42 @@ class SdkJellyfinLibraryRepository(
                 )
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getLibraryGenres(
+        session: JellyfinSession,
+        library: JellyfinLibrary,
+    ): JellyfinResult<List<JellyfinGenreItem>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.genresApi.getGenres(
+                    parentId = library.id,
+                    userId = session.user.id,
+                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                    sortOrder = listOf(SortOrder.ASCENDING),
+                    includeItemTypes = includeTypesFor(library.collectionType, library.name),
+                    enableImages = true,
+                )
+                val serverBaseUrl = session.server.url.trimEnd('/')
+                val genreItems = response.items.map { dto ->
+                    val hasImage = dto.imageTags?.containsKey(ImageType.PRIMARY) == true
+                    val imageUrl = if (hasImage) {
+                        "$serverBaseUrl/Items/${dto.id}/Images/Primary"
+                    } else {
+                        null
+                    }
+                    JellyfinGenreItem(
+                        id = dto.id,
+                        name = dto.name.orEmpty(),
+                        imageUrl = imageUrl,
+                    )
+                }.filter { it.name.isNotBlank() }
+                JellyfinResult.Success(genreItems)
+            } catch (e: Exception) {
+                Log.w("JellyfinLibrary", "Failed to get library genres for ${library.name}: ${e.message}")
+                JellyfinResult.Failure("Failed to load genres: ${e.message}")
             }
         }
 
@@ -2450,6 +2492,62 @@ class SdkJellyfinMusicRepository(
             }
         }
 
+    override suspend fun getAllSongs(session: JellyfinSession, limit: Int): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val tracks = getMusicTracks(
+                    api = api,
+                    session = session,
+                    limit = limit,
+                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                    sortOrder = listOf(SortOrder.ASCENDING),
+                )
+                JellyfinResult.Success(tracks)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getAllAlbums(session: JellyfinSession, limit: Int): JellyfinResult<List<JellyfinMusicAlbum>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val albums = getMusicAlbums(
+                    api = api,
+                    session = session,
+                    limit = limit,
+                    sortBy = listOf(ItemSortBy.SORT_NAME),
+                    sortOrder = listOf(SortOrder.ASCENDING),
+                )
+                JellyfinResult.Success(albums)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getAllArtists(session: JellyfinSession, limit: Int): JellyfinResult<List<JellyfinMusicArtist>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val artists = getMusicArtists(api, session, limit = limit)
+                JellyfinResult.Success(artists)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun getAllPlaylists(session: JellyfinSession, limit: Int): JellyfinResult<List<JellyfinMusicPlaylist>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val playlists = getMusicPlaylists(api, session, limit = limit)
+                JellyfinResult.Success(playlists)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
     private suspend fun getMusicTracks(
         api: ApiClient,
         session: JellyfinSession,
@@ -2536,14 +2634,20 @@ class SdkJellyfinMusicRepository(
         )
     }
 
-    private suspend fun getMusicAlbums(api: ApiClient, session: JellyfinSession, limit: Int): List<JellyfinMusicAlbum> {
+    private suspend fun getMusicAlbums(
+        api: ApiClient,
+        session: JellyfinSession,
+        limit: Int,
+        sortBy: List<ItemSortBy> = listOf(ItemSortBy.DATE_CREATED),
+        sortOrder: List<SortOrder> = listOf(SortOrder.DESCENDING),
+    ): List<JellyfinMusicAlbum> {
         val response by api.itemsApi.getItems(
             GetItemsRequest(
                 userId = session.user.id,
                 recursive = true,
                 limit = limit,
-                sortBy = listOf(ItemSortBy.DATE_CREATED),
-                sortOrder = listOf(SortOrder.DESCENDING),
+                sortBy = sortBy,
+                sortOrder = sortOrder,
                 fields = musicItemFields,
                 includeItemTypes = listOf(BaseItemKind.MUSIC_ALBUM),
                 enableUserData = true,
@@ -5811,12 +5915,17 @@ private fun toUserMessage(throwable: Throwable): String {
     Log.e("Vantafyn", "toUserMessage: ${throwable.javaClass.name}: ${throwable.message}", throwable)
     val className = throwable.javaClass.name
     val message = throwable.message.orEmpty()
+    val httpStatus = (throwable as? InvalidStatusException)?.status
+        ?: Regex("""\b(\d{3})\b""").find(message)?.groupValues?.get(1)?.toIntOrNull()
     return when {
         throwable is SessionRestoreException -> throwable.message ?: "No saved Jellyfin session"
         throwable is AuthenticationException -> throwable.message ?: "Unable to authenticate"
         throwable is SecurityException -> throwable.message ?: "That address belongs to a different Jellyfin server"
-        className.contains("InvalidStatusException") && message.contains("401") -> "Invalid username or password"
-        className.contains("InvalidStatusException") && message.contains("403") -> "Admin privileges required on server"
+        httpStatus == 401 || (className.contains("InvalidStatusException") && message.contains("401")) -> "Session expired or invalid credentials"
+        httpStatus == 403 || (className.contains("InvalidStatusException") && message.contains("403")) -> "Admin privileges required on server"
+        httpStatus == 404 -> "Item or resource not found on server"
+        httpStatus in 502..504 -> "Server gateway unavailable or timed out"
+        httpStatus != null && httpStatus in 500..599 -> "Jellyfin server error (HTTP $httpStatus)"
         className.contains("InvalidContentException") || className.contains("SerializationException") -> "Data parsing error from server"
         message.contains("CLEARTEXT", ignoreCase = true) -> "Android blocked cleartext HTTP for this server"
         className.contains("SSL", ignoreCase = true) ||
@@ -5826,7 +5935,7 @@ private fun toUserMessage(throwable: Throwable): String {
             message.contains("timeout", ignoreCase = true) -> "Connection timed out"
         className.contains("UnknownHost", ignoreCase = true) -> "Could not resolve server address"
         className.contains("ConnectException", ignoreCase = true) -> "Could not reach server"
-        className.contains("InvalidStatusException") -> "Server responded but does not look like Jellyfin"
+        className.contains("InvalidStatusException") -> "Server responded with an unexpected status (HTTP ${httpStatus ?: "error"})"
         throwable is PlaybackException -> throwable.message ?: "This item cannot be played yet"
         throwable is IllegalArgumentException -> throwable.message ?: "Invalid server address"
         message.isNotBlank() && !message.contains("@") -> message
@@ -5840,13 +5949,16 @@ private fun String.invitePayloadValue(): String =
 private fun Throwable.toRestoreFailure(): JellyfinSessionRestoreFailure {
     val className = javaClass.name
     val message = message.orEmpty()
+    val httpStatus = (this as? InvalidStatusException)?.status
+        ?: Regex("""\b(\d{3})\b""").find(message)?.groupValues?.get(1)?.toIntOrNull()
     val reason = when {
         this is kotlinx.coroutines.TimeoutCancellationException -> JellyfinRestoreFailureReason.ServerUnreachable
         this is SessionRestoreException -> JellyfinRestoreFailureReason.AuthExpired
         this is SecurityException -> JellyfinRestoreFailureReason.InvalidServerUrl
         this is IllegalArgumentException -> JellyfinRestoreFailureReason.InvalidServerUrl
-        className.contains("InvalidStatusException") && message.contains("401") -> JellyfinRestoreFailureReason.AuthExpired
-        className.contains("InvalidStatusException") && message.contains("403") -> JellyfinRestoreFailureReason.Unauthorized
+        httpStatus == 401 || (className.contains("InvalidStatusException") && message.contains("401")) -> JellyfinRestoreFailureReason.AuthExpired
+        httpStatus == 403 || (className.contains("InvalidStatusException") && message.contains("403")) -> JellyfinRestoreFailureReason.Unauthorized
+        httpStatus in 502..504 -> JellyfinRestoreFailureReason.ServerUnreachable
         className.contains("UnknownHost", ignoreCase = true) -> JellyfinRestoreFailureReason.ServerUnreachable
         className.contains("SocketTimeout", ignoreCase = true) ||
             message.contains("timeout", ignoreCase = true) -> JellyfinRestoreFailureReason.ServerUnreachable

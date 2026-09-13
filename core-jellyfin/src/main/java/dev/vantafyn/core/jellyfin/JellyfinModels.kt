@@ -215,7 +215,14 @@ enum class JellyfinLibraryItemFilter {
     AZ,
     Favorites,
     Unwatched,
+    Genres,
 }
+
+data class JellyfinGenreItem(
+    val id: UUID,
+    val name: String,
+    val imageUrl: String? = null,
+)
 
 enum class MusicSongsFilter(val label: String) {
     All("All"),
@@ -1108,7 +1115,12 @@ interface JellyfinLibraryRepository {
         limit: Int = 60,
         filter: JellyfinLibraryItemFilter = JellyfinLibraryItemFilter.All,
         alphabetKey: String? = null,
+        genre: String? = null,
     ): JellyfinResult<JellyfinLibraryPage>
+    suspend fun getLibraryGenres(
+        session: JellyfinSession,
+        library: JellyfinLibrary,
+    ): JellyfinResult<List<JellyfinGenreItem>>
     suspend fun buildAvailabilityIndex(session: JellyfinSession): JellyfinResult<JellyfinAvailabilityIndex>
 }
 
@@ -1190,6 +1202,10 @@ interface JellyfinMusicRepository {
     suspend fun getOnRepeatTracks(session: JellyfinSession, limit: Int = 20): JellyfinResult<List<JellyfinMusicTrack>>
     suspend fun getSimilarArtists(session: JellyfinSession, artistId: UUID, limit: Int = 12): JellyfinResult<List<JellyfinMusicArtist>>
     suspend fun getRediscoverTracks(session: JellyfinSession, limit: Int = 20): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getAllSongs(session: JellyfinSession, limit: Int = 10_000): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getAllAlbums(session: JellyfinSession, limit: Int = 10_000): JellyfinResult<List<JellyfinMusicAlbum>>
+    suspend fun getAllArtists(session: JellyfinSession, limit: Int = 10_000): JellyfinResult<List<JellyfinMusicArtist>>
+    suspend fun getAllPlaylists(session: JellyfinSession, limit: Int = 10_000): JellyfinResult<List<JellyfinMusicPlaylist>>
 }
 
 interface JellyfinAdminRepository {

@@ -39,6 +39,7 @@ import dev.vantafyn.core.jellyfin.JellyfinFriendRequest
 import dev.vantafyn.core.jellyfin.JellyfinHome
 import dev.vantafyn.core.jellyfin.JellyfinHomeRepository
 import dev.vantafyn.core.jellyfin.JellyfinEpisode
+import dev.vantafyn.core.jellyfin.JellyfinGenreItem
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
@@ -172,6 +173,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var socialPollingJob: Job? = null
     private var achievementPollingJob: Job? = null
     private var isAppForeground = false
+    private var lastBackgroundedAtMs: Long = 0L
+    private var sessionRefreshJob: Job? = null
+    private var lastSessionVerifiedAtMs: Long = 0L
     private var lastCompanionAvailabilityProfileId: String? = null
     private var lastCompanionAvailabilityCheckAt: Long = 0L
     private var lastAchievementAvailabilityProfileId: String? = null
@@ -1354,7 +1358,35 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun retryLibraries() {
-        _state.value.session?.let(::loadLibraries)
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    isLibrariesLoading = true,
+                    isHomeLoading = true,
+                    errorMessage = null,
+                    homeErrorMessage = null,
+                )
+            }
+            val activeSession = when (val restoreResult = authRepository.restoreSession(session.profileId)) {
+                is JellyfinResult.Success -> {
+                    val restored = restoreResult.value
+                    lastSessionVerifiedAtMs = System.currentTimeMillis()
+                    _state.update {
+                        it.copy(
+                            session = restored,
+                            server = restored.server,
+                            serverUrl = restored.server.url,
+                            localServerUrl = restored.server.localUrl.orEmpty(),
+                            remoteServerUrl = restored.server.remoteUrl.orEmpty(),
+                        )
+                    }
+                    restored
+                }
+                is JellyfinResult.Failure -> session
+            }
+            loadLibraries(activeSession, isRetryAfterRestore = true)
+        }
     }
 
     fun navigateMobile(destination: MobileDestination) {
@@ -1379,6 +1411,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 searchError = if (destination == MobileDestination.Search) it.searchError else null,
                 isSearchLoading = if (destination == MobileDestination.Search) it.isSearchLoading else false,
                 selectedLibrary = if (destination == MobileDestination.LibraryDetail) it.selectedLibrary else null,
+                selectedGenre = if (destination == MobileDestination.LibraryDetail) it.selectedGenre else null,
                 selectedMediaId = if (destination == MobileDestination.MediaDetail) it.selectedMediaId else null,
                 mediaDetail = if (destination == MobileDestination.MediaDetail) it.mediaDetail else null,
                 selectedAdminUserId = if (destination == MobileDestination.AdminUserSettings) it.selectedAdminUserId else null,
@@ -2434,7 +2467,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun openLibrary(library: JellyfinLibrary) {
-        openLibraryPage(library, startIndex = 0, filter = JellyfinLibraryItemFilter.All, alphabetKey = null)
+        _state.update {
+            it.copy(
+                selectedGenre = null,
+                libraryGenres = emptyList(),
+                isLibraryGenresLoading = false,
+            )
+        }
+        openLibraryPage(library, startIndex = 0, filter = JellyfinLibraryItemFilter.All, alphabetKey = null, genre = null)
     }
 
     fun openLibraryPage(
@@ -2442,6 +2482,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         startIndex: Int,
         filter: JellyfinLibraryItemFilter = _state.value.libraryItemsFilter,
         alphabetKey: String? = _state.value.libraryItemsAlphabetKey,
+        genre: String? = _state.value.selectedGenre?.name,
     ) {
         val session = _state.value.session ?: return
         val normalizedAlphabetKey = alphabetKey.normalizedLibraryAlphabetKey().takeIf { filter.supportsAlphabetRail() }
@@ -2450,7 +2491,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             val keepCurrentPage = it.selectedLibrary?.id == library.id &&
                 it.libraryItemsPage != null &&
                 it.libraryItemsFilter == filter &&
-                it.libraryItemsAlphabetKey == normalizedAlphabetKey
+                it.libraryItemsAlphabetKey == normalizedAlphabetKey &&
+                it.selectedGenre?.name == genre
             it.copy(
                 mobileDestination = MobileDestination.LibraryDetail,
                 previousMobileDestination = MobileDestination.Libraries,
@@ -2476,7 +2518,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             )
         }
         libraryItemsJob = viewModelScope.launch {
-            when (val result = libraryRepository.getLibraryItemsPage(session, library, startIndex, LibraryItemsPageSize, filter, normalizedAlphabetKey)) {
+            when (val result = libraryRepository.getLibraryItemsPage(session, library, startIndex, LibraryItemsPageSize, filter, normalizedAlphabetKey, genre)) {
                 is JellyfinResult.Success -> {
                     _state.update {
                         it.copy(
@@ -2496,33 +2538,102 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun retryLibraryItems() {
         val state = _state.value
         val library = state.selectedLibrary ?: return
-        openLibraryPage(library, state.libraryItemsPage?.startIndex ?: 0)
+        if (state.libraryItemsFilter == JellyfinLibraryItemFilter.Genres && state.selectedGenre == null) {
+            loadLibraryGenres(library)
+        } else {
+            openLibraryPage(library, state.libraryItemsPage?.startIndex ?: 0)
+        }
     }
 
     fun nextLibraryItemsPage() {
         val state = _state.value
         val library = state.selectedLibrary ?: return
         val page = state.libraryItemsPage ?: return
-        if (page.hasNext) openLibraryPage(library, page.startIndex + page.pageSize, state.libraryItemsFilter, state.libraryItemsAlphabetKey)
+        if (page.hasNext) openLibraryPage(library, page.startIndex + page.pageSize, state.libraryItemsFilter, state.libraryItemsAlphabetKey, state.selectedGenre?.name)
     }
 
     fun previousLibraryItemsPage() {
         val state = _state.value
         val library = state.selectedLibrary ?: return
         val page = state.libraryItemsPage ?: return
-        if (page.hasPrevious) openLibraryPage(library, (page.startIndex - page.pageSize).coerceAtLeast(0), state.libraryItemsFilter, state.libraryItemsAlphabetKey)
+        if (page.hasPrevious) openLibraryPage(library, (page.startIndex - page.pageSize).coerceAtLeast(0), state.libraryItemsFilter, state.libraryItemsAlphabetKey, state.selectedGenre?.name)
     }
 
     fun setLibraryItemsFilter(filter: JellyfinLibraryItemFilter) {
         val library = _state.value.selectedLibrary ?: return
+        if (filter == JellyfinLibraryItemFilter.Genres) {
+            _state.update {
+                it.copy(
+                    libraryItemsFilter = filter,
+                    selectedGenre = null,
+                    libraryItems = emptyList(),
+                    libraryItemsPage = null,
+                    libraryItemsAlphabetKey = null,
+                )
+            }
+            loadLibraryGenres(library)
+            return
+        }
+        _state.update { it.copy(selectedGenre = null) }
         val alphabetKey = _state.value.libraryItemsAlphabetKey.takeIf { filter.supportsAlphabetRail() }
-        openLibraryPage(library, startIndex = 0, filter = filter, alphabetKey = alphabetKey)
+        openLibraryPage(library, startIndex = 0, filter = filter, alphabetKey = alphabetKey, genre = null)
+    }
+
+    fun loadLibraryGenres(library: JellyfinLibrary) {
+        val session = _state.value.session ?: return
+        _state.update { it.copy(isLibraryGenresLoading = true, libraryItemsError = null) }
+        viewModelScope.launch {
+            when (val result = libraryRepository.getLibraryGenres(session, library)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            isLibraryGenresLoading = false,
+                            libraryGenres = result.value,
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            isLibraryGenresLoading = false,
+                            libraryItemsError = result.message,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun selectGenre(genre: JellyfinGenreItem) {
+        val library = _state.value.selectedLibrary ?: return
+        _state.update { it.copy(selectedGenre = genre) }
+        openLibraryPage(
+            library = library,
+            startIndex = 0,
+            filter = JellyfinLibraryItemFilter.Genres,
+            alphabetKey = null,
+            genre = genre.name,
+        )
+    }
+
+    fun clearSelectedGenre() {
+        val library = _state.value.selectedLibrary ?: return
+        _state.update {
+            it.copy(
+                selectedGenre = null,
+                libraryItems = emptyList(),
+                libraryItemsPage = null,
+            )
+        }
+        if (_state.value.libraryGenres.isEmpty()) {
+            loadLibraryGenres(library)
+        }
     }
 
     fun setLibraryAlphabetKey(alphabetKey: String?) {
         val state = _state.value
         val library = state.selectedLibrary ?: return
-        openLibraryPage(library, startIndex = 0, filter = state.libraryItemsFilter, alphabetKey = alphabetKey)
+        openLibraryPage(library, startIndex = 0, filter = state.libraryItemsFilter, alphabetKey = alphabetKey, genre = state.selectedGenre?.name)
     }
 
     fun setLibraryViewMode(mode: LibraryViewMode) {
@@ -2708,7 +2819,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     navigateMobile(snapshot.previousMobileDestination)
                 }
             }
-            MobileDestination.LibraryDetail -> navigateMobile(MobileDestination.Libraries)
+            MobileDestination.LibraryDetail -> {
+                if (snapshot.libraryItemsFilter == JellyfinLibraryItemFilter.Genres && snapshot.selectedGenre != null) {
+                    clearSelectedGenre()
+                } else {
+                    navigateMobile(MobileDestination.Libraries)
+                }
+            }
             MobileDestination.WatchParty -> navigateMobile(MobileDestination.Profile)
             MobileDestination.Downloads -> navigateMobile(MobileDestination.Profile)
             MobileDestination.HomeLayout,
@@ -4538,7 +4655,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         isAppForeground = true
         _state.update { it.copy(isAppForeground = true) }
         val session = _state.value.session
+        val now = System.currentTimeMillis()
+        val bgDuration = if (lastBackgroundedAtMs > 0L) now - lastBackgroundedAtMs else 0L
+        lastBackgroundedAtMs = 0L
+
         if (session != null) {
+            val shouldRefreshSession = bgDuration >= 5_000L ||
+                _state.value.errorMessage != null ||
+                _state.value.homeErrorMessage != null ||
+                (now - lastSessionVerifiedAtMs) >= 60_000L
+            if (shouldRefreshSession) {
+                verifyAndRefreshSessionOnResume(
+                    currentSession = session,
+                    forceReload = bgDuration >= 5_000L || _state.value.errorMessage != null || _state.value.homeErrorMessage != null,
+                )
+            }
             offlineSyncScheduler.schedule()
             refreshAchievementsAvailability()
             if (_state.value.isAchievementsAvailable) {
@@ -4560,11 +4691,43 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppBackgrounded() {
         isAppForeground = false
+        lastBackgroundedAtMs = System.currentTimeMillis()
         _state.update { it.copy(isAppForeground = false) }
         stopAchievementPolling()
         stopSocialPolling()
         if (_state.value.activeWatchParty == null) {
             stopWatchPartyRealtime(clearInvites = false)
+        }
+    }
+
+    private fun verifyAndRefreshSessionOnResume(currentSession: JellyfinSession, forceReload: Boolean) {
+        sessionRefreshJob?.cancel()
+        sessionRefreshJob = viewModelScope.launch {
+            when (val result = authRepository.restoreSession(currentSession.profileId)) {
+                is JellyfinResult.Success -> {
+                    val refreshed = result.value
+                    lastSessionVerifiedAtMs = System.currentTimeMillis()
+                    val urlChanged = refreshed.server.url != currentSession.server.url
+                    val tokenChanged = refreshed.accessToken != currentSession.accessToken
+                    _state.update {
+                        it.copy(
+                            session = refreshed,
+                            server = refreshed.server,
+                            serverUrl = refreshed.server.url,
+                            localServerUrl = refreshed.server.localUrl.orEmpty(),
+                            remoteServerUrl = refreshed.server.remoteUrl.orEmpty(),
+                        )
+                    }
+                    if (forceReload || urlChanged || tokenChanged || _state.value.libraries.isEmpty() || _state.value.errorMessage != null || _state.value.homeErrorMessage != null) {
+                        loadLibraries(refreshed, isRetryAfterRestore = true)
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    if (result.message.contains("expired", ignoreCase = true) || result.message.contains("sign in again", ignoreCase = true)) {
+                        _state.update { it.copy(errorMessage = result.message) }
+                    }
+                }
+            }
         }
     }
 
@@ -5914,7 +6077,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update { it.copy(savedProfiles = authRepository.savedProfiles()) }
     }
 
-    private fun loadLibraries(session: JellyfinSession) {
+    private fun loadLibraries(session: JellyfinSession, isRetryAfterRestore: Boolean = false) {
         loadDownloads()
         viewModelScope.launch {
             _state.update {
@@ -5928,6 +6091,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             when (val result = libraryRepository.getLibraries(session)) {
                 is JellyfinResult.Success -> {
+                    lastSessionVerifiedAtMs = System.currentTimeMillis()
                     val libraries = applyLibraryOrder(session.profileId, result.value)
                     _state.update {
                         it.copy(
@@ -5940,6 +6104,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadWhatsNew()
                 }
                 is JellyfinResult.Failure -> {
+                    if (!isRetryAfterRestore) {
+                        when (val restoreResult = authRepository.restoreSession(session.profileId)) {
+                            is JellyfinResult.Success -> {
+                                val restored = restoreResult.value
+                                lastSessionVerifiedAtMs = System.currentTimeMillis()
+                                _state.update {
+                                    it.copy(
+                                        session = restored,
+                                        server = restored.server,
+                                        serverUrl = restored.server.url,
+                                        localServerUrl = restored.server.localUrl.orEmpty(),
+                                        remoteServerUrl = restored.server.remoteUrl.orEmpty(),
+                                    )
+                                }
+                                loadLibraries(restored, isRetryAfterRestore = true)
+                                return@launch
+                            }
+                            is JellyfinResult.Failure -> Unit
+                        }
+                    }
                     _state.update {
                         it.copy(
                             isLibrariesLoading = false,
@@ -5953,14 +6137,35 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
-    private fun loadHome(session: JellyfinSession, libraries: List<JellyfinLibrary>) {
+    private fun loadHome(session: JellyfinSession, libraries: List<JellyfinLibrary>, isRetryAfterRestore: Boolean = false) {
         viewModelScope.launch {
             _state.update { it.copy(isHomeLoading = true, homeErrorMessage = null) }
             when (val result = homeRepository.getHome(session, libraries)) {
                 is JellyfinResult.Success -> {
+                    lastSessionVerifiedAtMs = System.currentTimeMillis()
                     _state.update { it.copy(isHomeLoading = false, home = result.value) }
                 }
                 is JellyfinResult.Failure -> {
+                    if (!isRetryAfterRestore) {
+                        when (val restoreResult = authRepository.restoreSession(session.profileId)) {
+                            is JellyfinResult.Success -> {
+                                val restored = restoreResult.value
+                                lastSessionVerifiedAtMs = System.currentTimeMillis()
+                                _state.update {
+                                    it.copy(
+                                        session = restored,
+                                        server = restored.server,
+                                        serverUrl = restored.server.url,
+                                        localServerUrl = restored.server.localUrl.orEmpty(),
+                                        remoteServerUrl = restored.server.remoteUrl.orEmpty(),
+                                    )
+                                }
+                                loadHome(restored, libraries, isRetryAfterRestore = true)
+                                return@launch
+                            }
+                            is JellyfinResult.Failure -> Unit
+                        }
+                    }
                     _state.update { it.copy(isHomeLoading = false, homeErrorMessage = result.message) }
                 }
             }
@@ -6082,6 +6287,9 @@ data class VantafynHomeUiState(
     val libraryItemsPage: JellyfinLibraryPage? = null,
     val isLibraryItemsLoading: Boolean = false,
     val libraryItemsError: String? = null,
+    val libraryGenres: List<JellyfinGenreItem> = emptyList(),
+    val isLibraryGenresLoading: Boolean = false,
+    val selectedGenre: JellyfinGenreItem? = null,
     val libraryViewMode: LibraryViewMode = LibraryViewMode.Poster,
     val selectedMediaId: UUID? = null,
     val mediaDetail: JellyfinMediaDetail? = null,
@@ -6940,7 +7148,7 @@ private fun String?.normalizedLibraryAlphabetKey(): String? {
 }
 
 private fun JellyfinLibraryItemFilter.supportsAlphabetRail(): Boolean =
-    this != JellyfinLibraryItemFilter.All && this != JellyfinLibraryItemFilter.RecentlyAdded
+    this != JellyfinLibraryItemFilter.All && this != JellyfinLibraryItemFilter.RecentlyAdded && this != JellyfinLibraryItemFilter.Genres
 
 private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
 private const val KEY_SETUP_COMPLETED = "setup_completed"

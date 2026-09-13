@@ -9,6 +9,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.math.log10
@@ -46,6 +47,18 @@ class VantafynAudioEffectsManager(
 
             _state.update { it.copy(isEnabled = isEnabled, selectedPreset = preset) }
             applyCurrentConfigToHardware()
+        }
+
+        // React immediately to audio routing changes (headphones plugged/unplugged, car BT connect/disconnect, Android Auto)
+        scope.launch {
+            combine(
+                ConnectedAudioDeviceDetector.observeAudioRoutingChanges(appContext),
+                dev.vantafyn.core.media.VantafynMusicPlaybackService.isAndroidAutoConnectedFlow,
+            ) { _, _ -> Unit }
+                .collect {
+                    Log.d(TAG, "Audio routing or car mode updated, re-evaluating AutoEQ hardware state")
+                    applyCurrentConfigToHardware()
+                }
         }
     }
 
@@ -127,7 +140,10 @@ class VantafynAudioEffectsManager(
         val currentState = _state.value
 
         runCatching {
-            if (!currentState.isEnabled || currentState.selectedPreset == null) {
+            val isHeadphoneActive = ConnectedAudioDeviceDetector.isHeadphoneOutputActive(appContext)
+            val shouldApply = currentState.isEnabled && currentState.selectedPreset != null && isHeadphoneActive
+
+            if (!shouldApply) {
                 // Bypass/Reset: set all bands to flat 0 dB and disable effect
                 val numBands = eq.numberOfBands
                 val flatBands = ArrayList<EqualizerBandInfo>(numBands.toInt())
@@ -146,7 +162,7 @@ class VantafynAudioEffectsManager(
                 }
                 eq.enabled = false
                 _state.update { it.copy(hardwareBands = flatBands) }
-                Log.d(TAG, "AutoEQ bypassed / disabled")
+                Log.d(TAG, "AutoEQ bypassed / disabled (enabled=${currentState.isEnabled}, hasPreset=${currentState.selectedPreset != null}, isHeadphoneActive=$isHeadphoneActive)")
                 return
             }
 

@@ -142,6 +142,7 @@ import androidx.compose.material.icons.rounded.EmojiEvents
 import dev.vantafyn.core.jellyfin.JellyfinAchievementUnlock
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CollectionsBookmark
+import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bookmark
@@ -283,6 +284,7 @@ import dev.vantafyn.core.downloads.DownloadMediaType
 import dev.vantafyn.core.downloads.DownloadStorageSummary
 import dev.vantafyn.core.downloads.DownloadState
 import dev.vantafyn.feature.home.auth.isOfflineAudio
+import dev.vantafyn.core.jellyfin.JellyfinGenreItem
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
@@ -3223,6 +3225,8 @@ private fun HomeScreen(
             onRetryLibrary = viewModel::retryLibraryItems,
             onSetLibraryFilter = viewModel::setLibraryItemsFilter,
             onSetLibraryAlphabet = viewModel::setLibraryAlphabetKey,
+            onSelectGenre = viewModel::selectGenre,
+            onClearGenre = viewModel::clearSelectedGenre,
             onSetViewMode = viewModel::setLibraryViewMode,
             onPreviousLibraryPage = viewModel::previousLibraryItemsPage,
             onNextLibraryPage = viewModel::nextLibraryItemsPage,
@@ -3449,6 +3453,8 @@ private fun MobileShellScreen(
     onRetryLibrary: () -> Unit,
     onSetLibraryFilter: (JellyfinLibraryItemFilter) -> Unit,
     onSetLibraryAlphabet: (String?) -> Unit,
+    onSelectGenre: (JellyfinGenreItem) -> Unit = {},
+    onClearGenre: () -> Unit = {},
     onSetViewMode: (LibraryViewMode) -> Unit,
     onPreviousLibraryPage: () -> Unit,
     onNextLibraryPage: () -> Unit,
@@ -4027,7 +4033,13 @@ private fun MobileShellScreen(
                         )
                         MobileDestination.LibraryDetail -> LibraryDetailScreen(
                             state = state,
-                            onBack = onNavigateBack,
+                            onBack = {
+                                if (state.libraryItemsFilter == JellyfinLibraryItemFilter.Genres && state.selectedGenre != null) {
+                                    onClearGenre()
+                                } else {
+                                    onNavigateBack()
+                                }
+                            },
                             onRetry = onRetryLibrary,
                             onSetFilter = onSetLibraryFilter,
                             onSetAlphabet = onSetLibraryAlphabet,
@@ -4038,6 +4050,8 @@ private fun MobileShellScreen(
                             onMediaLongPress = { mediaActionTarget = it },
                             onStartLiveTvPlayback = onStartLiveTvPlayback,
                             onPlaybackComingSoon = onPlaybackComingSoon,
+                            onSelectGenre = onSelectGenre,
+                            onClearGenre = onClearGenre,
                         )
                         MobileDestination.DiscoverVantafyn -> DiscoverVantafynScreen(
                             isAdmin = state.session?.user?.isAdministrator == true,
@@ -6805,6 +6819,8 @@ private fun LibraryDetailScreen(
     onMediaLongPress: (MediaActionTarget) -> Unit,
     onStartLiveTvPlayback: (java.util.UUID, String, String?) -> Unit,
     onPlaybackComingSoon: () -> Unit,
+    onSelectGenre: (JellyfinGenreItem) -> Unit = {},
+    onClearGenre: () -> Unit = {},
 ) {
     val library = state.selectedLibrary
     val liveTv = library?.collectionType.isLiveTvCollection()
@@ -6816,8 +6832,10 @@ private fun LibraryDetailScreen(
             name.contains("ebook") ||
             name == "books"
     }
+    val isGenreBrowser = !liveTv && state.libraryItemsFilter == JellyfinLibraryItemFilter.Genres && state.selectedGenre == null
+    val isGenreItems = !liveTv && state.libraryItemsFilter == JellyfinLibraryItemFilter.Genres && state.selectedGenre != null
     val showAlphabetRail = !liveTv && state.libraryItemsFilter.supportsLibraryAlphabetRail()
-    val visibleItems = if (state.isLibraryItemsLoading) emptyList() else state.libraryItems
+    val visibleItems = if (state.isLibraryItemsLoading || isGenreBrowser) emptyList() else state.libraryItems
     val screenRevealKey = library?.id?.toString().orEmpty()
     var screenRevealActive by remember(screenRevealKey) { mutableStateOf(true) }
     LaunchedEffect(screenRevealKey) {
@@ -6825,10 +6843,11 @@ private fun LibraryDetailScreen(
         delay(1_100L)
         screenRevealActive = false
     }
-    val contentRevealKey = "${library?.id}-${state.libraryItemsPage?.startIndex ?: -1}-${state.libraryItemsFilter.name}-${state.libraryItemsAlphabetKey.orEmpty()}-${state.libraryItemsPage?.totalItems ?: -1}"
-    var contentRevealActive by remember(contentRevealKey, state.isLibraryItemsLoading) { mutableStateOf(!state.isLibraryItemsLoading) }
-    LaunchedEffect(contentRevealKey, state.isLibraryItemsLoading) {
-        if (!state.isLibraryItemsLoading) {
+    val contentRevealKey = "${library?.id}-${state.libraryItemsPage?.startIndex ?: -1}-${state.libraryItemsFilter.name}-${state.selectedGenre?.id?.toString().orEmpty()}-${state.libraryItemsAlphabetKey.orEmpty()}-${state.libraryItemsPage?.totalItems ?: -1}"
+    val isAnyLoading = if (isGenreBrowser) state.isLibraryGenresLoading else state.isLibraryItemsLoading
+    var contentRevealActive by remember(contentRevealKey, isAnyLoading) { mutableStateOf(!isAnyLoading) }
+    LaunchedEffect(contentRevealKey, isAnyLoading) {
+        if (!isAnyLoading) {
             contentRevealActive = true
             delay(1_100L)
             contentRevealActive = false
@@ -6850,7 +6869,7 @@ private fun LibraryDetailScreen(
                     CompactBackButton(onClick = onBack)
                     ScreenTitle(library?.name ?: "Library", null)
                     Spacer(modifier = Modifier.weight(1f))
-                    if (!liveTv) LibraryViewToggle(selected = state.libraryViewMode, onSelect = onSetViewMode)
+                    if (!liveTv && !isGenreBrowser) LibraryViewToggle(selected = state.libraryViewMode, onSelect = onSetViewMode)
                 }
             }
         }
@@ -6863,6 +6882,60 @@ private fun LibraryDetailScreen(
                         isBooksOrAudiobooks = isBooksOrAudiobooks,
                         onSelected = onSetFilter,
                     )
+                }
+            }
+        }
+        if (isGenreItems) {
+            state.selectedGenre?.let { selectedGenre ->
+                item {
+                    HomeContentReveal(index = 2, animate = contentRevealActive, revealKey = contentRevealKey) {
+                        VantafynGlassTile(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = onClearGenre,
+                            cornerRadius = 14.dp,
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Category,
+                                        contentDescription = null,
+                                        tint = VantafynColors.Primary,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        text = selectedGenre.name,
+                                        color = VantafynColors.Ink,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Text(
+                                        text = "All Genres",
+                                        color = VantafynColors.Muted,
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Clear genre",
+                                        tint = VantafynColors.Muted,
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -6883,21 +6956,48 @@ private fun LibraryDetailScreen(
                 }
             }
         }
-        state.libraryItemsPage?.let { page ->
-            item {
-                HomeContentReveal(index = 3, animate = screenRevealActive, revealKey = screenRevealKey) {
-                    LibraryPageControls(
-                        page = page,
-                        loading = state.isLibraryItemsLoading,
-                        onPrevious = onPreviousPage,
-                        onNext = onNextPage,
-                    )
+        if (!isGenreBrowser) {
+            state.libraryItemsPage?.let { page ->
+                item {
+                    HomeContentReveal(index = 3, animate = screenRevealActive, revealKey = screenRevealKey) {
+                        LibraryPageControls(
+                            page = page,
+                            loading = state.isLibraryItemsLoading,
+                            onPrevious = onPreviousPage,
+                            onNext = onNextPage,
+                        )
+                    }
                 }
             }
         }
-        if (state.isLibraryItemsLoading) item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { HomeLoadingShelf() } }
-        state.libraryItemsError?.let { message ->
-            item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { VantafynErrorCard(message) { VantafynButton("Retry", onClick = onRetry) } } }
+        if (!isGenreBrowser && state.isLibraryItemsLoading) item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { HomeLoadingShelf() } }
+        if (isGenreBrowser && state.isLibraryGenresLoading) item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { HomeLoadingShelf() } }
+        if (!isGenreBrowser) {
+            state.libraryItemsError?.let { message ->
+                item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { VantafynErrorCard(message) { VantafynButton("Retry", onClick = onRetry) } } }
+            }
+        }
+        if (isGenreBrowser && !state.isLibraryGenresLoading && state.libraryGenres.isEmpty()) {
+            item {
+                HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) {
+                    LibraryItemsEmptyState(title = "No genres found", subtitle = "This library returned no genres.", icon = Icons.Rounded.Category)
+                }
+            }
+        }
+        if (isGenreBrowser && !state.isLibraryGenresLoading && state.libraryGenres.isNotEmpty()) {
+            val rows = state.libraryGenres.chunked(2)
+            itemsIndexed(rows, key = { index, row -> "genre-grid-${row.firstOrNull()?.id}-$index" }) { index, row ->
+                HomeContentReveal(index = index + 5, animate = contentRevealActive, revealKey = contentRevealKey) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+                        row.forEach { genre ->
+                            Box(modifier = Modifier.weight(1f)) {
+                                GenreGridCard(genre = genre) { onSelectGenre(genre) }
+                            }
+                        }
+                        if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                    }
+                }
+            }
         }
         if (liveTv) {
             item {
@@ -6914,10 +7014,12 @@ private fun LibraryDetailScreen(
                 }
             }
         }
-        if (!state.isLibraryItemsLoading && state.libraryItems.isEmpty() && state.libraryItemsError == null) {
+        if (!isGenreBrowser && !state.isLibraryItemsLoading && state.libraryItems.isEmpty() && state.libraryItemsError == null) {
             item {
                 HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) {
-                    if (liveTv) {
+                    if (isGenreItems) {
+                        LibraryItemsEmptyState(title = "No items in this genre", subtitle = "No items were found matching \"${state.selectedGenre?.name}\".", icon = Icons.Rounded.Category)
+                    } else if (liveTv) {
                         LibraryItemsEmptyState(title = "No Live TV channels", subtitle = "Jellyfin did not return channels for this profile/server.", icon = Icons.Rounded.Tv)
                     } else if (isBooksOrAudiobooks) {
                         LibraryItemsEmptyState(title = "No books or audiobooks", subtitle = "This library returned no books or audiobooks.", icon = Icons.Rounded.CollectionsBookmark)
@@ -6927,7 +7029,7 @@ private fun LibraryDetailScreen(
                 }
             }
         }
-        if (!state.isLibraryItemsLoading && state.libraryItems.isNotEmpty() && visibleItems.isEmpty()) {
+        if (!isGenreBrowser && !state.isLibraryItemsLoading && state.libraryItems.isNotEmpty() && visibleItems.isEmpty()) {
             item { HomeContentReveal(index = 4, animate = contentRevealActive, revealKey = contentRevealKey) { LibraryItemsEmptyState(title = "No matching items", subtitle = "Try All or a different filter.", icon = Icons.Rounded.Search) } }
         }
         if (visibleItems.isNotEmpty()) {
@@ -7008,16 +7110,18 @@ private fun LibraryDetailScreen(
                 }
             }
         }
-        state.libraryItemsPage?.let { page ->
-            if (page.totalPages > 1) {
-                item {
-                    HomeContentReveal(index = 8, animate = screenRevealActive, revealKey = screenRevealKey) {
-                        LibraryPageControls(
-                            page = page,
-                            loading = state.isLibraryItemsLoading,
-                            onPrevious = onPreviousPage,
-                            onNext = onNextPage,
-                        )
+        if (!isGenreBrowser) {
+            state.libraryItemsPage?.let { page ->
+                if (page.totalPages > 1) {
+                    item {
+                        HomeContentReveal(index = 8, animate = screenRevealActive, revealKey = screenRevealKey) {
+                            LibraryPageControls(
+                                page = page,
+                                loading = state.isLibraryItemsLoading,
+                                onPrevious = onPreviousPage,
+                                onNext = onNextPage,
+                            )
+                        }
                     }
                 }
             }
@@ -7033,7 +7137,9 @@ private fun LibraryFilterChips(
     onSelected: (JellyfinLibraryItemFilter) -> Unit,
 ) {
     val entries = if (isMusic) {
-        JellyfinLibraryItemFilter.entries.filter { it != JellyfinLibraryItemFilter.Unwatched }
+        JellyfinLibraryItemFilter.entries.filter { it != JellyfinLibraryItemFilter.Unwatched && it != JellyfinLibraryItemFilter.Genres }
+    } else if (isBooksOrAudiobooks) {
+        JellyfinLibraryItemFilter.entries.filter { it != JellyfinLibraryItemFilter.Genres }
     } else {
         JellyfinLibraryItemFilter.entries
     }
@@ -7286,10 +7392,11 @@ private val JellyfinLibraryItemFilter.label: String
         JellyfinLibraryItemFilter.AZ -> "A-Z"
         JellyfinLibraryItemFilter.Favorites -> "Favorites"
         JellyfinLibraryItemFilter.Unwatched -> "Unwatched"
+        JellyfinLibraryItemFilter.Genres -> "Genres"
     }
 
 private fun JellyfinLibraryItemFilter.supportsLibraryAlphabetRail(): Boolean =
-    this != JellyfinLibraryItemFilter.All && this != JellyfinLibraryItemFilter.RecentlyAdded
+    this != JellyfinLibraryItemFilter.All && this != JellyfinLibraryItemFilter.RecentlyAdded && this != JellyfinLibraryItemFilter.Genres
 
 private fun String?.isLiveTvCollection(): Boolean =
     this?.lowercase()?.replace(" ", "") in setOf("livetv", "livetvchannels")
@@ -19451,6 +19558,84 @@ private fun LibraryGridCard(library: JellyfinLibrary, onClick: () -> Unit) {
                 style = MaterialTheme.typography.bodyLarge,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun GenreGridCard(genre: JellyfinGenreItem, onClick: () -> Unit) {
+    VantafynGlassTile(
+        modifier = Modifier.fillMaxWidth(),
+        onClick = onClick,
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(0.dp),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(0.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(90.dp)
+                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                VantafynColors.Graphite,
+                                VantafynColors.Surface,
+                                Color(0xFF1E2430),
+                            ),
+                        ),
+                    ),
+            ) {
+                if (!genre.imageUrl.isNullOrBlank()) {
+                    ArtworkBox(
+                        imageUrl = genre.imageUrl,
+                        title = genre.name,
+                        wide = true,
+                        progress = null,
+                        onClick = onClick,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Movie,
+                            contentDescription = genre.name,
+                            tint = VantafynColors.Primary.copy(alpha = 0.45f),
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.White.copy(alpha = 0.045f),
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.28f),
+                                ),
+                            ),
+                        ),
+                )
+            }
+            Text(
+                genre.name,
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .fillMaxWidth()

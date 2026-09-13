@@ -13,5 +13,11 @@
                 <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH" />
             </intent-filter>
         </service>
+
+        <provider
+            android:name=".VantafynArtworkContentProvider"
+            android:authorities="${applicationId}.artwork"
+            android:exported="true"
+            android:grantUriPermissions="true" />
     </application>
 </manifest>

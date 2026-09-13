@@ -40,6 +40,14 @@ object VantafynArtworkLoader {
         override fun sizeOf(key: String, value: Bitmap): Int = 1
     }
 
+    fun getMemoryCachedBitmap(artworkUrl: String?): Bitmap? {
+        if (artworkUrl.isNullOrBlank()) return null
+        val cacheKey = getCacheKey(artworkUrl)
+        synchronized(memoryCache) {
+            return memoryCache.get(cacheKey)
+        }
+    }
+
     fun getCachedBitmap(context: Context, artworkUrl: String?, maxDimension: Int = DEFAULT_MAX_DIMENSION): Bitmap? {
         if (artworkUrl.isNullOrBlank()) return null
         val cacheKey = getCacheKey(artworkUrl)

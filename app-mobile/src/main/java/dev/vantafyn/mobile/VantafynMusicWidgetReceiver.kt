@@ -33,11 +33,11 @@ class VantafynMusicWidgetReceiver : GlanceAppWidgetReceiver() {
             VantafynMusicPlaybackService.ACTION_NEXT,
             VantafynMusicPlaybackService.ACTION_STOP -> {
                 try {
-                    context.startForegroundService(
+                    context.startService(
                         Intent(context, VantafynMusicPlaybackService::class.java).setAction(intent.action)
                     )
-                } catch (e: ForegroundServiceStartNotAllowedException) {
-                    Log.w("WidgetReceiver", "Cannot start foreground service from background", e)
+                } catch (e: Exception) {
+                    Log.w("WidgetReceiver", "Cannot send action to service", e)
                 }
                 return
             }

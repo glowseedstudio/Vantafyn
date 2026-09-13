@@ -19,6 +19,7 @@ import dev.vantafyn.core.downloads.toJsonString
 import kotlinx.coroutines.Dispatchers
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import dev.vantafyn.core.jellyfin.JellyfinAuthRepository
 import dev.vantafyn.core.jellyfin.JellyfinLyricLine
 import dev.vantafyn.core.jellyfin.JellyfinLyrics
 import dev.vantafyn.core.jellyfin.JellyfinMusicAlbum
@@ -69,6 +70,7 @@ import java.util.UUID
 
 class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val repositories = JellyfinRepositoryProvider(application)
+    private val authRepository: JellyfinAuthRepository = repositories.authRepository
     private val musicRepository: JellyfinMusicRepository = repositories.musicRepository
     private val mediaRepository: JellyfinMediaRepository = repositories.mediaRepository
     private val playbackRepository: JellyfinPlaybackRepository = repositories.playbackRepository
@@ -188,19 +190,34 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(isRadioActive = active) }
             }
         }
+        viewModelScope.launch {
+            AppForegroundStateRepository.isForeground.collect { isForeground ->
+                if (isForeground && _state.value.errorMessage != null && session != null) {
+                    loadHome()
+                }
+            }
+        }
     }
 
     fun bindSession(session: JellyfinSession?) {
         if (session == null) return
         dev.vantafyn.core.media.VantafynMediaCache.updateJellyfinSession(session)
-        if (this.session?.profileId == session.profileId && this.session?.server?.localId == session.server.localId && _state.value.home != null) return
-        if (this.session?.profileId != session.profileId || this.session?.server?.localId != session.server.localId) {
+        val profileChanged = this.session?.profileId != session.profileId
+        val serverChanged = this.session?.server?.localId != session.server.localId
+        val urlChanged = this.session?.server?.url != session.server.url
+        val tokenChanged = this.session?.accessToken != session.accessToken
+        val hadError = _state.value.errorMessage != null
+
+        if (profileChanged || serverChanged) {
             lyricsCache.clear()
             lyricsJob?.cancel()
             lyricsPrefetchJob?.cancel()
         }
         this.session = session
-        loadHome()
+
+        if (profileChanged || serverChanged || urlChanged || tokenChanged || hadError || _state.value.home == null) {
+            loadHome()
+        }
     }
 
     private fun getSubsonicCredentials(): SubsonicCredentials? {
@@ -218,7 +235,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         return mode == ExperienceMode.MusicOnly && backend == MusicBackendType.OpenSubsonic
     }
 
-    fun loadHome() {
+    fun loadHome(isRetryAfterRestore: Boolean = false) {
         if (isSubsonicActive()) {
             val creds = getSubsonicCredentials()
             if (creds != null) {
@@ -320,6 +337,18 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     loadHarmoniaPreviews(activeSession)
                 }
                 is JellyfinResult.Failure -> {
+                    if (!isRetryAfterRestore) {
+                        when (val restoreResult = authRepository.restoreSession(activeSession.profileId)) {
+                            is JellyfinResult.Success -> {
+                                val restored = restoreResult.value
+                                this@MusicViewModel.session = restored
+                                dev.vantafyn.core.media.VantafynMediaCache.updateJellyfinSession(restored)
+                                loadHome(isRetryAfterRestore = true)
+                                return@launch
+                            }
+                            is JellyfinResult.Failure -> Unit
+                        }
+                    }
                     if (_state.value.home == null) {
                         _state.update {
                             it.copy(isLoading = false, errorMessage = result.message)
