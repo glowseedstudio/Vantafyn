@@ -63,6 +63,7 @@ import dev.vantafyn.core.jellyfin.JellyfinQuickConnectRepository
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectSession
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
+import dev.vantafyn.core.jellyfin.JellyfinRemoteSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinRestoreFailureReason
 import dev.vantafyn.core.jellyfin.JellyfinSearchRepository
 import dev.vantafyn.core.jellyfin.JellyfinSearchResult
@@ -2677,6 +2678,166 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun openIdentifyDialog(id: UUID, title: String, subtitle: String?, itemType: String?, year: Int?) {
+        _state.update {
+            it.copy(
+                identifyDialog = VantafynIdentifyDialogState(
+                    itemId = id,
+                    itemType = itemType,
+                    title = title,
+                    titleQuery = title,
+                    yearQuery = year?.toString().orEmpty(),
+                ),
+            )
+        }
+        searchIdentify()
+    }
+
+    fun updateIdentifySearchQuery(title: String, year: String, providerId: String) {
+        _state.update { current ->
+            val dialog = current.identifyDialog ?: return@update current
+            current.copy(
+                identifyDialog = dialog.copy(
+                    titleQuery = title,
+                    yearQuery = year,
+                    providerIdQuery = providerId,
+                ),
+            )
+        }
+    }
+
+    fun searchIdentify() {
+        val session = _state.value.session ?: return
+        val dialog = _state.value.identifyDialog ?: return
+        val title = dialog.titleQuery.trim()
+        if (title.isBlank()) return
+        val year = dialog.yearQuery.trim().toIntOrNull()
+        val providerId = dialog.providerIdQuery.trim()
+        val providerIds = if (providerId.isNotBlank()) {
+            when {
+                providerId.startsWith("tt", ignoreCase = true) -> mapOf("Imdb" to providerId)
+                else -> mapOf("Tmdb" to providerId)
+            }
+        } else {
+            emptyMap()
+        }
+        _state.update { current ->
+            val d = current.identifyDialog ?: return@update current
+            current.copy(
+                identifyDialog = d.copy(
+                    isSearching = true,
+                    searchError = null,
+                    searchResults = emptyList(),
+                    selectedResult = null,
+                ),
+            )
+        }
+        viewModelScope.launch {
+            when (val result = mediaRepository.searchRemoteMetadata(
+                session = session,
+                itemId = dialog.itemId,
+                itemType = dialog.itemType,
+                title = title,
+                year = year,
+                providerIds = providerIds,
+            )) {
+                is JellyfinResult.Success -> {
+                    _state.update { current ->
+                        val d = current.identifyDialog ?: return@update current
+                        current.copy(
+                            identifyDialog = d.copy(
+                                isSearching = false,
+                                searchResults = result.value,
+                                searchError = if (result.value.isEmpty()) "No matches found on remote metadata providers." else null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { current ->
+                        val d = current.identifyDialog ?: return@update current
+                        current.copy(
+                            identifyDialog = d.copy(
+                                isSearching = false,
+                                searchError = result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun selectIdentifyResult(result: JellyfinRemoteSearchResult) {
+        _state.update { current ->
+            val d = current.identifyDialog ?: return@update current
+            current.copy(
+                identifyDialog = d.copy(
+                    selectedResult = if (d.selectedResult == result) null else result,
+                ),
+            )
+        }
+    }
+
+    fun setIdentifyReplaceImages(replace: Boolean) {
+        _state.update { current ->
+            val d = current.identifyDialog ?: return@update current
+            current.copy(
+                identifyDialog = d.copy(replaceAllImages = replace),
+            )
+        }
+    }
+
+    fun applyIdentifySelection() {
+        val session = _state.value.session ?: return
+        val dialog = _state.value.identifyDialog ?: return
+        val selected = dialog.selectedResult ?: return
+        _state.update { current ->
+            val d = current.identifyDialog ?: return@update current
+            current.copy(
+                identifyDialog = d.copy(isApplying = true, applyError = null),
+            )
+        }
+        viewModelScope.launch {
+            when (val result = mediaRepository.applyRemoteMetadata(
+                session = session,
+                itemId = dialog.itemId,
+                result = selected,
+                replaceAllImages = dialog.replaceAllImages,
+            )) {
+                is JellyfinResult.Success -> {
+                    _state.update { current ->
+                        current.copy(
+                            identifyDialog = null,
+                            mobileMessage = "Identification applied. Jellyfin is updating metadata in background.",
+                        )
+                    }
+                    if (_state.value.mobileDestination == MobileDestination.LibraryDetail) {
+                        retryLibraryItems()
+                    }
+                    if (_state.value.selectedMediaId == dialog.itemId) {
+                        openMedia(dialog.itemId)
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update { current ->
+                        val d = current.identifyDialog ?: return@update current
+                        current.copy(
+                            identifyDialog = d.copy(
+                                isApplying = false,
+                                applyError = result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun closeIdentifyDialog() {
+        _state.update { it.copy(identifyDialog = null) }
+    }
+
     fun openMedia(itemId: UUID) {
         val session = _state.value.session ?: return
         val current = _state.value
@@ -2794,6 +2955,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun navigateMobileBack() {
+        if (_state.value.identifyDialog != null) {
+            closeIdentifyDialog()
+            return
+        }
         val snapshot = _state.value
         when (snapshot.mobileDestination) {
             MobileDestination.Player -> exitPlayback(0L)
@@ -6243,6 +6408,23 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 }
 
+data class VantafynIdentifyDialogState(
+    val itemId: UUID,
+    val itemType: String?,
+    val title: String,
+    val titleQuery: String,
+    val yearQuery: String,
+    val providerIdQuery: String = "",
+    val isSearching: Boolean = false,
+    val searchError: String? = null,
+    val searchResults: List<JellyfinRemoteSearchResult> = emptyList(),
+    val selectedResult: JellyfinRemoteSearchResult? = null,
+    val replaceAllImages: Boolean = true,
+    val isApplying: Boolean = false,
+    val applySuccess: Boolean = false,
+    val applyError: String? = null,
+)
+
 data class VantafynHomeUiState(
     val step: VantafynSetupStep = VantafynSetupStep.Splash,
     val experienceMode: ExperienceMode = ExperienceMode.FullMedia,
@@ -6290,6 +6472,7 @@ data class VantafynHomeUiState(
     val libraryGenres: List<JellyfinGenreItem> = emptyList(),
     val isLibraryGenresLoading: Boolean = false,
     val selectedGenre: JellyfinGenreItem? = null,
+    val identifyDialog: VantafynIdentifyDialogState? = null,
     val libraryViewMode: LibraryViewMode = LibraryViewMode.Poster,
     val selectedMediaId: UUID? = null,
     val mediaDetail: JellyfinMediaDetail? = null,

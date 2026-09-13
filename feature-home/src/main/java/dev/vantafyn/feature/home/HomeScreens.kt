@@ -263,12 +263,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import kotlin.math.roundToInt
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -302,6 +305,7 @@ import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentBehavior
 import dev.vantafyn.core.jellyfin.JellyfinMediaSegmentType
 import dev.vantafyn.core.jellyfin.JellyfinPublicUser
 import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
+import dev.vantafyn.core.jellyfin.JellyfinRemoteSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSearchResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
@@ -371,6 +375,7 @@ import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import dev.vantafyn.core.ui.R as CoreUiR
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
+import dev.vantafyn.feature.home.auth.VantafynIdentifyDialogState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
 import dev.vantafyn.feature.home.auth.HomeSectionType
 import dev.vantafyn.feature.home.auth.MobileDestination
@@ -3345,6 +3350,21 @@ private fun HomeScreen(
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
             onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
+            onOpenIdentify = { target ->
+                viewModel.openIdentifyDialog(
+                    id = target.id,
+                    title = target.title,
+                    subtitle = target.subtitle,
+                    itemType = target.itemType,
+                    year = target.year,
+                )
+            },
+            onUpdateIdentifyQuery = viewModel::updateIdentifySearchQuery,
+            onSearchIdentify = viewModel::searchIdentify,
+            onSelectIdentifyResult = viewModel::selectIdentifyResult,
+            onSetIdentifyReplaceImages = viewModel::setIdentifyReplaceImages,
+            onApplyIdentify = viewModel::applyIdentifySelection,
+            onCloseIdentify = viewModel::closeIdentifyDialog,
             modifier = modifier,
         )
     } else {
@@ -3575,6 +3595,13 @@ private fun MobileShellScreen(
     onNotificationPermissionSettingsAction: () -> Unit,
     onSelectExperienceMode: (ExperienceMode) -> Unit = {},
     onSelectMusicBackend: (MusicBackendType) -> Unit = {},
+    onOpenIdentify: (MediaActionTarget) -> Unit = {},
+    onUpdateIdentifyQuery: (String, String, String) -> Unit = { _, _, _ -> },
+    onSearchIdentify: () -> Unit = {},
+    onSelectIdentifyResult: (JellyfinRemoteSearchResult) -> Unit = {},
+    onSetIdentifyReplaceImages: (Boolean) -> Unit = {},
+    onApplyIdentify: () -> Unit = {},
+    onCloseIdentify: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var mediaActionTarget by remember { mutableStateOf<MediaActionTarget?>(null) }
@@ -3667,9 +3694,11 @@ private fun MobileShellScreen(
         state.confirmLogout ||
         state.mobileMessage != null ||
         showMusicQuickPlayer ||
-        homeEditorOpen
+        homeEditorOpen ||
+        state.identifyDialog != null
     BackHandler(enabled = handlesSystemBack) {
         when {
+            state.identifyDialog != null -> onCloseIdentify()
             homeEditorTarget != null -> homeEditorTarget = null
             homeEditorAddRowsOpen -> homeEditorAddRowsOpen = false
             homeEditorOpen -> closeHomeEditor(discard = true)
@@ -4571,6 +4600,25 @@ private fun MobileShellScreen(
             } else {
                 null
             },
+            isAdmin = state.session?.user?.isAdministrator == true,
+            onIdentify = {
+                val t = mediaActionTarget
+                mediaActionTarget = null
+                if (t != null) {
+                    onOpenIdentify(t)
+                }
+            },
+        )
+    }
+    state.identifyDialog?.let { identifyState ->
+        MediaIdentifyDialog(
+            state = identifyState,
+            onUpdateQuery = onUpdateIdentifyQuery,
+            onSearch = onSearchIdentify,
+            onSelectResult = onSelectIdentifyResult,
+            onSetReplaceImages = onSetIdentifyReplaceImages,
+            onApply = onApplyIdentify,
+            onDismiss = onCloseIdentify,
         )
     }
 }
@@ -21540,6 +21588,7 @@ private data class MediaActionTarget(
     val inMyList: Boolean = false,
     val allowHomeCustomize: Boolean = false,
     val allowDownload: Boolean = true,
+    val year: Int? = null,
 )
 
 @Composable
@@ -21553,6 +21602,8 @@ private fun MediaContextMenu(
     onMarkUnwatched: () -> Unit,
     onDownload: () -> Unit,
     onCustomizeHome: (() -> Unit)? = null,
+    isAdmin: Boolean = false,
+    onIdentify: (() -> Unit)? = null,
 ) {
     val supportsMyList = target.itemType.supportsMyListAction()
     AlertDialog(
@@ -21586,6 +21637,9 @@ private fun MediaContextMenu(
                 }
                 if (target.allowDownload) {
                     ContextAction("↓", "Save offline", onDownload)
+                }
+                if (isAdmin && target.itemType.supportsIdentify() && onIdentify != null) {
+                    ContextAction("🔍", "Identify", onIdentify)
                 }
             }
         },
@@ -21623,13 +21677,13 @@ private fun getSubsonicCredentials(context: android.content.Context): dev.vantaf
 }
 
 private fun JellyfinMediaCard.toMediaActionTarget(): MediaActionTarget =
-    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite)
+    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite, year = year)
 
 private fun JellyfinMediaItem.toMediaActionTarget(inMyList: Boolean = false): MediaActionTarget =
-    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = inMyList || isFavorite)
+    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = inMyList || isFavorite, year = year)
 
 private fun JellyfinSearchResult.toMediaActionTarget(): MediaActionTarget =
-    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite)
+    MediaActionTarget(id = id, title = title, subtitle = subtitle, itemType = itemType, inMyList = isFavorite, year = year)
 
 private fun JellyfinHeroMediaItem.toMediaActionTarget(allowHomeCustomize: Boolean = false): MediaActionTarget =
     MediaActionTarget(
@@ -21639,6 +21693,7 @@ private fun JellyfinHeroMediaItem.toMediaActionTarget(allowHomeCustomize: Boolea
         itemType = "Media",
         allowHomeCustomize = allowHomeCustomize,
         allowDownload = false,
+        year = year,
     )
 
 private fun MobileDestination.bottomNavRoot(previous: MobileDestination): MobileDestination =
@@ -21683,6 +21738,17 @@ private fun String?.supportsMyListAction(): Boolean =
         equals("AudioBook", ignoreCase = true) ||
         equals("LiveTvChannel", ignoreCase = true) ||
         equals("LiveTvProgram", ignoreCase = true)
+
+private fun String?.supportsIdentify(): Boolean =
+    equals("Movie", ignoreCase = true) ||
+        equals("Series", ignoreCase = true) ||
+        equals("BoxSet", ignoreCase = true) ||
+        equals("MusicAlbum", ignoreCase = true) ||
+        equals("MusicArtist", ignoreCase = true) ||
+        equals("Book", ignoreCase = true) ||
+        equals("AudioBook", ignoreCase = true) ||
+        equals("Media", ignoreCase = true) ||
+        (this != null && (contains("Movie", ignoreCase = true) || contains("Series", ignoreCase = true) || contains("Show", ignoreCase = true)))
 
 private fun WatchPartyMediaScope.watchPartyLabel(): String =
     when (this) {
@@ -22505,4 +22571,371 @@ private fun FloatingSocialPanel(
         },
         dismissButton = {},
     )
+}
+
+@Composable
+private fun MediaIdentifyDialog(
+    state: VantafynIdentifyDialogState,
+    onUpdateQuery: (title: String, year: String, providerId: String) -> Unit,
+    onSearch: () -> Unit,
+    onSelectResult: (JellyfinRemoteSearchResult) -> Unit,
+    onSetReplaceImages: (Boolean) -> Unit,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Dialog(
+        onDismissRequest = {
+            if (!state.isApplying) {
+                onDismiss()
+            }
+        },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .padding(horizontal = 16.dp, vertical = 20.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            val maxHeightPx = maxHeight
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 520.dp)
+                    .heightIn(max = maxHeightPx * 0.92f)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(VantafynModalContainerColor)
+                    .vantafynAnimatedModalBorder(cornerRadius = 28.dp)
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Identify Media",
+                            color = VantafynColors.Ink,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                        )
+                        Text(
+                            state.title,
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        enabled = !state.isApplying,
+                    ) {
+                        Text("✕", color = VantafynColors.Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                VantafynTextField(
+                    value = state.titleQuery,
+                    onValueChange = { onUpdateQuery(it, state.yearQuery, state.providerIdQuery) },
+                    label = "Title",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    VantafynTextField(
+                        value = state.yearQuery,
+                        onValueChange = { onUpdateQuery(state.titleQuery, it.filter { c -> c.isDigit() }, state.providerIdQuery) },
+                        label = "Year (optional)",
+                        modifier = Modifier.weight(1f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    VantafynTextField(
+                        value = state.providerIdQuery,
+                        onValueChange = { onUpdateQuery(state.titleQuery, state.yearQuery, it) },
+                        label = "ID / Provider ID (optional)",
+                        modifier = Modifier.weight(1.4f),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    VantafynButton(
+                        text = if (state.isSearching) "Searching..." else "Search",
+                        onClick = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            onSearch()
+                        },
+                        enabled = state.titleQuery.isNotBlank() && !state.isSearching && !state.isApplying,
+                    )
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 2.dp),
+                    color = Color.White.copy(alpha = 0.08f),
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .fillMaxWidth(),
+                ) {
+                    when {
+                        state.isSearching -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(130.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                VantafynLoadingIndicator("Searching metadata providers...")
+                            }
+                        }
+                        state.searchError != null -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    state.searchError,
+                                    color = Color(0xFFFFB4B4),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                        state.searchResults.isEmpty() -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(90.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "Search above to find matches from metadata providers.",
+                                    color = VantafynColors.Muted,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                        else -> {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(state.searchResults) { result ->
+                                    val isSelected = state.selectedResult == result
+                                    val borderColor = if (isSelected) VantafynColors.Primary else Color.White.copy(alpha = 0.08f)
+                                    val bgColor = if (isSelected) VantafynColors.SurfaceHigh.copy(alpha = 0.9f) else Color.White.copy(alpha = 0.04f)
+
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .border(1.5.dp, borderColor, RoundedCornerShape(16.dp))
+                                            .background(bgColor)
+                                            .clickable(enabled = !state.isApplying) { onSelectResult(result) }
+                                            .padding(10.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .width(50.dp)
+                                                .height(75.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color.White.copy(alpha = 0.06f)),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            if (result.imageUrl != null) {
+                                                coil3.compose.AsyncImage(
+                                                    model = result.imageUrl,
+                                                    contentDescription = result.name,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop,
+                                                )
+                                            } else {
+                                                Text("🎬", fontSize = 20.sp)
+                                            }
+                                        }
+
+                                        Column(
+                                            modifier = Modifier.weight(1f),
+                                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            ) {
+                                                Text(
+                                                    result.name,
+                                                    color = VantafynColors.Ink,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                    modifier = Modifier.weight(1f, fill = false),
+                                                )
+                                                if (result.productionYear != null) {
+                                                    Text(
+                                                        "(${result.productionYear})",
+                                                        color = VantafynColors.Muted,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                    )
+                                                }
+                                            }
+                                            if (result.searchProviderName != null || result.providerIds.isNotEmpty()) {
+                                                val providerLabel = result.searchProviderName
+                                                    ?: result.providerIds.keys.joinToString(", ")
+                                                Text(
+                                                    providerLabel,
+                                                    color = VantafynColors.Primary,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                )
+                                            }
+                                            val overview = result.overview
+                                            if (!overview.isNullOrBlank()) {
+                                                Text(
+                                                    overview,
+                                                    color = VantafynColors.Muted,
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    maxLines = 2,
+                                                    overflow = TextOverflow.Ellipsis,
+                                                )
+                                            }
+                                        }
+
+                                        if (isSelected) {
+                                            Text(
+                                                "✓",
+                                                color = VantafynColors.Primary,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 18.sp,
+                                                modifier = Modifier.padding(end = 4.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(enabled = !state.isApplying) {
+                            onSetReplaceImages(!state.replaceAllImages)
+                        }
+                        .padding(vertical = 4.dp, horizontal = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Replace all existing images",
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        Text(
+                            "Download fresh posters and backdrops",
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    VantafynPremiumSwitchVisual(checked = state.replaceAllImages)
+                }
+
+                if (state.applyError != null) {
+                    Text(
+                        state.applyError,
+                        color = Color(0xFFFFB4B4),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    AdminMessageSecondaryButton(
+                        text = "Cancel",
+                        enabled = !state.isApplying,
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                    )
+                    val applyEnabled = state.selectedResult != null && !state.isApplying
+                    val buttonShape = RoundedCornerShape(20.dp)
+                    val gradient = if (applyEnabled) {
+                        VantafynGradients.accentHorizontal()
+                    } else {
+                        Brush.horizontalGradient(
+                            listOf(
+                                VantafynColors.SurfaceHigh.copy(alpha = 0.82f),
+                                Color(0xFF252B3D).copy(alpha = 0.82f),
+                            ),
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(58.dp)
+                            .padding(2.dp)
+                            .clip(buttonShape)
+                            .background(gradient)
+                            .border(
+                                BorderStroke(
+                                    1.dp,
+                                    Color.White.copy(alpha = if (applyEnabled) 0.16f else 0.08f),
+                                ),
+                                buttonShape,
+                            )
+                            .clickable(
+                                enabled = applyEnabled,
+                                onClick = onApply,
+                            )
+                            .padding(horizontal = VantafynSpacing.md),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = if (state.isApplying) "Applying" else "Apply",
+                                color = if (applyEnabled) Color(0xFFF8FAFF) else VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                textAlign = TextAlign.Center,
+                                maxLines = 1,
+                            )
+                            if (state.isApplying) {
+                                VantafynGradientSpinner(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

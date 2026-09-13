@@ -32,6 +32,7 @@ import org.jellyfin.sdk.api.client.extensions.artistsApi
 import org.jellyfin.sdk.api.client.extensions.devicesApi
 import org.jellyfin.sdk.api.client.extensions.genresApi
 import org.jellyfin.sdk.api.client.extensions.imageApi
+import org.jellyfin.sdk.api.client.extensions.itemLookupApi
 import org.jellyfin.sdk.api.client.extensions.itemsApi
 import org.jellyfin.sdk.api.client.extensions.libraryApi
 import org.jellyfin.sdk.api.client.extensions.liveTvApi
@@ -56,8 +57,19 @@ import org.jellyfin.sdk.createJellyfin
 import org.jellyfin.sdk.model.ClientInfo
 import org.jellyfin.sdk.model.DeviceInfo
 import org.jellyfin.sdk.model.FileInfo
+import org.jellyfin.sdk.model.api.AlbumInfo
+import org.jellyfin.sdk.model.api.AlbumInfoRemoteSearchQuery
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.BookInfo
+import org.jellyfin.sdk.model.api.BookInfoRemoteSearchQuery
+import org.jellyfin.sdk.model.api.BoxSetInfo
+import org.jellyfin.sdk.model.api.BoxSetInfoRemoteSearchQuery
+import org.jellyfin.sdk.model.api.MovieInfo
+import org.jellyfin.sdk.model.api.MovieInfoRemoteSearchQuery
+import org.jellyfin.sdk.model.api.RemoteSearchResult
+import org.jellyfin.sdk.model.api.SeriesInfo
+import org.jellyfin.sdk.model.api.SeriesInfoRemoteSearchQuery
 import org.jellyfin.sdk.model.api.ChannelType
 import org.jellyfin.sdk.model.api.CreatePlaylistDto
 import org.jellyfin.sdk.model.api.CreateUserByName
@@ -1034,6 +1046,150 @@ class SdkJellyfinMediaRepository(
                     ),
                 )
                 JellyfinResult.Success(response.items.map { it.toMediaItem(api, shapeFor(it.type)) })
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun searchRemoteMetadata(
+        session: JellyfinSession,
+        itemId: java.util.UUID,
+        itemType: String?,
+        title: String,
+        year: Int?,
+        providerIds: Map<String, String>,
+    ): JellyfinResult<List<JellyfinRemoteSearchResult>> =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val type = itemType?.lowercase().orEmpty()
+                val results: List<RemoteSearchResult> = when {
+                    type.contains("series") || type.contains("show") || type == "tv" -> {
+                        val response by api.itemLookupApi.getSeriesRemoteSearchResults(
+                            SeriesInfoRemoteSearchQuery(
+                                searchInfo = SeriesInfo(
+                                    name = title,
+                                    year = year,
+                                    providerIds = providerIds,
+                                    premiereDate = null,
+                                    isAutomated = false,
+                                ),
+                                itemId = itemId,
+                                searchProviderName = null,
+                                includeDisabledProviders = false,
+                            ),
+                        )
+                        response
+                    }
+                    type.contains("boxset") || type.contains("collection") -> {
+                        val response by api.itemLookupApi.getBoxSetRemoteSearchResults(
+                            BoxSetInfoRemoteSearchQuery(
+                                searchInfo = BoxSetInfo(
+                                    name = title,
+                                    year = year,
+                                    providerIds = providerIds,
+                                    premiereDate = null,
+                                    isAutomated = false,
+                                ),
+                                itemId = itemId,
+                                searchProviderName = null,
+                                includeDisabledProviders = false,
+                            ),
+                        )
+                        response
+                    }
+                    type.contains("album") -> {
+                        val response by api.itemLookupApi.getMusicAlbumRemoteSearchResults(
+                            AlbumInfoRemoteSearchQuery(
+                                searchInfo = AlbumInfo(
+                                    name = title,
+                                    year = year,
+                                    providerIds = providerIds,
+                                    premiereDate = null,
+                                    isAutomated = false,
+                                    albumArtists = emptyList(),
+                                    artistProviderIds = emptyMap(),
+                                    songInfos = emptyList(),
+                                ),
+                                itemId = itemId,
+                                searchProviderName = null,
+                                includeDisabledProviders = false,
+                            ),
+                        )
+                        response
+                    }
+                    type.contains("book") -> {
+                        val response by api.itemLookupApi.getBookRemoteSearchResults(
+                            BookInfoRemoteSearchQuery(
+                                searchInfo = BookInfo(
+                                    name = title,
+                                    year = year,
+                                    providerIds = providerIds,
+                                    premiereDate = null,
+                                    isAutomated = false,
+                                    seriesName = null,
+                                ),
+                                itemId = itemId,
+                                searchProviderName = null,
+                                includeDisabledProviders = false,
+                            ),
+                        )
+                        response
+                    }
+                    else -> {
+                        val response by api.itemLookupApi.getMovieRemoteSearchResults(
+                            MovieInfoRemoteSearchQuery(
+                                searchInfo = MovieInfo(
+                                    name = title,
+                                    year = year,
+                                    providerIds = providerIds,
+                                    premiereDate = null,
+                                    isAutomated = false,
+                                ),
+                                itemId = itemId,
+                                searchProviderName = null,
+                                includeDisabledProviders = false,
+                            ),
+                        )
+                        response
+                    }
+                }
+                val mapped = results.map { result ->
+                    val cleanProviderIds = result.providerIds?.entries?.mapNotNull { entry ->
+                        entry.value?.let { v -> entry.key to v }
+                    }?.toMap() ?: emptyMap()
+                    JellyfinRemoteSearchResult(
+                        name = result.name.orEmpty(),
+                        productionYear = result.productionYear,
+                        imageUrl = result.imageUrl,
+                        overview = result.overview,
+                        providerIds = cleanProviderIds,
+                        searchProviderName = result.searchProviderName,
+                        rawResult = result,
+                    )
+                }
+                JellyfinResult.Success(mapped)
+            } catch (throwable: Throwable) {
+                JellyfinResult.Failure(toUserMessage(throwable), throwable)
+            }
+        }
+
+    override suspend fun applyRemoteMetadata(
+        session: JellyfinSession,
+        itemId: java.util.UUID,
+        result: JellyfinRemoteSearchResult,
+        replaceAllImages: Boolean,
+    ): JellyfinResult<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val rawResult = result.rawResult ?: throw IllegalArgumentException("No raw search result available")
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.itemLookupApi.applySearchCriteria(
+                    itemId = itemId,
+                    replaceAllImages = replaceAllImages,
+                    data = rawResult,
+                )
+                JellyfinResult.Success(Unit)
             } catch (throwable: Throwable) {
                 JellyfinResult.Failure(toUserMessage(throwable), throwable)
             }

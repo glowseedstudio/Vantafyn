@@ -2,6 +2,7 @@ package dev.vantafyn.core.jellyfin
 
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import org.jellyfin.sdk.model.api.RemoteSearchResult
 
 data class JellyfinServerConfig(
     val url: String,
@@ -222,6 +223,16 @@ data class JellyfinGenreItem(
     val id: UUID,
     val name: String,
     val imageUrl: String? = null,
+)
+
+data class JellyfinRemoteSearchResult(
+    val name: String,
+    val productionYear: Int? = null,
+    val imageUrl: String? = null,
+    val overview: String? = null,
+    val providerIds: Map<String, String> = emptyMap(),
+    val searchProviderName: String? = null,
+    val rawResult: RemoteSearchResult? = null,
 )
 
 enum class MusicSongsFilter(val label: String) {
@@ -1141,6 +1152,20 @@ interface JellyfinMediaRepository {
     suspend fun refreshFavoriteState(session: JellyfinSession, itemId: UUID): JellyfinResult<Boolean>
     suspend fun setPlayed(session: JellyfinSession, itemId: UUID, isPlayed: Boolean): JellyfinResult<Boolean>
     suspend fun getPersonFilmography(session: JellyfinSession, personId: UUID): JellyfinResult<List<JellyfinMediaItem>>
+    suspend fun searchRemoteMetadata(
+        session: JellyfinSession,
+        itemId: UUID,
+        itemType: String?,
+        title: String,
+        year: Int? = null,
+        providerIds: Map<String, String> = emptyMap(),
+    ): JellyfinResult<List<JellyfinRemoteSearchResult>>
+    suspend fun applyRemoteMetadata(
+        session: JellyfinSession,
+        itemId: UUID,
+        result: JellyfinRemoteSearchResult,
+        replaceAllImages: Boolean = true,
+    ): JellyfinResult<Unit>
 }
 
 interface JellyfinPlaybackRepository {
