@@ -154,12 +154,15 @@ import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.DragIndicator
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.FastRewind
+import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Link
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Logout
 import androidx.compose.material.icons.rounded.Favorite
@@ -287,6 +290,8 @@ import dev.vantafyn.core.downloads.DownloadMediaType
 import dev.vantafyn.core.downloads.DownloadStorageSummary
 import dev.vantafyn.core.downloads.DownloadState
 import dev.vantafyn.feature.home.auth.isOfflineAudio
+import dev.vantafyn.core.jellyfin.JellyfinChapter
+import dev.vantafyn.core.jellyfin.isAudiobookMedia
 import dev.vantafyn.core.jellyfin.JellyfinGenreItem
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
@@ -377,6 +382,24 @@ import dev.vantafyn.core.ui.R as CoreUiR
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
 import dev.vantafyn.feature.home.auth.VantafynIdentifyDialogState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
+import dev.vantafyn.feature.home.mcu.*
+import dev.vantafyn.feature.home.saw.*
+import dev.vantafyn.feature.home.residentevil.*
+import dev.vantafyn.feature.home.potter.*
+import dev.vantafyn.feature.home.hunger.*
+import dev.vantafyn.feature.home.scream.*
+import dev.vantafyn.feature.home.matrix.*
+import dev.vantafyn.feature.home.jumanji.*
+import dev.vantafyn.feature.home.jurassic.*
+import dev.vantafyn.feature.home.pirates.*
+import dev.vantafyn.feature.home.pokemon.*
+import dev.vantafyn.feature.home.scary.*
+import dev.vantafyn.feature.home.twilight.*
+import dev.vantafyn.feature.home.underworld.*
+import dev.vantafyn.feature.home.xmen.*
+import dev.vantafyn.feature.home.mordor.*
+import dev.vantafyn.feature.home.gift.*
+import androidx.compose.material.icons.rounded.CardGiftcard
 import dev.vantafyn.feature.home.auth.HomeSectionType
 import dev.vantafyn.feature.home.auth.MobileDestination
 import dev.vantafyn.feature.home.auth.ThemeMusicVolume
@@ -3179,6 +3202,7 @@ private fun HomeScreen(
     if (!tv) {
         MobileShellScreen(
             state = state,
+            viewModel = viewModel,
             isCarMode = isCarMode,
             onRetryHome = viewModel::retryLibraries,
             onSwitchUser = viewModel::showProfilePicker,
@@ -3280,6 +3304,7 @@ private fun HomeScreen(
             onSetDownloadWifiOnlyDefault = viewModel::setDownloadWifiOnlyDefault,
             onStartPlayback = { viewModel.startPlayback() },
             onStartPlaybackFromBeginning = viewModel::startPlaybackFromBeginning,
+            onStartAudiobookChapter = viewModel::startAudiobookChapter,
             onStartEpisodePlayback = viewModel::startEpisodePlayback,
             onSelectSeason = viewModel::selectSeason,
             onRetryPlayback = viewModel::retryPlayback,
@@ -3350,21 +3375,6 @@ private fun HomeScreen(
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
             onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
-            onOpenIdentify = { target ->
-                viewModel.openIdentifyDialog(
-                    id = target.id,
-                    title = target.title,
-                    subtitle = target.subtitle,
-                    itemType = target.itemType,
-                    year = target.year,
-                )
-            },
-            onUpdateIdentifyQuery = viewModel::updateIdentifySearchQuery,
-            onSearchIdentify = viewModel::searchIdentify,
-            onSelectIdentifyResult = viewModel::selectIdentifyResult,
-            onSetIdentifyReplaceImages = viewModel::setIdentifyReplaceImages,
-            onApplyIdentify = viewModel::applyIdentifySelection,
-            onCloseIdentify = viewModel::closeIdentifyDialog,
             modifier = modifier,
         )
     } else {
@@ -3429,6 +3439,7 @@ private fun TvHomeScreen(
 @Composable
 private fun MobileShellScreen(
     state: VantafynHomeUiState,
+    viewModel: VantafynHomeViewModel,
     isCarMode: Boolean = false,
     onRetryHome: () -> Unit,
     onSwitchUser: () -> Unit,
@@ -3523,6 +3534,7 @@ private fun MobileShellScreen(
     onSetDownloadWifiOnlyDefault: (Boolean) -> Unit,
     onStartPlayback: () -> Unit,
     onStartPlaybackFromBeginning: () -> Unit,
+    onStartAudiobookChapter: (JellyfinChapter) -> Unit = {},
     onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
     onSelectSeason: (java.util.UUID?) -> Unit,
     onRetryPlayback: () -> Unit,
@@ -3595,13 +3607,6 @@ private fun MobileShellScreen(
     onNotificationPermissionSettingsAction: () -> Unit,
     onSelectExperienceMode: (ExperienceMode) -> Unit = {},
     onSelectMusicBackend: (MusicBackendType) -> Unit = {},
-    onOpenIdentify: (MediaActionTarget) -> Unit = {},
-    onUpdateIdentifyQuery: (String, String, String) -> Unit = { _, _, _ -> },
-    onSearchIdentify: () -> Unit = {},
-    onSelectIdentifyResult: (JellyfinRemoteSearchResult) -> Unit = {},
-    onSetIdentifyReplaceImages: (Boolean) -> Unit = {},
-    onApplyIdentify: () -> Unit = {},
-    onCloseIdentify: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var mediaActionTarget by remember { mutableStateOf<MediaActionTarget?>(null) }
@@ -3658,6 +3663,11 @@ private fun MobileShellScreen(
     val haptic = LocalHapticFeedback.current
     val musicController = remember(context) { MusicPlaybackController.get(context) }
     val musicPlayback by musicController.state.collectAsStateWithLifecycle()
+    LaunchedEffect(musicPlayback.isAudiobookMode, musicPlayback.isPlaying) {
+        if (musicPlayback.isAudiobookMode && musicPlayback.isPlaying) {
+            showMusicQuickPlayer = true
+        }
+    }
     fun closeHomeEditor(discard: Boolean) {
         homeEditorTarget = null
         homeEditorAddRowsOpen = false
@@ -3695,10 +3705,48 @@ private fun MobileShellScreen(
         state.mobileMessage != null ||
         showMusicQuickPlayer ||
         homeEditorOpen ||
-        state.identifyDialog != null
+        state.identifyDialog != null ||
+        state.enterCodeDialog != null ||
+        state.mcuWatchGuideDialog != null ||
+        state.sawWatchGuideDialog != null ||
+        state.residentEvilWatchGuideDialog != null ||
+        state.harryPotterWatchGuideDialog != null ||
+        state.hungerGamesWatchGuideDialog != null ||
+        state.screamWatchGuideDialog != null ||
+        state.matrixWatchGuideDialog != null ||
+        state.jumanjiWatchGuideDialog != null ||
+        state.jurassicWatchGuideDialog != null ||
+        state.piratesWatchGuideDialog != null ||
+        state.pokemonWatchGuideDialog != null ||
+        state.scaryMovieWatchGuideDialog != null ||
+        state.twilightWatchGuideDialog != null ||
+        state.underworldWatchGuideDialog != null ||
+        state.xMenWatchGuideDialog != null ||
+        state.middleEarthWatchGuideDialog != null ||
+        state.showAdminCodeGiftDialog ||
+        state.pendingReceivedGift != null
     BackHandler(enabled = handlesSystemBack) {
         when {
-            state.identifyDialog != null -> onCloseIdentify()
+            state.pendingReceivedGift != null -> viewModel.dismissReceivedGift()
+            state.showAdminCodeGiftDialog -> viewModel.closeAdminCodeGiftDialog()
+            state.middleEarthWatchGuideDialog != null -> viewModel.closeMiddleEarthGuide()
+            state.xMenWatchGuideDialog != null -> viewModel.closeXMenGuide()
+            state.underworldWatchGuideDialog != null -> viewModel.closeUnderworldGuide()
+            state.twilightWatchGuideDialog != null -> viewModel.closeTwilightGuide()
+            state.scaryMovieWatchGuideDialog != null -> viewModel.closeScaryMovieGuide()
+            state.pokemonWatchGuideDialog != null -> viewModel.closePokemonGuide()
+            state.piratesWatchGuideDialog != null -> viewModel.closePiratesGuide()
+            state.jurassicWatchGuideDialog != null -> viewModel.closeJurassicGuide()
+            state.jumanjiWatchGuideDialog != null -> viewModel.closeJumanjiGuide()
+            state.matrixWatchGuideDialog != null -> viewModel.closeMatrixGuide()
+            state.screamWatchGuideDialog != null -> viewModel.closeScreamGuide()
+            state.hungerGamesWatchGuideDialog != null -> viewModel.closeHungerGamesGuide()
+            state.harryPotterWatchGuideDialog != null -> viewModel.closeHarryPotterGuide()
+            state.residentEvilWatchGuideDialog != null -> viewModel.closeResidentEvilGuide()
+            state.sawWatchGuideDialog != null -> viewModel.closeSawGuide()
+            state.mcuWatchGuideDialog != null -> viewModel.closeMcuGuide()
+            state.enterCodeDialog != null -> viewModel.closeEnterCodeDialog()
+            state.identifyDialog != null -> viewModel.closeIdentifyDialog()
             homeEditorTarget != null -> homeEditorTarget = null
             homeEditorAddRowsOpen -> homeEditorAddRowsOpen = false
             homeEditorOpen -> closeHomeEditor(discard = true)
@@ -3742,6 +3790,7 @@ private fun MobileShellScreen(
                             onRetry = onRetryHome,
                             onSearch = { onNavigate(MobileDestination.Search) },
                             onProfile = { onNavigate(MobileDestination.Profile) },
+                            onOpenSavedGuides = viewModel::openEnterCodeDialog,
                             onOpenAchievements = onOpenAchievements,
                             onOpenLibrary = { library ->
                                 if (!homeEditorOpen) onOpenLibrary(library)
@@ -3787,8 +3836,22 @@ private fun MobileShellScreen(
                     onRetry = onRetryMedia,
                     onOpenMedia = onOpenMedia,
                     onPlaybackComingSoon = onPlaybackComingSoon,
-                    onStartPlayback = onStartPlayback,
-                    onStartPlaybackFromBeginning = onStartPlaybackFromBeginning,
+                    onStartPlayback = {
+                        if (state.mediaDetail?.isAudiobookMedia == true) {
+                            showMusicQuickPlayer = true
+                        }
+                        onStartPlayback()
+                    },
+                    onStartPlaybackFromBeginning = {
+                        if (state.mediaDetail?.isAudiobookMedia == true) {
+                            showMusicQuickPlayer = true
+                        }
+                        onStartPlaybackFromBeginning()
+                    },
+                    onStartAudiobookChapter = { chapter ->
+                        showMusicQuickPlayer = true
+                        onStartAudiobookChapter(chapter)
+                    },
                     onStartEpisodePlayback = onStartEpisodePlayback,
                     onSelectSeason = onSelectSeason,
                     themeMusicEnabled = state.themeMusicEnabled,
@@ -4023,6 +4086,7 @@ private fun MobileShellScreen(
                             onDiscoverVantafyn = { onNavigate(MobileDestination.DiscoverVantafyn) },
                             onSelectExperienceMode = onSelectExperienceMode,
                             onSelectMusicBackend = onSelectMusicBackend,
+                            onOpenAdminCodeGiftDialog = viewModel::openAdminCodeGiftDialog,
                         )
                         MobileDestination.DeviceQuickConnect -> DeviceQuickConnectScreen(
                             state = state,
@@ -4605,7 +4669,13 @@ private fun MobileShellScreen(
                 val t = mediaActionTarget
                 mediaActionTarget = null
                 if (t != null) {
-                    onOpenIdentify(t)
+                    viewModel.openIdentifyDialog(
+                        id = t.id,
+                        title = t.title,
+                        subtitle = t.subtitle,
+                        itemType = t.itemType,
+                        year = t.year,
+                    )
                 }
             },
         )
@@ -4613,12 +4683,295 @@ private fun MobileShellScreen(
     state.identifyDialog?.let { identifyState ->
         MediaIdentifyDialog(
             state = identifyState,
-            onUpdateQuery = onUpdateIdentifyQuery,
-            onSearch = onSearchIdentify,
-            onSelectResult = onSelectIdentifyResult,
-            onSetReplaceImages = onSetIdentifyReplaceImages,
-            onApply = onApplyIdentify,
-            onDismiss = onCloseIdentify,
+            onUpdateQuery = viewModel::updateIdentifySearchQuery,
+            onSearch = viewModel::searchIdentify,
+            onSelectResult = viewModel::selectIdentifyResult,
+            onSetReplaceImages = viewModel::setIdentifyReplaceImages,
+            onApply = viewModel::applyIdentifySelection,
+            onDismiss = viewModel::closeIdentifyDialog,
+        )
+    }
+    state.enterCodeDialog?.let { enterCodeState ->
+        EnterCodeDialog(
+            onDismiss = viewModel::closeEnterCodeDialog,
+            onSubmitCode = viewModel::submitUnlockCode,
+            onOpenMcuGuide = viewModel::openMcuGuide,
+            onOpenSawGuide = viewModel::openSawGuide,
+            onOpenResidentEvilGuide = viewModel::openResidentEvilGuide,
+            onOpenHarryPotterGuide = viewModel::openHarryPotterGuide,
+            onOpenHungerGamesGuide = viewModel::openHungerGamesGuide,
+            onOpenScreamGuide = viewModel::openScreamGuide,
+            onOpenMatrixGuide = viewModel::openMatrixGuide,
+            onOpenJumanjiGuide = viewModel::openJumanjiGuide,
+            onOpenJurassicGuide = viewModel::openJurassicGuide,
+            onOpenPiratesGuide = viewModel::openPiratesGuide,
+            onOpenPokemonGuide = viewModel::openPokemonGuide,
+            onOpenScaryMovieGuide = viewModel::openScaryMovieGuide,
+            onOpenTwilightGuide = viewModel::openTwilightGuide,
+            onOpenUnderworldGuide = viewModel::openUnderworldGuide,
+            onOpenXMenGuide = viewModel::openXMenGuide,
+            onOpenMiddleEarthGuide = viewModel::openMiddleEarthGuide,
+            isMcuUnlocked = enterCodeState.isMcuUnlocked,
+            isSawUnlocked = enterCodeState.isSawUnlocked,
+            isResidentEvilUnlocked = enterCodeState.isResidentEvilUnlocked,
+            isHarryPotterUnlocked = enterCodeState.isHarryPotterUnlocked,
+            isHungerGamesUnlocked = enterCodeState.isHungerGamesUnlocked,
+            isScreamUnlocked = enterCodeState.isScreamUnlocked,
+            isMatrixUnlocked = enterCodeState.isMatrixUnlocked,
+            isJumanjiUnlocked = enterCodeState.isJumanjiUnlocked,
+            isJurassicUnlocked = enterCodeState.isJurassicUnlocked,
+            isPiratesUnlocked = enterCodeState.isPiratesUnlocked,
+            isPokemonUnlocked = enterCodeState.isPokemonUnlocked,
+            isScaryMovieUnlocked = enterCodeState.isScaryMovieUnlocked,
+            isTwilightUnlocked = enterCodeState.isTwilightUnlocked,
+            isUnderworldUnlocked = enterCodeState.isUnderworldUnlocked,
+            isXMenUnlocked = enterCodeState.isXMenUnlocked,
+            isMiddleEarthUnlocked = enterCodeState.isMiddleEarthUnlocked,
+            errorMessage = enterCodeState.errorMessage,
+            isSubmitting = enterCodeState.isSubmitting,
+        )
+    }
+    state.mcuWatchGuideDialog?.let { mcuState ->
+        McuWatchGuideDialog(
+            movies = mcuState.movies,
+            isLoading = mcuState.isLoading,
+            errorMessage = mcuState.errorMessage,
+            sortMode = mcuState.sortMode,
+            filterMode = mcuState.filterMode,
+            onToggleSort = viewModel::setMcuSortMode,
+            onSelectFilter = viewModel::setMcuFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadMcuWatchStatus,
+            onDismiss = viewModel::closeMcuGuide,
+        )
+    }
+    state.sawWatchGuideDialog?.let { sawState ->
+        SawWatchGuideDialog(
+            movies = sawState.movies,
+            isLoading = sawState.isLoading,
+            errorMessage = sawState.errorMessage,
+            sortMode = sawState.sortMode,
+            filterMode = sawState.filterMode,
+            onToggleSort = viewModel::setSawSortMode,
+            onSelectFilter = viewModel::setSawFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadSawWatchStatus,
+            onDismiss = viewModel::closeSawGuide,
+        )
+    }
+    state.residentEvilWatchGuideDialog?.let { reState ->
+        ResidentEvilWatchGuideDialog(
+            movies = reState.movies,
+            isLoading = reState.isLoading,
+            errorMessage = reState.errorMessage,
+            sortMode = reState.sortMode,
+            filterMode = reState.filterMode,
+            onToggleSort = viewModel::setResidentEvilSortMode,
+            onSelectFilter = viewModel::setResidentEvilFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadResidentEvilWatchStatus,
+            onDismiss = viewModel::closeResidentEvilGuide,
+        )
+    }
+    state.harryPotterWatchGuideDialog?.let { hpState ->
+        HarryPotterWatchGuideDialog(
+            movies = hpState.movies,
+            isLoading = hpState.isLoading,
+            errorMessage = hpState.errorMessage,
+            sortMode = hpState.sortMode,
+            filterMode = hpState.filterMode,
+            onToggleSort = viewModel::setHarryPotterSortMode,
+            onSelectFilter = viewModel::setHarryPotterFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadHarryPotterWatchStatus,
+            onDismiss = viewModel::closeHarryPotterGuide,
+        )
+    }
+    state.hungerGamesWatchGuideDialog?.let { hgState ->
+        HungerGamesWatchGuideDialog(
+            movies = hgState.movies,
+            isLoading = hgState.isLoading,
+            errorMessage = hgState.errorMessage,
+            sortMode = hgState.sortMode,
+            filterMode = hgState.filterMode,
+            onToggleSort = viewModel::setHungerGamesSortMode,
+            onSelectFilter = viewModel::setHungerGamesFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadHungerGamesWatchStatus,
+            onDismiss = viewModel::closeHungerGamesGuide,
+        )
+    }
+    state.screamWatchGuideDialog?.let { screamState ->
+        ScreamWatchGuideDialog(
+            movies = screamState.movies,
+            isLoading = screamState.isLoading,
+            errorMessage = screamState.errorMessage,
+            sortMode = screamState.sortMode,
+            filterMode = screamState.filterMode,
+            onToggleSort = viewModel::setScreamSortMode,
+            onSelectFilter = viewModel::setScreamFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadScreamWatchStatus,
+            onDismiss = viewModel::closeScreamGuide,
+        )
+    }
+    state.matrixWatchGuideDialog?.let { matrixState ->
+        MatrixWatchGuideDialog(
+            movies = matrixState.movies,
+            isLoading = matrixState.isLoading,
+            errorMessage = matrixState.errorMessage,
+            sortMode = matrixState.sortMode,
+            filterMode = matrixState.filterMode,
+            onToggleSort = viewModel::setMatrixSortMode,
+            onSelectFilter = viewModel::setMatrixFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadMatrixWatchStatus,
+            onDismiss = viewModel::closeMatrixGuide,
+        )
+    }
+    state.jumanjiWatchGuideDialog?.let { jumanjiState ->
+        JumanjiWatchGuideDialog(
+            movies = jumanjiState.movies,
+            isLoading = jumanjiState.isLoading,
+            errorMessage = jumanjiState.errorMessage,
+            sortMode = jumanjiState.sortMode,
+            filterMode = jumanjiState.filterMode,
+            onToggleSort = viewModel::setJumanjiSortMode,
+            onSelectFilter = viewModel::setJumanjiFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadJumanjiWatchStatus,
+            onDismiss = viewModel::closeJumanjiGuide,
+        )
+    }
+    state.jurassicWatchGuideDialog?.let { jurassicState ->
+        JurassicWatchGuideDialog(
+            movies = jurassicState.movies,
+            isLoading = jurassicState.isLoading,
+            errorMessage = jurassicState.errorMessage,
+            sortMode = jurassicState.sortMode,
+            filterMode = jurassicState.filterMode,
+            onToggleSort = viewModel::setJurassicSortMode,
+            onSelectFilter = viewModel::setJurassicFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadJurassicWatchStatus,
+            onDismiss = viewModel::closeJurassicGuide,
+        )
+    }
+    state.piratesWatchGuideDialog?.let { piratesState ->
+        PiratesWatchGuideDialog(
+            movies = piratesState.movies,
+            isLoading = piratesState.isLoading,
+            errorMessage = piratesState.errorMessage,
+            sortMode = piratesState.sortMode,
+            filterMode = piratesState.filterMode,
+            onToggleSort = viewModel::setPiratesSortMode,
+            onSelectFilter = viewModel::setPiratesFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadPiratesWatchStatus,
+            onDismiss = viewModel::closePiratesGuide,
+        )
+    }
+    state.pokemonWatchGuideDialog?.let { pkmState ->
+        PokemonWatchGuideDialog(
+            movies = pkmState.movies,
+            isLoading = pkmState.isLoading,
+            errorMessage = pkmState.errorMessage,
+            sortMode = pkmState.sortMode,
+            filterMode = pkmState.filterMode,
+            onToggleSort = viewModel::setPokemonSortMode,
+            onSelectFilter = viewModel::setPokemonFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadPokemonWatchStatus,
+            onDismiss = viewModel::closePokemonGuide,
+        )
+    }
+    state.scaryMovieWatchGuideDialog?.let { scaryState ->
+        ScaryMovieWatchGuideDialog(
+            movies = scaryState.movies,
+            isLoading = scaryState.isLoading,
+            errorMessage = scaryState.errorMessage,
+            sortMode = scaryState.sortMode,
+            filterMode = scaryState.filterMode,
+            onToggleSort = viewModel::setScaryMovieSortMode,
+            onSelectFilter = viewModel::setScaryMovieFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadScaryMovieWatchStatus,
+            onDismiss = viewModel::closeScaryMovieGuide,
+        )
+    }
+    state.twilightWatchGuideDialog?.let { twState ->
+        TwilightWatchGuideDialog(
+            movies = twState.movies,
+            isLoading = twState.isLoading,
+            errorMessage = twState.errorMessage,
+            sortMode = twState.sortMode,
+            filterMode = twState.filterMode,
+            onToggleSort = viewModel::setTwilightSortMode,
+            onSelectFilter = viewModel::setTwilightFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadTwilightWatchStatus,
+            onDismiss = viewModel::closeTwilightGuide,
+        )
+    }
+    state.underworldWatchGuideDialog?.let { uwState ->
+        UnderworldWatchGuideDialog(
+            movies = uwState.movies,
+            isLoading = uwState.isLoading,
+            errorMessage = uwState.errorMessage,
+            sortMode = uwState.sortMode,
+            filterMode = uwState.filterMode,
+            onToggleSort = viewModel::setUnderworldSortMode,
+            onSelectFilter = viewModel::setUnderworldFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadUnderworldWatchStatus,
+            onDismiss = viewModel::closeUnderworldGuide,
+        )
+    }
+    state.xMenWatchGuideDialog?.let { xState ->
+        XMenWatchGuideDialog(
+            movies = xState.movies,
+            isLoading = xState.isLoading,
+            errorMessage = xState.errorMessage,
+            sortMode = xState.sortMode,
+            filterMode = xState.filterMode,
+            onToggleSort = viewModel::setXMenSortMode,
+            onSelectFilter = viewModel::setXMenFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadXMenWatchStatus,
+            onDismiss = viewModel::closeXMenGuide,
+        )
+    }
+    state.middleEarthWatchGuideDialog?.let { meState ->
+        MiddleEarthWatchGuideDialog(
+            movies = meState.movies,
+            isLoading = meState.isLoading,
+            errorMessage = meState.errorMessage,
+            sortMode = meState.sortMode,
+            filterMode = meState.filterMode,
+            onToggleSort = viewModel::setMiddleEarthSortMode,
+            onSelectFilter = viewModel::setMiddleEarthFilterMode,
+            onOpenMovie = onOpenMedia,
+            onRefresh = viewModel::loadMiddleEarthWatchStatus,
+            onDismiss = viewModel::closeMiddleEarthGuide,
+        )
+    }
+    if (state.showAdminCodeGiftDialog) {
+        AdminCodeGiftDialog(
+            users = state.adminGiftUsers,
+            isLoadingUsers = state.isLoadingAdminGiftUsers,
+            currentUserId = state.session?.user?.id,
+            onSendGift = viewModel::sendFranchiseGift,
+            onDismiss = viewModel::closeAdminCodeGiftDialog,
+        )
+    }
+    state.pendingReceivedGift?.let { gift ->
+        GiftRevealModal(
+            gift = gift,
+            queueCount = state.pendingGiftsQueueCount,
+            queueIndex = state.pendingGiftQueueIndex,
+            onClaim = viewModel::claimReceivedGift,
+            onDismiss = viewModel::dismissReceivedGift,
+            onDismissAll = viewModel::dismissAllReceivedGifts,
         )
     }
 }
@@ -4673,6 +5026,7 @@ private fun MobileHomeContent(
     onRetry: () -> Unit,
     onSearch: () -> Unit,
     onProfile: () -> Unit,
+    onOpenSavedGuides: () -> Unit = {},
     onOpenAchievements: () -> Unit = {},
     onOpenLibrary: (JellyfinLibrary) -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
@@ -4958,6 +5312,7 @@ private fun MobileHomeContent(
             MobileHomeProfileAvatar(
                 state = state,
                 onProfile = onProfile,
+                onOpenSavedGuides = onOpenSavedGuides,
                 hasUnseenWhatsNew = state.hasUnseenWhatsNew,
             )
         }
@@ -5151,14 +5506,27 @@ private fun HomeRowInset(
 }
 
 @Composable
-private fun MobileHomeProfileAvatar(state: VantafynHomeUiState, onProfile: () -> Unit, hasUnseenWhatsNew: Boolean = false) {
+private fun MobileHomeProfileAvatar(
+    state: VantafynHomeUiState,
+    onProfile: () -> Unit,
+    onOpenSavedGuides: () -> Unit = {},
+    hasUnseenWhatsNew: Boolean = false,
+) {
+    val haptic = LocalHapticFeedback.current
     Box {
         Box(
             modifier = Modifier
                 .size(44.dp)
                 .vantafynAnimatedModalBorder(cornerRadius = 15.dp, strokeWidth = 1.5.dp)
                 .background(VantafynColors.SurfaceHigh.copy(alpha = 0.76f))
-                .clickable(onClick = onProfile),
+                .clip(RoundedCornerShape(15.dp))
+                .combinedClickable(
+                    onClick = onProfile,
+                    onLongClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onOpenSavedGuides()
+                    },
+                ),
             contentAlignment = Alignment.Center,
         ) {
             val savedProfile = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }
@@ -12442,6 +12810,7 @@ private fun SettingsScreen(
     onDiscoverVantafyn: () -> Unit,
     onSelectExperienceMode: (ExperienceMode) -> Unit = {},
     onSelectMusicBackend: (MusicBackendType) -> Unit = {},
+    onOpenAdminCodeGiftDialog: () -> Unit = {},
     viewModel: VantafynHomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -12513,6 +12882,8 @@ private fun SettingsScreen(
                                     state = state,
                                     onChangePhoto = { avatarPicker.open() },
                                     onRemovePhoto = onDeleteProfileImage,
+                                    onOpenEnterCode = viewModel::openEnterCodeDialog,
+                                    onOpenMcuGuide = viewModel::openMcuGuide,
                                 )
                             }
                         }
@@ -12540,8 +12911,8 @@ private fun SettingsScreen(
                         item {
                             HomeContentReveal(index = 4, animate = revealActive) {
                                 SettingsCardGroup(
-                                    items = listOf(
-                                        {
+                                    items = buildList<@Composable () -> Unit> {
+                                        add {
                                             SettingsNavigationRow(
                                                 title = "Account & Profiles",
                                                 subtitle = "Switch user, login preferences, TV pairing, security",
@@ -12551,8 +12922,8 @@ private fun SettingsScreen(
                                                     currentSubScreen = SettingsSubScreen.AccountAndProfiles
                                                 },
                                             )
-                                        },
-                                        {
+                                        }
+                                        add {
                                             SettingsNavigationRow(
                                                 title = "Appearance & Experience",
                                                 subtitle = "Themes, dynamic backgrounds, rail border animation, mode",
@@ -12562,8 +12933,8 @@ private fun SettingsScreen(
                                                     currentSubScreen = SettingsSubScreen.AppearanceAndExperience
                                                 },
                                             )
-                                        },
-                                        {
+                                        }
+                                        add {
                                             SettingsNavigationRow(
                                                 title = "Audio & Playback",
                                                 subtitle = "Theme music, soundscapes, streaming fidelity",
@@ -12573,8 +12944,8 @@ private fun SettingsScreen(
                                                     currentSubScreen = SettingsSubScreen.AudioAndPlayback
                                                 },
                                             )
-                                        },
-                                        {
+                                        }
+                                        add {
                                             SettingsNavigationRow(
                                                 title = "Integrations & Advanced",
                                                 subtitle = "Achievements, messaging, admin, permissions, version",
@@ -12584,8 +12955,21 @@ private fun SettingsScreen(
                                                     currentSubScreen = SettingsSubScreen.IntegrationsAndAdvanced
                                                 },
                                             )
-                                        },
-                                    ),
+                                        }
+                                        if (state.session?.user?.isAdministrator == true) {
+                                            add {
+                                                SettingsNavigationRow(
+                                                    title = "Code Services & Gift Dispatch",
+                                                    subtitle = "Gift franchise watch guides to server members",
+                                                    icon = Icons.Rounded.CardGiftcard,
+                                                    onClick = {
+                                                        SettingsUsageTracker.recordAction(context, "code_services_gift_dispatch")
+                                                        onOpenAdminCodeGiftDialog()
+                                                    },
+                                                )
+                                            }
+                                        }
+                                    },
                                 )
                             }
                         }
@@ -13097,6 +13481,7 @@ private fun ProfileSettingsScreen(
     onDiscoverVantafyn: () -> Unit,
     onSelectExperienceMode: (ExperienceMode) -> Unit = {},
     onSelectMusicBackend: (MusicBackendType) -> Unit = {},
+    onOpenAdminCodeGiftDialog: () -> Unit = {},
     viewModel: VantafynHomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
 ) = SettingsScreen(
     state = state,
@@ -13133,6 +13518,7 @@ private fun ProfileSettingsScreen(
     onDiscoverVantafyn = onDiscoverVantafyn,
     onSelectExperienceMode = onSelectExperienceMode,
     onSelectMusicBackend = onSelectMusicBackend,
+    onOpenAdminCodeGiftDialog = onOpenAdminCodeGiftDialog,
     viewModel = viewModel,
 )
 
@@ -13822,6 +14208,8 @@ private fun ProfileDashboardCard(
     state: VantafynHomeUiState,
     onChangePhoto: () -> Unit,
     onRemovePhoto: () -> Unit,
+    onOpenEnterCode: () -> Unit = {},
+    onOpenMcuGuide: () -> Unit = {},
 ) {
     GlassPanel {
         Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -13833,7 +14221,7 @@ private fun ProfileDashboardCard(
                 onClick = onChangePhoto,
             )
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), verticalAlignment = Alignment.Top) {
+                Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         state.session?.user?.name ?: "Vantafyn User",
                         color = VantafynColors.Ink,
@@ -13841,7 +14229,7 @@ private fun ProfileDashboardCard(
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f, fill = false),
                     )
                     if (state.session?.user?.isAdministrator == true) {
                         SoftBadge("Admin")
@@ -13866,7 +14254,13 @@ private fun ProfileDashboardCard(
                 }
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+        ) {
             VantafynGlassChip(onClick = onChangePhoto) {
                 Text("Change photo", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
             }
@@ -13874,6 +14268,17 @@ private fun ProfileDashboardCard(
                 VantafynGlassChip(onClick = onRemovePhoto) {
                     Text("Remove photo", color = Color(0xFFFFC2C2), fontWeight = FontWeight.SemiBold)
                 }
+            }
+            VantafynGlassChip(
+                onClick = onOpenEnterCode,
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Lock,
+                    contentDescription = "Unlock Code",
+                    modifier = Modifier.size(16.dp),
+                    tint = Color.White,
+                )
             }
         }
     }
@@ -17953,6 +18358,7 @@ private fun MediaDetailScreen(
     onPlaybackComingSoon: () -> Unit,
     onStartPlayback: () -> Unit,
     onStartPlaybackFromBeginning: () -> Unit,
+    onStartAudiobookChapter: (JellyfinChapter) -> Unit = {},
     onStartEpisodePlayback: (JellyfinEpisode, Boolean) -> Unit,
     onSelectSeason: (java.util.UUID?) -> Unit,
     themeMusicEnabled: Boolean,
@@ -18061,6 +18467,18 @@ private fun MediaDetailScreen(
                 HomeContentReveal(index = 2, animate = detailRevealActive, revealKey = detailRevealKey) {
                     HomeRowInset {
                         DetailOverview(detail)
+                    }
+                }
+            }
+            if (detail.isAudiobookMedia) {
+                item {
+                    HomeContentReveal(index = 3, animate = detailRevealActive, revealKey = detailRevealKey) {
+                        HomeRowInset {
+                            AudiobookDetailsSection(
+                                detail = detail,
+                                onStartChapter = onStartAudiobookChapter,
+                            )
+                        }
                     }
                 }
             }
@@ -18485,6 +18903,171 @@ private fun DetailOverview(detail: JellyfinMediaDetail) {
             color = VantafynColors.Ink.copy(alpha = 0.86f),
             style = MaterialTheme.typography.bodyLarge,
         )
+    }
+}
+
+@Composable
+private fun AudiobookDetailsSection(
+    detail: JellyfinMediaDetail,
+    onStartChapter: (JellyfinChapter) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val author = detail.author
+    val narrator = detail.narrator
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+    ) {
+        if (!author.isNullOrBlank() || !narrator.isNullOrBlank()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (!author.isNullOrBlank()) {
+                    VantafynGlassSurface(
+                        variant = VantafynGlassVariant.Chip,
+                        cornerRadius = 14.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column {
+                            Text(
+                                "Author",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VantafynColors.Muted,
+                            )
+                            Text(
+                                author,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = VantafynColors.Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+                if (!narrator.isNullOrBlank()) {
+                    VantafynGlassSurface(
+                        variant = VantafynGlassVariant.Chip,
+                        cornerRadius = 14.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Column {
+                            Text(
+                                "Narrator",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = VantafynColors.Muted,
+                            )
+                            Text(
+                                narrator,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = VantafynColors.Ink,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (detail.chapters.isNotEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    "Chapters (${detail.chapters.size})",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = VantafynColors.Ink,
+                )
+
+                detail.chapters.forEachIndexed { index, chapter ->
+                    val chapterDurationMs = chapter.durationMs
+                    val isResumeTarget = detail.playbackPositionTicks != null &&
+                        detail.playbackPositionTicks > 0L &&
+                        (detail.playbackPositionTicks / 10_000L) >= chapter.startPositionMs &&
+                        (chapterDurationMs == null || (detail.playbackPositionTicks / 10_000L) < chapter.startPositionMs + chapterDurationMs)
+
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onStartChapter(chapter) },
+                        variant = if (isResumeTarget) VantafynGlassVariant.Card else VantafynGlassVariant.Chip,
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (isResumeTarget) VantafynGradients.accentHorizontal()
+                                        else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.10f), Color.White.copy(alpha = 0.05f)))
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "${index + 1}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = VantafynColors.Ink,
+                                )
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = chapter.name,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isResumeTarget) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isResumeTarget) Color(0xFF21D8FF) else VantafynColors.Ink,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                val startLabel = chapter.startPositionMs.toAudiobookTimeLabel()
+                                val durationLabel = chapter.durationMs?.toAudiobookTimeLabel()
+                                val metaText = if (durationLabel != null) "$startLabel · $durationLabel" else startLabel
+                                Text(
+                                    text = metaText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = VantafynColors.Muted,
+                                )
+                            }
+
+                            Icon(
+                                imageVector = if (isResumeTarget) Icons.Rounded.PlayArrow else Icons.AutoMirrored.Rounded.NavigateNext,
+                                contentDescription = "Play chapter",
+                                tint = if (isResumeTarget) Color(0xFF21D8FF) else VantafynColors.Muted,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun Long.toAudiobookTimeLabel(): String {
+    val totalSeconds = (this / 1000L).coerceAtLeast(0L)
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "$minutes:${seconds.toString().padStart(2, '0')}"
     }
 }
 
@@ -20652,7 +21235,8 @@ private fun MusicQuickPlayerSheet(
                                 }
                             }
                         } else {
-                            Text("Now Playing", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            val title = if (currentPlayback.isAudiobookMode) "Audiobook" else "Now Playing"
+                            Text(title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             GoogleCastRouteButton(modifier = Modifier.size(38.dp))
@@ -20695,35 +21279,87 @@ private fun MusicQuickPlayerSheet(
                                         contentScale = ContentScale.Crop,
                                     )
                                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        val currentChapter = currentPlayback.currentChapter
+                                        val displaySubtitle = if (currentPlayback.isAudiobookMode && currentChapter != null) {
+                                            "${currentChapter.name} · ${track.artist}"
+                                        } else {
+                                            listOfNotNull(track.artist, track.album).joinToString(" - ")
+                                        }
                                         Text(track.title, color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                                        Text(listOfNotNull(track.artist, track.album).joinToString(" - "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Text(displaySubtitle, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                 }
                                 MiniMusicProgress(currentPlayback)
                                 Box(
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
-                                    Row(
-                                        modifier = Modifier.align(Alignment.Center),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        MiniPlayerIconControl(Icons.Rounded.SkipPrevious, "Previous", onClick = controller::previous)
-                                        MiniPlayerIconControl(
-                                            if (currentPlayback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                            if (currentPlayback.isPlaying) "Pause" else "Play",
-                                            emphasized = true,
-                                            onClick = controller::togglePlayPause,
+                                    if (currentPlayback.isAudiobookMode) {
+                                        Row(
+                                            modifier = Modifier.align(Alignment.Center),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            MiniPlayerIconControl(Icons.Rounded.FastRewind, "Rewind 15s", onClick = { controller.seekRelative(-15_000L) })
+                                            MiniPlayerIconControl(Icons.Rounded.SkipPrevious, "Previous", onClick = controller::previous)
+                                            MiniPlayerIconControl(
+                                                if (currentPlayback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                                if (currentPlayback.isPlaying) "Pause" else "Play",
+                                                emphasized = true,
+                                                onClick = controller::togglePlayPause,
+                                            )
+                                            MiniPlayerIconControl(Icons.Rounded.SkipNext, "Next", onClick = controller::next)
+                                            MiniPlayerIconControl(Icons.Rounded.FastForward, "Forward 30s", onClick = { controller.seekRelative(30_000L) })
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.CenterEnd)
+                                                .clip(RoundedCornerShape(999.dp))
+                                                .background(Color.White.copy(alpha = 0.10f))
+                                                .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(999.dp))
+                                                .clickable {
+                                                    val nextSpeed = when (currentPlayback.playbackSpeed) {
+                                                        1.0f -> 1.25f
+                                                        1.25f -> 1.5f
+                                                        1.5f -> 1.75f
+                                                        1.75f -> 2.0f
+                                                        2.0f -> 0.8f
+                                                        else -> 1.0f
+                                                    }
+                                                    controller.setPlaybackSpeed(nextSpeed)
+                                                }
+                                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = "${currentPlayback.playbackSpeed}x",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFF21D8FF),
+                                            )
+                                        }
+                                    } else {
+                                        Row(
+                                            modifier = Modifier.align(Alignment.Center),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            MiniPlayerIconControl(Icons.Rounded.SkipPrevious, "Previous", onClick = controller::previous)
+                                            MiniPlayerIconControl(
+                                                if (currentPlayback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                                if (currentPlayback.isPlaying) "Pause" else "Play",
+                                                emphasized = true,
+                                                onClick = controller::togglePlayPause,
+                                            )
+                                            MiniPlayerIconControl(Icons.Rounded.SkipNext, "Next", onClick = controller::next)
+                                        }
+                                        MiniPlayerSmallIconButton(
+                                            icon = Icons.Rounded.Article,
+                                            contentDescription = "Show lyrics",
+                                            size = 32.dp,
+                                            onClick = { showLyrics = true },
+                                            modifier = Modifier.align(Alignment.BottomEnd),
                                         )
-                                        MiniPlayerIconControl(Icons.Rounded.SkipNext, "Next", onClick = controller::next)
                                     }
-                                    MiniPlayerSmallIconButton(
-                                        icon = Icons.Rounded.Article,
-                                        contentDescription = "Show lyrics",
-                                        size = 32.dp,
-                                        onClick = { showLyrics = true },
-                                        modifier = Modifier.align(Alignment.BottomEnd),
-                                    )
                                 }
                             }
                         }
@@ -21828,6 +22464,8 @@ private fun Int.toHourLimitLabel(): String =
 private fun JellyfinMediaDetail.primaryActionLabel(): String {
     val watchedProgress = progress
     return when {
+        isAudiobookMedia && watchedProgress != null && watchedProgress > 0.05f -> "Resume Audiobook"
+        isAudiobookMedia -> "Listen to Audiobook"
         watchedProgress != null && watchedProgress > 0.05f -> "Resume"
         itemType.equals("Book", ignoreCase = true) || itemType.equals("EBook", ignoreCase = true) -> "Open"
         itemType.equals("AudioBook", ignoreCase = true) || itemType.equals("Audio_Book", ignoreCase = true) -> "Listen"

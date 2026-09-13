@@ -123,6 +123,7 @@ data class JellyfinMediaItem(
     val seriesId: UUID? = null,
     val seasonNumber: Int? = null,
     val episodeNumber: Int? = null,
+    val isAudiobook: Boolean = false,
 )
 
 enum class MediaAvailabilityState {
@@ -296,7 +297,26 @@ data class JellyfinMediaDetail(
     val seriesName: String? = null,
     val seasonIndexNumber: Int? = null,
     val episodeIndexNumber: Int? = null,
+    val author: String? = null,
+    val narrator: String? = null,
+    val chapters: List<JellyfinChapter> = emptyList(),
+    val isAudiobook: Boolean = false,
 )
+
+data class JellyfinChapter(
+    val id: String,
+    val name: String,
+    val startPositionMs: Long,
+    val durationMs: Long? = null,
+    val imageUrl: String? = null,
+)
+
+val JellyfinMediaItem.isAudiobookMedia: Boolean
+    get() = isAudiobook || itemType.equals("AudioBook", ignoreCase = true) || itemType.equals("Book", ignoreCase = true)
+
+val JellyfinMediaDetail.isAudiobookMedia: Boolean
+    get() = isAudiobook || itemType.equals("AudioBook", ignoreCase = true) || (itemType.equals("Folder", ignoreCase = true) && chapters.isNotEmpty()) || (itemType.equals("Book", ignoreCase = true) && mediaSources.any { it.container?.lowercase() in setOf("m4b", "mp3", "m4a", "aac", "ogg", "opus", "flac") })
+
 
 data class JellyfinMediaInfoLine(
     val label: String,
@@ -1166,7 +1186,21 @@ interface JellyfinMediaRepository {
         result: JellyfinRemoteSearchResult,
         replaceAllImages: Boolean = true,
     ): JellyfinResult<Unit>
+    suspend fun getAudiobookTracks(session: JellyfinSession, itemId: UUID): JellyfinResult<List<JellyfinMusicTrack>>
+    suspend fun getMovieWatchList(session: JellyfinSession): JellyfinResult<List<JellyfinMcuServerItem>>
 }
+
+data class JellyfinMcuServerItem(
+    val id: UUID,
+    val name: String,
+    val productionYear: Int?,
+    val tmdbId: String?,
+    val imdbId: String?,
+    val isPlayed: Boolean,
+    val playbackPositionTicks: Long = 0L,
+    val imageUrl: String?,
+    val backdropUrl: String? = null,
+)
 
 interface JellyfinPlaybackRepository {
     suspend fun getPlaybackInfo(

@@ -2,6 +2,10 @@ package dev.vantafyn.feature.home.auth
 
 import android.app.Application
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.BatteryManager
+import android.os.PowerManager
 import androidx.core.net.toUri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.Lifecycle
@@ -58,6 +62,24 @@ import dev.vantafyn.core.jellyfin.JellyfinMediaRepository
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackInfo
 import dev.vantafyn.core.jellyfin.JellyfinPlaybackRepository
 import dev.vantafyn.core.jellyfin.JellyfinProfileImageUpload
+import dev.vantafyn.feature.home.mcu.*
+import dev.vantafyn.feature.home.saw.*
+import dev.vantafyn.feature.home.residentevil.*
+import dev.vantafyn.feature.home.potter.*
+import dev.vantafyn.feature.home.hunger.*
+import dev.vantafyn.feature.home.scream.*
+import dev.vantafyn.feature.home.matrix.*
+import dev.vantafyn.feature.home.jumanji.*
+import dev.vantafyn.feature.home.jurassic.*
+import dev.vantafyn.feature.home.pirates.*
+import dev.vantafyn.feature.home.pokemon.*
+import dev.vantafyn.feature.home.scary.*
+import dev.vantafyn.feature.home.twilight.*
+import dev.vantafyn.feature.home.underworld.*
+import dev.vantafyn.feature.home.xmen.*
+import dev.vantafyn.feature.home.mordor.*
+import dev.vantafyn.feature.home.gift.*
+import dev.vantafyn.core.jellyfin.JellyfinAdminUser
 import dev.vantafyn.core.jellyfin.JellyfinPublicUser
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectRepository
 import dev.vantafyn.core.jellyfin.JellyfinQuickConnectSession
@@ -101,6 +123,8 @@ import dev.vantafyn.core.jellyfin.WatchPartyMemberRealtimeState
 import dev.vantafyn.core.jellyfin.WatchPartyMemberReadyStatus
 import dev.vantafyn.core.jellyfin.WatchPartyVote
 import dev.vantafyn.core.jellyfin.WatchPartyVoteValue
+import dev.vantafyn.core.jellyfin.JellyfinChapter
+import dev.vantafyn.core.jellyfin.isAudiobookMedia
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.AutoplaySettings
 import dev.vantafyn.core.media.LongRunningTaskRegistry
@@ -113,6 +137,7 @@ import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynSyncPlaybackCommand
 import dev.vantafyn.core.media.VantafynMusicTrack
 import dev.vantafyn.core.media.VantafynMusicStopReason
+import dev.vantafyn.core.media.toVantafynTrack
 import dev.vantafyn.core.media.VantafynSubtitleTrack
 import dev.vantafyn.core.ui.VantafynThemeController
 import dev.vantafyn.core.ui.VantafynThemePreset
@@ -184,6 +209,29 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var lastSocialAvailabilityProfileId: String? = null
     private var lastSocialAvailabilityCheckAt: Long = 0L
     private val seenMessageKeys = mutableSetOf<String>()
+    private val dismissedGiftIdsInSession = mutableSetOf<String>()
+    private var totalGiftsInCurrentBatch = 0
+    private var idlePollCyclesWithoutChanges = 0
+
+    private fun isNetworkConnected(): Boolean {
+        val cm = getApplication<Application>().getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val activeNetwork = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(activeNetwork) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    private fun isPowerSaveMode(): Boolean {
+        val app = getApplication<Application>()
+        val pm = app.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (pm?.isPowerSaveMode == true) return true
+        val bm = app.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val batteryPct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: 100
+        return batteryPct <= 15
+    }
+
+    fun resetInactivityBackoff() {
+        idlePollCyclesWithoutChanges = 0
+    }
 
     private val _state = MutableStateFlow(
         VantafynHomeUiState(
@@ -233,6 +281,56 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         refreshSocialAvailability()
         loadDownloads()
         startObservingDownloads()
+        val unlockPrefs = application.getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+        val unlockedCodes = unlockPrefs.getStringSet("unlocked_codes", emptySet()).orEmpty()
+        if (unlockedCodes.contains("MCU")) {
+            _state.update { it.copy(isMcuCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("JIGSAW") || unlockedCodes.contains("SAW")) {
+            _state.update { it.copy(isSawCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("R-EVIL") || unlockedCodes.contains("RESIDENTEVIL")) {
+            _state.update { it.copy(isResidentEvilCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("POTTER") || unlockedCodes.contains("HARRYPOTTER")) {
+            _state.update { it.copy(isHarryPotterCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("HUNGER") || unlockedCodes.contains("HUNGERGAMES")) {
+            _state.update { it.copy(isHungerGamesCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("SCREAM")) {
+            _state.update { it.copy(isScreamCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("MATRIX") || unlockedCodes.contains("THEMATRIX")) {
+            _state.update { it.copy(isMatrixCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("JUMANJI")) {
+            _state.update { it.copy(isJumanjiCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("JURASSIC") || unlockedCodes.contains("JURASSICPARK") || unlockedCodes.contains("JURASSICWORLD")) {
+            _state.update { it.copy(isJurassicCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("PIRATES") || unlockedCodes.contains("POTC")) {
+            _state.update { it.copy(isPiratesCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("POKEMON")) {
+            _state.update { it.copy(isPokemonCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("SCARY") || unlockedCodes.contains("SCARYMOVIE")) {
+            _state.update { it.copy(isScaryMovieCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("TWILIGHT")) {
+            _state.update { it.copy(isTwilightCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("UNDERWORLD")) {
+            _state.update { it.copy(isUnderworldCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("X-MEN") || unlockedCodes.contains("XMEN")) {
+            _state.update { it.copy(isXMenCodeUnlocked = true) }
+        }
+        if (unlockedCodes.contains("MORDOR") || unlockedCodes.contains("LOTR") || unlockedCodes.contains("HOBBIT") || unlockedCodes.contains("ONE-RING") || unlockedCodes.contains("ONERING") || unlockedCodes.contains("MIDDLE-EARTH") || unlockedCodes.contains("MIDDLEEARTH")) {
+            _state.update { it.copy(isMiddleEarthCodeUnlocked = true) }
+        }
         val appLifecycleObserver = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
@@ -1395,6 +1493,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination != MobileDestination.Search) {
             searchJob?.cancel()
         }
+        setMobileDestination(destination)
+    }
+
+    fun setMobileDestination(destination: MobileDestination) {
+        resetInactivityBackoff()
         if (destination == MobileDestination.Downloads) {
             loadDownloads()
         }
@@ -1557,32 +1660,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun startAchievementPolling() {
         if (!_state.value.achievementsEnabled || !_state.value.isAchievementsAvailable) return
-        if (achievementPollingJob?.isActive == true) return
-        achievementPollingJob = viewModelScope.launch {
-            while (isActive) {
-                val session = _state.value.session
-                if (
-                    session == null ||
-                    !_state.value.isAppForeground ||
-                    !_state.value.achievementsEnabled ||
-                    !_state.value.isAchievementsAvailable
-                ) {
-                    break
-                }
-                pollAchievementUnlocksOnce(session, resolveDeviceId())
-                delay(ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS)
-            }
-        }
+        // Forward to unified polling loop so achievement and social/gift polling share the exact same radio burst
+        startSocialPolling()
     }
 
     fun stopAchievementPolling() {
-        achievementPollingJob?.cancel()
-        achievementPollingJob = null
+        if (!_state.value.socialEnabled) {
+            socialPollingJob?.cancel()
+            socialPollingJob = null
+        }
     }
 
     private val pendingAchievementUnlocks = mutableListOf<JellyfinAchievementUnlock>()
 
-    private suspend fun pollAchievementUnlocksOnce(session: JellyfinSession, deviceId: String) {
+    private suspend fun pollAchievementUnlocksOnce(session: JellyfinSession, deviceId: String): Boolean {
         val checkpointKey = "last_checkpoint_${session.server.url.trimEnd('/')}_${session.user.id}_$deviceId"
         val seenKey = "seen_unlocks_${session.server.url.trimEnd('/')}_${session.user.id}"
         val lastCheckpoint = achievementPrefs.getString(checkpointKey, null)
@@ -1596,7 +1687,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             achievementRepository.getUnlocksSince(session, lastCheckpoint, deviceId)
         }
 
-        when (result) {
+        return when (result) {
             is JellyfinResult.Success -> {
                 val seenSet = achievementPrefs.getStringSet(seenKey, emptySet()) ?: emptySet()
                 val rawList = result.value
@@ -1634,9 +1725,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     timeZone = TimeZone.getTimeZone("UTC")
                 }.format(Date())
                 achievementPrefs.edit().putString(checkpointKey, nowIso).apply()
+                newUnlocks.isNotEmpty()
             }
             is JellyfinResult.Failure -> {
                 // Do not advance checkpoint on failure
+                false
             }
         }
     }
@@ -1779,6 +1872,22 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             val friendsRes = friendsDeferred.await()
             val requestsRes = requestsDeferred.await()
             val convosRes = convosDeferred.await()
+            if (convosRes is JellyfinResult.Success) {
+                var foundSocialGift = false
+                convosRes.value.forEach { conv ->
+                    val lastText = conv.lastMessageText
+                    if (conv.unreadCount > 0 && conv.lastSenderId != session.user.id && !lastText.isNullOrBlank() && lastText.contains("[vantafyn_gift|")) {
+                        val gift = VantafynCodeGift.fromSerializedMessage(lastText)
+                        if (gift != null) {
+                            VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, gift)
+                            foundSocialGift = true
+                        }
+                    }
+                }
+                if (foundSocialGift) {
+                    checkPendingGiftsForUser(session)
+                }
+            }
             val summaryRes = summaryDeferred.await()
             val discoverableRes = discoverableDeferred?.await()
 
@@ -1891,21 +2000,23 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun startSocialPolling() {
-        if (!_state.value.socialEnabled) return
+        val shouldPollSocial = _state.value.socialEnabled
+        val shouldPollAchievements = _state.value.achievementsEnabled && _state.value.isAchievementsAvailable
+        if (!shouldPollSocial && !shouldPollAchievements) return
+
         socialPollingJob?.cancel()
         socialPollingJob = viewModelScope.launch {
-            var lastPresenceReportTime = 0L
+            // Deduplicate presence report on initial launch/resume (Item C)
+            var lastPresenceReportTime = System.currentTimeMillis()
             while (isActive) {
                 val session = _state.value.session
-                if (session == null || !_state.value.isAppForeground || !_state.value.socialEnabled) {
+                if (session == null || !_state.value.isAppForeground) {
                     break
                 }
-
-                // Keep session presence active on Jellyfin server every 90 seconds (low battery, lightweight ping)
-                val now = System.currentTimeMillis()
-                if (now - lastPresenceReportTime >= 90_000L) {
-                    lastPresenceReportTime = now
-                    launch { socialRepository.reportPresence(session) }
+                val currentSocialEnabled = _state.value.socialEnabled
+                val currentAchievementsEnabled = _state.value.achievementsEnabled && _state.value.isAchievementsAvailable
+                if (!currentSocialEnabled && !currentAchievementsEnabled) {
+                    break
                 }
 
                 // Suppress background network polling completely during full-screen media playback, music listening, downloads, or preferences
@@ -1915,104 +2026,196 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     continue
                 }
 
-                val isChatting = _state.value.mobileDestination == MobileDestination.Chat
-                val isSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
+                val isPowerSave = isPowerSaveMode()
 
-                if (isChatting) {
-                    val activePeer = _state.value.activeChatPeer
-                    if (activePeer != null) {
-                        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
-                        val clearedPrefs = runCatching {
-                            getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
-                        }.getOrNull()
-                        val cutoff = maxOf(
-                            clearedPrefs?.getLong("cleared_${activePeer.userId}", 0L) ?: 0L,
-                            clearedPrefs?.getLong("cleared_$convId", 0L) ?: 0L
-                        )
-                        when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
+                // Check connectivity (Item B): if offline, do not wake radio/dispatch failing HTTP calls
+                if (!isNetworkConnected()) {
+                    val offlineSleep = if (isPowerSave) 90_000L else 45_000L
+                    delay(offlineSleep)
+                    continue
+                }
+
+                var hadActivityOrChanges = false
+
+                if (currentSocialEnabled) {
+                    // Keep session presence active on Jellyfin server every 90 seconds
+                    val now = System.currentTimeMillis()
+                    if (now - lastPresenceReportTime >= 90_000L) {
+                        lastPresenceReportTime = now
+                        launch { socialRepository.reportPresence(session) }
+                    }
+
+                    val isChatting = _state.value.mobileDestination == MobileDestination.Chat
+                    checkPendingGiftsForUser(session)
+
+                    val isSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
+
+                    if (isChatting) {
+                        hadActivityOrChanges = true
+                        val activePeer = _state.value.activeChatPeer
+                        if (activePeer != null) {
+                            val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
+                            val clearedPrefs = runCatching {
+                                getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+                            }.getOrNull()
+                            val cutoff = maxOf(
+                                clearedPrefs?.getLong("cleared_${activePeer.userId}", 0L) ?: 0L,
+                                clearedPrefs?.getLong("cleared_$convId", 0L) ?: 0L
+                            )
+                            when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
+                                is JellyfinResult.Success -> {
+                                    val filtered = if (cutoff > 0L) {
+                                        msgRes.value.filter { msg ->
+                                            val t = dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(msg.timestamp)
+                                            t > cutoff
+                                        }
+                                    } else {
+                                        msgRes.value
+                                    }
+                                    var hasChatGifts = false
+                                    filtered.filter { !it.isFromSelf && it.content.contains("[vantafyn_gift|") }.forEach { msg ->
+                                        val incomingGift = VantafynCodeGift.fromSerializedMessage(msg.content)
+                                        if (incomingGift != null) {
+                                            VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, incomingGift)
+                                            hasChatGifts = true
+                                        }
+                                    }
+                                    if (hasChatGifts) {
+                                        checkPendingGiftsForUser(session)
+                                    }
+                                    _state.update { it.copy(activeChatMessages = filtered) }
+                                    socialRepository.markConversationRead(session, convId)
+                                }
+                                else -> Unit
+                            }
+                        }
+                    } else if (isSocialScreen) {
+                        hadActivityOrChanges = true
+                        loadSocialData(force = false, includeDiscoverable = true)
+                        _state.value.socialConversations.forEach { c ->
+                            val txt = c.lastMessageText
+                            if (!txt.isNullOrBlank()) {
+                                seenMessageKeys += "${c.conversationId}_${c.lastMessageTimestamp}_$txt"
+                            }
+                        }
+                    } else {
+                        // Check unread summary and conversations periodically (unified with gifts and achievements)
+                        when (val convRes = socialRepository.getConversations(session)) {
                             is JellyfinResult.Success -> {
-                                val filtered = if (cutoff > 0L) {
-                                    msgRes.value.filter { msg ->
-                                        val t = dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(msg.timestamp)
-                                        t > cutoff
+                                val newConvos = convRes.value
+                                val totalUnread = newConvos.sumOf { it.unreadCount }
+
+                                var foundIncomingGifts = false
+                                for (convo in newConvos) {
+                                    if (convo.unreadCount > 0 && convo.lastSenderId != session.user.id) {
+                                        val lastText = convo.lastMessageText
+                                        if (!lastText.isNullOrBlank() && lastText.contains("[vantafyn_gift|")) {
+                                            val incomingGift = VantafynCodeGift.fromSerializedMessage(lastText)
+                                            if (incomingGift != null) {
+                                                VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, incomingGift)
+                                                foundIncomingGifts = true
+                                            }
+                                        }
+                                        if (convo.unreadCount > 1) {
+                                            val msgRes = socialRepository.getMessages(session, convo.conversationId, convo.peerUserId)
+                                            if (msgRes is JellyfinResult.Success) {
+                                                msgRes.value.filter { !it.isFromSelf && it.content.contains("[vantafyn_gift|") }.forEach { msg ->
+                                                    val g = VantafynCodeGift.fromSerializedMessage(msg.content)
+                                                    if (g != null) {
+                                                        VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, g)
+                                                        foundIncomingGifts = true
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                if (foundIncomingGifts) {
+                                    hadActivityOrChanges = true
+                                    checkPendingGiftsForUser(session)
+                                }
+
+                                val latestUnreadConvo = newConvos.firstOrNull { it.unreadCount > 0 && it.lastSenderId != session.user.id }
+                                val msgText = latestUnreadConvo?.lastMessageText
+                                if (latestUnreadConvo != null && !msgText.isNullOrBlank()) {
+                                    val incomingGift = VantafynCodeGift.fromSerializedMessage(msgText)
+                                    if (incomingGift != null) {
+                                        VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, incomingGift)
+                                        checkPendingGiftsForUser(session)
+                                    }
+                                    val messageKey = "${latestUnreadConvo.conversationId}_${latestUnreadConvo.lastMessageTimestamp}_$msgText"
+                                    if (messageKey !in seenMessageKeys) {
+                                        hadActivityOrChanges = true
+                                        seenMessageKeys += messageKey
+                                        val previewMsg = JellyfinSocialMessage(
+                                            messageId = messageKey,
+                                            conversationId = latestUnreadConvo.conversationId,
+                                            senderId = latestUnreadConvo.peerUserId,
+                                            senderName = latestUnreadConvo.peerName,
+                                            senderAvatarTag = latestUnreadConvo.peerAvatarTag,
+                                            senderAvatarUrl = latestUnreadConvo.peerAvatarUrl,
+                                            recipientId = session.user.id,
+                                            content = msgText,
+                                            timestamp = latestUnreadConvo.lastMessageTimestamp,
+                                            isRead = false,
+                                            isFromSelf = false,
+                                        )
+                                        _state.update {
+                                            it.copy(
+                                                activeSocialIslandPreview = previewMsg,
+                                                socialConversations = newConvos,
+                                                socialUnreadCount = totalUnread,
+                                            )
+                                        }
+                                    } else {
+                                        _state.update {
+                                            it.copy(
+                                                socialConversations = newConvos,
+                                                socialUnreadCount = totalUnread,
+                                            )
+                                        }
                                     }
                                 } else {
-                                    msgRes.value
+                                    _state.update {
+                                        it.copy(
+                                            socialConversations = newConvos,
+                                            socialUnreadCount = totalUnread,
+                                        )
+                                    }
                                 }
-                                _state.update { it.copy(activeChatMessages = filtered) }
-                                socialRepository.markConversationRead(session, convId)
                             }
                             else -> Unit
                         }
                     }
-                } else if (isSocialScreen) {
-                    loadSocialData(force = false, includeDiscoverable = true)
-                    _state.value.socialConversations.forEach { c ->
-                        val txt = c.lastMessageText
-                        if (!txt.isNullOrBlank()) {
-                            seenMessageKeys += "${c.conversationId}_${c.lastMessageTimestamp}_$txt"
-                        }
-                    }
-                } else {
-                    // Check unread summary and conversations periodically (relaxed 90s interval)
-                    when (val convRes = socialRepository.getConversations(session)) {
-                        is JellyfinResult.Success -> {
-                            val newConvos = convRes.value
-                            val totalUnread = newConvos.sumOf { it.unreadCount }
+                }
 
-                            val latestUnreadConvo = newConvos.firstOrNull { it.unreadCount > 0 && it.lastSenderId != session.user.id }
-                            val msgText = latestUnreadConvo?.lastMessageText
-                            if (latestUnreadConvo != null && !msgText.isNullOrBlank()) {
-                                val messageKey = "${latestUnreadConvo.conversationId}_${latestUnreadConvo.lastMessageTimestamp}_$msgText"
-                                if (messageKey !in seenMessageKeys) {
-                                    seenMessageKeys += messageKey
-                                    val previewMsg = JellyfinSocialMessage(
-                                        messageId = messageKey,
-                                        conversationId = latestUnreadConvo.conversationId,
-                                        senderId = latestUnreadConvo.peerUserId,
-                                        senderName = latestUnreadConvo.peerName,
-                                        senderAvatarTag = latestUnreadConvo.peerAvatarTag,
-                                        senderAvatarUrl = latestUnreadConvo.peerAvatarUrl,
-                                        recipientId = session.user.id,
-                                        content = msgText,
-                                        timestamp = latestUnreadConvo.lastMessageTimestamp,
-                                        isRead = false,
-                                        isFromSelf = false,
-                                    )
-                                    _state.update {
-                                        it.copy(
-                                            activeSocialIslandPreview = previewMsg,
-                                            socialConversations = newConvos,
-                                            socialUnreadCount = totalUnread,
-                                        )
-                                    }
-                                } else {
-                                    _state.update {
-                                        it.copy(
-                                            socialConversations = newConvos,
-                                            socialUnreadCount = totalUnread,
-                                        )
-                                    }
-                                }
-                            } else {
-                                _state.update {
-                                    it.copy(
-                                        socialConversations = newConvos,
-                                        socialUnreadCount = totalUnread,
-                                    )
-                                }
-                            }
-                        }
-                        else -> Unit
+                // Coalesced Achievement check: executes in the exact same radio wake burst
+                if (currentAchievementsEnabled) {
+                    val hadUnlocks = pollAchievementUnlocksOnce(session, resolveDeviceId())
+                    if (hadUnlocks) {
+                        hadActivityOrChanges = true
                     }
+                }
+
+                if (hadActivityOrChanges) {
+                    idlePollCyclesWithoutChanges = 0
+                } else {
+                    idlePollCyclesWithoutChanges++
                 }
 
                 val nextIsChatting = _state.value.mobileDestination == MobileDestination.Chat
                 val nextIsSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
                 val interval = when {
-                    nextIsChatting -> 8_000L
-                    nextIsSocialScreen -> 15_000L
-                    else -> 90_000L
+                    nextIsChatting -> if (isPowerSave) 10_000L else 6_000L
+                    nextIsSocialScreen -> if (isPowerSave) 20_000L else 12_000L
+                    else -> {
+                        // Idle homescreen backoff (Item D) & Power Saver scaling (Item E)
+                        val base = if (isPowerSave) 90_000L else 45_000L
+                        val maxIdle = if (isPowerSave) 180_000L else 120_000L
+                        val step = if (isPowerSave) 30_000L else 15_000L
+                        val backoffCycles = (idlePollCyclesWithoutChanges - 2).coerceAtLeast(0)
+                        (base + backoffCycles * step).coerceAtMost(maxIdle)
+                    }
                 }
                 delay(interval)
             }
@@ -2025,6 +2228,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun openSocialPanel() {
+        resetInactivityBackoff()
         _state.update { it.copy(isSocialPanelOpen = true, activeSocialIslandPreview = null) }
         loadSocialData(force = true, includeDiscoverable = true)
     }
@@ -2836,6 +3040,2581 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun closeIdentifyDialog() {
         _state.update { it.copy(identifyDialog = null) }
+    }
+
+    fun openEnterCodeDialog() {
+        val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+        val unlockedCodes = prefs.getStringSet("unlocked_codes", emptySet()).orEmpty()
+        val isMcuUnlocked = unlockedCodes.contains("MCU")
+        val isSawUnlocked = unlockedCodes.contains("JIGSAW")
+        val isResidentEvilUnlocked = unlockedCodes.contains("R-EVIL") || unlockedCodes.contains("RESIDENTEVIL")
+        val isHarryPotterUnlocked = unlockedCodes.contains("POTTER") || unlockedCodes.contains("HARRYPOTTER")
+        val isHungerGamesUnlocked = unlockedCodes.contains("HUNGER") || unlockedCodes.contains("HUNGERGAMES")
+        val isScreamUnlocked = unlockedCodes.contains("SCREAM")
+        val isMatrixUnlocked = unlockedCodes.contains("MATRIX") || unlockedCodes.contains("THEMATRIX")
+        val isJumanjiUnlocked = unlockedCodes.contains("JUMANJI")
+        val isJurassicUnlocked = unlockedCodes.contains("JURASSIC") || unlockedCodes.contains("JURASSICPARK") || unlockedCodes.contains("JURASSICWORLD")
+        val isPiratesUnlocked = unlockedCodes.contains("PIRATES") || unlockedCodes.contains("POTC")
+        val isPokemonUnlocked = unlockedCodes.contains("POKEMON")
+        val isScaryMovieUnlocked = unlockedCodes.contains("SCARY") || unlockedCodes.contains("SCARYMOVIE")
+        val isTwilightUnlocked = unlockedCodes.contains("TWILIGHT")
+        val isUnderworldUnlocked = unlockedCodes.contains("UNDERWORLD")
+        val isXMenUnlocked = unlockedCodes.contains("X-MEN") || unlockedCodes.contains("XMEN")
+        val isMiddleEarthUnlocked = unlockedCodes.contains("MORDOR") || unlockedCodes.contains("LOTR") || unlockedCodes.contains("HOBBIT") || unlockedCodes.contains("ONE-RING") || unlockedCodes.contains("ONERING") || unlockedCodes.contains("MIDDLE-EARTH") || unlockedCodes.contains("MIDDLEEARTH")
+        _state.update {
+            it.copy(
+                enterCodeDialog = VantafynEnterCodeDialogState(
+                    errorMessage = null,
+                    isSubmitting = false,
+                    isMcuUnlocked = isMcuUnlocked,
+                    isSawUnlocked = isSawUnlocked,
+                    isResidentEvilUnlocked = isResidentEvilUnlocked,
+                    isHarryPotterUnlocked = isHarryPotterUnlocked,
+                    isHungerGamesUnlocked = isHungerGamesUnlocked,
+                    isScreamUnlocked = isScreamUnlocked,
+                    isMatrixUnlocked = isMatrixUnlocked,
+                    isJumanjiUnlocked = isJumanjiUnlocked,
+                    isJurassicUnlocked = isJurassicUnlocked,
+                    isPiratesUnlocked = isPiratesUnlocked,
+                    isPokemonUnlocked = isPokemonUnlocked,
+                    isScaryMovieUnlocked = isScaryMovieUnlocked,
+                    isTwilightUnlocked = isTwilightUnlocked,
+                    isUnderworldUnlocked = isUnderworldUnlocked,
+                    isXMenUnlocked = isXMenUnlocked,
+                    isMiddleEarthUnlocked = isMiddleEarthUnlocked,
+                ),
+            )
+        }
+    }
+
+    fun closeEnterCodeDialog() {
+        _state.update { it.copy(enterCodeDialog = null) }
+    }
+
+    fun submitUnlockCode(code: String) {
+        val trimmed = code.trim().uppercase()
+        if (trimmed == "MCU") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("MCU")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isMcuCodeUnlocked = true,
+                    mcuWatchGuideDialog = VantafynMcuWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadMcuWatchStatus()
+        } else if (trimmed == "JIGSAW" || trimmed == "SAW") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("SAW")
+            unlocked.add("JIGSAW")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isSawCodeUnlocked = true,
+                    sawWatchGuideDialog = VantafynSawWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadSawWatchStatus()
+        } else if (trimmed == "R-EVIL" || trimmed == "REVIL" || trimmed == "RESIDENTEVIL") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("R-EVIL")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isResidentEvilCodeUnlocked = true,
+                    residentEvilWatchGuideDialog = VantafynResidentEvilWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadResidentEvilWatchStatus()
+        } else if (trimmed == "POTTER" || trimmed == "HARRYPOTTER") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("POTTER")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isHarryPotterCodeUnlocked = true,
+                    harryPotterWatchGuideDialog = VantafynHarryPotterWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadHarryPotterWatchStatus()
+        } else if (trimmed == "HUNGER" || trimmed == "HUNGERGAMES") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("HUNGER")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isHungerGamesCodeUnlocked = true,
+                    hungerGamesWatchGuideDialog = VantafynHungerGamesWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadHungerGamesWatchStatus()
+        } else if (trimmed == "SCREAM") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("SCREAM")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isScreamCodeUnlocked = true,
+                    screamWatchGuideDialog = VantafynScreamWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadScreamWatchStatus()
+        } else if (trimmed == "MATRIX" || trimmed == "THEMATRIX") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("MATRIX")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isMatrixCodeUnlocked = true,
+                    matrixWatchGuideDialog = VantafynMatrixWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadMatrixWatchStatus()
+        } else if (trimmed == "JUMANJI") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("JUMANJI")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isJumanjiCodeUnlocked = true,
+                    jumanjiWatchGuideDialog = VantafynJumanjiWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadJumanjiWatchStatus()
+        } else if (trimmed == "JURASSIC" || trimmed == "JURASSICPARK" || trimmed == "JURASSICWORLD") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("JURASSIC")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isJurassicCodeUnlocked = true,
+                    jurassicWatchGuideDialog = VantafynJurassicWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadJurassicWatchStatus()
+        } else if (trimmed == "PIRATES" || trimmed == "POTC") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("PIRATES")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isPiratesCodeUnlocked = true,
+                    piratesWatchGuideDialog = VantafynPiratesWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadPiratesWatchStatus()
+        } else if (trimmed == "POKEMON") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("POKEMON")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isPokemonCodeUnlocked = true,
+                    pokemonWatchGuideDialog = VantafynPokemonWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadPokemonWatchStatus()
+        } else if (trimmed == "SCARY" || trimmed == "SCARYMOVIE") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("SCARY")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isScaryMovieCodeUnlocked = true,
+                    scaryMovieWatchGuideDialog = VantafynScaryMovieWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadScaryMovieWatchStatus()
+        } else if (trimmed == "TWILIGHT") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("TWILIGHT")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isTwilightCodeUnlocked = true,
+                    twilightWatchGuideDialog = VantafynTwilightWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadTwilightWatchStatus()
+        } else if (trimmed == "UNDERWORLD") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("UNDERWORLD")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isUnderworldCodeUnlocked = true,
+                    underworldWatchGuideDialog = VantafynUnderworldWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadUnderworldWatchStatus()
+        } else if (trimmed == "X-MEN" || trimmed == "XMEN") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("X-MEN")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isXMenCodeUnlocked = true,
+                    xMenWatchGuideDialog = VantafynXMenWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadXMenWatchStatus()
+        } else if (trimmed == "MORDOR" || trimmed == "LOTR" || trimmed == "HOBBIT" || trimmed == "ONE-RING" || trimmed == "ONERING" || trimmed == "MIDDLE-EARTH" || trimmed == "MIDDLEEARTH") {
+            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
+            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
+            unlocked.add("MORDOR")
+            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+
+            _state.update {
+                it.copy(
+                    enterCodeDialog = null,
+                    isMiddleEarthCodeUnlocked = true,
+                    middleEarthWatchGuideDialog = VantafynMiddleEarthWatchGuideDialogState(isLoading = true),
+                )
+            }
+            loadMiddleEarthWatchStatus()
+        } else {
+            _state.update { current ->
+                val d = current.enterCodeDialog ?: return@update current
+                current.copy(
+                    enterCodeDialog = d.copy(
+                        errorMessage = "Code \"$code\" not recognized. Check back later for secret codes!",
+                        isSubmitting = false,
+                    ),
+                )
+            }
+        }
+    }
+
+    fun openMcuGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                mcuWatchGuideDialog = VantafynMcuWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.mcuWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadMcuWatchStatus()
+    }
+
+    fun closeMcuGuide() {
+        _state.update { it.copy(mcuWatchGuideDialog = null) }
+    }
+
+    fun setMcuSortMode(mode: McuSortMode) {
+        _state.update { current ->
+            val d = current.mcuWatchGuideDialog ?: return@update current
+            current.copy(mcuWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setMcuFilterMode(mode: McuFilterMode) {
+        _state.update { current ->
+            val d = current.mcuWatchGuideDialog ?: return@update current
+            current.copy(mcuWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadMcuWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = McuMoviesCatalog.movies.map { movie ->
+                    McuWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.mcuWatchGuideDialog ?: return@update current
+                    current.copy(
+                        mcuWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = McuMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = McuMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[McuMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        McuWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.mcuWatchGuideDialog ?: return@update current
+                        current.copy(
+                            mcuWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = McuMoviesCatalog.movies.map { movie ->
+                        McuWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.mcuWatchGuideDialog ?: return@update current
+                        current.copy(
+                            mcuWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun openSawGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                sawWatchGuideDialog = VantafynSawWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.sawWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadSawWatchStatus()
+    }
+
+    fun closeSawGuide() {
+        _state.update { it.copy(sawWatchGuideDialog = null) }
+    }
+
+    fun setSawSortMode(mode: SawSortMode) {
+        _state.update { current ->
+            val d = current.sawWatchGuideDialog ?: return@update current
+            current.copy(sawWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setSawFilterMode(mode: SawFilterMode) {
+        _state.update { current ->
+            val d = current.sawWatchGuideDialog ?: return@update current
+            current.copy(sawWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadSawWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = SawMoviesCatalog.movies.map { movie ->
+                    SawWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.sawWatchGuideDialog ?: return@update current
+                    current.copy(
+                        sawWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = SawMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = SawMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[SawMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        SawWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.sawWatchGuideDialog ?: return@update current
+                        current.copy(
+                            sawWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = SawMoviesCatalog.movies.map { movie ->
+                        SawWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.sawWatchGuideDialog ?: return@update current
+                        current.copy(
+                            sawWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun openResidentEvilGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                residentEvilWatchGuideDialog = VantafynResidentEvilWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.residentEvilWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadResidentEvilWatchStatus()
+    }
+
+    fun closeResidentEvilGuide() {
+        _state.update { it.copy(residentEvilWatchGuideDialog = null) }
+    }
+
+    fun setResidentEvilSortMode(mode: ResidentEvilSortMode) {
+        _state.update { current ->
+            val d = current.residentEvilWatchGuideDialog ?: return@update current
+            current.copy(residentEvilWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setResidentEvilFilterMode(mode: ResidentEvilFilterMode) {
+        _state.update { current ->
+            val d = current.residentEvilWatchGuideDialog ?: return@update current
+            current.copy(residentEvilWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadResidentEvilWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = ResidentEvilMoviesCatalog.movies.map { movie ->
+                    ResidentEvilWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.residentEvilWatchGuideDialog ?: return@update current
+                    current.copy(
+                        residentEvilWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = ResidentEvilMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = ResidentEvilMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[ResidentEvilMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        ResidentEvilWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.residentEvilWatchGuideDialog ?: return@update current
+                        current.copy(
+                            residentEvilWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = ResidentEvilMoviesCatalog.movies.map { movie ->
+                        ResidentEvilWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.residentEvilWatchGuideDialog ?: return@update current
+                        current.copy(
+                            residentEvilWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun openHarryPotterGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                harryPotterWatchGuideDialog = VantafynHarryPotterWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.harryPotterWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadHarryPotterWatchStatus()
+    }
+
+    fun closeHarryPotterGuide() {
+        _state.update { it.copy(harryPotterWatchGuideDialog = null) }
+    }
+
+    fun setHarryPotterSortMode(mode: HarryPotterSortMode) {
+        _state.update { current ->
+            val d = current.harryPotterWatchGuideDialog ?: return@update current
+            current.copy(harryPotterWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setHarryPotterFilterMode(mode: HarryPotterFilterMode) {
+        _state.update { current ->
+            val d = current.harryPotterWatchGuideDialog ?: return@update current
+            current.copy(harryPotterWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadHarryPotterWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = HarryPotterMoviesCatalog.movies.map { movie ->
+                    HarryPotterWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.harryPotterWatchGuideDialog ?: return@update current
+                    current.copy(
+                        harryPotterWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = HarryPotterMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = HarryPotterMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[HarryPotterMoviesCatalog.normalizeTitle(movie.title)]
+                            ?: movie.alternateTitle?.let { titleMap[HarryPotterMoviesCatalog.normalizeTitle(it)] }
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        HarryPotterWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.harryPotterWatchGuideDialog ?: return@update current
+                        current.copy(
+                            harryPotterWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = HarryPotterMoviesCatalog.movies.map { movie ->
+                        HarryPotterWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.harryPotterWatchGuideDialog ?: return@update current
+                        current.copy(
+                            harryPotterWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openHungerGamesGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                hungerGamesWatchGuideDialog = VantafynHungerGamesWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.hungerGamesWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadHungerGamesWatchStatus()
+    }
+
+    fun closeHungerGamesGuide() {
+        _state.update { it.copy(hungerGamesWatchGuideDialog = null) }
+    }
+
+    fun setHungerGamesSortMode(mode: HungerGamesSortMode) {
+        _state.update { current ->
+            val d = current.hungerGamesWatchGuideDialog ?: return@update current
+            current.copy(hungerGamesWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setHungerGamesFilterMode(mode: HungerGamesFilterMode) {
+        _state.update { current ->
+            val d = current.hungerGamesWatchGuideDialog ?: return@update current
+            current.copy(hungerGamesWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadHungerGamesWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = HungerGamesMoviesCatalog.movies.map { movie ->
+                    HungerGamesWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.hungerGamesWatchGuideDialog ?: return@update current
+                    current.copy(
+                        hungerGamesWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = HungerGamesMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = HungerGamesMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[HungerGamesMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        HungerGamesWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.hungerGamesWatchGuideDialog ?: return@update current
+                        current.copy(
+                            hungerGamesWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = HungerGamesMoviesCatalog.movies.map { movie ->
+                        HungerGamesWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.hungerGamesWatchGuideDialog ?: return@update current
+                        current.copy(
+                            hungerGamesWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openScreamGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                screamWatchGuideDialog = VantafynScreamWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.screamWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadScreamWatchStatus()
+    }
+
+    fun closeScreamGuide() {
+        _state.update { it.copy(screamWatchGuideDialog = null) }
+    }
+
+    fun setScreamSortMode(mode: ScreamSortMode) {
+        _state.update { current ->
+            val d = current.screamWatchGuideDialog ?: return@update current
+            current.copy(screamWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setScreamFilterMode(mode: ScreamFilterMode) {
+        _state.update { current ->
+            val d = current.screamWatchGuideDialog ?: return@update current
+            current.copy(screamWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadScreamWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = ScreamMoviesCatalog.movies.map { movie ->
+                    ScreamWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.screamWatchGuideDialog ?: return@update current
+                    current.copy(
+                        screamWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = ScreamMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = ScreamMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[ScreamMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        ScreamWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.screamWatchGuideDialog ?: return@update current
+                        current.copy(
+                            screamWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = ScreamMoviesCatalog.movies.map { movie ->
+                        ScreamWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.screamWatchGuideDialog ?: return@update current
+                        current.copy(
+                            screamWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openMatrixGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                matrixWatchGuideDialog = VantafynMatrixWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.matrixWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadMatrixWatchStatus()
+    }
+
+    fun closeMatrixGuide() {
+        _state.update { it.copy(matrixWatchGuideDialog = null) }
+    }
+
+    fun setMatrixSortMode(mode: MatrixSortMode) {
+        _state.update { current ->
+            val d = current.matrixWatchGuideDialog ?: return@update current
+            current.copy(matrixWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setMatrixFilterMode(mode: MatrixFilterMode) {
+        _state.update { current ->
+            val d = current.matrixWatchGuideDialog ?: return@update current
+            current.copy(matrixWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadMatrixWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = MatrixMoviesCatalog.movies.map { movie ->
+                    MatrixWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.matrixWatchGuideDialog ?: return@update current
+                    current.copy(
+                        matrixWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = MatrixMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = MatrixMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[MatrixMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        MatrixWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.matrixWatchGuideDialog ?: return@update current
+                        current.copy(
+                            matrixWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = MatrixMoviesCatalog.movies.map { movie ->
+                        MatrixWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.matrixWatchGuideDialog ?: return@update current
+                        current.copy(
+                            matrixWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openJumanjiGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                jumanjiWatchGuideDialog = VantafynJumanjiWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.jumanjiWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadJumanjiWatchStatus()
+    }
+
+    fun closeJumanjiGuide() {
+        _state.update { it.copy(jumanjiWatchGuideDialog = null) }
+    }
+
+    fun setJumanjiSortMode(mode: JumanjiSortMode) {
+        _state.update { current ->
+            val d = current.jumanjiWatchGuideDialog ?: return@update current
+            current.copy(jumanjiWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setJumanjiFilterMode(mode: JumanjiFilterMode) {
+        _state.update { current ->
+            val d = current.jumanjiWatchGuideDialog ?: return@update current
+            current.copy(jumanjiWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadJumanjiWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = JumanjiMoviesCatalog.movies.map { movie ->
+                    JumanjiWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.jumanjiWatchGuideDialog ?: return@update current
+                    current.copy(
+                        jumanjiWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = JumanjiMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = JumanjiMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[JumanjiMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        JumanjiWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.jumanjiWatchGuideDialog ?: return@update current
+                        current.copy(
+                            jumanjiWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = JumanjiMoviesCatalog.movies.map { movie ->
+                        JumanjiWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.jumanjiWatchGuideDialog ?: return@update current
+                        current.copy(
+                            jumanjiWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openJurassicGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                jurassicWatchGuideDialog = VantafynJurassicWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.jurassicWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadJurassicWatchStatus()
+    }
+
+    fun closeJurassicGuide() {
+        _state.update { it.copy(jurassicWatchGuideDialog = null) }
+    }
+
+    fun setJurassicSortMode(mode: JurassicSortMode) {
+        _state.update { current ->
+            val d = current.jurassicWatchGuideDialog ?: return@update current
+            current.copy(jurassicWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setJurassicFilterMode(mode: JurassicFilterMode) {
+        _state.update { current ->
+            val d = current.jurassicWatchGuideDialog ?: return@update current
+            current.copy(jurassicWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadJurassicWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = JurassicMoviesCatalog.movies.map { movie ->
+                    JurassicWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.jurassicWatchGuideDialog ?: return@update current
+                    current.copy(
+                        jurassicWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = JurassicMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = JurassicMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[JurassicMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        JurassicWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.jurassicWatchGuideDialog ?: return@update current
+                        current.copy(
+                            jurassicWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = JurassicMoviesCatalog.movies.map { movie ->
+                        JurassicWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.jurassicWatchGuideDialog ?: return@update current
+                        current.copy(
+                            jurassicWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openPiratesGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                piratesWatchGuideDialog = VantafynPiratesWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.piratesWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadPiratesWatchStatus()
+    }
+
+    fun closePiratesGuide() {
+        _state.update { it.copy(piratesWatchGuideDialog = null) }
+    }
+
+    fun setPiratesSortMode(mode: PiratesSortMode) {
+        _state.update { current ->
+            val d = current.piratesWatchGuideDialog ?: return@update current
+            current.copy(piratesWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setPiratesFilterMode(mode: PiratesFilterMode) {
+        _state.update { current ->
+            val d = current.piratesWatchGuideDialog ?: return@update current
+            current.copy(piratesWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadPiratesWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = PiratesMoviesCatalog.movies.map { movie ->
+                    PiratesWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.piratesWatchGuideDialog ?: return@update current
+                    current.copy(
+                        piratesWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = PiratesMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = PiratesMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[PiratesMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        PiratesWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.piratesWatchGuideDialog ?: return@update current
+                        current.copy(
+                            piratesWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = PiratesMoviesCatalog.movies.map { movie ->
+                        PiratesWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.piratesWatchGuideDialog ?: return@update current
+                        current.copy(
+                            piratesWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: ${result.message}",
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openPokemonGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                pokemonWatchGuideDialog = VantafynPokemonWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.pokemonWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadPokemonWatchStatus()
+    }
+
+    fun closePokemonGuide() {
+        _state.update { it.copy(pokemonWatchGuideDialog = null) }
+    }
+
+    fun setPokemonSortMode(mode: PokemonSortMode) {
+        _state.update { current ->
+            val d = current.pokemonWatchGuideDialog ?: return@update current
+            current.copy(pokemonWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setPokemonFilterMode(mode: PokemonFilterMode) {
+        _state.update { current ->
+            val d = current.pokemonWatchGuideDialog ?: return@update current
+            current.copy(pokemonWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadPokemonWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = PokemonMoviesCatalog.movies.map { movie ->
+                    PokemonWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.pokemonWatchGuideDialog ?: return@update current
+                    current.copy(
+                        pokemonWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = PokemonMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = PokemonMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[PokemonMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        PokemonWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.pokemonWatchGuideDialog ?: return@update current
+                        current.copy(
+                            pokemonWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = PokemonMoviesCatalog.movies.map { movie ->
+                        PokemonWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.pokemonWatchGuideDialog ?: return@update current
+                        current.copy(
+                            pokemonWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: " + result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openScaryMovieGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                scaryMovieWatchGuideDialog = VantafynScaryMovieWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.scaryMovieWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadScaryMovieWatchStatus()
+    }
+
+    fun closeScaryMovieGuide() {
+        _state.update { it.copy(scaryMovieWatchGuideDialog = null) }
+    }
+
+    fun setScaryMovieSortMode(mode: ScaryMovieSortMode) {
+        _state.update { current ->
+            val d = current.scaryMovieWatchGuideDialog ?: return@update current
+            current.copy(scaryMovieWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setScaryMovieFilterMode(mode: ScaryMovieFilterMode) {
+        _state.update { current ->
+            val d = current.scaryMovieWatchGuideDialog ?: return@update current
+            current.copy(scaryMovieWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadScaryMovieWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = ScaryMovieMoviesCatalog.movies.map { movie ->
+                    ScaryMovieWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.scaryMovieWatchGuideDialog ?: return@update current
+                    current.copy(
+                        scaryMovieWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = ScaryMovieMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = ScaryMovieMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[ScaryMovieMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        ScaryMovieWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.scaryMovieWatchGuideDialog ?: return@update current
+                        current.copy(
+                            scaryMovieWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = ScaryMovieMoviesCatalog.movies.map { movie ->
+                        ScaryMovieWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.scaryMovieWatchGuideDialog ?: return@update current
+                        current.copy(
+                            scaryMovieWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: " + result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openTwilightGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                twilightWatchGuideDialog = VantafynTwilightWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.twilightWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadTwilightWatchStatus()
+    }
+
+    fun closeTwilightGuide() {
+        _state.update { it.copy(twilightWatchGuideDialog = null) }
+    }
+
+    fun setTwilightSortMode(mode: TwilightSortMode) {
+        _state.update { current ->
+            val d = current.twilightWatchGuideDialog ?: return@update current
+            current.copy(twilightWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setTwilightFilterMode(mode: TwilightFilterMode) {
+        _state.update { current ->
+            val d = current.twilightWatchGuideDialog ?: return@update current
+            current.copy(twilightWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadTwilightWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = TwilightMoviesCatalog.movies.map { movie ->
+                    TwilightWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.twilightWatchGuideDialog ?: return@update current
+                    current.copy(
+                        twilightWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = TwilightMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = TwilightMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[TwilightMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        TwilightWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.twilightWatchGuideDialog ?: return@update current
+                        current.copy(
+                            twilightWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = TwilightMoviesCatalog.movies.map { movie ->
+                        TwilightWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.twilightWatchGuideDialog ?: return@update current
+                        current.copy(
+                            twilightWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: " + result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openUnderworldGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                underworldWatchGuideDialog = VantafynUnderworldWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.underworldWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadUnderworldWatchStatus()
+    }
+
+    fun closeUnderworldGuide() {
+        _state.update { it.copy(underworldWatchGuideDialog = null) }
+    }
+
+    fun setUnderworldSortMode(mode: UnderworldSortMode) {
+        _state.update { current ->
+            val d = current.underworldWatchGuideDialog ?: return@update current
+            current.copy(underworldWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setUnderworldFilterMode(mode: UnderworldFilterMode) {
+        _state.update { current ->
+            val d = current.underworldWatchGuideDialog ?: return@update current
+            current.copy(underworldWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadUnderworldWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = UnderworldMoviesCatalog.movies.map { movie ->
+                    UnderworldWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.underworldWatchGuideDialog ?: return@update current
+                    current.copy(
+                        underworldWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = UnderworldMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = UnderworldMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[UnderworldMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        UnderworldWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.underworldWatchGuideDialog ?: return@update current
+                        current.copy(
+                            underworldWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = UnderworldMoviesCatalog.movies.map { movie ->
+                        UnderworldWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.underworldWatchGuideDialog ?: return@update current
+                        current.copy(
+                            underworldWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: " + result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openXMenGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                xMenWatchGuideDialog = VantafynXMenWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.xMenWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadXMenWatchStatus()
+    }
+
+    fun closeXMenGuide() {
+        _state.update { it.copy(xMenWatchGuideDialog = null) }
+    }
+
+    fun setXMenSortMode(mode: XMenSortMode) {
+        _state.update { current ->
+            val d = current.xMenWatchGuideDialog ?: return@update current
+            current.copy(xMenWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setXMenFilterMode(mode: XMenFilterMode) {
+        _state.update { current ->
+            val d = current.xMenWatchGuideDialog ?: return@update current
+            current.copy(xMenWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadXMenWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = XMenMoviesCatalog.movies.map { movie ->
+                    XMenWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.xMenWatchGuideDialog ?: return@update current
+                    current.copy(
+                        xMenWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = XMenMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = XMenMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[XMenMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        XMenWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.xMenWatchGuideDialog ?: return@update current
+                        current.copy(
+                            xMenWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = XMenMoviesCatalog.movies.map { movie ->
+                        XMenWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.xMenWatchGuideDialog ?: return@update current
+                        current.copy(
+                            xMenWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: " + result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+
+    fun openMiddleEarthGuide() {
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                middleEarthWatchGuideDialog = VantafynMiddleEarthWatchGuideDialogState(
+                    isLoading = true,
+                    movies = it.middleEarthWatchGuideDialog?.movies ?: emptyList(),
+                ),
+            )
+        }
+        loadMiddleEarthWatchStatus()
+    }
+
+    fun closeMiddleEarthGuide() {
+        _state.update { it.copy(middleEarthWatchGuideDialog = null) }
+    }
+
+    fun setMiddleEarthSortMode(mode: MiddleEarthSortMode) {
+        _state.update { current ->
+            val d = current.middleEarthWatchGuideDialog ?: return@update current
+            current.copy(middleEarthWatchGuideDialog = d.copy(sortMode = mode))
+        }
+    }
+
+    fun setMiddleEarthFilterMode(mode: MiddleEarthFilterMode) {
+        _state.update { current ->
+            val d = current.middleEarthWatchGuideDialog ?: return@update current
+            current.copy(middleEarthWatchGuideDialog = d.copy(filterMode = mode))
+        }
+    }
+
+    fun loadMiddleEarthWatchStatus() {
+        val session = _state.value.session
+        viewModelScope.launch {
+            if (session == null) {
+                val fallbackItems = MiddleEarthMoviesCatalog.movies.map { movie ->
+                    MiddleEarthWatchItemUi(
+                        movie = movie,
+                        isOnServer = false,
+                        isPlayed = false,
+                        mediaItemId = null,
+                        serverImageUrl = null,
+                    )
+                }
+                _state.update { current ->
+                    val d = current.middleEarthWatchGuideDialog ?: return@update current
+                    current.copy(
+                        middleEarthWatchGuideDialog = d.copy(
+                            isLoading = false,
+                            movies = fallbackItems,
+                            errorMessage = null,
+                        ),
+                    )
+                }
+                return@launch
+            }
+
+            when (val result = mediaRepository.getMovieWatchList(session)) {
+                is JellyfinResult.Success -> {
+                    val serverMovies: List<dev.vantafyn.core.jellyfin.JellyfinMcuServerItem> = result.value
+                    val tmdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val imdbMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+                    val titleMap = mutableMapOf<String, dev.vantafyn.core.jellyfin.JellyfinMcuServerItem>()
+
+                    for (item in serverMovies) {
+                        item.tmdbId?.takeIf { it.isNotBlank() }?.let { tmdbMap[it] = item }
+                        item.imdbId?.takeIf { it.isNotBlank() }?.let { imdbMap[it.lowercase()] = item }
+                        val norm = MiddleEarthMoviesCatalog.normalizeTitle(item.name)
+                        if (norm.isNotBlank()) {
+                            titleMap[norm] = item
+                        }
+                    }
+
+                    val itemsUi = MiddleEarthMoviesCatalog.movies.map { movie ->
+                        val matched = (movie.tmdbId?.toString()?.let { tmdbMap[it] })
+                            ?: (movie.imdbId?.lowercase()?.let { imdbMap[it] })
+                            ?: titleMap[MiddleEarthMoviesCatalog.normalizeTitle(movie.title)]
+
+                        val isOnServer = matched != null
+                        val isPlayed = matched?.isPlayed == true
+                        val mediaItemId = matched?.id
+                        val serverImageUrl = matched?.imageUrl
+                        val serverBackdropUrl = matched?.backdropUrl
+
+                        MiddleEarthWatchItemUi(
+                            movie = movie,
+                            isOnServer = isOnServer,
+                            isPlayed = isPlayed,
+                            mediaItemId = mediaItemId,
+                            serverImageUrl = serverImageUrl,
+                            serverBackdropUrl = serverBackdropUrl,
+                        )
+                    }
+
+                    _state.update { current ->
+                        val d = current.middleEarthWatchGuideDialog ?: return@update current
+                        current.copy(
+                            middleEarthWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = itemsUi,
+                                errorMessage = null,
+                            ),
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackItems = MiddleEarthMoviesCatalog.movies.map { movie ->
+                        MiddleEarthWatchItemUi(
+                            movie = movie,
+                            isOnServer = false,
+                            isPlayed = false,
+                            mediaItemId = null,
+                            serverImageUrl = null,
+                        )
+                    }
+                    _state.update { current ->
+                        val d = current.middleEarthWatchGuideDialog ?: return@update current
+                        current.copy(
+                            middleEarthWatchGuideDialog = d.copy(
+                                isLoading = false,
+                                movies = fallbackItems,
+                                errorMessage = "Couldn't sync library: " + result.message,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun checkPendingGiftsForUser(session: JellyfinSession? = _state.value.session) {
+        val s = session ?: return
+        val pending = VantafynGiftStorage.getPendingGifts(getApplication(), s.server.url, s.user.id)
+            .filter { it.id !in dismissedGiftIdsInSession }
+        if (pending.isEmpty()) {
+            totalGiftsInCurrentBatch = 0
+            _state.update {
+                it.copy(
+                    pendingReceivedGift = null,
+                    pendingGiftsQueueCount = 0,
+                    pendingGiftQueueIndex = 1,
+                )
+            }
+            return
+        }
+
+        if (pending.size > totalGiftsInCurrentBatch) {
+            totalGiftsInCurrentBatch = pending.size
+        }
+        val queueTotal = maxOf(totalGiftsInCurrentBatch, pending.size)
+        val queueIndex = (queueTotal - pending.size + 1).coerceIn(1, queueTotal)
+
+        val nextGift = pending.firstOrNull()
+        _state.update {
+            it.copy(
+                pendingGiftsQueueCount = queueTotal,
+                pendingGiftQueueIndex = queueIndex,
+                pendingReceivedGift = it.pendingReceivedGift ?: nextGift,
+            )
+        }
+    }
+
+    fun closeAllWatchGuideDialogs() {
+        _state.update {
+            it.copy(
+                mcuWatchGuideDialog = null,
+                sawWatchGuideDialog = null,
+                residentEvilWatchGuideDialog = null,
+                harryPotterWatchGuideDialog = null,
+                hungerGamesWatchGuideDialog = null,
+                screamWatchGuideDialog = null,
+                matrixWatchGuideDialog = null,
+                jumanjiWatchGuideDialog = null,
+                jurassicWatchGuideDialog = null,
+                piratesWatchGuideDialog = null,
+                pokemonWatchGuideDialog = null,
+                scaryMovieWatchGuideDialog = null,
+                twilightWatchGuideDialog = null,
+                underworldWatchGuideDialog = null,
+                xMenWatchGuideDialog = null,
+                middleEarthWatchGuideDialog = null,
+            )
+        }
+    }
+
+    fun openAdminCodeGiftDialog() {
+        val session = _state.value.session ?: return
+        _state.update { it.copy(showAdminCodeGiftDialog = true, isLoadingAdminGiftUsers = true) }
+        viewModelScope.launch {
+            when (val result = adminRepository.getOverview(session, _state.value.libraries)) {
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            adminGiftUsers = result.value.users,
+                            isLoadingAdminGiftUsers = false,
+                        )
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    val fallbackUsers = _state.value.publicUsers.map { pub ->
+                        JellyfinAdminUser(
+                            id = pub.id,
+                            name = pub.displayName,
+                            imageUrl = pub.imageUrl,
+                            isAdministrator = pub.isAdministrator,
+                            isDisabled = false,
+                            isHidden = false,
+                            lastActivity = null,
+                            lastLogin = null,
+                        )
+                    }
+                    _state.update {
+                        it.copy(
+                            adminGiftUsers = fallbackUsers,
+                            isLoadingAdminGiftUsers = false,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun closeAdminCodeGiftDialog() {
+        _state.update { it.copy(showAdminCodeGiftDialog = false) }
+        checkPendingGiftsForUser()
+    }
+
+    fun sendFranchiseGift(
+        recipientId: UUID,
+        recipientName: String,
+        franchiseCode: String,
+        note: String?,
+    ) {
+        val session = _state.value.session ?: return
+        val franchise = VantafynGiftFranchises.all.firstOrNull { it.code.equals(franchiseCode, ignoreCase = true) }
+        val gift = VantafynCodeGift(
+            senderId = session.user.id,
+            senderName = session.user.name,
+            senderAvatarUrl = session.user.primaryImageTag?.let { tag ->
+                "${session.server.url.trimEnd('/')}/Users/${session.user.id}/Images/Primary?tag=$tag"
+            },
+            recipientUserId = recipientId,
+            recipientName = recipientName,
+            franchiseCode = franchise?.code ?: franchiseCode,
+            franchiseTitle = franchise?.title ?: franchiseCode,
+            franchiseBadge = franchise?.badge ?: "FRANCHISE",
+            franchiseIcon = franchise?.icon ?: "🎁",
+            accentColorHex = franchise?.accentColorHex ?: 0xFFD4AF37,
+            note = note?.takeIf { it.isNotBlank() },
+            posterUrl = franchise?.posterUrl,
+        )
+
+        VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, gift)
+
+        if (recipientId == session.user.id) {
+            checkPendingGiftsForUser(session)
+        }
+
+        viewModelScope.launch {
+            try {
+                socialRepository.sendMessage(
+                    session = session,
+                    recipientId = recipientId,
+                    conversationId = null,
+                    text = gift.toSerializedMessage(),
+                )
+            } catch (_: Exception) {
+                // Persistent queue ensures gift arrival
+            }
+        }
+    }
+
+    fun claimReceivedGift(gift: VantafynCodeGift) {
+        val session = _state.value.session
+        if (session != null) {
+            VantafynGiftStorage.markGiftClaimed(
+                getApplication(),
+                session.server.url,
+                gift.recipientUserId,
+                gift.id,
+            )
+        }
+        submitUnlockCode(gift.franchiseCode)
+
+        val remaining = if (session != null) {
+            VantafynGiftStorage.getPendingGifts(getApplication(), session.server.url, session.user.id)
+                .filter { it.id !in dismissedGiftIdsInSession }
+        } else {
+            emptyList()
+        }
+        if (remaining.isNotEmpty()) {
+            closeAllWatchGuideDialogs()
+        }
+
+        _state.update { it.copy(pendingReceivedGift = null) }
+
+        viewModelScope.launch {
+            delay(380L)
+            checkPendingGiftsForUser()
+        }
+    }
+
+    fun dismissReceivedGift(gift: VantafynCodeGift? = _state.value.pendingReceivedGift) {
+        if (gift != null) {
+            dismissedGiftIdsInSession.add(gift.id)
+        }
+        _state.update { it.copy(pendingReceivedGift = null) }
+        viewModelScope.launch {
+            delay(300L)
+            checkPendingGiftsForUser()
+        }
+    }
+
+    fun dismissAllReceivedGifts() {
+        val session = _state.value.session
+        if (session != null) {
+            val pending = VantafynGiftStorage.getPendingGifts(getApplication(), session.server.url, session.user.id)
+            dismissedGiftIdsInSession.addAll(pending.map { it.id })
+        }
+        _state.value.pendingReceivedGift?.let { dismissedGiftIdsInSession.add(it.id) }
+        _state.update { it.copy(pendingReceivedGift = null) }
     }
 
     fun openMedia(itemId: UUID) {
@@ -4238,6 +7017,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (snapshot.isPlaybackLoading) return
         val session = snapshot.session ?: return
         val detail = snapshot.mediaDetail ?: return
+        if (detail.isAudiobookMedia) {
+            startAudiobookPlayback(session, detail, positionMs = positionMs)
+            return
+        }
         val target = detail.playbackTarget(positionMs) ?: run {
             _state.update { it.copy(mobileMessage = "This item cannot be played yet") }
             return
@@ -4249,11 +7032,93 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val snapshot = _state.value
         val session = snapshot.session ?: return
         val detail = snapshot.mediaDetail ?: return
+        if (detail.isAudiobookMedia) {
+            startAudiobookPlayback(session, detail, positionMs = 0L)
+            return
+        }
         val target = detail.beginningPlaybackTarget(snapshot.selectedSeasonEpisodes) ?: run {
             _state.update { it.copy(mobileMessage = "This item cannot be played yet") }
             return
         }
         startPlaybackTarget(session, target, forceTranscode = false, audioStreamIndex = null, subtitleStreamIndex = null)
+    }
+
+    fun startAudiobookChapter(chapter: JellyfinChapter) {
+        val session = _state.value.session ?: return
+        val detail = _state.value.mediaDetail ?: return
+        startAudiobookPlayback(session, detail, positionMs = chapter.startPositionMs)
+    }
+
+    fun startAudiobookPlayback(
+        session: JellyfinSession,
+        detail: JellyfinMediaDetail,
+        positionMs: Long? = null,
+    ) {
+        viewModelScope.launch {
+            _state.update { it.copy(isPlaybackLoading = true) }
+            val tracksResult = mediaRepository.getAudiobookTracks(session, detail.id)
+            val tracks = when (tracksResult) {
+                is JellyfinResult.Success -> tracksResult.value
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            isPlaybackLoading = false,
+                            mobileMessage = "Failed to load audiobook: ${tracksResult.message}",
+                        )
+                    }
+                    return@launch
+                }
+            }
+            if (tracks.isEmpty()) {
+                _state.update {
+                    it.copy(
+                        isPlaybackLoading = false,
+                        mobileMessage = "No audio tracks found for this audiobook",
+                    )
+                }
+                return@launch
+            }
+
+            val targetPositionMs = positionMs ?: run {
+                val resumeTicks = detail.playbackPositionTicks
+                if (resumeTicks != null && resumeTicks > 0L) {
+                    resumeTicks / 10_000L
+                } else 0L
+            }
+
+            val controller = MusicPlaybackController.get(getApplication())
+            val vantafynTracks = tracks.map { it.toVantafynTrack() }
+
+            var startIndex = 0
+            var trackOffsetMs = targetPositionMs
+            if (vantafynTracks.size > 1) {
+                var accumulatedMs = 0L
+                for ((idx, trk) in vantafynTracks.withIndex()) {
+                    val dur = trk.durationMs ?: 0L
+                    if (targetPositionMs < accumulatedMs + dur) {
+                        startIndex = idx
+                        trackOffsetMs = targetPositionMs - accumulatedMs
+                        break
+                    }
+                    accumulatedMs += dur
+                }
+            }
+
+            controller.playQueue(
+                queue = vantafynTracks,
+                startIndex = startIndex,
+                startPositionMs = trackOffsetMs,
+                isAudiobook = true,
+                chapters = detail.chapters,
+            )
+
+            _state.update {
+                it.copy(
+                    isPlaybackLoading = false,
+                    mobileMessage = "Playing ${detail.title}",
+                )
+            }
+        }
     }
 
     fun startEpisodePlayback(episode: JellyfinEpisode, fromBeginning: Boolean = false) {
@@ -4818,8 +7683,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppForegrounded() {
         isAppForeground = true
+        resetInactivityBackoff()
         _state.update { it.copy(isAppForeground = true) }
+        dismissedGiftIdsInSession.clear()
         val session = _state.value.session
+        if (session != null) {
+            checkPendingGiftsForUser(session)
+        }
         val now = System.currentTimeMillis()
         val bgDuration = if (lastBackgroundedAtMs > 0L) now - lastBackgroundedAtMs else 0L
         lastBackgroundedAtMs = 0L
@@ -4838,13 +7708,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             offlineSyncScheduler.schedule()
             refreshAchievementsAvailability()
             if (_state.value.isAchievementsAvailable) {
-                startAchievementPolling()
                 pollAchievementUnlocks()
             }
             if (_state.value.socialEnabled) {
                 viewModelScope.launch { socialRepository.reportPresence(session) }
-                startSocialPolling()
             }
+            startSocialPolling()
         }
         if (_state.value.adminOverview != null && _state.value.session?.user?.isAdministrator == true) {
             pollAdminOverview()
@@ -6425,6 +9294,155 @@ data class VantafynIdentifyDialogState(
     val applyError: String? = null,
 )
 
+data class VantafynEnterCodeDialogState(
+    val errorMessage: String? = null,
+    val isSubmitting: Boolean = false,
+    val isMcuUnlocked: Boolean = false,
+    val isSawUnlocked: Boolean = false,
+    val isResidentEvilUnlocked: Boolean = false,
+    val isHarryPotterUnlocked: Boolean = false,
+    val isHungerGamesUnlocked: Boolean = false,
+    val isScreamUnlocked: Boolean = false,
+    val isMatrixUnlocked: Boolean = false,
+    val isJumanjiUnlocked: Boolean = false,
+    val isJurassicUnlocked: Boolean = false,
+    val isPiratesUnlocked: Boolean = false,
+    val isPokemonUnlocked: Boolean = false,
+    val isScaryMovieUnlocked: Boolean = false,
+    val isTwilightUnlocked: Boolean = false,
+    val isUnderworldUnlocked: Boolean = false,
+    val isXMenUnlocked: Boolean = false,
+    val isMiddleEarthUnlocked: Boolean = false,
+)
+
+data class VantafynMcuWatchGuideDialogState(
+    val movies: List<McuWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: McuSortMode = McuSortMode.Timeline,
+    val filterMode: McuFilterMode = McuFilterMode.All,
+)
+
+data class VantafynSawWatchGuideDialogState(
+    val movies: List<SawWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: SawSortMode = SawSortMode.Release,
+    val filterMode: SawFilterMode = SawFilterMode.All,
+)
+
+data class VantafynResidentEvilWatchGuideDialogState(
+    val movies: List<ResidentEvilWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: ResidentEvilSortMode = ResidentEvilSortMode.Release,
+    val filterMode: ResidentEvilFilterMode = ResidentEvilFilterMode.All,
+)
+
+data class VantafynHarryPotterWatchGuideDialogState(
+    val movies: List<HarryPotterWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: HarryPotterSortMode = HarryPotterSortMode.Release,
+    val filterMode: HarryPotterFilterMode = HarryPotterFilterMode.All,
+)
+
+data class VantafynHungerGamesWatchGuideDialogState(
+    val movies: List<HungerGamesWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: HungerGamesSortMode = HungerGamesSortMode.Timeline,
+    val filterMode: HungerGamesFilterMode = HungerGamesFilterMode.All,
+)
+
+data class VantafynScreamWatchGuideDialogState(
+    val movies: List<ScreamWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: ScreamSortMode = ScreamSortMode.Release,
+    val filterMode: ScreamFilterMode = ScreamFilterMode.All,
+)
+
+data class VantafynMatrixWatchGuideDialogState(
+    val movies: List<MatrixWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: MatrixSortMode = MatrixSortMode.Release,
+    val filterMode: MatrixFilterMode = MatrixFilterMode.All,
+)
+
+data class VantafynJumanjiWatchGuideDialogState(
+    val movies: List<JumanjiWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: JumanjiSortMode = JumanjiSortMode.Release,
+    val filterMode: JumanjiFilterMode = JumanjiFilterMode.All,
+)
+
+data class VantafynJurassicWatchGuideDialogState(
+    val movies: List<JurassicWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: JurassicSortMode = JurassicSortMode.Release,
+    val filterMode: JurassicFilterMode = JurassicFilterMode.All,
+)
+
+data class VantafynPiratesWatchGuideDialogState(
+    val movies: List<PiratesWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: PiratesSortMode = PiratesSortMode.Release,
+    val filterMode: PiratesFilterMode = PiratesFilterMode.All,
+)
+
+data class VantafynPokemonWatchGuideDialogState(
+    val movies: List<PokemonWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: PokemonSortMode = PokemonSortMode.Release,
+    val filterMode: PokemonFilterMode = PokemonFilterMode.All,
+)
+
+data class VantafynScaryMovieWatchGuideDialogState(
+    val movies: List<ScaryMovieWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: ScaryMovieSortMode = ScaryMovieSortMode.Release,
+    val filterMode: ScaryMovieFilterMode = ScaryMovieFilterMode.All,
+)
+
+data class VantafynTwilightWatchGuideDialogState(
+    val movies: List<TwilightWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: TwilightSortMode = TwilightSortMode.Release,
+    val filterMode: TwilightFilterMode = TwilightFilterMode.All,
+)
+
+data class VantafynUnderworldWatchGuideDialogState(
+    val movies: List<UnderworldWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: UnderworldSortMode = UnderworldSortMode.Timeline,
+    val filterMode: UnderworldFilterMode = UnderworldFilterMode.All,
+)
+
+data class VantafynXMenWatchGuideDialogState(
+    val movies: List<XMenWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: XMenSortMode = XMenSortMode.Timeline,
+    val filterMode: XMenFilterMode = XMenFilterMode.All,
+)
+
+data class VantafynMiddleEarthWatchGuideDialogState(
+    val movies: List<MiddleEarthWatchItemUi> = emptyList(),
+    val isLoading: Boolean = false,
+    val errorMessage: String? = null,
+    val sortMode: MiddleEarthSortMode = MiddleEarthSortMode.Timeline,
+    val filterMode: MiddleEarthFilterMode = MiddleEarthFilterMode.All,
+)
+
 data class VantafynHomeUiState(
     val step: VantafynSetupStep = VantafynSetupStep.Splash,
     val experienceMode: ExperienceMode = ExperienceMode.FullMedia,
@@ -6473,6 +9491,45 @@ data class VantafynHomeUiState(
     val isLibraryGenresLoading: Boolean = false,
     val selectedGenre: JellyfinGenreItem? = null,
     val identifyDialog: VantafynIdentifyDialogState? = null,
+    val enterCodeDialog: VantafynEnterCodeDialogState? = null,
+    val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState? = null,
+    val isMcuCodeUnlocked: Boolean = false,
+    val sawWatchGuideDialog: VantafynSawWatchGuideDialogState? = null,
+    val isSawCodeUnlocked: Boolean = false,
+    val residentEvilWatchGuideDialog: VantafynResidentEvilWatchGuideDialogState? = null,
+    val isResidentEvilCodeUnlocked: Boolean = false,
+    val harryPotterWatchGuideDialog: VantafynHarryPotterWatchGuideDialogState? = null,
+    val isHarryPotterCodeUnlocked: Boolean = false,
+    val hungerGamesWatchGuideDialog: VantafynHungerGamesWatchGuideDialogState? = null,
+    val isHungerGamesCodeUnlocked: Boolean = false,
+    val screamWatchGuideDialog: VantafynScreamWatchGuideDialogState? = null,
+    val isScreamCodeUnlocked: Boolean = false,
+    val matrixWatchGuideDialog: VantafynMatrixWatchGuideDialogState? = null,
+    val isMatrixCodeUnlocked: Boolean = false,
+    val jumanjiWatchGuideDialog: VantafynJumanjiWatchGuideDialogState? = null,
+    val isJumanjiCodeUnlocked: Boolean = false,
+    val jurassicWatchGuideDialog: VantafynJurassicWatchGuideDialogState? = null,
+    val isJurassicCodeUnlocked: Boolean = false,
+    val piratesWatchGuideDialog: VantafynPiratesWatchGuideDialogState? = null,
+    val isPiratesCodeUnlocked: Boolean = false,
+    val pokemonWatchGuideDialog: VantafynPokemonWatchGuideDialogState? = null,
+    val isPokemonCodeUnlocked: Boolean = false,
+    val scaryMovieWatchGuideDialog: VantafynScaryMovieWatchGuideDialogState? = null,
+    val isScaryMovieCodeUnlocked: Boolean = false,
+    val twilightWatchGuideDialog: VantafynTwilightWatchGuideDialogState? = null,
+    val isTwilightCodeUnlocked: Boolean = false,
+    val underworldWatchGuideDialog: VantafynUnderworldWatchGuideDialogState? = null,
+    val isUnderworldCodeUnlocked: Boolean = false,
+    val xMenWatchGuideDialog: VantafynXMenWatchGuideDialogState? = null,
+    val isXMenCodeUnlocked: Boolean = false,
+    val middleEarthWatchGuideDialog: VantafynMiddleEarthWatchGuideDialogState? = null,
+    val isMiddleEarthCodeUnlocked: Boolean = false,
+    val showAdminCodeGiftDialog: Boolean = false,
+    val adminGiftUsers: List<JellyfinAdminUser> = emptyList(),
+    val isLoadingAdminGiftUsers: Boolean = false,
+    val pendingReceivedGift: VantafynCodeGift? = null,
+    val pendingGiftsQueueCount: Int = 0,
+    val pendingGiftQueueIndex: Int = 1,
     val libraryViewMode: LibraryViewMode = LibraryViewMode.Poster,
     val selectedMediaId: UUID? = null,
     val mediaDetail: JellyfinMediaDetail? = null,

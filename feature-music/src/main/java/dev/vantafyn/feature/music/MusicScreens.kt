@@ -33,13 +33,17 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.material.icons.automirrored.rounded.List
 import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.DragHandle
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.FastRewind
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Reorder
+import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -73,6 +77,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -172,6 +177,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import dev.vantafyn.core.jellyfin.JellyfinChapter
 import dev.vantafyn.core.media.SleepTimerMode
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
 import dev.vantafyn.feature.music.harmonia.HarmoniaShareHelper
@@ -1319,9 +1325,19 @@ fun MusicScreen(
                         startMusic { viewModel.togglePlayPause() }
                     }
                 },
-                onPrevious = viewModel::previous,
-                onNext = viewModel::next,
+                onPrevious = if (state.playback.isAudiobookMode) {
+                    { viewModel.seekRelative(-15_000L) }
+                } else {
+                    viewModel::previous
+                },
+                onNext = if (state.playback.isAudiobookMode) {
+                    { viewModel.seekRelative(30_000L) }
+                } else {
+                    viewModel::next
+                },
                 onStop = viewModel::stopMusic,
+                isAudiobook = state.playback.isAudiobookMode,
+                currentChapterName = state.playback.currentChapter?.name,
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
                     .padding(start = 8.dp, end = 8.dp, bottom = 96.dp),
@@ -6769,6 +6785,8 @@ private fun MusicMiniPlayer(
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     onStop: () -> Unit,
+    isAudiobook: Boolean = false,
+    currentChapterName: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val density = LocalDensity.current
@@ -6877,20 +6895,35 @@ private fun MusicMiniPlayer(
                         text = track.title,
                         style = MaterialTheme.typography.bodyLarge.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold),
                     )
+                    val displaySubtitle = if (isAudiobook && !currentChapterName.isNullOrBlank()) {
+                        "$currentChapterName · ${track.artist}"
+                    } else {
+                        track.artist
+                    }
                     VantafynMarqueeText(
-                        text = track.artist,
+                        text = displaySubtitle,
                         style = MaterialTheme.typography.bodyMedium.copy(color = VantafynColors.Muted),
                     )
                 }
                 GoogleCastRouteButton(modifier = Modifier.size(38.dp))
-                FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous", onPrevious, size = 38)
+                FlatMusicIconButton(
+                    icon = if (isAudiobook) Icons.Rounded.FastRewind else Icons.Rounded.SkipPrevious,
+                    contentDescription = if (isAudiobook) "Rewind 15s" else "Previous",
+                    onClick = onPrevious,
+                    size = 38,
+                )
                 GradientPlayButton(
                     icon = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                     contentDescription = if (isPlaying) "Pause" else "Play",
                     onClick = onToggle,
                     size = 42,
                 )
-                FlatMusicIconButton(Icons.Rounded.SkipNext, "Next", onNext, size = 38)
+                FlatMusicIconButton(
+                    icon = if (isAudiobook) Icons.Rounded.FastForward else Icons.Rounded.SkipNext,
+                    contentDescription = if (isAudiobook) "Forward 30s" else "Next",
+                    onClick = onNext,
+                    size = 38,
+                )
             }
             MusicProgressStrip(progress = progress, height = 4)
         }
@@ -6913,6 +6946,7 @@ private fun NowPlayingDialog(
     var showAudioStreamDetailsSheet by remember { mutableStateOf(false) }
     var showStreamingBitrateSheet by remember { mutableStateOf(false) }
     var showSaveQueueDialog by remember { mutableStateOf(false) }
+    var showChaptersSheet by remember { mutableStateOf(false) }
     var contextQueueIndex by remember { mutableIntStateOf(-1) }
     val track = state.playback.currentTrack ?: return
     val isDownloaded = track.streamUrl.startsWith("file:") || track.streamUrl.startsWith("content:")
@@ -7066,6 +7100,37 @@ private fun NowPlayingDialog(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
+                        if (state.playback.isAudiobookMode) {
+                            val currentChapter = state.playback.currentChapter
+                            if (currentChapter != null) {
+                                VantafynGlassSurface(
+                                    variant = VantafynGlassVariant.Chip,
+                                    cornerRadius = 999.dp,
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 5.dp),
+                                    modifier = Modifier.clickable { showChaptersSheet = true },
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Rounded.List,
+                                            contentDescription = null,
+                                            tint = Color(0xFF21D8FF),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                        Text(
+                                            text = currentChapter.name,
+                                            color = Color(0xFF21D8FF),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         VantafynMarqueeText(
                             text = track.title,
                             style = MaterialTheme.typography.headlineSmall.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold),
@@ -7125,27 +7190,52 @@ private fun NowPlayingDialog(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        FlatMusicIconButton(Icons.Rounded.Shuffle, "Shuffle", viewModel::toggleShuffle, selected = state.playback.shuffleEnabled, size = 46)
-                        FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous", viewModel::previous, size = 54)
-                        GradientPlayButton(
-                            if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            if (state.playback.isPlaying) "Pause" else "Play",
-                            {
-                                if (state.playback.isPlaying) {
-                                    viewModel.togglePlayPause()
-                                } else {
-                                    onRequestMusicControlsPermission { viewModel.togglePlayPause() }
-                                }
-                            },
-                            size = 72,
-                        )
-                        FlatMusicIconButton(Icons.Rounded.SkipNext, "Next", viewModel::next, size = 54)
-                        FlatMusicIconButton(
-                            if (state.playback.repeatMode == VantafynMusicRepeatMode.One) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
-                            "Repeat",
-                            viewModel::cycleRepeat,
-                            selected = state.playback.repeatMode != VantafynMusicRepeatMode.Off,
-                        )
+                        if (state.playback.isAudiobookMode) {
+                            AudiobookSkipButton(
+                                seconds = -15,
+                                onClick = { viewModel.seekRelative(-15_000L) },
+                            )
+                            FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous Chapter", viewModel::previous, size = 54)
+                            GradientPlayButton(
+                                if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                if (state.playback.isPlaying) "Pause" else "Play",
+                                {
+                                    if (state.playback.isPlaying) {
+                                        viewModel.togglePlayPause()
+                                    } else {
+                                        onRequestMusicControlsPermission { viewModel.togglePlayPause() }
+                                    }
+                                },
+                                size = 72,
+                            )
+                            FlatMusicIconButton(Icons.Rounded.SkipNext, "Next Chapter", viewModel::next, size = 54)
+                            AudiobookSkipButton(
+                                seconds = 30,
+                                onClick = { viewModel.seekRelative(30_000L) },
+                            )
+                        } else {
+                            FlatMusicIconButton(Icons.Rounded.Shuffle, "Shuffle", viewModel::toggleShuffle, selected = state.playback.shuffleEnabled, size = 46)
+                            FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous", viewModel::previous, size = 54)
+                            GradientPlayButton(
+                                if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                                if (state.playback.isPlaying) "Pause" else "Play",
+                                {
+                                    if (state.playback.isPlaying) {
+                                        viewModel.togglePlayPause()
+                                    } else {
+                                        onRequestMusicControlsPermission { viewModel.togglePlayPause() }
+                                    }
+                                },
+                                size = 72,
+                            )
+                            FlatMusicIconButton(Icons.Rounded.SkipNext, "Next", viewModel::next, size = 54)
+                            FlatMusicIconButton(
+                                if (state.playback.repeatMode == VantafynMusicRepeatMode.One) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                                "Repeat",
+                                viewModel::cycleRepeat,
+                                selected = state.playback.repeatMode != VantafynMusicRepeatMode.Off,
+                            )
+                        }
                     }
                 }
             }
@@ -7169,9 +7259,29 @@ private fun NowPlayingDialog(
                         horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true }
-                        IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
-                        IconPill(Icons.Rounded.MoreHoriz, "More") { showMoreSheet = true }
+                        if (state.playback.isAudiobookMode) {
+                            IconPill(Icons.Rounded.Speed, "${state.playback.playbackSpeed}x Speed") {
+                                val nextSpeed = when (state.playback.playbackSpeed) {
+                                    1.0f -> 1.25f
+                                    1.25f -> 1.5f
+                                    1.5f -> 1.75f
+                                    1.75f -> 2.0f
+                                    2.0f -> 0.8f
+                                    else -> 1.0f
+                                }
+                                viewModel.setPlaybackSpeed(nextSpeed)
+                            }
+                            if (state.playback.activeChapters.isNotEmpty()) {
+                                IconPill(Icons.AutoMirrored.Rounded.List, "Chapters (${state.playback.activeChapters.size})") {
+                                    showChaptersSheet = true
+                                }
+                            }
+                            IconPill(Icons.Rounded.MoreHoriz, "More") { showMoreSheet = true }
+                        } else {
+                            IconPill(Icons.Rounded.PlaylistAdd, "New Playlist") { showPlaylistName = true }
+                            IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
+                            IconPill(Icons.Rounded.MoreHoriz, "More") { showMoreSheet = true }
+                        }
                     }
                 }
             }
@@ -7258,6 +7368,15 @@ private fun NowPlayingDialog(
             onSetEndOfTrack = viewModel::setSleepTimerEndOfTrack,
             onSetEndOfQueue = viewModel::setSleepTimerEndOfQueue,
             onCancel = viewModel::cancelSleepTimer,
+        )
+        AudiobookChaptersSheet(
+            visible = showChaptersSheet,
+            chapters = state.playback.activeChapters,
+            currentPositionMs = state.playback.positionMs,
+            onDismiss = { showChaptersSheet = false },
+            onSelectChapter = { chapter ->
+                viewModel.seekTo(chapter.startPositionMs)
+            },
         )
         AudioStreamDetailsSheet(
             visible = showAudioStreamDetailsSheet,
@@ -8288,6 +8407,198 @@ private fun SleepTimerSheet(
                         ) {
                             Text("End of album / playlist", color = VantafynColors.Ink, fontWeight = FontWeight.Medium)
                             Icon(Icons.Rounded.Stop, contentDescription = null, tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudiobookSkipButton(
+    seconds: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Int = 46,
+) {
+    IconButton(onClick = onClick, modifier = modifier.size(size.dp)) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Icon(
+                if (seconds < 0) Icons.Rounded.FastRewind else Icons.Rounded.FastForward,
+                contentDescription = if (seconds < 0) "Rewind ${-seconds}s" else "Forward ${seconds}s",
+                tint = VantafynColors.Ink.copy(alpha = 0.92f),
+                modifier = Modifier.size(22.dp),
+            )
+            Text(
+                text = if (seconds < 0) "-15s" else "+30s",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF21D8FF),
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AudiobookChaptersSheet(
+    visible: Boolean,
+    chapters: List<JellyfinChapter>,
+    currentPositionMs: Long,
+    onDismiss: () -> Unit,
+    onSelectChapter: (JellyfinChapter) -> Unit,
+) {
+    BackHandler(enabled = visible, onBack = onDismiss)
+    val density = LocalDensity.current
+    val extraOffsetPx = remember(density) {
+        with(density) { (MusicBottomSheetRailClearance + 56.dp).roundToPx() }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(animationSpec = tween(durationMillis = 260, easing = FastOutSlowInEasing)),
+        exit = fadeOut(animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.45f))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onDismiss,
+                ),
+            contentAlignment = Alignment.BottomCenter,
+        ) {
+            VantafynGlassModalPanel(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 14.dp, end = 14.dp, top = 14.dp, bottom = MusicBottomSheetRailClearance)
+                    .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.5.dp)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {}
+                    .animateEnterExit(
+                        enter = slideInVertically(
+                            initialOffsetY = { fullHeight -> fullHeight + extraOffsetPx },
+                            animationSpec = spring(
+                                dampingRatio = 0.84f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        ),
+                        exit = slideOutVertically(
+                            targetOffsetY = { fullHeight -> fullHeight + extraOffsetPx },
+                            animationSpec = tween(
+                                durationMillis = 260,
+                                easing = CubicBezierEasing(0.32f, 0f, 0.67f, 0f),
+                            ),
+                        ),
+                    ),
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(18.dp),
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.AutoMirrored.Rounded.List, contentDescription = null, tint = Color(0xFF21D8FF), modifier = Modifier.size(24.dp))
+                            Text("Chapters (${chapters.size})", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        }
+                        FlatMusicIconButton(Icons.Rounded.Close, "Close chapters", onDismiss, size = 38)
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 380.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        itemsIndexed(chapters) { index, chapter ->
+                            val chapterDuration = chapter.durationMs
+                            val isCurrentChapter = currentPositionMs >= chapter.startPositionMs &&
+                                (chapterDuration == null || currentPositionMs < chapter.startPositionMs + chapterDuration)
+
+                            VantafynGlassSurface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        onSelectChapter(chapter)
+                                        onDismiss()
+                                    },
+                                variant = if (isCurrentChapter) VantafynGlassVariant.Card else VantafynGlassVariant.Chip,
+                                cornerRadius = 14.dp,
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                if (isCurrentChapter) Color(0xFF21D8FF).copy(alpha = 0.20f)
+                                                else Color.White.copy(alpha = 0.08f)
+                                            ),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        if (isCurrentChapter) {
+                                            Icon(
+                                                Icons.Rounded.PlayArrow,
+                                                contentDescription = null,
+                                                tint = Color(0xFF21D8FF),
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "${index + 1}",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = VantafynColors.Muted,
+                                            )
+                                        }
+                                    }
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = chapter.name,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = if (isCurrentChapter) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isCurrentChapter) Color(0xFF21D8FF) else VantafynColors.Ink,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            text = chapter.startPositionMs.formatTime(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = VantafynColors.Muted,
+                                        )
+                                    }
+                                    if (chapterDuration != null && chapterDuration > 0L) {
+                                        Text(
+                                            text = chapterDuration.formatTime(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = VantafynColors.Muted,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -9968,9 +10279,14 @@ private fun VantafynMusicTrack.toDetails(): MusicTrackDetails =
 
 private fun Long.formatTime(): String {
     val totalSeconds = (this / 1000L).coerceAtLeast(0L)
-    val minutes = totalSeconds / 60L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
     val seconds = totalSeconds % 60L
-    return "$minutes:${seconds.toString().padStart(2, '0')}"
+    return if (hours > 0) {
+        "$hours:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}"
+    } else {
+        "$minutes:${seconds.toString().padStart(2, '0')}"
+    }
 }
 
 private fun Int.groupedMusicCountLabel(): String = "%,d".format(this)

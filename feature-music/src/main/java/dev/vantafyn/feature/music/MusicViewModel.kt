@@ -1802,6 +1802,14 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun seekRelative(deltaMs: Long) {
+        playbackController.seekRelative(deltaMs)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        playbackController.setPlaybackSpeed(speed)
+    }
+
     fun playQueueIndex(index: Int) {
         if (outputCoordinator.state.value.isCasting) {
             outputCoordinator.playQueueIndex(index)

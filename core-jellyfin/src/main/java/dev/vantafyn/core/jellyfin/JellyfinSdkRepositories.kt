@@ -619,6 +619,11 @@ class SdkJellyfinLibraryRepository(
                 val pageSize = limit.coerceAtLeast(200)
                 var totalRecordCount: Int? = null
                 var pageItemCount: Int
+                val isBookOrAudio = isBooksOrAudiobooksCollection(library.collectionType, library.name)
+                if (isBookOrAudio) {
+                    val books = fetchAudiobookLibraryItems(api, session, library)
+                    return@withContext JellyfinResult.Success(books.take(limit))
+                }
                 val isMusic = library.collectionType.isMusicCollection()
                 do {
                     val response by api.itemsApi.getItems(
@@ -640,18 +645,7 @@ class SdkJellyfinLibraryRepository(
                         ),
                     )
                     val rawItems = response.items
-                    val isBookOrAudio = isBooksOrAudiobooksCollection(library.collectionType, library.name)
-                    val filteredItems = if (isBookOrAudio) {
-                        val bookIds = rawItems.filter { it.type in setOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK) }.map { it.id }.toSet()
-                        if (bookIds.isNotEmpty()) {
-                            rawItems.filter { it.type != BaseItemKind.AUDIO || (it.parentId !in bookIds) }
-                        } else {
-                            rawItems
-                        }
-                    } else {
-                        rawItems
-                    }
-                    val pageItems = filteredItems.map { it.toMediaItem(api, shapeFor(it.type)) }
+                    val pageItems = rawItems.map { it.toMediaItem(api, shapeFor(it.type)) }
                     pageItemCount = pageItems.size
                     totalRecordCount = response.totalRecordCount ?: totalRecordCount
                     allItems += pageItems
@@ -714,6 +708,39 @@ class SdkJellyfinLibraryRepository(
                     JellyfinLibraryItemFilter.Unwatched,
                     JellyfinLibraryItemFilter.Genres -> listOf(SortOrder.ASCENDING)
                 }
+                val isBookOrAudio = isBooksOrAudiobooksCollection(library.collectionType, library.name)
+                if (isBookOrAudio) {
+                    val allBooks = fetchAudiobookLibraryItems(api, session, library)
+                    val filteredBooks = when (filter) {
+                        JellyfinLibraryItemFilter.RecentlyAdded -> allBooks
+                        JellyfinLibraryItemFilter.All,
+                        JellyfinLibraryItemFilter.AZ -> allBooks.sortedBy { it.title.lowercase() }
+                        JellyfinLibraryItemFilter.Favorites -> allBooks.filter { it.isFavorite }
+                        JellyfinLibraryItemFilter.Unwatched -> allBooks.filter { !it.isPlayed }
+                        JellyfinLibraryItemFilter.Genres -> genre?.let { g ->
+                            allBooks.filter { it.subtitle?.contains(g, ignoreCase = true) == true }
+                        } ?: allBooks
+                    }.let { list ->
+                        if (normalizedAlphabetKey == null) {
+                            list
+                        } else if (normalizedAlphabetKey == "#") {
+                            list.filter { it.title.firstOrNull()?.isLetter() != true }
+                        } else {
+                            list.filter { it.title.startsWith(normalizedAlphabetKey, ignoreCase = true) }
+                        }
+                    }
+                    val safeStart = startIndex.coerceAtLeast(0)
+                    val pageItems = filteredBooks.drop(safeStart).take(limit)
+                    return@withContext JellyfinResult.Success(
+                        JellyfinLibraryPage(
+                            items = pageItems,
+                            startIndex = safeStart,
+                            pageSize = limit,
+                            totalItems = filteredBooks.size,
+                            alphabetKey = normalizedAlphabetKey,
+                        ),
+                    )
+                }
                 val isMusic = library.collectionType.isMusicCollection()
                 val response by api.itemsApi.getItems(
                     GetItemsRequest(
@@ -739,23 +766,12 @@ class SdkJellyfinLibraryRepository(
                     ),
                 )
                 val rawItems = response.items
-                val isBookOrAudio = isBooksOrAudiobooksCollection(library.collectionType, library.name)
-                val filteredItems = if (isBookOrAudio) {
-                    val bookIds = rawItems.filter { it.type in setOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK) }.map { it.id }.toSet()
-                    if (bookIds.isNotEmpty()) {
-                        rawItems.filter { it.type != BaseItemKind.AUDIO || (it.parentId !in bookIds) }
-                    } else {
-                        rawItems
-                    }
-                } else {
-                    rawItems
-                }
                 JellyfinResult.Success(
                     JellyfinLibraryPage(
-                        items = filteredItems.map { it.toMediaItem(api, shapeFor(it.type)) },
+                        items = rawItems.map { it.toMediaItem(api, shapeFor(it.type)) },
                         startIndex = safeStart,
                         pageSize = limit,
-                        totalItems = if (filteredItems.size != rawItems.size) filteredItems.size else response.totalRecordCount,
+                        totalItems = response.totalRecordCount,
                         alphabetKey = normalizedAlphabetKey,
                     ),
                 )
@@ -871,6 +887,72 @@ class SdkJellyfinLibraryRepository(
             }
         }
 
+    private suspend fun fetchAudiobookLibraryItems(
+        api: ApiClient,
+        session: JellyfinSession,
+        library: JellyfinLibrary,
+    ): List<JellyfinMediaItem> = runCatching {
+        val response by api.itemsApi.getItems(
+            GetItemsRequest(
+                userId = session.user.id,
+                parentId = library.id,
+                recursive = true,
+                fields = listOf(
+                    ItemFields.OVERVIEW,
+                    ItemFields.GENRES,
+                    ItemFields.PRIMARY_IMAGE_ASPECT_RATIO,
+                    ItemFields.MEDIA_SOURCES,
+                    ItemFields.CHILD_COUNT,
+                    ItemFields.RECURSIVE_ITEM_COUNT,
+                ),
+                includeItemTypes = listOf(
+                    BaseItemKind.BOOK,
+                    BaseItemKind.AUDIO_BOOK,
+                    BaseItemKind.FOLDER,
+                ),
+                enableUserData = true,
+                imageTypeLimit = 2,
+                enableImageTypes = listOf(ImageType.PRIMARY),
+                enableImages = true,
+                enableTotalRecordCount = false,
+            ),
+        )
+        val rawItems = response.items
+
+        val allFolderIds = rawItems.filter { it.type == BaseItemKind.FOLDER }.map { it.id }.toSet()
+        val nonLeafFolderIds = rawItems
+            .filter { it.type == BaseItemKind.FOLDER }
+            .mapNotNull { it.parentId }
+            .filter { it in allFolderIds }
+            .toSet()
+
+        val audioFiles = rawItems.filter {
+            it.type in setOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK) ||
+                (it.type == BaseItemKind.AUDIO && it.mediaSources.orEmpty().any { s -> s.container?.lowercase() in setOf("m4b", "m4a") })
+        }
+
+        val filesByParent = audioFiles.groupBy { it.parentId }
+        val bookFolderIds = filesByParent.filter { (parentId, files) ->
+            parentId != null && (
+                files.any { audiobookChapterRegex.containsMatchIn(it.name.orEmpty()) } ||
+                (files.size > 1 && files.all { !it.album.isNullOrBlank() && it.album == files.first().album })
+            )
+        }.keys
+
+        val bookFolders = rawItems.filter {
+            it.type == BaseItemKind.FOLDER &&
+                it.id in bookFolderIds &&
+                it.id !in nonLeafFolderIds &&
+                it.id != library.id
+        }.map { it.toMediaItem(api, JellyfinMediaCardShape.Poster, isAudiobook = true) }
+
+        val standaloneBookFiles = audioFiles.filter {
+            !audiobookChapterRegex.containsMatchIn(it.name.orEmpty()) &&
+                it.parentId !in bookFolderIds
+        }.map { it.toMediaItem(api, JellyfinMediaCardShape.Poster, isAudiobook = true) }
+
+        (bookFolders + standaloneBookFiles).distinctBy { it.id }
+    }.getOrDefault(emptyList())
 }
 
 class SdkJellyfinMediaRepository(
@@ -890,12 +972,17 @@ class SdkJellyfinMediaRepository(
                 }
                 val related = fetchRelated(api, session, item.id)
                 val themeSongUrl = fetchThemeSongUrl(api, session, item.id)
-                val collectionItems = if (item.type == BaseItemKind.BOX_SET) {
+                val isAudiobookType = item.type in setOf(BaseItemKind.AUDIO_BOOK, BaseItemKind.BOOK) ||
+                    (item.type == BaseItemKind.AUDIO && item.mediaSources.orEmpty().any { it.container?.lowercase() in setOf("m4b", "m4a") })
+                val isFolder = item.type == BaseItemKind.FOLDER
+                val audiobookParts = if (isFolder) fetchAudiobookParts(api, session, item.id) else emptyList()
+                val isAudiobook = isAudiobookType || (isFolder && audiobookParts.isNotEmpty())
+                val collectionItems = if (item.type == BaseItemKind.BOX_SET || (isFolder && audiobookParts.isEmpty())) {
                     fetchCollectionItems(api, session, item.id)
                 } else {
                     emptyList()
                 }
-                val collections = if (item.type != BaseItemKind.BOX_SET) {
+                val collections = if (item.type != BaseItemKind.BOX_SET && !isFolder) {
                     fetchItemCollections(session, item.id)
                 } else {
                     emptyList()
@@ -909,6 +996,7 @@ class SdkJellyfinMediaRepository(
                         themeSongUrl = themeSongUrl,
                         collectionItems = collectionItems,
                         collections = collections,
+                        audiobookParts = audiobookParts,
                     ),
                 )
             } catch (throwable: Throwable) {
@@ -1269,19 +1357,26 @@ class SdkJellyfinMediaRepository(
     private suspend fun fetchCollectionItems(
         api: ApiClient,
         session: JellyfinSession,
-        boxSetId: java.util.UUID,
+        parentId: java.util.UUID,
     ): List<JellyfinMediaItem> =
         runCatching {
             val response by api.itemsApi.getItems(
                 GetItemsRequest(
                     userId = session.user.id,
-                    parentId = boxSetId,
-                    recursive = true,
-                    limit = 50,
+                    parentId = parentId,
+                    recursive = false,
+                    limit = 100,
                     sortBy = listOf(ItemSortBy.SORT_NAME),
                     sortOrder = listOf(SortOrder.ASCENDING),
                     fields = itemFields,
-                    includeItemTypes = listOf(BaseItemKind.MOVIE, BaseItemKind.SERIES),
+                    includeItemTypes = listOf(
+                        BaseItemKind.MOVIE,
+                        BaseItemKind.SERIES,
+                        BaseItemKind.BOOK,
+                        BaseItemKind.AUDIO_BOOK,
+                        BaseItemKind.FOLDER,
+                        BaseItemKind.BOX_SET,
+                    ),
                     enableImages = true,
                     imageTypeLimit = 1,
                     enableImageTypes = listOf(ImageType.PRIMARY),
@@ -1290,6 +1385,40 @@ class SdkJellyfinMediaRepository(
                 ),
             )
             response.items.map { it.toMediaItem(api, shapeFor(it.type)) }
+        }.getOrDefault(emptyList())
+
+    private suspend fun fetchAudiobookParts(
+        api: ApiClient,
+        session: JellyfinSession,
+        bookId: java.util.UUID,
+    ): List<JellyfinChapter> =
+        runCatching {
+            val response by api.itemsApi.getItems(
+                GetItemsRequest(
+                    userId = session.user.id,
+                    parentId = bookId,
+                    recursive = false,
+                    fields = listOf(ItemFields.MEDIA_SOURCES),
+                    includeItemTypes = listOf(BaseItemKind.AUDIO, BaseItemKind.AUDIO_BOOK),
+                    sortBy = listOf(ItemSortBy.INDEX_NUMBER, ItemSortBy.SORT_NAME),
+                    sortOrder = listOf(SortOrder.ASCENDING),
+                    enableUserData = true,
+                ),
+            )
+            val directChildren = response.items.filter { it.parentId == bookId }
+            var cumulativeMs = 0L
+            directChildren.mapIndexed { index, child ->
+                val childDurationMs = child.runTimeTicks?.let { it / 10_000L }
+                val startMs = cumulativeMs
+                if (childDurationMs != null) cumulativeMs += childDurationMs
+                JellyfinChapter(
+                    id = child.id.toString(),
+                    name = child.name?.takeIf { it.isNotBlank() } ?: "Part ${index + 1}",
+                    startPositionMs = startMs,
+                    durationMs = childDurationMs,
+                    imageUrl = null,
+                )
+            }
         }.getOrDefault(emptyList())
 
     private suspend fun fetchItemCollections(
@@ -1365,6 +1494,91 @@ class SdkJellyfinMediaRepository(
                 audioCodec = "aac,mp3",
             ).withAccessToken(session.accessToken)
         }.getOrNull()
+
+    override suspend fun getAudiobookTracks(
+        session: JellyfinSession,
+        itemId: java.util.UUID,
+    ): JellyfinResult<List<JellyfinMusicTrack>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.itemsApi.getItems(
+                    GetItemsRequest(
+                        userId = session.user.id,
+                        parentId = itemId,
+                        recursive = true,
+                        fields = listOf(ItemFields.MEDIA_SOURCES),
+                        includeItemTypes = listOf(BaseItemKind.AUDIO, BaseItemKind.AUDIO_BOOK),
+                        sortBy = listOf(ItemSortBy.SORT_NAME),
+                        sortOrder = listOf(SortOrder.ASCENDING),
+                        enableUserData = true,
+                    ),
+                )
+                val childTracks = response.items.map { it.toMusicTrack(api, session) }
+                if (childTracks.isNotEmpty()) {
+                    childTracks
+                } else {
+                    val itemResponse by api.userLibraryApi.getItem(userId = session.user.id, itemId = itemId)
+                    if (itemResponse.isFolder == true || itemResponse.type == BaseItemKind.FOLDER) {
+                        emptyList()
+                    } else {
+                        listOf(itemResponse.toMusicTrack(api, session))
+                    }
+                }
+            }.fold(
+                onSuccess = { tracks ->
+                    if (tracks.isEmpty()) {
+                        JellyfinResult.Failure("No audio tracks found for this audiobook")
+                    } else {
+                        JellyfinResult.Success(tracks)
+                    }
+                },
+                onFailure = { JellyfinResult.Failure(toUserMessage(it), it) },
+            )
+        }
+
+    override suspend fun getMovieWatchList(
+        session: JellyfinSession,
+    ): JellyfinResult<List<JellyfinMcuServerItem>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                val response by api.itemsApi.getItems(
+                    GetItemsRequest(
+                        userId = session.user.id,
+                        recursive = true,
+                        includeItemTypes = listOf(BaseItemKind.MOVIE),
+                        fields = listOf(
+                            ItemFields.PROVIDER_IDS,
+                        ),
+                        enableImages = true,
+                        enableUserData = true,
+                    ),
+                )
+                response.items.map { item ->
+                    val imageUrl = if (item.imageTags?.containsKey(ImageType.PRIMARY) == true) {
+                        "${session.server.url}/Items/${item.id}/Images/Primary?fillWidth=300&quality=90"
+                    } else null
+                    val backdropUrl = if (item.backdropImageTags?.isNotEmpty() == true) {
+                        "${session.server.url}/Items/${item.id}/Images/Backdrop/0?maxWidth=1280&quality=85"
+                    } else null
+                    JellyfinMcuServerItem(
+                        id = item.id,
+                        name = item.name ?: "",
+                        productionYear = item.productionYear,
+                        tmdbId = item.providerIds?.get("Tmdb")?.trim(),
+                        imdbId = item.providerIds?.get("Imdb")?.trim()?.lowercase(),
+                        isPlayed = item.userData?.played == true,
+                        playbackPositionTicks = item.userData?.playbackPositionTicks ?: 0L,
+                        imageUrl = imageUrl,
+                        backdropUrl = backdropUrl,
+                    )
+                }
+            }.fold(
+                onSuccess = { JellyfinResult.Success(it) },
+                onFailure = { JellyfinResult.Failure(toUserMessage(it), it) },
+            )
+        }
 }
 
 class SdkJellyfinPlaybackRepository(
@@ -5007,6 +5221,11 @@ private val musicItemFields = listOf(
 
 private val itemImageTypes = listOf(ImageType.PRIMARY, ImageType.BACKDROP, ImageType.THUMB, ImageType.LOGO)
 
+private val audiobookChapterRegex = Regex(
+    """(^(Chapter|Chpater|Part|CD|Track|Disc|Disk|Prologue|Epilogue|Intro|Outro|Section|Book\s+[IVXLCDM\d]+|Appendix|\d{1,3}[\s\.\-_])\b)|(\b(Part|CD|Track|Disc|Disk|Chapter|Chpater)\s*\d+)""",
+    RegexOption.IGNORE_CASE
+)
+
 private val mediaItemTypes = listOf(
     BaseItemKind.MOVIE,
     BaseItemKind.SERIES,
@@ -5036,7 +5255,7 @@ private fun includeTypesFor(collectionType: String?, libraryName: String? = null
         normType in setOf("tvshows", "series") -> listOf(BaseItemKind.SERIES)
         normType in setOf("boxsets", "collections") -> listOf(BaseItemKind.BOX_SET)
         normType == "music" -> listOf(BaseItemKind.AUDIO, BaseItemKind.MUSIC_ALBUM)
-        isBookOrAudio -> listOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK, BaseItemKind.AUDIO)
+        isBookOrAudio -> listOf(BaseItemKind.BOOK, BaseItemKind.AUDIO_BOOK, BaseItemKind.FOLDER)
         else -> listOf(
             BaseItemKind.SERIES,
             BaseItemKind.MOVIE,
@@ -5083,13 +5302,35 @@ private fun BaseItemDto.toCard(api: ApiClient, shape: JellyfinMediaCardShape): J
         genres = genres.orEmpty(),
     )
 
-private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShape): JellyfinMediaItem =
+private fun normalizeAudiobookTitle(rawTitle: String): String {
+    val match = Regex("""^Book\s*0*(\d+)[\s\.\-_:]+(.+)$""", RegexOption.IGNORE_CASE).find(rawTitle.trim())
+    return if (match != null) {
+        val num = match.groupValues[1]
+        val title = match.groupValues[2].trim()
+        "$title (Book $num)"
+    } else {
+        rawTitle
+    }
+}
+
+private fun BaseItemDto.toMediaItem(
+    api: ApiClient,
+    shape: JellyfinMediaCardShape,
+    isAudiobook: Boolean = false,
+): JellyfinMediaItem =
     JellyfinMediaItem(
         id = id,
-        title = displayTitle(),
-        subtitle = subtitle(),
+        title = if (isAudiobook && type == BaseItemKind.FOLDER) normalizeAudiobookTitle(displayTitle()) else displayTitle(),
+        subtitle = if (isAudiobook && type == BaseItemKind.FOLDER) {
+            listOfNotNull(
+                artists?.joinToString(", ")?.takeIf { it.isNotBlank() } ?: albumArtist ?: seriesName,
+                productionYear?.toString(),
+            ).joinToString(" · ").ifBlank { null } ?: "Audiobook"
+        } else {
+            subtitle()
+        },
         year = productionYear,
-        itemType = type?.serialName,
+        itemType = if (isAudiobook && type == BaseItemKind.FOLDER) "AudioBook" else type?.serialName,
         imageUrl = primaryImageUrl(api, if (shape == JellyfinMediaCardShape.Wide) 540 else 360),
         backdropUrl = backdropImageUrl(api, 760),
         thumbUrl = thumbImageUrl(api, 760),
@@ -5103,6 +5344,7 @@ private fun BaseItemDto.toMediaItem(api: ApiClient, shape: JellyfinMediaCardShap
         seriesId = seriesId,
         seasonNumber = parentIndexNumber,
         episodeNumber = indexNumber,
+        isAudiobook = isAudiobook || type in setOf(BaseItemKind.AUDIO_BOOK, BaseItemKind.BOOK),
     )
 
 private fun BaseItemDto.toWatchPartyCandidate(api: ApiClient, serverId: String?): WatchPartyCandidate =
@@ -5167,7 +5409,7 @@ private fun BaseItemDto.toMusicTrack(api: ApiClient, session: JellyfinSession): 
         hasLyrics = hasLyrics == true,
         streamUrl = api.universalAudioApi.getUniversalAudioStreamUrl(
             itemId = id,
-            container = listOf("flac", "alac", "wav", "m4a", "aac", "mp3", "opus", "ogg", "webma", "webm"),
+            container = listOf("flac", "alac", "wav", "m4a", "m4b", "aac", "mp3", "opus", "ogg", "webma", "webm"),
             mediaSourceId = null,
             deviceId = currentDeviceId,
             userId = session.user.id,
@@ -5241,6 +5483,27 @@ private fun BaseItemDto.toMusicPlaylist(
 
 private fun Long.toLyricMillis(): Long = this / 10_000L
 
+private fun BaseItemDto.toChapters(totalDurationMs: Long?): List<JellyfinChapter> {
+    val rawChapters = chapters.orEmpty()
+    if (rawChapters.isEmpty()) return emptyList()
+    return rawChapters.mapIndexed { index, chapter ->
+        val startMs = chapter.startPositionTicks / 10_000L
+        val nextStartMs = rawChapters.getOrNull(index + 1)?.startPositionTicks?.let { it / 10_000L }
+        val duration = when {
+            nextStartMs != null && nextStartMs > startMs -> nextStartMs - startMs
+            totalDurationMs != null && totalDurationMs > startMs -> totalDurationMs - startMs
+            else -> null
+        }
+        JellyfinChapter(
+            id = "${id}_ch_$index",
+            name = chapter.name?.takeIf { it.isNotBlank() } ?: "Chapter ${index + 1}",
+            startPositionMs = startMs,
+            durationMs = duration,
+            imageUrl = null,
+        )
+    }
+}
+
 private fun BaseItemDto.toDetail(
     api: ApiClient,
     seasons: List<JellyfinSeason> = emptyList(),
@@ -5249,18 +5512,36 @@ private fun BaseItemDto.toDetail(
     themeSongUrl: String? = null,
     collectionItems: List<JellyfinMediaItem> = emptyList(),
     collections: List<JellyfinMediaItem> = emptyList(),
-): JellyfinMediaDetail =
-    JellyfinMediaDetail(
+    audiobookParts: List<JellyfinChapter> = emptyList(),
+): JellyfinMediaDetail {
+    val totalDurationMs = runTimeTicks?.takeIf { it > 0L }?.let { it / 10_000L }
+        ?: audiobookParts.takeIf { it.isNotEmpty() }?.sumOf { it.durationMs ?: 0L }
+    val embeddedChapters = toChapters(totalDurationMs)
+    val finalChapters = if (embeddedChapters.isNotEmpty()) embeddedChapters else audiobookParts
+    val isAudiobookItem = finalChapters.isNotEmpty() || type in setOf(BaseItemKind.AUDIO_BOOK, BaseItemKind.BOOK) ||
+        (type == BaseItemKind.AUDIO && mediaSources.orEmpty().any { it.container?.lowercase() in setOf("m4b", "m4a") })
+    val authorName = albumArtist
+        ?: artists.orEmpty().firstOrNull()
+        ?: people.orEmpty().firstOrNull {
+            it.type?.serialName?.contains("writer", ignoreCase = true) == true ||
+            it.role?.contains("author", ignoreCase = true) == true ||
+            it.role?.contains("writer", ignoreCase = true) == true
+        }?.name
+    val narratorName = people.orEmpty().firstOrNull {
+        it.role?.contains("narrat", ignoreCase = true) == true ||
+        it.role?.contains("read", ignoreCase = true) == true
+    }?.name
+    return JellyfinMediaDetail(
         id = id,
-        title = displayTitle(),
+        title = if (isAudiobookItem && type == BaseItemKind.FOLDER) normalizeAudiobookTitle(displayTitle()) else displayTitle(),
         subtitle = subtitle(),
         year = productionYear,
-        runtimeMinutes = runTimeTicks?.let { (it / 600_000_000L).toInt() },
+        runtimeMinutes = totalDurationMs?.let { (it / 60_000L).toInt() } ?: runTimeTicks?.let { (it / 600_000_000L).toInt() },
         officialRating = officialRating,
         communityRating = communityRating,
         overview = overview,
         genres = genres.orEmpty(),
-        itemType = type?.serialName,
+        itemType = if (isAudiobookItem && type == BaseItemKind.FOLDER) "AudioBook" else type?.serialName,
         imageUrl = primaryImageUrl(api, 520),
         backdropUrl = backdropImageUrl(api, 1200),
         logoUrl = logoImageUrl(api, 560),
@@ -5288,7 +5569,12 @@ private fun BaseItemDto.toDetail(
         seriesName = seriesName,
         seasonIndexNumber = parentIndexNumber,
         episodeIndexNumber = indexNumber,
+        author = authorName,
+        narrator = narratorName,
+        chapters = finalChapters,
+        isAudiobook = isAudiobookItem,
     )
+}
 
 private fun BaseItemDto.toEpisode(api: ApiClient): JellyfinEpisode =
     JellyfinEpisode(

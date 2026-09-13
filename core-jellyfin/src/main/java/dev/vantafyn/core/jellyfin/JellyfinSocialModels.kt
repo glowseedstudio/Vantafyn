@@ -96,6 +96,13 @@ fun formatSocialSnippet(raw: String?): String {
         val emoji = parts.getOrNull(1)?.trim() ?: "❤️"
         return "Reacted $emoji to a message"
     }
+    if (trimmed.startsWith("[vantafyn_gift|") && trimmed.endsWith("]")) {
+        val body = trimmed.removePrefix("[vantafyn_gift|").removeSuffix("]")
+        val title = runCatching {
+            org.json.JSONObject(body).optString("franchiseTitle", "Franchise Guide")
+        }.getOrDefault("Franchise Guide")
+        return "🎁 Special Gift: $title"
+    }
     return raw
 }
 

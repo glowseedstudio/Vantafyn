@@ -36,6 +36,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.UUID
+import dev.vantafyn.core.jellyfin.JellyfinChapter
+import dev.vantafyn.core.jellyfin.JellyfinMusicTrack
 
 data class VantafynMusicTrack(
     val id: UUID,
@@ -57,6 +59,28 @@ data class VantafynMusicTrack(
     val bitDepth: Int? = null,
     val channels: Int? = null,
 )
+
+fun JellyfinMusicTrack.toVantafynTrack(): VantafynMusicTrack =
+    VantafynMusicTrack(
+        id = id,
+        title = title,
+        artist = artist,
+        album = album,
+        albumId = albumId,
+        durationMs = durationMs,
+        genres = genres,
+        streamUrl = streamUrl,
+        artworkUrl = artworkUrl,
+        isFavorite = isFavorite,
+        replayGainTrackGainDb = replayGainTrackGainDb,
+        replayGainTrackPeak = replayGainTrackPeak,
+        container = container,
+        codec = codec,
+        bitrate = bitrate,
+        sampleRate = sampleRate,
+        bitDepth = bitDepth,
+        channels = channels,
+    )
 
 enum class VantafynMusicStopReason {
     User,
@@ -94,9 +118,30 @@ data class VantafynMusicPlaybackState(
     val sleepTimerRemainingSeconds: Long? = null,
     val sleepTimerMode: SleepTimerMode? = null,
     val audioStreamInfo: VantafynAudioStreamInfo? = null,
+    val playbackSpeed: Float = 1.0f,
+    val isAudiobookMode: Boolean = false,
+    val activeChapters: List<JellyfinChapter> = emptyList(),
 ) {
     val currentTrack: VantafynMusicTrack?
         get() = queue.getOrNull(queueIndex)
+
+    val currentChapter: JellyfinChapter?
+        get() {
+            if (activeChapters.isEmpty()) return null
+            if (isAudiobookMode && queue.size > 1 && queue.size == activeChapters.size) {
+                return activeChapters.getOrNull(queueIndex)
+            }
+            val effectivePositionMs = if (isAudiobookMode && queue.size > 1) {
+                var acc = 0L
+                for (i in 0 until queueIndex.coerceAtMost(queue.size)) {
+                    acc += queue[i].durationMs ?: 0L
+                }
+                acc + positionMs
+            } else {
+                positionMs
+            }
+            return activeChapters.lastOrNull { effectivePositionMs >= it.startPositionMs } ?: activeChapters.firstOrNull()
+        }
 }
 
 sealed interface VantafynMusicPlaybackEvent {
@@ -358,7 +403,13 @@ class MusicPlaybackController private constructor(context: Context) {
         }
     }
 
-    fun playQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0) {
+    fun playQueue(
+        queue: List<VantafynMusicTrack>,
+        startIndex: Int = 0,
+        startPositionMs: Long = 0L,
+        isAudiobook: Boolean = false,
+        chapters: List<JellyfinChapter> = emptyList(),
+    ) {
         if (queue.isEmpty()) return
         if (radioQueueManager.isRadioActive.value &&
             !(queue.size == 1 && queue.firstOrNull()?.id == radioQueueManager.currentSeedTrack.value?.id)
@@ -366,6 +417,7 @@ class MusicPlaybackController private constructor(context: Context) {
             radioQueueManager.stopRadio("manual_queue_play")
         }
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
+        val safePosition = startPositionMs.coerceAtLeast(0L)
         val sampleTrack = queue.getOrNull(safeIndex) ?: queue.firstOrNull()
         if (sampleTrack != null && !sampleTrack.streamUrl.startsWith("file:") && !sampleTrack.streamUrl.startsWith("content:")) {
             val uri = runCatching { Uri.parse(sampleTrack.streamUrl) }.getOrNull()
@@ -388,9 +440,11 @@ class MusicPlaybackController private constructor(context: Context) {
             it.copy(
                 queue = queue,
                 queueIndex = safeIndex,
-                positionMs = 0L,
+                positionMs = safePosition,
                 durationMs = queue[safeIndex].durationMs ?: 0L,
                 errorMessage = null,
+                isAudiobookMode = isAudiobook,
+                activeChapters = chapters,
             )
         }
         val mediaItems = queue.map { it.toMediaItem() }
@@ -402,11 +456,11 @@ class MusicPlaybackController private constructor(context: Context) {
         )
         lastAudioFormat = null
         updateAudioStreamInfo(null)
-        sessionPlayer.setMediaItems(mediaItems, safeIndex, 0L)
+        sessionPlayer.setMediaItems(mediaItems, safeIndex, safePosition)
         sessionPlayer.prepare()
         ensurePlaybackService()
         sessionPlayer.playWhenReady = true
-        emitEvent(VantafynMusicPlaybackEvent.TrackStarted(queue[safeIndex], 0L))
+        emitEvent(VantafynMusicPlaybackEvent.TrackStarted(queue[safeIndex], safePosition))
     }
 
     fun restoreQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0, startPositionMs: Long = 0L) {
@@ -467,6 +521,7 @@ class MusicPlaybackController private constructor(context: Context) {
             preCacheManager.cancelAll("queue cleared")
             radioQueueManager.stopRadio("queue cleared")
             sessionPlayer.clearMediaItems()
+            sessionPlayer.setPlaybackSpeed(1.0f)
             lastAudioFormat = null
         }
         stopPlaybackService()
@@ -478,6 +533,9 @@ class MusicPlaybackController private constructor(context: Context) {
                 positionMs = 0L,
                 durationMs = if (clearQueue) 0L else it.durationMs,
                 audioStreamInfo = if (clearQueue) null else it.audioStreamInfo,
+                isAudiobookMode = if (clearQueue) false else it.isAudiobookMode,
+                activeChapters = if (clearQueue) emptyList() else it.activeChapters,
+                playbackSpeed = if (clearQueue) 1.0f else it.playbackSpeed,
             )
         }
     }
@@ -810,6 +868,23 @@ class MusicPlaybackController private constructor(context: Context) {
         _state.value.currentTrack?.let { emitEvent(VantafynMusicPlaybackEvent.Seeked(it, sessionPlayer.currentPosition.coerceAtLeast(0L))) }
     }
 
+    fun seekRelative(deltaMs: Long) {
+        val currentPos = sessionPlayer.currentPosition.coerceAtLeast(0L)
+        val maxDuration = sessionPlayer.duration.takeIf { it > 0 } ?: _state.value.durationMs
+        val targetPos = if (maxDuration > 0) {
+            (currentPos + deltaMs).coerceIn(0L, maxDuration)
+        } else {
+            (currentPos + deltaMs).coerceAtLeast(0L)
+        }
+        seekTo(targetPos)
+    }
+
+    fun setPlaybackSpeed(speed: Float) {
+        val safeSpeed = speed.coerceIn(0.25f, 3.0f)
+        sessionPlayer.setPlaybackSpeed(safeSpeed)
+        _state.update { it.copy(playbackSpeed = safeSpeed) }
+    }
+
     fun currentPositionMs(): Long = sessionPlayer.currentPosition.coerceAtLeast(0L)
 
     fun refreshPositionFromPlayer() {
@@ -862,7 +937,13 @@ class MusicPlaybackController private constructor(context: Context) {
         _state.update { it.copy(repeatMode = next) }
     }
 
-    internal fun adoptSystemQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0, startPositionMs: Long = 0L): List<MediaItem> {
+    internal fun adoptSystemQueue(
+        queue: List<VantafynMusicTrack>,
+        startIndex: Int = 0,
+        startPositionMs: Long = 0L,
+        isAudiobook: Boolean = false,
+        chapters: List<JellyfinChapter> = emptyList(),
+    ): List<MediaItem> {
         if (queue.isEmpty()) return emptyList()
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
         tracksByMediaId.clear()
@@ -874,6 +955,8 @@ class MusicPlaybackController private constructor(context: Context) {
                 positionMs = startPositionMs.coerceAtLeast(0L),
                 durationMs = queue[safeIndex].durationMs ?: 0L,
                 errorMessage = null,
+                isAudiobookMode = isAudiobook,
+                activeChapters = chapters,
             )
         }
         lastAudioFormat = null

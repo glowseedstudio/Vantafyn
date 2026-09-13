@@ -77,6 +77,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private var lastNotificationPlaying: Boolean? = null
     private var lastNotificationFavorite: Boolean? = null
     private var lastNotificationShuffle: Boolean? = null
+    private var lastNotificationAudiobook: Boolean? = null
     private var lastWidgetTrackId: UUID? = null
     private var lastWidgetPlaying: Boolean? = null
     private var lastWidgetArtworkUrl: String? = null
@@ -167,10 +168,12 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 val isPlaying = state.isPlaying
                 val isFavorite = state.currentTrack?.isFavorite
                 val isShuffle = state.shuffleEnabled
+                val isAudiobook = state.isAudiobookMode
                 val needsNotificationUpdate = trackId != lastNotificationTrackId ||
                     isPlaying != lastNotificationPlaying ||
                     isFavorite != lastNotificationFavorite ||
-                    isShuffle != lastNotificationShuffle
+                    isShuffle != lastNotificationShuffle ||
+                    isAudiobook != lastNotificationAudiobook
 
                 if (needsNotificationUpdate) {
                     val hadPreviousTrack = lastNotificationTrackId != null
@@ -178,6 +181,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     lastNotificationPlaying = isPlaying
                     lastNotificationFavorite = isFavorite
                     lastNotificationShuffle = isShuffle
+                    lastNotificationAudiobook = isAudiobook
                     updateCustomLayout(state)
                     if (state.currentTrack == null && hadPreviousTrack) {
                         updateSessionCompatMetadata(mediaSession, state, null)
@@ -215,6 +219,8 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 playbackController.toggleShuffle()
                 updateCustomLayout()
             }
+            ACTION_REWIND_15 -> playbackController.seekRelative(-15_000L)
+            ACTION_FAST_FORWARD_30 -> playbackController.seekRelative(30_000L)
             ACTION_STOP -> {
                 playbackController.stop(reason = VantafynMusicStopReason.User)
                 stopSelf()
@@ -464,33 +470,57 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 state.positionMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
                 state.durationMs <= 0L,
             )
-            .addAction(
-                if (state.shuffleEnabled) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
-                if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
-                serviceIntent(ACTION_TOGGLE_SHUFFLE, 6),
-            )
-            .addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
-            .addAction(
-                if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (state.isPlaying) "Pause" else "Play",
-                serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
-            )
-            .addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
-            .addAction(
-                if (track?.isFavorite == true) R.drawable.ic_heart_filled else R.drawable.ic_heart,
-                if (track?.isFavorite == true) "Unlike" else "Like",
-                serviceIntent(ACTION_TOGGLE_FAVORITE, 5),
-            )
-            .setStyle(
-                MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(
-                        *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            intArrayOf(0, 1, 2, 3, 4)
-                        } else {
-                            intArrayOf(1, 2, 3)
-                        })
-                    ),
-            )
+            .apply {
+                if (state.isAudiobookMode) {
+                    addAction(android.R.drawable.ic_media_rew, "Rewind 15s", serviceIntent(ACTION_REWIND_15, 7))
+                    addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
+                    addAction(
+                        if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                        if (state.isPlaying) "Pause" else "Play",
+                        serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
+                    )
+                    addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
+                    addAction(android.R.drawable.ic_media_ff, "Forward 30s", serviceIntent(ACTION_FAST_FORWARD_30, 8))
+                    setStyle(
+                        MediaStyleNotificationHelper.MediaStyle(session)
+                            .setShowActionsInCompactView(
+                                *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    intArrayOf(0, 1, 2, 3, 4)
+                                } else {
+                                    intArrayOf(0, 2, 4)
+                                })
+                            ),
+                    )
+                } else {
+                    addAction(
+                        if (state.shuffleEnabled) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
+                        if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                        serviceIntent(ACTION_TOGGLE_SHUFFLE, 6),
+                    )
+                    addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
+                    addAction(
+                        if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                        if (state.isPlaying) "Pause" else "Play",
+                        serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
+                    )
+                    addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
+                    addAction(
+                        if (track?.isFavorite == true) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+                        if (track?.isFavorite == true) "Unlike" else "Like",
+                        serviceIntent(ACTION_TOGGLE_FAVORITE, 5),
+                    )
+                    setStyle(
+                        MediaStyleNotificationHelper.MediaStyle(session)
+                            .setShowActionsInCompactView(
+                                *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    intArrayOf(0, 1, 2, 3, 4)
+                                } else {
+                                    intArrayOf(1, 2, 3)
+                                })
+                            ),
+                    )
+                }
+            }
             .build()
 
         try {
@@ -549,33 +579,57 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 state.positionMs.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
                 state.durationMs <= 0L,
             )
-            .addAction(
-                if (state.shuffleEnabled) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
-                if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
-                serviceIntent(ACTION_TOGGLE_SHUFFLE, 6),
-            )
-            .addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
-            .addAction(
-                if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
-                if (state.isPlaying) "Pause" else "Play",
-                serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
-            )
-            .addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
-            .addAction(
-                if (track?.isFavorite == true) R.drawable.ic_heart_filled else R.drawable.ic_heart,
-                if (track?.isFavorite == true) "Unlike" else "Like",
-                serviceIntent(ACTION_TOGGLE_FAVORITE, 5),
-            )
-            .setStyle(
-                MediaStyleNotificationHelper.MediaStyle(session)
-                    .setShowActionsInCompactView(
-                        *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                            intArrayOf(0, 1, 2, 3, 4)
-                        } else {
-                            intArrayOf(1, 2, 3)
-                        })
-                    ),
-            )
+            .apply {
+                if (state.isAudiobookMode) {
+                    addAction(android.R.drawable.ic_media_rew, "Rewind 15s", serviceIntent(ACTION_REWIND_15, 7))
+                    addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
+                    addAction(
+                        if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                        if (state.isPlaying) "Pause" else "Play",
+                        serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
+                    )
+                    addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
+                    addAction(android.R.drawable.ic_media_ff, "Forward 30s", serviceIntent(ACTION_FAST_FORWARD_30, 8))
+                    setStyle(
+                        MediaStyleNotificationHelper.MediaStyle(session)
+                            .setShowActionsInCompactView(
+                                *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    intArrayOf(0, 1, 2, 3, 4)
+                                } else {
+                                    intArrayOf(0, 2, 4)
+                                })
+                            ),
+                    )
+                } else {
+                    addAction(
+                        if (state.shuffleEnabled) R.drawable.ic_shuffle_on else R.drawable.ic_shuffle,
+                        if (state.shuffleEnabled) "Shuffle on" else "Shuffle off",
+                        serviceIntent(ACTION_TOGGLE_SHUFFLE, 6),
+                    )
+                    addAction(android.R.drawable.ic_media_previous, "Previous", serviceIntent(ACTION_PREVIOUS, 1))
+                    addAction(
+                        if (state.isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play,
+                        if (state.isPlaying) "Pause" else "Play",
+                        serviceIntent(ACTION_TOGGLE_PLAYBACK, 2),
+                    )
+                    addAction(android.R.drawable.ic_media_next, "Next", serviceIntent(ACTION_NEXT, 3))
+                    addAction(
+                        if (track?.isFavorite == true) R.drawable.ic_heart_filled else R.drawable.ic_heart,
+                        if (track?.isFavorite == true) "Unlike" else "Like",
+                        serviceIntent(ACTION_TOGGLE_FAVORITE, 5),
+                    )
+                    setStyle(
+                        MediaStyleNotificationHelper.MediaStyle(session)
+                            .setShowActionsInCompactView(
+                                *(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                    intArrayOf(0, 1, 2, 3, 4)
+                                } else {
+                                    intArrayOf(1, 2, 3)
+                                })
+                            ),
+                    )
+                }
+            }
             .build()
 
         notificationManager.notify(NOTIFICATION_ID, notification)
@@ -842,6 +896,26 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     }
 
     private fun buildCustomLayout(state: VantafynMusicPlaybackState): List<CommandButton> {
+        if (state.isAudiobookMode) {
+            val rewindButton = CommandButton.Builder(CommandButton.ICON_REWIND)
+                .setDisplayName("Rewind 15s")
+                .setCustomIconResId(android.R.drawable.ic_media_rew)
+                .setSessionCommand(SessionCommand(CUSTOM_COMMAND_REWIND_15, Bundle.EMPTY))
+                .setSlots(CommandButton.SLOT_BACK_SECONDARY)
+                .setEnabled(true)
+                .build()
+
+            val fastForwardButton = CommandButton.Builder(CommandButton.ICON_FAST_FORWARD)
+                .setDisplayName("Forward 30s")
+                .setCustomIconResId(android.R.drawable.ic_media_ff)
+                .setSessionCommand(SessionCommand(CUSTOM_COMMAND_FAST_FORWARD_30, Bundle.EMPTY))
+                .setSlots(CommandButton.SLOT_FORWARD_SECONDARY)
+                .setEnabled(true)
+                .build()
+
+            return listOf(rewindButton, fastForwardButton)
+        }
+
         val track = state.currentTrack
         val isFavorite = track?.isFavorite == true
         val isShuffle = state.shuffleEnabled
@@ -900,10 +974,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_REWIND_15, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_FAST_FORWARD_30, Bundle.EMPTY))
                 .build()
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .add(Player.COMMAND_SET_SHUFFLE_MODE)
                 .add(Player.COMMAND_SET_REPEAT_MODE)
+                .add(Player.COMMAND_SEEK_BACK)
+                .add(Player.COMMAND_SEEK_FORWARD)
                 .build()
 
             val implField = findField(session.javaClass, "impl") ?: return@runCatching
@@ -1044,6 +1122,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                                         updateCustomLayout()
                                         return
                                     }
+                                    CUSTOM_COMMAND_REWIND_15, ACTION_REWIND_15 -> {
+                                        playbackController.seekRelative(-15_000L)
+                                        return
+                                    }
+                                    CUSTOM_COMMAND_FAST_FORWARD_30, ACTION_FAST_FORWARD_30 -> {
+                                        playbackController.seekRelative(30_000L)
+                                        return
+                                    }
                                 }
                                 legacyCallback.onCustomAction(action, extras)
                             }
@@ -1067,13 +1153,19 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                             override fun onPause() = legacyCallback.onPause()
                             override fun onSkipToNext() = legacyCallback.onSkipToNext()
                             override fun onSkipToPrevious() = legacyCallback.onSkipToPrevious()
-                            override fun onFastForward() = legacyCallback.onFastForward()
-                            override fun onRewind() = legacyCallback.onRewind()
+                            override fun onFastForward() {
+                                playbackController.seekRelative(30_000L)
+                            }
+                            override fun onRewind() {
+                                playbackController.seekRelative(-15_000L)
+                            }
                             override fun onStop() = legacyCallback.onStop()
                             override fun onSeekTo(pos: Long) = legacyCallback.onSeekTo(pos)
                             override fun onSetRating(rating: RatingCompat?) = legacyCallback.onSetRating(rating)
                             override fun onSetRating(rating: RatingCompat?, extras: Bundle?) = legacyCallback.onSetRating(rating, extras)
-                            override fun onSetPlaybackSpeed(speed: Float) = legacyCallback.onSetPlaybackSpeed(speed)
+                            override fun onSetPlaybackSpeed(speed: Float) {
+                                playbackController.setPlaybackSpeed(speed)
+                            }
                             override fun onSetCaptioningEnabled(enabled: Boolean) = legacyCallback.onSetCaptioningEnabled(enabled)
                             override fun onSetRepeatMode(repeatMode: Int) = legacyCallback.onSetRepeatMode(repeatMode)
                             override fun onSetShuffleMode(shuffleMode: Int) = legacyCallback.onSetShuffleMode(shuffleMode)
@@ -1209,8 +1301,12 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         const val ACTION_STOP = "dev.vantafyn.music.action.STOP"
         const val ACTION_TOGGLE_FAVORITE = "dev.vantafyn.music.action.TOGGLE_FAVORITE"
         const val ACTION_TOGGLE_SHUFFLE = "dev.vantafyn.music.action.TOGGLE_SHUFFLE"
+        const val ACTION_REWIND_15 = "dev.vantafyn.music.action.REWIND_15"
+        const val ACTION_FAST_FORWARD_30 = "dev.vantafyn.music.action.FAST_FORWARD_30"
         const val CUSTOM_COMMAND_TOGGLE_FAVORITE = "dev.vantafyn.music.command.TOGGLE_FAVORITE"
         const val CUSTOM_COMMAND_TOGGLE_SHUFFLE = "dev.vantafyn.music.command.TOGGLE_SHUFFLE"
+        const val CUSTOM_COMMAND_REWIND_15 = "dev.vantafyn.music.command.REWIND_15"
+        const val CUSTOM_COMMAND_FAST_FORWARD_30 = "dev.vantafyn.music.command.FAST_FORWARD_30"
         const val ACTION_PLAYBACK_STATE_CHANGED = "dev.vantafyn.music.action.PLAYBACK_STATE_CHANGED"
         private const val WIDGET_PREFS = "vantafyn_widget_playback"
         private const val KEY_TITLE = "title"
@@ -1261,10 +1357,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_REWIND_15, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_FAST_FORWARD_30, Bundle.EMPTY))
                 .build()
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .add(Player.COMMAND_SET_SHUFFLE_MODE)
                 .add(Player.COMMAND_SET_REPEAT_MODE)
+                .add(Player.COMMAND_SEEK_BACK)
+                .add(Player.COMMAND_SEEK_FORWARD)
                 .build()
             val buttons = buildCustomLayout(playbackController.state.value)
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
@@ -1285,10 +1385,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_AND_LIBRARY_COMMANDS.buildUpon()
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_FAVORITE, Bundle.EMPTY))
                 .add(SessionCommand(CUSTOM_COMMAND_TOGGLE_SHUFFLE, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_REWIND_15, Bundle.EMPTY))
+                .add(SessionCommand(CUSTOM_COMMAND_FAST_FORWARD_30, Bundle.EMPTY))
                 .build()
             val playerCommands = MediaSession.ConnectionResult.DEFAULT_PLAYER_COMMANDS.buildUpon()
                 .add(Player.COMMAND_SET_SHUFFLE_MODE)
                 .add(Player.COMMAND_SET_REPEAT_MODE)
+                .add(Player.COMMAND_SEEK_BACK)
+                .add(Player.COMMAND_SEEK_FORWARD)
                 .build()
             session.setAvailableCommands(controller, sessionCommands, playerCommands)
             syncLegacySessionCommands(session, buttons)
@@ -1359,6 +1463,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     playbackController.previous()
                     return SessionResult.RESULT_SUCCESS
                 }
+                Player.COMMAND_SEEK_BACK -> {
+                    playbackController.seekRelative(-15_000L)
+                    return SessionResult.RESULT_SUCCESS
+                }
+                Player.COMMAND_SEEK_FORWARD -> {
+                    playbackController.seekRelative(30_000L)
+                    return SessionResult.RESULT_SUCCESS
+                }
             }
             return super.onPlayerCommandRequest(session, controller, playerCommand)
         }
@@ -1377,6 +1489,14 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 CUSTOM_COMMAND_TOGGLE_SHUFFLE -> {
                     playbackController.toggleShuffle()
                     updateCustomLayout()
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CUSTOM_COMMAND_REWIND_15 -> {
+                    playbackController.seekRelative(-15_000L)
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                CUSTOM_COMMAND_FAST_FORWARD_30 -> {
+                    playbackController.seekRelative(30_000L)
                     return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
                 }
             }
@@ -1478,10 +1598,12 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     mediaId.startsWith(VantafynMusicMediaLibraryProvider.TRACK_PREFIX) -> provider().resolveQueueAsync(mediaId)
                     mediaId == VantafynMusicMediaLibraryProvider.RECENT_ID ||
                         mediaId == VantafynMusicMediaLibraryProvider.SONGS_ID ||
+                        mediaId == VantafynMusicMediaLibraryProvider.AUDIOBOOKS_ID ||
                         mediaId == VantafynMusicMediaLibraryProvider.DOWNLOADS_ID ||
                         mediaId == VantafynMusicMediaLibraryProvider.DOWNLOADS_SONGS_ID ||
                         mediaId == VantafynMusicMediaLibraryProvider.QUEUE_ID ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.ALBUM_PREFIX) ||
+                        mediaId.startsWith(VantafynMusicMediaLibraryProvider.AUDIOBOOK_PREFIX) ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.DOWNLOAD_ALBUM_PREFIX) ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.PLAYLIST_PREFIX) ||
                         mediaId.startsWith(VantafynMusicMediaLibraryProvider.SEARCH_PREFIX) -> {
@@ -1491,6 +1613,10 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     }
                     else -> null
                 }
+                val isAudiobookRequest = mediaId == VantafynMusicMediaLibraryProvider.AUDIOBOOKS_ID ||
+                    mediaId.startsWith(VantafynMusicMediaLibraryProvider.AUDIOBOOK_PREFIX) ||
+                    resolved?.containerId == VantafynMusicMediaLibraryProvider.AUDIOBOOKS_ID ||
+                    resolved?.containerId?.startsWith(VantafynMusicMediaLibraryProvider.AUDIOBOOK_PREFIX) == true
                 val queue = resolved?.tracks.orEmpty().map {
                     VantafynMusicTrack(
                         id = it.id,
@@ -1510,7 +1636,12 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 if (queue.isEmpty()) {
                     MediaSession.MediaItemsWithStartPosition(mediaItems, startIndex, startPositionMs)
                 } else {
-                    val resolvedItems = playbackController.adoptSystemQueue(queue, resolved?.startIndex ?: startIndex, startPositionMs)
+                    val resolvedItems = playbackController.adoptSystemQueue(
+                        queue = queue,
+                        startIndex = resolved?.startIndex ?: startIndex,
+                        startPositionMs = startPositionMs,
+                        isAudiobook = isAudiobookRequest,
+                    )
                     MediaSession.MediaItemsWithStartPosition(
                         resolvedItems,
                         resolved?.startIndex ?: startIndex.coerceIn(0, resolvedItems.lastIndex),
