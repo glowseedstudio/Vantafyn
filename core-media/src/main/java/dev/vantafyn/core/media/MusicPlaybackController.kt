@@ -1015,7 +1015,7 @@ class MusicPlaybackController private constructor(context: Context) {
                     )
                 }
                 val now = System.currentTimeMillis()
-                if (now - lastRegistryTickMs >= ForegroundTickerIntervalMs) {
+                if (now - lastRegistryTickMs >= RegistryTickIntervalMs) {
                     lastRegistryTickMs = now
                     LongRunningTaskRegistry.tick(MUSIC_TICKER_TASK_ID, if (sessionPlayer.isPlaying) "playing" else "paused")
                 }
@@ -1181,6 +1181,7 @@ class MusicPlaybackController private constructor(context: Context) {
         private const val MUSIC_TICKER_TASK_ID = "music.positionTicker"
         private const val ForegroundTickerIntervalMs = 1_000L
         private const val BackgroundTickerIntervalMs = 10_000L
+        private const val RegistryTickIntervalMs = 10_000L
         private const val BackgroundRegistryTickIntervalMs = 60_000L
 
         const val EXTRA_REPLAY_GAIN_DB = "dev.vantafyn.replaygain.GAIN_DB"

@@ -273,6 +273,7 @@ import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1247,27 +1248,23 @@ fun MusicScreen(
                             )
                         }
                     }
-                    item {
-                        MusicContentReveal(index = 3, animate = nestedRevealActive, revealKey = contentRevealKey) {
-                            MusicTrackList(
-                                title = "All Songs",
-                                tracks = filteredTracks,
-                                page = screen.page,
-                                isPageLoading = state.isMusicPageLoading,
-                                onPreviousPage = viewModel::previousMusicPage,
-                                onNextPage = viewModel::nextMusicPage,
-                                playlists = state.home?.playlists.orEmpty(),
-                                pendingTrackId = state.pendingPlayTrackId,
-                                currentTrackId = state.playback.currentTrack?.id,
-                                selectedTrackIds = selectedTrackIds,
-                                onToggleSelectTrack = toggleSelectTrack,
-                                onLongPressTrack = toggleSelectTrack,
-                                onTrack = { track -> startMusic { viewModel.playTrack(track, filteredTracks) } },
-                                onChoosePlaylist = choosePlaylistForTrack,
-                                onLongPress = { actionTrack = it },
-                                animateReveal = false,
-                            )
-                        }
+                    item(key = "songs-track-list-title") {
+                        Text("All Songs", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                    }
+                    itemsIndexed(
+                        items = filteredTracks,
+                        key = { _, track -> "song-${track.id}" },
+                    ) { _, track ->
+                        MusicSongTrackRow(
+                            track = track,
+                            pendingTrackId = state.pendingPlayTrackId,
+                            currentTrackId = state.playback.currentTrack?.id,
+                            isSelected = selectedTrackIds.contains(track.id),
+                            isSelectionActive = selectedTrackIds.isNotEmpty(),
+                            onToggleSelectTrack = toggleSelectTrack,
+                            onTrack = { selectedTrack -> startMusic { viewModel.playTrack(selectedTrack, filteredTracks) } },
+                            onMore = { actionTrack = it },
+                        )
                     }
                     if (screen.page.hasNext && state.songsSearchQuery.isBlank()) {
                         item(key = "songs-load-more-trigger") {
@@ -1316,7 +1313,8 @@ fun MusicScreen(
             MusicMiniPlayer(
                 track = it,
                 isPlaying = state.playback.isPlaying,
-                progress = progressFraction(state.playback.positionMs, state.playback.durationMs),
+                playbackPositionMs = viewModel.playbackPositionMs,
+                durationMs = state.playback.durationMs,
                 isScrolling = musicListState.isScrollInProgress,
                 onOpen = viewModel::openNowPlaying,
                 onToggle = {
@@ -5791,6 +5789,101 @@ private fun MusicSongsAlphabetLetter(
 }
 
 @Composable
+private fun MusicSongTrackRow(
+    track: JellyfinMusicTrack,
+    pendingTrackId: java.util.UUID?,
+    currentTrackId: java.util.UUID?,
+    isSelected: Boolean,
+    isSelectionActive: Boolean,
+    onToggleSelectTrack: (JellyfinMusicTrack) -> Unit,
+    onTrack: (JellyfinMusicTrack) -> Unit,
+    onMore: (JellyfinMusicTrack) -> Unit,
+) {
+    val haptic = LocalHapticFeedback.current
+    VantafynGlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isSelected) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.6.dp)
+                else if (track.id == currentTrackId) Modifier.vantafynAnimatedModalBorder(cornerRadius = 18.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
+                else Modifier
+            )
+            .combinedClickable(
+                onClick = {
+                    if (isSelectionActive) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onToggleSelectTrack(track)
+                    } else {
+                        onTrack(track)
+                    }
+                },
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onToggleSelectTrack(track)
+                },
+            ),
+        cornerRadius = 18.dp,
+        contentPadding = PaddingValues(10.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (isSelectionActive) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isSelected) Brush.horizontalGradient(listOf(VantafynColors.Primary, VantafynColors.Secondary))
+                            else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                        )
+                        .then(
+                            if (!isSelected) Modifier.border(1.5.dp, Color.White.copy(alpha = 0.35f), CircleShape)
+                            else Modifier
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            imageVector = Icons.Rounded.Check,
+                            contentDescription = "Selected",
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                }
+            }
+            MusicArt(track.artworkUrl, Modifier.size(52.dp), title = track.title, subtitle = track.artist)
+            Column(Modifier.weight(1f)) {
+                Text(track.title, color = VantafynColors.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(track.artist, color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Text(track.durationMs?.formatTime().orEmpty(), color = VantafynColors.Muted)
+            if (pendingTrackId == track.id) {
+                VantafynGradientLoadingRing(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
+            }
+            if (!isSelectionActive) {
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .clickable { onMore(track) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreVert,
+                        contentDescription = "More options for ${track.title}",
+                        tint = VantafynColors.Ink.copy(alpha = 0.85f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MusicTrackList(
     title: String,
     tracks: List<JellyfinMusicTrack>,
@@ -6761,7 +6854,8 @@ private fun MiniPlayerInteriorAtmosphere(
 private fun MusicMiniPlayer(
     track: VantafynMusicTrack,
     isPlaying: Boolean,
-    progress: Float,
+    playbackPositionMs: StateFlow<Long>,
+    durationMs: Long,
     isScrolling: Boolean = false,
     onOpen: () -> Unit,
     onToggle: () -> Unit,
@@ -6778,6 +6872,8 @@ private fun MusicMiniPlayer(
     val maxDragPx = with(density) { 340.dp.toPx() }
     val offsetX = remember(track.id) { Animatable(0f) }
     var isDismissing by remember(track.id) { mutableStateOf(false) }
+    val positionMs by playbackPositionMs.collectAsStateWithLifecycle()
+    val progress = progressFraction(positionMs, durationMs)
 
     val borderAlpha by animateFloatAsState(
         targetValue = if (isPlaying) 1f else 0f,
@@ -7126,41 +7222,15 @@ private fun NowPlayingDialog(
             }
             item {
                 MusicContentReveal(index = 3, animate = revealActive) {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        MusicScrubber(
-                            positionMs = state.playback.positionMs,
-                            durationMs = state.playback.durationMs,
-                            isPlaying = state.playback.isPlaying,
-                            onSeek = viewModel::seekTo,
-                        )
-                        Box(
-                            modifier = Modifier.fillMaxWidth(),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = state.playback.positionMs.formatTime(),
-                                color = VantafynColors.Muted,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFeatureSettings = "tnum",
-                                ),
-                                modifier = Modifier.align(Alignment.CenterStart),
-                            )
-                            AudioQualityBadgePill(
-                                audioStreamInfo = state.playback.audioStreamInfo,
-                                track = track,
-                                onClick = { showAudioStreamDetailsSheet = true },
-                                modifier = Modifier.align(Alignment.Center),
-                            )
-                            Text(
-                                text = state.playback.durationMs.formatTime(),
-                                color = VantafynColors.Muted,
-                                style = MaterialTheme.typography.bodySmall.copy(
-                                    fontFeatureSettings = "tnum",
-                                ),
-                                modifier = Modifier.align(Alignment.CenterEnd),
-                            )
-                        }
-                    }
+                    NowPlayingProgressSection(
+                        playbackPositionMs = viewModel.playbackPositionMs,
+                        durationMs = state.playback.durationMs,
+                        isPlaying = state.playback.isPlaying,
+                        audioStreamInfo = state.playback.audioStreamInfo,
+                        track = track,
+                        onSeek = viewModel::seekTo,
+                        onAudioQualityClick = { showAudioStreamDetailsSheet = true },
+                    )
                 }
             }
             item {
@@ -7352,7 +7422,7 @@ private fun NowPlayingDialog(
         AudiobookChaptersSheet(
             visible = showChaptersSheet,
             chapters = state.playback.activeChapters,
-            currentPositionMs = state.playback.positionMs,
+            currentPositionMs = viewModel.currentPlaybackPositionMs(),
             onDismiss = { showChaptersSheet = false },
             onSelectChapter = { chapter ->
                 viewModel.seekTo(chapter.startPositionMs)
@@ -7547,42 +7617,31 @@ private fun MusicReactiveBackground(track: VantafynMusicTrack) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(animatedBase),
-    )
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
+            .drawWithCache {
+                val accentBrush = Brush.radialGradient(
                     colors = listOf(animatedAccent.copy(alpha = 0.70f), Color.Transparent),
                     center = Offset(160f, 220f),
                     radius = 720f,
-                ),
-            ),
-    )
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.radialGradient(
+                )
+                val secondaryBrush = Brush.radialGradient(
                     colors = listOf(animatedSecondary.copy(alpha = 0.62f), Color.Transparent),
                     center = Offset(860f, 860f),
                     radius = 840f,
-                ),
-            ),
-    )
-    Box(
-        Modifier
-            .fillMaxSize()
-            .background(
-                Brush.linearGradient(
+                )
+                val scrimBrush = Brush.linearGradient(
                     listOf(
                         animatedBase.copy(alpha = 0.34f),
                         VantafynColors.Graphite.copy(alpha = 0.18f),
                         Color.Black.copy(alpha = 0.30f),
                     ),
-                ),
-            ),
+                )
+                onDrawBehind {
+                    drawRect(animatedBase)
+                    drawRect(accentBrush)
+                    drawRect(secondaryBrush)
+                    drawRect(scrimBrush)
+                }
+            },
     )
 }
 
@@ -8821,7 +8880,7 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
             ) { renderState ->
                 LyricsBody(
                     renderState = renderState,
-                    playbackMs = state.playback.positionMs,
+                    playbackMs = viewModel.currentPlaybackPositionMs(),
                     isPlaying = state.playback.isPlaying,
                     currentPositionMs = viewModel::currentPlaybackPositionMs,
                     onSeek = viewModel::seekTo,
@@ -10138,6 +10197,54 @@ private fun IconPill(icon: ImageVector, label: String, onClick: () -> Unit) {
 }
 
 @Composable
+private fun NowPlayingProgressSection(
+    playbackPositionMs: StateFlow<Long>,
+    durationMs: Long,
+    isPlaying: Boolean,
+    audioStreamInfo: dev.vantafyn.core.media.VantafynAudioStreamInfo?,
+    track: VantafynMusicTrack,
+    onSeek: (Long) -> Unit,
+    onAudioQualityClick: () -> Unit,
+) {
+    val positionMs by playbackPositionMs.collectAsStateWithLifecycle()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        MusicScrubber(
+            positionMs = positionMs,
+            durationMs = durationMs,
+            isPlaying = isPlaying,
+            onSeek = onSeek,
+        )
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = positionMs.formatTime(),
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFeatureSettings = "tnum",
+                ),
+                modifier = Modifier.align(Alignment.CenterStart),
+            )
+            AudioQualityBadgePill(
+                audioStreamInfo = audioStreamInfo,
+                track = track,
+                onClick = onAudioQualityClick,
+                modifier = Modifier.align(Alignment.Center),
+            )
+            Text(
+                text = durationMs.formatTime(),
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontFeatureSettings = "tnum",
+                ),
+                modifier = Modifier.align(Alignment.CenterEnd),
+            )
+        }
+    }
+}
+
+@Composable
 private fun MusicScrubber(
     positionMs: Long,
     durationMs: Long,
@@ -10693,5 +10800,3 @@ private fun MusicMultiSelectActionBar(
         }
     }
 }
-
-

@@ -101,10 +101,13 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _state = MutableStateFlow(MusicUiState(playback = playbackController.state.value))
     val state: StateFlow<MusicUiState> = _state.asStateFlow()
+    private val _playbackPositionMs = MutableStateFlow(playbackController.state.value.positionMs)
+    val playbackPositionMs: StateFlow<Long> = _playbackPositionMs.asStateFlow()
 
     init {
         viewModelScope.launch {
             playbackController.state.collect { playback ->
+                _playbackPositionMs.value = playback.positionMs
                 if (!outputCoordinator.state.value.isCasting && shouldPublishPlaybackToUi(playback)) {
                     _state.update { it.copy(playback = playback) }
                 }
@@ -132,6 +135,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 val playback = _state.value.playback
                 val isCasting = output.isCasting
                 if (isCasting && playback.queue.isNotEmpty()) {
+                    _playbackPositionMs.value = cast.positionMs
                     val castQueueIndex = cast.currentQueueIndex.coerceIn(0, playback.queue.lastIndex.coerceAtLeast(0))
                     val resolvedIndex = if (!cast.currentItemId.isNullOrBlank()) {
                         playback.queue.indexOfFirst { it.id.toString().equals(cast.currentItemId, ignoreCase = true) }
@@ -139,22 +143,27 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     } else {
                         castQueueIndex
                     }
+                    val castPlayback = playback.copy(
+                        queueIndex = resolvedIndex,
+                        isPlaying = cast.isPlaying,
+                        positionMs = cast.positionMs,
+                        durationMs = cast.durationMs.takeIf { duration -> duration > 0L }
+                            ?: playback.queue.getOrNull(resolvedIndex)?.durationMs
+                            ?: playback.durationMs,
+                        repeatMode = cast.repeatMode,
+                    )
                     _state.update {
-                        it.copy(
+                        val updated = it.copy(
                             isCasting = true,
                             castReceiverName = cast.receiverName,
                             castVolume = cast.volume,
                             isCastMuted = cast.isMuted,
-                            playback = it.playback.copy(
-                                queueIndex = resolvedIndex,
-                                isPlaying = cast.isPlaying,
-                                positionMs = cast.positionMs,
-                                durationMs = cast.durationMs.takeIf { duration -> duration > 0L }
-                                    ?: playback.queue.getOrNull(resolvedIndex)?.durationMs
-                                    ?: it.playback.durationMs,
-                                repeatMode = cast.repeatMode,
-                            ),
                         )
+                        if (shouldPublishPlaybackToUi(castPlayback)) {
+                            updated.copy(playback = castPlayback)
+                        } else {
+                            updated
+                        }
                     }
                 } else {
                     _state.update {
@@ -1063,7 +1072,21 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                     errorMessage = null,
                 )
             }
-            when (val result = musicRepository.getSongsPage(activeSession, startIndex, filter = filter, alphabetKey = alphabetKey)) {
+            val result =
+                if (filter.shouldLoadAsCompleteSongList()) {
+                    when (val allSongs = musicRepository.getAllSongs(activeSession, limit = MusicAllSongsLimit)) {
+                        is JellyfinResult.Success -> JellyfinResult.Success(
+                            allSongs.value
+                                .filterForSongs(filter, alphabetKey)
+                                .sortedWith(musicSongSortComparator)
+                                .toCompleteSongsPage(),
+                        )
+                        is JellyfinResult.Failure -> allSongs
+                    }
+                } else {
+                    musicRepository.getSongsPage(activeSession, startIndex, filter = filter, alphabetKey = alphabetKey)
+                }
+            when (result) {
                 is JellyfinResult.Success -> _state.update {
                     it.copy(screen = MusicScreenState.Songs(result.value), isMusicPageLoading = false)
                 }
@@ -1747,13 +1770,22 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun shouldPublishPlaybackToUi(playback: VantafynMusicPlaybackState): Boolean {
-        if (AppForegroundStateRepository.isForeground.value || musicScreenActive || popupLyricsActive) return true
         val current = _state.value.playback
         return current.currentTrack?.id != playback.currentTrack?.id ||
             current.queueIndex != playback.queueIndex ||
             current.queue.size != playback.queue.size ||
             current.isPlaying != playback.isPlaying ||
             current.durationMs != playback.durationMs ||
+            current.shuffleEnabled != playback.shuffleEnabled ||
+            current.repeatMode != playback.repeatMode ||
+            current.errorMessage != playback.errorMessage ||
+            current.sleepTimerRemainingSeconds != playback.sleepTimerRemainingSeconds ||
+            current.sleepTimerMode != playback.sleepTimerMode ||
+            current.audioStreamInfo != playback.audioStreamInfo ||
+            current.playbackSpeed != playback.playbackSpeed ||
+            current.isAudiobookMode != playback.isAudiobookMode ||
+            current.activeChapters != playback.activeChapters ||
+            current.currentChapter != playback.currentChapter ||
             playback.errorMessage != null
     }
 
@@ -2983,6 +3015,9 @@ sealed interface MusicScreenState {
 private fun MusicSongsFilter.supportsAlphabetRail(): Boolean =
     this == MusicSongsFilter.AZ || this == MusicSongsFilter.Favorites
 
+private fun MusicSongsFilter.shouldLoadAsCompleteSongList(): Boolean =
+    this == MusicSongsFilter.All || this == MusicSongsFilter.AZ || this == MusicSongsFilter.Favorites
+
 private fun String?.normalizedSongsAlphabetKey(): String? {
     val value = this?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } ?: return null
     return when {
@@ -2991,6 +3026,35 @@ private fun String?.normalizedSongsAlphabetKey(): String? {
         else -> null
     }
 }
+
+private fun List<JellyfinMusicTrack>.filterForSongs(
+    filter: MusicSongsFilter,
+    alphabetKey: String?,
+): List<JellyfinMusicTrack> {
+    val favoriteFiltered = if (filter == MusicSongsFilter.Favorites) filter { it.isFavorite } else this
+    val key = alphabetKey.takeIf { filter.supportsAlphabetRail() } ?: return favoriteFiltered
+    return favoriteFiltered.filter { track ->
+        val first = track.title.trim().firstOrNull()?.uppercaseChar()
+        when (key) {
+            "#" -> first == null || first !in 'A'..'Z'
+            else -> first?.toString() == key
+        }
+    }
+}
+
+private val musicSongSortComparator =
+    compareBy<JellyfinMusicTrack> { it.title.trim().lowercase() }
+        .thenBy { it.artist.trim().lowercase() }
+        .thenBy { it.album.orEmpty().trim().lowercase() }
+        .thenBy { it.id.toString() }
+
+private fun List<JellyfinMusicTrack>.toCompleteSongsPage(): JellyfinMusicTrackPage =
+    JellyfinMusicTrackPage(
+        tracks = this,
+        startIndex = 0,
+        pageSize = size,
+        totalItems = size,
+    )
 
 private fun MusicUiState.musicTrackPageFor(parentId: UUID?, startIndex: Int): JellyfinMusicTrackPage {
     val currentPage = when (val current = screen) {
@@ -3008,6 +3072,7 @@ private fun MusicUiState.musicTrackPageFor(parentId: UUID?, startIndex: Int): Je
 }
 
 private const val MusicTrackPageSize = 60
+private const val MusicAllSongsLimit = 10_000
 
 private fun HarmoniaGenerationResult.message(): String =
     when (this) {
@@ -3132,6 +3197,6 @@ private fun VantafynMusicTrack.toJellyfinTrack(): JellyfinMusicTrack =
 private fun Long.toTicks(): Long =
     coerceAtLeast(0L) * 10_000L
 
-private const val MusicProgressReportIntervalMs = 10_000L
+private const val MusicProgressReportIntervalMs = 30_000L
 private const val MusicBackgroundProgressReportIntervalMs = 70_000L
 private const val KEY_DOWNLOAD_WIFI_ONLY_DEFAULT = "download_wifi_only_default"

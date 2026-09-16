@@ -6123,10 +6123,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is JellyfinResult.Success -> {
                     _state.update { state ->
                         val tracking = state.libraryScanTrackingAfter(result.value)
+                        val overview = result.value.takeUnless {
+                            it.plugins.isEmpty() && state.adminOverview?.plugins?.isNotEmpty() == true
+                        } ?: result.value.copy(plugins = state.adminOverview?.plugins.orEmpty())
                         state.copy(
                             isAdminLoading = false,
                             isAdminRefreshing = false,
-                            adminOverview = result.value,
+                            adminOverview = overview,
                             isLibraryScanTracking = tracking.isTracking,
                             libraryScanTrackingStartedAt = if (tracking.isTracking) {
                                 state.libraryScanTrackingStartedAt

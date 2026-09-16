@@ -12,7 +12,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -24,6 +26,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.floor
 import kotlin.math.sin
 
 @Composable
@@ -40,6 +43,7 @@ fun VantafynWavyProgressBar(
     showThumb: Boolean = false,
     thumbColor: Color = Color(0xFF31D7FF),
     thumbRadius: Dp = 6.dp,
+    motionFrameRate: Int = 24,
 ) {
     val density = LocalDensity.current
     val waveHeightPx = with(density) { waveHeight.toPx() }
@@ -55,7 +59,7 @@ fun VantafynWavyProgressBar(
     )
 
     val shouldAnimateWave = isPlaying && !isScrubbing
-    val phase = if (shouldAnimateWave) {
+    val animatedPhase = if (shouldAnimateWave) {
         val infiniteTransition = rememberInfiniteTransition(label = "wavyProgressMotion")
         infiniteTransition.animateFloat(
             initialValue = 0f,
@@ -65,9 +69,16 @@ fun VantafynWavyProgressBar(
                 repeatMode = RepeatMode.Restart,
             ),
             label = "wavyPhase",
-        ).value
+        )
     } else {
-        0f
+        null
+    }
+    val phase by remember(animatedPhase, motionFrameRate) {
+        derivedStateOf {
+            val rawPhase = animatedPhase?.value ?: 0f
+            val framesPerCycle = (1.4f * motionFrameRate.coerceAtLeast(1)).toInt().coerceAtLeast(1)
+            floor(rawPhase * framesPerCycle) / framesPerCycle
+        }
     }
 
     val safeProgress = progress.coerceIn(0f, 1f)

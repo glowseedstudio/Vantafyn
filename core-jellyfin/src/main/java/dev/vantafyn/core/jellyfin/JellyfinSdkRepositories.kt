@@ -2108,7 +2108,15 @@ class SdkJellyfinMusicRepository(
                         }.getOrDefault(emptyList())
                     }
                     val albumsDef = async {
-                        runCatching { getMusicAlbums(api, session, limit = 40) }.getOrDefault(emptyList())
+                        runCatching {
+                            getMusicAlbums(
+                                api = api,
+                                session = session,
+                                limit = MusicHomeAlbumLimit,
+                                sortBy = listOf(ItemSortBy.SORT_NAME),
+                                sortOrder = listOf(SortOrder.ASCENDING),
+                            )
+                        }.getOrDefault(emptyList())
                     }
                     val artistsDef = async {
                         runCatching { getMusicArtists(api, session, limit = 40) }.getOrDefault(emptyList())
@@ -3583,7 +3591,7 @@ class SdkJellyfinAdminRepository(
                     val pluginsDeferred = async {
                         runCatching {
                             val result by api.pluginsApi.getPlugins()
-                            result.map {
+                            val sdkPlugins = result.map {
                                 JellyfinAdminPlugin(
                                     id = it.id,
                                     name = it.name,
@@ -3593,6 +3601,12 @@ class SdkJellyfinAdminRepository(
                                     hasImage = it.hasImage,
                                     canUninstall = it.canUninstall,
                                 )
+                            }
+                            if (sdkPlugins.isNotEmpty()) {
+                                sdkPlugins
+                            } else {
+                                Log.w("VantafynAdmin", "SDK plugin list returned empty, falling back to /Plugins")
+                                fetchPluginsFallback(session)
                             }
                         }.getOrElse { sdkThrowable ->
                             Log.w("VantafynAdmin", "SDK plugin list failed, falling back to /Plugins: ${sdkThrowable.javaClass.simpleName}")
@@ -6425,6 +6439,8 @@ private fun Throwable.toRestoreFailure(): JellyfinSessionRestoreFailure {
     }
     return JellyfinSessionRestoreFailure(reason, userMessage, this)
 }
+
+private const val MusicHomeAlbumLimit = 10_000
 
 private class AuthenticationException(message: String) : RuntimeException(message)
 private class SessionRestoreException(message: String) : RuntimeException(message)
