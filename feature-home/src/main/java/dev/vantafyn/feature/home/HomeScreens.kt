@@ -3070,64 +3070,6 @@ private fun readBundledProfileAvatar(context: Context, resId: Int): Result<Prepa
         }
     }
 
-@Composable
-private fun BottomRailAccentSettings(
-    selected: BottomRailAccent,
-    onSelect: (BottomRailAccent) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SettingsRowIcon(Icons.Rounded.AutoAwesome)
-            Text(
-                "Bottom rail border animation",
-                color = VantafynColors.Ink,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f),
-            )
-        }
-        VantafynGlassSurface(
-            modifier = Modifier.fillMaxWidth(),
-            variant = VantafynGlassVariant.Chip,
-            cornerRadius = 999.dp,
-            contentPadding = PaddingValues(4.dp),
-        ) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                BottomRailAccent.entries.forEach { option ->
-                    val isSelected = option == selected
-                    val shape = RoundedCornerShape(999.dp)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .then(
-                                if (isSelected) {
-                                    Modifier.vantafynAnimatedModalBorder(cornerRadius = 999.dp, strokeWidth = 1.3.dp, durationMillis = 4200)
-                                } else {
-                                    Modifier.clip(shape)
-                                },
-                            )
-                            .background(if (isSelected) Color.White.copy(alpha = 0.08f) else Color.Transparent)
-                            .clickable { onSelect(option) }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = option.label,
-                            color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
-                            style = MaterialTheme.typography.bodyLarge,
-                            textAlign = TextAlign.Center,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 @Composable
 private fun BottomRailAtmosphereSettings(
@@ -5783,9 +5725,9 @@ private fun HeroCarousel(
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(carouselKeys, lifecycleOwner) {
         if (carouselItems.size > 1) {
-            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
                 while (isActive) {
-                    delay(5_500)
+                    delay(12_000L)
                     val next = (pagerState.currentPage + 1) % carouselItems.size
                     pagerState.animateScrollToPage(next)
                 }
@@ -13116,11 +13058,6 @@ private fun SettingsScreen(
                                     Text("Background", color = VantafynColors.Muted, fontWeight = FontWeight.SemiBold)
                                 }
                                 BackgroundSelector(selected = state.selectedBackground, onSelect = onSelectBackground)
-                                HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.75.dp)
-                                BottomRailAccentSettings(
-                                    selected = state.bottomRailAccent,
-                                    onSelect = onSetBottomRailAccent,
-                                )
                                 HorizontalDivider(color = Color.White.copy(alpha = 0.08f), thickness = 0.75.dp)
                                 BottomRailAtmosphereSettings(
                                     selected = state.bottomRailAtmosphere,
@@ -20594,62 +20531,23 @@ private fun MagneticGlidingCircle(
 @Composable
 private fun RailInteriorAtmosphere(
     mode: BottomRailAtmosphereMode,
-    isMusicPlaying: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    if (mode == BottomRailAtmosphereMode.Off) return
-    val reducedMotion = rememberReducedMotionPreference()
-    if (reducedMotion) return
-
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    if (!isResumed) return
-
-    val isTargetVisible = when (mode) {
-        BottomRailAtmosphereMode.Active -> true
-        BottomRailAtmosphereMode.MusicOnly -> isMusicPlaying
-        BottomRailAtmosphereMode.Off -> false
-    }
-
+    val isEnabled = mode == BottomRailAtmosphereMode.On
     val atmosphereAlpha by animateFloatAsState(
-        targetValue = if (isTargetVisible) 1f else 0f,
-        animationSpec = tween(700, easing = FastOutSlowInEasing),
-        label = "railInteriorAtmosphereAlpha",
+        targetValue = if (isEnabled) 1f else 0f,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "railAtmosphereAlpha",
     )
 
-    if (atmosphereAlpha <= 0.005f) return
-
-    val infiniteTransition = rememberInfiniteTransition(label = "railInteriorAtmosphere")
-    val driftProgress by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(6500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "auroraDrift",
-    )
-
-    val pulseProgress by infiniteTransition.animateFloat(
-        initialValue = 0.70f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(if (isMusicPlaying) 1400 else 3200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "auroraPulse",
-    )
+    if (atmosphereAlpha <= 0.001f && !isEnabled) return
 
     Canvas(
         modifier = modifier
+            .graphicsLayer {
+                alpha = atmosphereAlpha
+                clip = true
+            }
             .clip(RoundedCornerShape(30.dp))
             .drawWithCache {
                 val width = size.width
@@ -20657,7 +20555,6 @@ private fun RailInteriorAtmosphere(
                 val radius = width * 0.44f
                 val bloomY = height * 0.5f
 
-                // Pre-allocated static gradient brushes cached per size change (0 allocations during animation)
                 val cyanBrush = Brush.radialGradient(
                     colors = listOf(
                         Color(0xFF00E5FF).copy(alpha = 1.30f),
@@ -20690,15 +20587,11 @@ private fun RailInteriorAtmosphere(
                 onDrawBehind {
                     if (width <= 0f || height <= 0f) return@onDrawBehind
 
-                    val drift = driftProgress
-                    val pulse = pulseProgress
+                    val bloom1X = width * 0.28f
+                    val bloom2X = width * 0.72f
+                    val baseAlpha = 0.16f
 
-                    val bloom1X = width * (0.08f + drift * 0.42f)
-                    val bloom2X = width * (0.92f - drift * 0.42f)
-
-                    val baseAlpha = (if (isMusicPlaying) 0.18f * pulse else 0.13f * pulse) * atmosphereAlpha
-
-                    // 1. Electric Cyan Nebula Bloom (zero-alloc GPU matrix translation)
+                    // 1. Electric Cyan Nebula Bloom
                     translate(left = bloom1X, top = bloomY) {
                         drawCircle(
                             brush = cyanBrush,
@@ -20708,7 +20601,7 @@ private fun RailInteriorAtmosphere(
                         )
                     }
 
-                    // 2. Violet / Indigo Light Bloom (zero-alloc GPU matrix translation)
+                    // 2. Violet / Indigo Light Bloom
                     translate(left = bloom2X, top = bloomY) {
                         drawCircle(
                             brush = violetBrush,
@@ -20732,60 +20625,15 @@ private fun RailInteriorAtmosphere(
 
 @Composable
 private fun BottomRailAccentBorder(
-    mode: BottomRailAccent,
-    tapTrigger: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    if (mode == BottomRailAccent.Off) return
-    val reducedMotion = rememberReducedMotionPreference()
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val rippleAnim = remember { Animatable(0f) }
-    LaunchedEffect(mode) {
-        rippleAnim.snapTo(0f)
-    }
-    LaunchedEffect(tapTrigger) {
-        if (mode == BottomRailAccent.TouchRipple && tapTrigger > 0 && isResumed) {
-            rippleAnim.snapTo(0f)
-            rippleAnim.animateTo(1f, animationSpec = tween(280, easing = FastOutSlowInEasing))
-            rippleAnim.animateTo(0f, animationSpec = tween(700, easing = LinearEasing))
-        }
-    }
-    val baseAlpha = when (mode) {
-        BottomRailAccent.StillGlow -> 0.38f
-        BottomRailAccent.Breathing -> {
-            if (reducedMotion || !isResumed) 0.38f
-            else {
-                val infiniteTransition = rememberInfiniteTransition(label = "railAccent")
-                infiniteTransition.animateFloat(
-                    initialValue = 0.15f,
-                    targetValue = 0.55f,
-                    animationSpec = infiniteRepeatable(tween(4200, easing = LinearEasing), RepeatMode.Reverse),
-                    label = "breathe",
-                ).value
-            }
-        }
-        BottomRailAccent.TouchRipple -> {
-            if (reducedMotion) 0.38f
-            else lerp(0.30f, 0.65f, rippleAnim.value).coerceIn(0f, 0.7f)
-        }
-        else -> 0f
-    }
     Canvas(modifier = modifier) {
         val strokeWidth = 1.8.dp.toPx()
         val cornerRadius = (size.height / 2f).coerceAtMost(30.dp.toPx())
         val halfStroke = strokeWidth / 2f
         drawRoundRect(
             brush = VantafynGradients.accentHorizontal(),
-            alpha = baseAlpha,
+            alpha = 0.38f,
             topLeft = Offset(halfStroke, halfStroke),
             size = Size(size.width - strokeWidth, size.height - strokeWidth),
             cornerRadius = CornerRadius(cornerRadius, cornerRadius),
@@ -20976,7 +20824,6 @@ private fun MobileBottomNav(
             ) {
                 RailInteriorAtmosphere(
                     mode = atmosphereMode,
-                    isMusicPlaying = isMusicPlaying,
                     modifier = Modifier.matchParentSize(),
                 )
                 AnimatedContent(
@@ -21100,13 +20947,9 @@ private fun MobileBottomNav(
                     }
                 }
             }
-            if (accentMode != BottomRailAccent.Off) {
-                BottomRailAccentBorder(
-                    mode = accentMode,
-                    tapTrigger = tapTrigger,
-                    modifier = Modifier.matchParentSize(),
-                )
-            }
+            BottomRailAccentBorder(
+                modifier = Modifier.matchParentSize(),
+            )
         }
     }
 }
@@ -21853,8 +21696,8 @@ private fun MiniNavIcon(destination: MobileDestination, selected: Boolean, activ
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val pulseTransition = rememberInfiniteTransition(label = "musicNavPulse")
     val pulseState = if (activePulse && isResumed) {
+        val pulseTransition = rememberInfiniteTransition(label = "musicNavPulse")
         pulseTransition.animateFloat(
             initialValue = 0.08f,
             targetValue = 0.86f,
@@ -22490,7 +22333,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.11"
+private const val VANTAFYN_APP_VERSION = "0.9.12"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

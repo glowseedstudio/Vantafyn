@@ -85,6 +85,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     private var lastWidgetPositionBucket: Long = Long.MIN_VALUE
     private var lastWidgetUpdateAtMs: Long = 0L
     private var isForegroundService = false
+    private var isNotificationDismissedByUser = false
     private var isLegacyCallbackWrapped = false
     private var cachedSessionCompat: MediaSessionCompat? = null
     private val notificationManager by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
@@ -95,6 +96,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        isServiceRunning = true
         Log.d(TAG, "Music service created")
         createMusicPlaybackChannel()
 
@@ -110,6 +112,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     setSmallIcon(R.drawable.vantafyn_logo)
                 },
         )
+        setShowNotificationForIdlePlayer(SHOW_NOTIFICATION_FOR_IDLE_PLAYER_NEVER)
 
         // NOTE: We intentionally do NOT call startForeground() here.
         //
@@ -160,7 +163,6 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             session.setCustomLayout(initialButtons)
             syncLegacySessionCommands(session, initialButtons)
         }
-        restoreLastTrackIfAvailable()
 
         serviceScope.launch {
             playbackController.state.collect { state ->
@@ -186,15 +188,35 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     if (state.currentTrack == null && hadPreviousTrack) {
                         updateSessionCompatMetadata(mediaSession, state, null)
                     }
-                    if (!isForegroundService) {
-                        if (isPlaying) {
+                    if (isPlaying) {
+                        isNotificationDismissedByUser = false
+                        if (!isForegroundService) {
                             Log.d(TAG, "State change → startForeground (track=${trackId?.toString()?.take(8)}, playing=$isPlaying)")
                             mediaSession?.let { session -> startForegroundWithMediaNotification(session, state, loadLargeIcon = true) }
                                 ?: triggerNotificationUpdate()
+                        } else {
+                            Log.d(TAG, "State change → notify (track=${trackId?.toString()?.take(8)}, playing=$isPlaying)")
+                            updateNotificationOnly(state, loadLargeIcon = true)
                         }
                     } else {
-                        Log.d(TAG, "State change → notify (track=${trackId?.toString()?.take(8)}, playing=$isPlaying)")
-                        updateNotificationOnly(state, loadLargeIcon = true)
+                        val isBufferingOrStarting = playbackController.sessionPlayer.playWhenReady &&
+                            state.currentTrack != null &&
+                            playbackController.sessionPlayer.playbackState == Player.STATE_BUFFERING
+                        if (!isBufferingOrStarting) {
+                            if (isForegroundService) {
+                                stopForeground(STOP_FOREGROUND_DETACH)
+                                isForegroundService = false
+                                playbackController.notifyForegroundDetached()
+                            }
+                            if (isNotificationDismissedByUser || state.currentTrack == null) {
+                                notificationManager.cancel(NOTIFICATION_ID)
+                            } else {
+                                Log.d(TAG, "State change → notify paused (track=${trackId?.toString()?.take(8)})")
+                                updateNotificationOnly(state, loadLargeIcon = true)
+                            }
+                        } else {
+                            Log.d(TAG, "Buffering next track in background — keeping foreground service active")
+                        }
                     }
                 }
                 maybePersistWidgetState(state, force = trackId != lastWidgetTrackId || state.isPlaying != lastWidgetPlaying)
@@ -222,25 +244,46 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             ACTION_REWIND_15 -> playbackController.seekRelative(-15_000L)
             ACTION_FAST_FORWARD_30 -> playbackController.seekRelative(30_000L)
             ACTION_STOP -> {
-                playbackController.stop(reason = VantafynMusicStopReason.User)
+                Log.d(TAG, "ACTION_STOP received — dismissing notification and stopping service")
+                isNotificationDismissedByUser = true
+                if (isForegroundService) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    isForegroundService = false
+                }
+                notificationManager.cancel(NOTIFICATION_ID)
+                playbackController.stop(clearQueue = true, reason = VantafynMusicStopReason.User)
+                mediaSession?.let { session ->
+                    val compat = getMediaSessionCompat(session)
+                    compat?.setMetadata(null)
+                    compat?.isActive = false
+                }
                 stopSelf()
                 return START_NOT_STICKY
             }
         }
         try {
-            val isPlaying = playbackController.state.value.isPlaying
-            if (mediaSession == null) {
-                if (isPlaying) {
+            val isPlayingOrStarting = playbackController.state.value.isPlaying ||
+                playbackController.sessionPlayer.playWhenReady
+            if (isPlayingOrStarting) {
+                isNotificationDismissedByUser = false
+                if (mediaSession == null) {
                     startForegroundImmediately(MusicPlaybackController.get(this).state.value.currentTrack)
-                }
-            } else if (!isForegroundService) {
-                if (isPlaying) {
+                } else if (!isForegroundService) {
                     startForegroundWithMediaNotification(mediaSession ?: return START_STICKY, playbackController.state.value, loadLargeIcon = true)
                 } else {
                     updateNotificationOnly(playbackController.state.value, loadLargeIcon = true)
                 }
             } else {
-                updateNotificationOnly(playbackController.state.value, loadLargeIcon = true)
+                if (isForegroundService) {
+                    stopForeground(STOP_FOREGROUND_DETACH)
+                    isForegroundService = false
+                    playbackController.notifyForegroundDetached()
+                }
+                if (isNotificationDismissedByUser || playbackController.state.value.currentTrack == null) {
+                    notificationManager.cancel(NOTIFICATION_ID)
+                } else {
+                    updateNotificationOnly(playbackController.state.value, loadLargeIcon = true)
+                }
             }
         } catch (_: ForegroundServiceStartNotAllowedException) {
             Log.w(TAG, "Cannot start foreground from background — remaining bound")
@@ -249,9 +292,21 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val isPlaying = playbackController.state.value.isPlaying
+        val currentState = playbackController.state.value
+        val isPlaying = currentState.isPlaying
         if (!isPlaying) {
+            isNotificationDismissedByUser = true
+            if (isForegroundService) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                isForegroundService = false
+            }
+            notificationManager.cancel(NOTIFICATION_ID)
             playbackController.stop(clearQueue = true, reason = VantafynMusicStopReason.User)
+            mediaSession?.let { session ->
+                val compat = getMediaSessionCompat(session)
+                compat?.setMetadata(null)
+                compat?.isActive = false
+            }
             stopSelf()
         }
         super.onTaskRemoved(rootIntent)
@@ -260,15 +315,29 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     override fun onUpdateNotification(session: MediaSession, startInForegroundRequired: Boolean) {
         val state = if (::playbackController.isInitialized) playbackController.state.value else MusicPlaybackController.get(this).state.value
         updateCustomLayout(state)
+        val isPlayingOrStarting = state.isPlaying ||
+            (playbackController.sessionPlayer.playWhenReady && state.currentTrack != null)
+        if (isPlayingOrStarting) {
+            isNotificationDismissedByUser = false
+        }
         try {
-            if (!isForegroundService) {
-                if (startInForegroundRequired || state.isPlaying) {
+            if (isPlayingOrStarting) {
+                if (!isForegroundService || startInForegroundRequired) {
                     startForegroundWithMediaNotification(session, state, loadLargeIcon = true)
                 } else {
                     updateNotificationOnly(state, loadLargeIcon = true)
                 }
             } else {
-                updateNotificationOnly(state, loadLargeIcon = true)
+                if (isForegroundService) {
+                    stopForeground(STOP_FOREGROUND_DETACH)
+                    isForegroundService = false
+                    playbackController.notifyForegroundDetached()
+                }
+                if (isNotificationDismissedByUser || state.currentTrack == null) {
+                    notificationManager.cancel(NOTIFICATION_ID)
+                } else {
+                    updateNotificationOnly(state, loadLargeIcon = true)
+                }
             }
         } catch (_: ForegroundServiceStartNotAllowedException) {
             Log.w(TAG, "Cannot start foreground from background in onUpdateNotification")
@@ -282,9 +351,19 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
 
     override fun onDestroy() {
         Log.d(TAG, "Music service destroyed")
+        isServiceRunning = false
+        if (::playbackController.isInitialized) {
+            playbackController.notifyPlaybackServiceStopped()
+        }
         LongRunningTaskRegistry.stop(MUSIC_SERVICE_TASK_ID, "service destroyed")
         isForegroundService = false
         isLegacyCallbackWrapped = false
+        mediaSession?.let { session ->
+            val compat = getMediaSessionCompat(session)
+            compat?.setMetadata(null)
+            compat?.isActive = false
+        }
+        notificationManager.cancel(NOTIFICATION_ID)
         cachedSessionCompat = null
         cachedAmbientArtwork = null
         isAndroidAutoConnectedFlow.value = false
@@ -353,16 +432,17 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
 
     private fun restoreLastTrackIfAvailable() {
         if (playbackController.state.value.currentTrack != null) return
+
         val prefs = getSharedPreferences(WIDGET_PREFS, MODE_PRIVATE)
         val hasTrack = prefs.getBoolean(KEY_HAS_TRACK, false)
         if (!hasTrack) return
         val title = prefs.getString(KEY_TITLE, null)?.takeIf { it.isNotBlank() } ?: return
         val trackIdStr = prefs.getString(KEY_TRACK_ID, null) ?: return
-        val trackId = runCatching { java.util.UUID.fromString(trackIdStr) }.getOrNull() ?: return
+        val trackId = runCatching { UUID.fromString(trackIdStr) }.getOrNull() ?: return
         val streamUrl = prefs.getString(KEY_STREAM_URL, null)?.takeIf { it.isNotBlank() } ?: return
         val artist = prefs.getString(KEY_ARTIST, null) ?: "Unknown Artist"
         val album = prefs.getString(KEY_ALBUM, null)
-        val albumId = prefs.getString(KEY_ALBUM_ID, null)?.let { runCatching { java.util.UUID.fromString(it) }.getOrNull() }
+        val albumId = prefs.getString(KEY_ALBUM_ID, null)?.let { runCatching { UUID.fromString(it) }.getOrNull() }
         val artworkUrl = prefs.getString(KEY_ARTWORK_URL, null)
         val durationMs = prefs.getLong(KEY_DURATION_MS, 0L).takeIf { it > 0L }
         val positionMs = prefs.getLong(KEY_POSITION_MS, 0L).coerceAtLeast(0L)
@@ -380,7 +460,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             isFavorite = isFavorite,
         )
 
-        Log.d(TAG, "Restoring last played track to session: ${restoredTrack.title} at ${positionMs}ms")
+        Log.d(TAG, "Restoring last played track to session (single track fallback): ${restoredTrack.title} at ${positionMs}ms")
         playbackController.restoreQueue(listOf(restoredTrack), startIndex = 0, startPositionMs = positionMs)
     }
 
@@ -646,7 +726,9 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             val bitmap = loadLargeIcon(artworkUrl) ?: return@launch
             val latestState = playbackController.state.value
             if (latestState.currentTrack?.id == trackId) {
-                updateNotificationOnly(latestState, loadLargeIcon = false)
+                if (latestState.isPlaying || (!isNotificationDismissedByUser && latestState.currentTrack != null)) {
+                    updateNotificationOnly(latestState, loadLargeIcon = false)
+                }
                 val artworkBytes = bitmapToArtworkByteArray(bitmap)
                 if (artworkBytes != null) {
                     playbackController.updateCurrentTrackArtwork(artworkBytes)
@@ -750,23 +832,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         val track = state.currentTrack
         if (track == null) {
             runCatching {
-                val ambientArtwork = loadAmbientBrandArtwork()
-                val metadata = MediaMetadataCompat.Builder()
-                    .putString(MediaMetadataCompat.METADATA_KEY_TITLE, "Vantafyn")
-                    .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, "Ready to stream")
-                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, "Vantafyn Music")
-                    .putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ARTIST, "Vantafyn")
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_TITLE, "Vantafyn")
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_SUBTITLE, "Ready to stream")
-                    .putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION, "Vantafyn Music")
-                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, ambientArtwork)
-                    .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, ambientArtwork)
-                    .putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, ambientArtwork)
-                    .build()
-                sessionCompat.setMetadata(metadata)
-                Log.d(TAG, "Set ambient Vantafyn MediaSessionCompat metadata")
+                sessionCompat.setMetadata(null)
+                sessionCompat.isActive = false
+                Log.d(TAG, "Cleared MediaSessionCompat metadata and set inactive")
             }.onFailure { e ->
-                Log.w(TAG, "Failed to set ambient MediaSessionCompat metadata: ${e.message}")
+                Log.w(TAG, "Failed to clear MediaSessionCompat metadata: ${e.message}")
             }
             return
         }
@@ -789,16 +859,22 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, state.durationMs.coerceAtLeast(0L))
                 .putString(MediaMetadataCompat.METADATA_KEY_MEDIA_ID, track.id.toString())
 
-            track.artworkUrl?.let { url ->
-                metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, url)
-                metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, url)
-                metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, url)
-            }
+            val contentArtUri = VantafynArtworkContentProvider.getTrackArtworkUri(
+                this,
+                track.id.toString(),
+                track.artworkUrl,
+                track.title,
+                track.artist,
+            )
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ALBUM_ART_URI, contentArtUri.toString())
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, contentArtUri.toString())
+            metadataBuilder.putString(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON_URI, contentArtUri.toString())
 
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, watchArtwork)
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, watchArtwork)
             metadataBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_DISPLAY_ICON, watchArtwork)
 
+            sessionCompat.isActive = true
             sessionCompat.setMetadata(metadataBuilder.build())
             Log.d(TAG, "Synced MediaSessionCompat metadata for Galaxy Watch / Wear OS (hasArtwork=${artworkBitmap != null || cachedLargeIcon(track.artworkUrl) != null}, track=${track.title})")
         }.onFailure { e ->
@@ -1286,6 +1362,10 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
     }
 
     companion object {
+        @Volatile
+        var isServiceRunning: Boolean = false
+            private set
+
         private const val TAG = "MusicPlaybackService"
         const val CHANNEL_ID = "vantafyn_music_controls_v2"
         private const val NOTIFICATION_ID = 4207
@@ -1349,7 +1429,6 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): MediaSession.ConnectionResult {
-            restoreLastTrackIfAvailable()
             if (isCarController(controller)) {
                 Log.d(TAG, "Car / Android Auto controller connected: ${controller.packageName}")
                 isAndroidAutoConnectedFlow.value = true
@@ -1421,7 +1500,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             if (keyEvent != null && keyEvent.action == KeyEvent.ACTION_DOWN) {
                 when (keyEvent.keyCode) {
                     KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                        playbackController.sessionPlayer.play()
+                        if (playbackController.sessionPlayer.mediaItemCount == 0) {
+                            startRecentsQueueIfEmpty()
+                        } else {
+                            playbackController.sessionPlayer.play()
+                        }
                         return true
                     }
                     KeyEvent.KEYCODE_MEDIA_PAUSE -> {
@@ -1429,7 +1512,11 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                         return true
                     }
                     KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_HEADSETHOOK -> {
-                        playbackController.togglePlayPause()
+                        if (playbackController.sessionPlayer.mediaItemCount == 0) {
+                            startRecentsQueueIfEmpty()
+                        } else {
+                            playbackController.togglePlayPause()
+                        }
                         return true
                     }
                     KeyEvent.KEYCODE_MEDIA_NEXT -> {
@@ -1449,20 +1536,25 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             return super.onMediaButtonEvent(session, controllerInfo, intent)
         }
 
+        private fun startRecentsQueueIfEmpty() {
+            serviceScope.launch {
+                Log.d(TAG, "Empty player media button: starting Recents queue from Jellyfin")
+                val recentChildren = provider().getChildrenAsync(VantafynMusicMediaLibraryProvider.RECENT_ID)
+                val firstTrackId = recentChildren.firstOrNull()?.mediaId ?: return@launch
+                val resolved = provider().resolveQueueAsync(firstTrackId)
+                val recentTracks = resolved.tracks.map { it.toVantafynTrack() }
+                if (recentTracks.isNotEmpty()) {
+                    playbackController.playQueue(recentTracks, startIndex = 0, startPositionMs = 0L)
+                }
+            }
+        }
+
         override fun onPlayerCommandRequest(
             session: MediaSession,
             controller: MediaSession.ControllerInfo,
             playerCommand: Int,
         ): Int {
             when (playerCommand) {
-                Player.COMMAND_SEEK_TO_NEXT, Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM -> {
-                    playbackController.next()
-                    return SessionResult.RESULT_SUCCESS
-                }
-                Player.COMMAND_SEEK_TO_PREVIOUS, Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> {
-                    playbackController.previous()
-                    return SessionResult.RESULT_SUCCESS
-                }
                 Player.COMMAND_SEEK_BACK -> {
                     playbackController.seekRelative(-15_000L)
                     return SessionResult.RESULT_SUCCESS
@@ -1658,6 +1750,13 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
             val queue = currentState.queue
             if (queue.isNotEmpty()) {
                 val items = queue.map { track ->
+                    val contentArtUri = VantafynArtworkContentProvider.getTrackArtworkUri(
+                        this@VantafynMusicPlaybackService,
+                        track.id.toString(),
+                        track.artworkUrl,
+                        track.title,
+                        track.artist,
+                    )
                     MediaItem.Builder()
                         .setUri(track.streamUrl)
                         .setMediaId(track.id.toString())
@@ -1666,7 +1765,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                                 .setTitle(track.title)
                                 .setArtist(track.artist)
                                 .setAlbumTitle(track.album)
-                                .setArtworkUri(track.artworkUrl?.let(Uri::parse))
+                                .setArtworkUri(contentArtUri)
                                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                                 .setIsPlayable(true)
                                 .build(),
@@ -1678,7 +1777,36 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                     MediaSession.MediaItemsWithStartPosition(items, index, currentState.positionMs.coerceAtLeast(0L)),
                 )
             }
-            return super.onPlaybackResumption(mediaSession, controller)
+            return future {
+                Log.d(TAG, "Cold start onPlaybackResumption: fetching Recents queue from Jellyfin")
+                val recentChildren = runCatching {
+                    provider().getChildrenAsync(VantafynMusicMediaLibraryProvider.RECENT_ID)
+                }.getOrNull().orEmpty()
+                val firstTrackId = recentChildren.firstOrNull()?.mediaId
+                val resolved = if (!firstTrackId.isNullOrBlank()) {
+                    runCatching { provider().resolveQueueAsync(firstTrackId) }.getOrNull()
+                } else {
+                    null
+                }
+                val recentTracks = resolved?.tracks.orEmpty().map { it.toVantafynTrack() }
+                if (recentTracks.isNotEmpty()) {
+                    Log.d(TAG, "Resolved ${recentTracks.size} recent tracks for cold-start resumption")
+                    val resolvedItems = playbackController.adoptSystemQueue(
+                        queue = recentTracks,
+                        startIndex = 0,
+                        startPositionMs = 0L,
+                        isAudiobook = false,
+                    )
+                    MediaSession.MediaItemsWithStartPosition(
+                        resolvedItems,
+                        0,
+                        0L,
+                    )
+                } else {
+                    Log.w(TAG, "No recent tracks found from Jellyfin for cold-start resumption")
+                    MediaSession.MediaItemsWithStartPosition(emptyList(), 0, 0L)
+                }
+            }
         }
 
         private fun List<MediaItem>.paged(page: Int, pageSize: Int): List<MediaItem> {

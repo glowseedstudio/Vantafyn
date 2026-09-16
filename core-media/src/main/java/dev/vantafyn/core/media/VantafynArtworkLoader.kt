@@ -224,6 +224,9 @@ object VantafynArtworkLoader {
         )
     }
 
+    fun getDiskCacheFileForUrl(context: Context, url: String): File =
+        getDiskCacheFile(context, getCacheKey(url))
+
     private fun getDiskCacheFile(context: Context, cacheKey: String): File {
         val dir = File(context.cacheDir, DISK_CACHE_DIR)
         return File(dir, "$cacheKey.img")

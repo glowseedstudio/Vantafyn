@@ -52,6 +52,17 @@ class VantafynArtworkContentProvider : ContentProvider() {
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         val ctx = context ?: return null
         return try {
+            val path = uri.path ?: ""
+            if (path.contains("track")) {
+                val url = uri.getQueryParameter("url")
+                if (!url.isNullOrBlank()) {
+                    val cacheFile = VantafynArtworkLoader.getDiskCacheFileForUrl(ctx, url)
+                    if (cacheFile.exists() && cacheFile.length() > 0L) {
+                        return ParcelFileDescriptor.open(cacheFile, ParcelFileDescriptor.MODE_READ_ONLY)
+                    }
+                }
+            }
+
             val title = uri.getQueryParameter("title") ?: ""
             val subtitle = uri.getQueryParameter("sub") ?: ""
             val cacheDir = File(ctx.cacheDir, "vantafyn_artwork_placeholders").apply { mkdirs() }
@@ -67,7 +78,7 @@ class VantafynArtworkContentProvider : ContentProvider() {
             }
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to open placeholder file for $uri: ${e.message}")
+            Log.w(TAG, "Failed to open artwork file for $uri: ${e.message}")
             null
         }
     }
@@ -75,6 +86,24 @@ class VantafynArtworkContentProvider : ContentProvider() {
     companion object {
         private const val TAG = "VantafynArtworkProvider"
         private const val SIZE = 512
+
+        fun getTrackArtworkUri(context: Context, trackId: String, artworkUrl: String?, title: String? = null, artist: String? = null): Uri {
+            val builder = Uri.Builder()
+                .scheme("content")
+                .authority("${context.packageName}.artwork")
+                .path("track")
+                .appendQueryParameter("id", trackId)
+            if (!artworkUrl.isNullOrBlank()) {
+                builder.appendQueryParameter("url", artworkUrl)
+            }
+            if (!title.isNullOrBlank()) {
+                builder.appendQueryParameter("title", title)
+            }
+            if (!artist.isNullOrBlank()) {
+                builder.appendQueryParameter("sub", artist)
+            }
+            return builder.build()
+        }
 
         fun getPlaceholderUri(context: Context, title: String?, subtitle: String? = null): Uri {
             return Uri.Builder()

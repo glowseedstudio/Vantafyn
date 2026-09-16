@@ -260,6 +260,9 @@ class MusicPlaybackController private constructor(context: Context) {
                         emitEvent(VantafynMusicPlaybackEvent.PauseChanged(track, currentPosition.coerceAtLeast(0L), !isPlaying))
                         if (isPlaying) emitEvent(VantafynMusicPlaybackEvent.TrackStarted(track, currentPosition.coerceAtLeast(0L)))
                     }
+                    if (isPlaying) {
+                        ensurePlaybackService()
+                    }
                     syncTicker()
                 }
 
@@ -463,7 +466,12 @@ class MusicPlaybackController private constructor(context: Context) {
         emitEvent(VantafynMusicPlaybackEvent.TrackStarted(queue[safeIndex], safePosition))
     }
 
-    fun restoreQueue(queue: List<VantafynMusicTrack>, startIndex: Int = 0, startPositionMs: Long = 0L) {
+    fun restoreQueue(
+        queue: List<VantafynMusicTrack>,
+        startIndex: Int = 0,
+        startPositionMs: Long = 0L,
+        isAudiobook: Boolean = false,
+    ) {
         if (queue.isEmpty()) return
         val safeIndex = startIndex.coerceIn(0, queue.lastIndex)
         val safePosition = startPositionMs.coerceAtLeast(0L)
@@ -475,6 +483,7 @@ class MusicPlaybackController private constructor(context: Context) {
                 durationMs = queue[safeIndex].durationMs ?: 0L,
                 isPlaying = false,
                 errorMessage = null,
+                isAudiobookMode = isAudiobook,
             )
         }
         val mediaItems = queue.map { it.toMediaItem() }
@@ -1031,14 +1040,26 @@ class MusicPlaybackController private constructor(context: Context) {
             .build()
     }
 
+    internal fun notifyPlaybackServiceStopped() {
+        playbackServiceStarted = false
+    }
+
+    internal fun notifyForegroundDetached() {
+        playbackServiceStarted = false
+    }
+
     private fun ensurePlaybackService() {
-        if (playbackServiceStarted) return
+        if (VantafynMusicPlaybackService.isServiceRunning && playbackServiceStarted) return
         val intent = Intent(appContext, VantafynMusicPlaybackService::class.java)
         runCatching {
             androidx.core.content.ContextCompat.startForegroundService(appContext, intent)
             playbackServiceStarted = true
+        }.recoverCatching {
+            appContext.startService(intent)
+            playbackServiceStarted = true
         }.onFailure { e ->
             Log.w(TAG, "Failed to start playback service: ${e.message}")
+            playbackServiceStarted = false
         }
     }
 
@@ -1067,13 +1088,36 @@ class MusicPlaybackController private constructor(context: Context) {
     fun updateCurrentTrackArtwork(artworkBytes: ByteArray) {
         if (sessionPlayer.playbackState != Player.STATE_IDLE) {
             val currentTrack = _state.value.currentTrack ?: return
+            val currentIndex = sessionPlayer.currentMediaItemIndex
+            if (currentIndex in 0 until sessionPlayer.mediaItemCount) {
+                val currentItem = sessionPlayer.getMediaItemAt(currentIndex)
+                val contentArtworkUri = VantafynArtworkContentProvider.getTrackArtworkUri(
+                    appContext,
+                    currentTrack.id.toString(),
+                    currentTrack.artworkUrl,
+                    currentTrack.title,
+                    currentTrack.artist,
+                )
+                val updatedMetadata = currentItem.mediaMetadata.buildUpon()
+                    .setTitle(currentTrack.title)
+                    .setArtist(currentTrack.artist)
+                    .setAlbumTitle(currentTrack.album)
+                    .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
+                    .setArtworkUri(contentArtworkUri)
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .setIsPlayable(true)
+                    .build()
+                val updatedItem = currentItem.buildUpon()
+                    .setMediaMetadata(updatedMetadata)
+                    .build()
+                sessionPlayer.replaceMediaItem(currentIndex, updatedItem)
+            }
             val currentMeta = sessionPlayer.playlistMetadata
             val updatedMetadata = currentMeta.buildUpon()
                 .setTitle(currentTrack.title)
                 .setArtist(currentTrack.artist)
                 .setAlbumTitle(currentTrack.album)
                 .setArtworkData(artworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)
-                .setArtworkUri(currentTrack.artworkUrl?.let(Uri::parse))
                 .setMediaType(MediaMetadata.MEDIA_TYPE_MUSIC)
                 .setIsPlayable(true)
                 .build()
@@ -1102,6 +1146,13 @@ class MusicPlaybackController private constructor(context: Context) {
                 }.getOrNull()
             }
         }
+        val contentArtworkUri = VantafynArtworkContentProvider.getTrackArtworkUri(
+            appContext,
+            id.toString(),
+            artworkUrl,
+            title,
+            artist,
+        )
         return MediaItem.Builder()
             .setUri(streamUrl)
             .setMediaId(id.toString())
@@ -1111,7 +1162,7 @@ class MusicPlaybackController private constructor(context: Context) {
                     .setTitle(title)
                     .setArtist(artist)
                     .setAlbumTitle(album)
-                    .setArtworkUri(artworkUrl?.let(Uri::parse))
+                    .setArtworkUri(contentArtworkUri)
                     .apply {
                         if (cachedArtworkBytes != null) {
                             setArtworkData(cachedArtworkBytes, MediaMetadata.PICTURE_TYPE_FRONT_COVER)

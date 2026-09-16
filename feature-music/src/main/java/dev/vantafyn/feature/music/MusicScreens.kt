@@ -126,6 +126,7 @@ import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MoreHoriz
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.NavigateNext
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -1397,6 +1398,14 @@ fun MusicScreen(
                 onAddToQueue = {
                     actionTrack = null
                     viewModel.addToQueue(track)
+                },
+                onStartRadio = {
+                    actionTrack = null
+                    startMusic { viewModel.startRadio(track) }
+                },
+                onToggleFavorite = {
+                    actionTrack = null
+                    viewModel.toggleFavorite(track)
                 },
                 onDownload = {
                     actionTrack = null
@@ -5798,6 +5807,7 @@ private fun MusicTrackList(
     onTrack: (JellyfinMusicTrack) -> Unit,
     onChoosePlaylist: (JellyfinMusicTrack) -> Unit = {},
     onLongPress: (JellyfinMusicTrack) -> Unit = {},
+    onMore: (JellyfinMusicTrack) -> Unit = onLongPress,
     animateReveal: Boolean = true,
     isReorderMode: Boolean = false,
     onReorder: ((fromIndex: Int, toIndex: Int) -> Unit)? = null,
@@ -6094,14 +6104,15 @@ private fun MusicTrackList(
                                 Box(
                                     modifier = Modifier
                                         .size(38.dp)
-                                        .clip(RoundedCornerShape(999.dp))
-                                        .clickable { onChoosePlaylist(track) },
+                                        .clip(CircleShape)
+                                        .clickable { onMore(track) },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(
-                                        "+",
-                                        color = VantafynColors.Ink,
-                                        fontWeight = FontWeight.Bold,
+                                    Icon(
+                                        imageVector = Icons.Rounded.MoreVert,
+                                        contentDescription = "More options for ${track.title}",
+                                        tint = VantafynColors.Ink.copy(alpha = 0.85f),
+                                        modifier = Modifier.size(20.dp),
                                     )
                                 }
                             }
@@ -6633,67 +6644,44 @@ private fun rememberReducedMotionPreference(): Boolean {
 
 @Composable
 private fun MiniPlayerInteriorAtmosphere(
-    fadeAlpha: Float,
-    isPlaying: Boolean,
-    isScrolling: Boolean,
     cornerRadius: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
 ) {
-    if (fadeAlpha <= 0.005f) return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val atmosphereEnabledState = remember {
+        val prefs = context.getSharedPreferences("vantafyn_app_preferences", android.content.Context.MODE_PRIVATE)
+        val mode = prefs.getString("bottom_rail_atmosphere", "Off")
+        mutableStateOf(mode == "On" || mode == "Active" || mode == "MusicOnly")
+    }
 
-    val reducedMotion = rememberReducedMotionPreference()
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, _ ->
-            lifecycleState = lifecycleOwner.lifecycle.currentState
+    DisposableEffect(context) {
+        val prefs = context.getSharedPreferences("vantafyn_app_preferences", android.content.Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == "bottom_rail_atmosphere" || key?.startsWith("bottom_rail_atmosphere_") == true) {
+                val mode = prefs.getString("bottom_rail_atmosphere", "Off")
+                atmosphereEnabledState.value = (mode == "On" || mode == "Active" || mode == "MusicOnly")
+            }
         }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val shouldAnimate = isResumed && !reducedMotion && isPlaying && fadeAlpha > 0.01f
-
-    val driftProgress by if (shouldAnimate) {
-        val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerInteriorAtmosphere")
-        infiniteTransition.animateFloat(
-            initialValue = 0f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(6500, easing = LinearEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "miniDrift",
-        )
-    } else {
-        animateFloatAsState(
-            targetValue = 0.5f,
-            animationSpec = tween(1200, easing = FastOutSlowInEasing),
-            label = "miniDriftSettled",
-        )
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
     }
 
-    val pulseProgress by if (shouldAnimate) {
-        val infiniteTransition = rememberInfiniteTransition(label = "miniPlayerPulse")
-        infiniteTransition.animateFloat(
-            initialValue = 0.70f,
-            targetValue = 1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1400, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "miniPulse",
-        )
-    } else {
-        animateFloatAsState(
-            targetValue = 0.85f,
-            animationSpec = tween(800, easing = FastOutSlowInEasing),
-            label = "miniPulseSettled",
-        )
-    }
+    val atmosphereAlpha by animateFloatAsState(
+        targetValue = if (atmosphereEnabledState.value) 1f else 0f,
+        animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing),
+        label = "miniPlayerAtmosphereAlpha",
+    )
+
+    if (atmosphereAlpha <= 0.001f && !atmosphereEnabledState.value) return
 
     Canvas(
         modifier = modifier
+            .graphicsLayer {
+                alpha = atmosphereAlpha
+                clip = true
+            }
             .clip(RoundedCornerShape(cornerRadius))
             .drawWithCache {
                 val width = size.width
@@ -6701,7 +6689,6 @@ private fun MiniPlayerInteriorAtmosphere(
                 val radius = width * 0.44f
                 val bloomY = height * 0.5f
 
-                // Pre-allocated static gradient brushes cached per size change (0 allocations during animation)
                 val cyanBrush = Brush.radialGradient(
                     colors = listOf(
                         Color(0xFF00E5FF).copy(alpha = 1.30f),
@@ -6734,15 +6721,11 @@ private fun MiniPlayerInteriorAtmosphere(
                 onDrawBehind {
                     if (width <= 0f || height <= 0f) return@onDrawBehind
 
-                    val drift = if (isScrolling) 0.5f else driftProgress
-                    val pulse = if (isScrolling) 0.85f else pulseProgress
+                    val bloom1X = width * 0.28f
+                    val bloom2X = width * 0.72f
+                    val baseAlpha = 0.14f
 
-                    val bloom1X = width * (0.08f + drift * 0.42f)
-                    val bloom2X = width * (0.92f - drift * 0.42f)
-
-                    val baseAlpha = (0.09f * pulse) * fadeAlpha
-
-                    // 1. Electric Cyan Nebula Bloom (zero-alloc GPU matrix translation)
+                    // 1. Electric Cyan Nebula Bloom
                     translate(left = bloom1X, top = bloomY) {
                         drawCircle(
                             brush = cyanBrush,
@@ -6752,7 +6735,7 @@ private fun MiniPlayerInteriorAtmosphere(
                         )
                     }
 
-                    // 2. Violet / Indigo Light Bloom (zero-alloc GPU matrix translation)
+                    // 2. Violet / Indigo Light Bloom
                     translate(left = bloom2X, top = bloomY) {
                         drawCircle(
                             brush = violetBrush,
@@ -6878,9 +6861,6 @@ private fun MusicMiniPlayer(
         contentPadding = PaddingValues(0.dp),
     ) {
         MiniPlayerInteriorAtmosphere(
-            fadeAlpha = borderAlpha,
-            isPlaying = isPlaying,
-            isScrolling = isScrolling,
             cornerRadius = 22.dp,
             modifier = Modifier.matchParentSize(),
         )
@@ -9290,6 +9270,8 @@ private fun MusicTrackContextMenu(
     onPlay: () -> Unit,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onStartRadio: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
     onDownload: () -> Unit,
     onChoosePlaylist: () -> Unit,
     onGoToAlbum: () -> Unit,
@@ -9314,6 +9296,16 @@ private fun MusicTrackContextMenu(
                 MusicMenuAction(Icons.Rounded.PlayArrow, "Play", onPlay)
                 MusicMenuAction(Icons.Rounded.NavigateNext, "Play next", onPlayNext)
                 MusicMenuAction(Icons.Rounded.QueueMusic, "Add to queue", onAddToQueue)
+                onStartRadio?.let { action ->
+                    MusicMenuAction(Icons.Rounded.Radio, "Start Radio", action)
+                }
+                onToggleFavorite?.let { action ->
+                    MusicMenuAction(
+                        if (track.isFavorite) Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
+                        if (track.isFavorite) "Remove from favorites" else "Add to favorites",
+                        action,
+                    )
+                }
                 onSelectTracks?.let { action ->
                     MusicMenuAction(Icons.Rounded.Check, "Select tracks", action)
                 }

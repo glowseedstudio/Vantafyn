@@ -625,7 +625,7 @@ fun Modifier.vantafynAnimatedModalBorder(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
     val isResumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
-    val shift = if (animate && isResumed) {
+    val shiftAnim = if (animate && isResumed) {
         val transition = rememberInfiniteTransition(label = "vantafynModalBorder")
         transition.animateFloat(
             initialValue = 0f,
@@ -635,13 +635,14 @@ fun Modifier.vantafynAnimatedModalBorder(
                 repeatMode = RepeatMode.Restart,
             ),
             label = "vantafynModalBorderShift",
-        ).value
+        )
     } else {
-        0f
+        null
     }
     val shape = RoundedCornerShape(cornerRadius)
     return this.clip(shape).drawWithContent {
         drawContent()
+        val shift = shiftAnim?.value ?: 0f
         val radius = cornerRadius.toPx()
         val start = Offset(-size.width * shift, -size.height * shift)
         val end = Offset(size.width * (1f - shift), size.height * (1f - shift))

@@ -185,6 +185,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val ombiRepository = OmbiRepository(application)
     private val achievementRepository: JellyfinAchievementRepository = repositories.achievementRepository
     private val socialRepository: JellyfinSocialRepository = repositories.socialRepository
+    private val watchGuideRepository = dev.vantafyn.feature.home.guide.WatchGuideRepository(application)
     private val achievementPrefs = application.getSharedPreferences("vantafyn_achievements", Context.MODE_PRIVATE)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
@@ -281,56 +282,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         refreshSocialAvailability()
         loadDownloads()
         startObservingDownloads()
-        val unlockPrefs = application.getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-        val unlockedCodes = unlockPrefs.getStringSet("unlocked_codes", emptySet()).orEmpty()
-        if (unlockedCodes.contains("MCU")) {
-            _state.update { it.copy(isMcuCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("JIGSAW") || unlockedCodes.contains("SAW")) {
-            _state.update { it.copy(isSawCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("R-EVIL") || unlockedCodes.contains("RESIDENTEVIL")) {
-            _state.update { it.copy(isResidentEvilCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("POTTER") || unlockedCodes.contains("HARRYPOTTER")) {
-            _state.update { it.copy(isHarryPotterCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("HUNGER") || unlockedCodes.contains("HUNGERGAMES")) {
-            _state.update { it.copy(isHungerGamesCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("SCREAM")) {
-            _state.update { it.copy(isScreamCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("MATRIX") || unlockedCodes.contains("THEMATRIX")) {
-            _state.update { it.copy(isMatrixCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("JUMANJI")) {
-            _state.update { it.copy(isJumanjiCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("JURASSIC") || unlockedCodes.contains("JURASSICPARK") || unlockedCodes.contains("JURASSICWORLD")) {
-            _state.update { it.copy(isJurassicCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("PIRATES") || unlockedCodes.contains("POTC")) {
-            _state.update { it.copy(isPiratesCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("POKEMON")) {
-            _state.update { it.copy(isPokemonCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("SCARY") || unlockedCodes.contains("SCARYMOVIE")) {
-            _state.update { it.copy(isScaryMovieCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("TWILIGHT")) {
-            _state.update { it.copy(isTwilightCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("UNDERWORLD")) {
-            _state.update { it.copy(isUnderworldCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("X-MEN") || unlockedCodes.contains("XMEN")) {
-            _state.update { it.copy(isXMenCodeUnlocked = true) }
-        }
-        if (unlockedCodes.contains("MORDOR") || unlockedCodes.contains("LOTR") || unlockedCodes.contains("HOBBIT") || unlockedCodes.contains("ONE-RING") || unlockedCodes.contains("ONERING") || unlockedCodes.contains("MIDDLE-EARTH") || unlockedCodes.contains("MIDDLEEARTH")) {
-            _state.update { it.copy(isMiddleEarthCodeUnlocked = true) }
-        }
+        // Watch guide unlocked codes are managed by watchGuideRepository (SQLite database)
         val appLifecycleObserver = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
@@ -3043,8 +2995,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun openEnterCodeDialog() {
-        val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-        val unlockedCodes = prefs.getStringSet("unlocked_codes", emptySet()).orEmpty()
+        val unlockedCodes = watchGuideRepository.getUnlockedCodes()
         val isMcuUnlocked = unlockedCodes.contains("MCU")
         val isSawUnlocked = unlockedCodes.contains("JIGSAW")
         val isResidentEvilUnlocked = unlockedCodes.contains("R-EVIL") || unlockedCodes.contains("RESIDENTEVIL")
@@ -3094,227 +3045,162 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun submitUnlockCode(code: String) {
         val trimmed = code.trim().uppercase()
         if (trimmed == "MCU") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("MCU")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("MCU")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isMcuCodeUnlocked = true,
-                    mcuWatchGuideDialog = VantafynMcuWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Mcu(VantafynMcuWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadMcuWatchStatus()
         } else if (trimmed == "JIGSAW" || trimmed == "SAW") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("SAW")
-            unlocked.add("JIGSAW")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("SAW")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isSawCodeUnlocked = true,
-                    sawWatchGuideDialog = VantafynSawWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Saw(VantafynSawWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadSawWatchStatus()
         } else if (trimmed == "R-EVIL" || trimmed == "REVIL" || trimmed == "RESIDENTEVIL") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("R-EVIL")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("RESIDENTEVIL")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isResidentEvilCodeUnlocked = true,
-                    residentEvilWatchGuideDialog = VantafynResidentEvilWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.ResidentEvil(VantafynResidentEvilWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadResidentEvilWatchStatus()
         } else if (trimmed == "POTTER" || trimmed == "HARRYPOTTER") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("POTTER")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("HARRYPOTTER")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isHarryPotterCodeUnlocked = true,
-                    harryPotterWatchGuideDialog = VantafynHarryPotterWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.HarryPotter(VantafynHarryPotterWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadHarryPotterWatchStatus()
         } else if (trimmed == "HUNGER" || trimmed == "HUNGERGAMES") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("HUNGER")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("HUNGERGAMES")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isHungerGamesCodeUnlocked = true,
-                    hungerGamesWatchGuideDialog = VantafynHungerGamesWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.HungerGames(VantafynHungerGamesWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadHungerGamesWatchStatus()
         } else if (trimmed == "SCREAM") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("SCREAM")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("SCREAM")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isScreamCodeUnlocked = true,
-                    screamWatchGuideDialog = VantafynScreamWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Scream(VantafynScreamWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadScreamWatchStatus()
         } else if (trimmed == "MATRIX" || trimmed == "THEMATRIX") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("MATRIX")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("MATRIX")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isMatrixCodeUnlocked = true,
-                    matrixWatchGuideDialog = VantafynMatrixWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Matrix(VantafynMatrixWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadMatrixWatchStatus()
         } else if (trimmed == "JUMANJI") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("JUMANJI")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("JUMANJI")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isJumanjiCodeUnlocked = true,
-                    jumanjiWatchGuideDialog = VantafynJumanjiWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Jumanji(VantafynJumanjiWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadJumanjiWatchStatus()
         } else if (trimmed == "JURASSIC" || trimmed == "JURASSICPARK" || trimmed == "JURASSICWORLD") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("JURASSIC")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("JURASSIC")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isJurassicCodeUnlocked = true,
-                    jurassicWatchGuideDialog = VantafynJurassicWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Jurassic(VantafynJurassicWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadJurassicWatchStatus()
         } else if (trimmed == "PIRATES" || trimmed == "POTC") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("PIRATES")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("PIRATES")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isPiratesCodeUnlocked = true,
-                    piratesWatchGuideDialog = VantafynPiratesWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Pirates(VantafynPiratesWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadPiratesWatchStatus()
         } else if (trimmed == "POKEMON") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("POKEMON")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("POKEMON")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isPokemonCodeUnlocked = true,
-                    pokemonWatchGuideDialog = VantafynPokemonWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Pokemon(VantafynPokemonWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadPokemonWatchStatus()
         } else if (trimmed == "SCARY" || trimmed == "SCARYMOVIE") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("SCARY")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("SCARYMOVIE")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isScaryMovieCodeUnlocked = true,
-                    scaryMovieWatchGuideDialog = VantafynScaryMovieWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.ScaryMovie(VantafynScaryMovieWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadScaryMovieWatchStatus()
         } else if (trimmed == "TWILIGHT") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("TWILIGHT")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("TWILIGHT")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isTwilightCodeUnlocked = true,
-                    twilightWatchGuideDialog = VantafynTwilightWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Twilight(VantafynTwilightWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadTwilightWatchStatus()
         } else if (trimmed == "UNDERWORLD") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("UNDERWORLD")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("UNDERWORLD")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isUnderworldCodeUnlocked = true,
-                    underworldWatchGuideDialog = VantafynUnderworldWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.Underworld(VantafynUnderworldWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadUnderworldWatchStatus()
         } else if (trimmed == "X-MEN" || trimmed == "XMEN") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("X-MEN")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("XMEN")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isXMenCodeUnlocked = true,
-                    xMenWatchGuideDialog = VantafynXMenWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.XMen(VantafynXMenWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadXMenWatchStatus()
         } else if (trimmed == "MORDOR" || trimmed == "LOTR" || trimmed == "HOBBIT" || trimmed == "ONE-RING" || trimmed == "ONERING" || trimmed == "MIDDLE-EARTH" || trimmed == "MIDDLEEARTH") {
-            val prefs = getApplication<Application>().getSharedPreferences("vantafyn_unlockables", Context.MODE_PRIVATE)
-            val unlocked = prefs.getStringSet("unlocked_codes", emptySet())?.toMutableSet() ?: mutableSetOf()
-            unlocked.add("MORDOR")
-            prefs.edit().putStringSet("unlocked_codes", unlocked).apply()
+            watchGuideRepository.unlockCode("MIDDLEEARTH")
 
             _state.update {
                 it.copy(
                     enterCodeDialog = null,
-                    isMiddleEarthCodeUnlocked = true,
-                    middleEarthWatchGuideDialog = VantafynMiddleEarthWatchGuideDialogState(isLoading = true),
+                    activeWatchGuide = ActiveWatchGuide.MiddleEarth(VantafynMiddleEarthWatchGuideDialogState(isLoading = true)),
                 )
             }
             loadMiddleEarthWatchStatus()
@@ -3335,9 +3221,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                mcuWatchGuideDialog = VantafynMcuWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.mcuWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Mcu(
+                    VantafynMcuWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.mcuWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -3345,20 +3233,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeMcuGuide() {
-        _state.update { it.copy(mcuWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setMcuSortMode(mode: McuSortMode) {
         _state.update { current ->
             val d = current.mcuWatchGuideDialog ?: return@update current
-            current.copy(mcuWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Mcu(d.copy(sortMode = mode)))
         }
     }
 
     fun setMcuFilterMode(mode: McuFilterMode) {
         _state.update { current ->
             val d = current.mcuWatchGuideDialog ?: return@update current
-            current.copy(mcuWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Mcu(d.copy(filterMode = mode)))
         }
     }
 
@@ -3378,11 +3266,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.mcuWatchGuideDialog ?: return@update current
                     current.copy(
-                        mcuWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Mcu(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -3428,11 +3316,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.mcuWatchGuideDialog ?: return@update current
                         current.copy(
-                            mcuWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Mcu(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3449,11 +3337,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.mcuWatchGuideDialog ?: return@update current
                         current.copy(
-                            mcuWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Mcu(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3465,9 +3353,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                sawWatchGuideDialog = VantafynSawWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.sawWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Saw(
+                    VantafynSawWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.sawWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -3475,20 +3365,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeSawGuide() {
-        _state.update { it.copy(sawWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setSawSortMode(mode: SawSortMode) {
         _state.update { current ->
             val d = current.sawWatchGuideDialog ?: return@update current
-            current.copy(sawWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Saw(d.copy(sortMode = mode)))
         }
     }
 
     fun setSawFilterMode(mode: SawFilterMode) {
         _state.update { current ->
             val d = current.sawWatchGuideDialog ?: return@update current
-            current.copy(sawWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Saw(d.copy(filterMode = mode)))
         }
     }
 
@@ -3508,11 +3398,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.sawWatchGuideDialog ?: return@update current
                     current.copy(
-                        sawWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Saw(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -3558,11 +3448,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.sawWatchGuideDialog ?: return@update current
                         current.copy(
-                            sawWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Saw(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3579,11 +3469,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.sawWatchGuideDialog ?: return@update current
                         current.copy(
-                            sawWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Saw(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3595,9 +3485,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                residentEvilWatchGuideDialog = VantafynResidentEvilWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.residentEvilWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.ResidentEvil(
+                    VantafynResidentEvilWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.residentEvilWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -3605,20 +3497,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeResidentEvilGuide() {
-        _state.update { it.copy(residentEvilWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setResidentEvilSortMode(mode: ResidentEvilSortMode) {
         _state.update { current ->
             val d = current.residentEvilWatchGuideDialog ?: return@update current
-            current.copy(residentEvilWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.ResidentEvil(d.copy(sortMode = mode)))
         }
     }
 
     fun setResidentEvilFilterMode(mode: ResidentEvilFilterMode) {
         _state.update { current ->
             val d = current.residentEvilWatchGuideDialog ?: return@update current
-            current.copy(residentEvilWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.ResidentEvil(d.copy(filterMode = mode)))
         }
     }
 
@@ -3638,11 +3530,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.residentEvilWatchGuideDialog ?: return@update current
                     current.copy(
-                        residentEvilWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.ResidentEvil(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -3688,11 +3580,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.residentEvilWatchGuideDialog ?: return@update current
                         current.copy(
-                            residentEvilWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.ResidentEvil(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3709,11 +3601,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.residentEvilWatchGuideDialog ?: return@update current
                         current.copy(
-                            residentEvilWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.ResidentEvil(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3725,9 +3617,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                harryPotterWatchGuideDialog = VantafynHarryPotterWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.harryPotterWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.HarryPotter(
+                    VantafynHarryPotterWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.harryPotterWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -3735,20 +3629,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeHarryPotterGuide() {
-        _state.update { it.copy(harryPotterWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setHarryPotterSortMode(mode: HarryPotterSortMode) {
         _state.update { current ->
             val d = current.harryPotterWatchGuideDialog ?: return@update current
-            current.copy(harryPotterWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.HarryPotter(d.copy(sortMode = mode)))
         }
     }
 
     fun setHarryPotterFilterMode(mode: HarryPotterFilterMode) {
         _state.update { current ->
             val d = current.harryPotterWatchGuideDialog ?: return@update current
-            current.copy(harryPotterWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.HarryPotter(d.copy(filterMode = mode)))
         }
     }
 
@@ -3768,11 +3662,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.harryPotterWatchGuideDialog ?: return@update current
                     current.copy(
-                        harryPotterWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.HarryPotter(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -3819,11 +3713,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.harryPotterWatchGuideDialog ?: return@update current
                         current.copy(
-                            harryPotterWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.HarryPotter(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3840,11 +3734,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.harryPotterWatchGuideDialog ?: return@update current
                         current.copy(
-                            harryPotterWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.HarryPotter(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3857,9 +3751,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                hungerGamesWatchGuideDialog = VantafynHungerGamesWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.hungerGamesWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.HungerGames(
+                    VantafynHungerGamesWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.hungerGamesWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -3867,20 +3763,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeHungerGamesGuide() {
-        _state.update { it.copy(hungerGamesWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setHungerGamesSortMode(mode: HungerGamesSortMode) {
         _state.update { current ->
             val d = current.hungerGamesWatchGuideDialog ?: return@update current
-            current.copy(hungerGamesWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.HungerGames(d.copy(sortMode = mode)))
         }
     }
 
     fun setHungerGamesFilterMode(mode: HungerGamesFilterMode) {
         _state.update { current ->
             val d = current.hungerGamesWatchGuideDialog ?: return@update current
-            current.copy(hungerGamesWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.HungerGames(d.copy(filterMode = mode)))
         }
     }
 
@@ -3900,11 +3796,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.hungerGamesWatchGuideDialog ?: return@update current
                     current.copy(
-                        hungerGamesWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.HungerGames(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -3950,11 +3846,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.hungerGamesWatchGuideDialog ?: return@update current
                         current.copy(
-                            hungerGamesWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.HungerGames(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3971,11 +3867,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.hungerGamesWatchGuideDialog ?: return@update current
                         current.copy(
-                            hungerGamesWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.HungerGames(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -3988,9 +3884,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                screamWatchGuideDialog = VantafynScreamWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.screamWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Scream(
+                    VantafynScreamWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.screamWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -3998,20 +3896,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeScreamGuide() {
-        _state.update { it.copy(screamWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setScreamSortMode(mode: ScreamSortMode) {
         _state.update { current ->
             val d = current.screamWatchGuideDialog ?: return@update current
-            current.copy(screamWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Scream(d.copy(sortMode = mode)))
         }
     }
 
     fun setScreamFilterMode(mode: ScreamFilterMode) {
         _state.update { current ->
             val d = current.screamWatchGuideDialog ?: return@update current
-            current.copy(screamWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Scream(d.copy(filterMode = mode)))
         }
     }
 
@@ -4031,11 +3929,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.screamWatchGuideDialog ?: return@update current
                     current.copy(
-                        screamWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Scream(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4081,11 +3979,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.screamWatchGuideDialog ?: return@update current
                         current.copy(
-                            screamWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Scream(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4102,11 +4000,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.screamWatchGuideDialog ?: return@update current
                         current.copy(
-                            screamWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Scream(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4119,9 +4017,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                matrixWatchGuideDialog = VantafynMatrixWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.matrixWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Matrix(
+                    VantafynMatrixWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.matrixWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4129,20 +4029,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeMatrixGuide() {
-        _state.update { it.copy(matrixWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setMatrixSortMode(mode: MatrixSortMode) {
         _state.update { current ->
             val d = current.matrixWatchGuideDialog ?: return@update current
-            current.copy(matrixWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Matrix(d.copy(sortMode = mode)))
         }
     }
 
     fun setMatrixFilterMode(mode: MatrixFilterMode) {
         _state.update { current ->
             val d = current.matrixWatchGuideDialog ?: return@update current
-            current.copy(matrixWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Matrix(d.copy(filterMode = mode)))
         }
     }
 
@@ -4162,11 +4062,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.matrixWatchGuideDialog ?: return@update current
                     current.copy(
-                        matrixWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Matrix(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4212,11 +4112,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.matrixWatchGuideDialog ?: return@update current
                         current.copy(
-                            matrixWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Matrix(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4233,11 +4133,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.matrixWatchGuideDialog ?: return@update current
                         current.copy(
-                            matrixWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Matrix(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4250,9 +4150,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                jumanjiWatchGuideDialog = VantafynJumanjiWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.jumanjiWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Jumanji(
+                    VantafynJumanjiWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.jumanjiWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4260,20 +4162,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeJumanjiGuide() {
-        _state.update { it.copy(jumanjiWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setJumanjiSortMode(mode: JumanjiSortMode) {
         _state.update { current ->
             val d = current.jumanjiWatchGuideDialog ?: return@update current
-            current.copy(jumanjiWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Jumanji(d.copy(sortMode = mode)))
         }
     }
 
     fun setJumanjiFilterMode(mode: JumanjiFilterMode) {
         _state.update { current ->
             val d = current.jumanjiWatchGuideDialog ?: return@update current
-            current.copy(jumanjiWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Jumanji(d.copy(filterMode = mode)))
         }
     }
 
@@ -4293,11 +4195,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.jumanjiWatchGuideDialog ?: return@update current
                     current.copy(
-                        jumanjiWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Jumanji(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4343,11 +4245,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.jumanjiWatchGuideDialog ?: return@update current
                         current.copy(
-                            jumanjiWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Jumanji(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4364,11 +4266,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.jumanjiWatchGuideDialog ?: return@update current
                         current.copy(
-                            jumanjiWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Jumanji(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4381,9 +4283,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                jurassicWatchGuideDialog = VantafynJurassicWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.jurassicWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Jurassic(
+                    VantafynJurassicWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.jurassicWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4391,20 +4295,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeJurassicGuide() {
-        _state.update { it.copy(jurassicWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setJurassicSortMode(mode: JurassicSortMode) {
         _state.update { current ->
             val d = current.jurassicWatchGuideDialog ?: return@update current
-            current.copy(jurassicWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Jurassic(d.copy(sortMode = mode)))
         }
     }
 
     fun setJurassicFilterMode(mode: JurassicFilterMode) {
         _state.update { current ->
             val d = current.jurassicWatchGuideDialog ?: return@update current
-            current.copy(jurassicWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Jurassic(d.copy(filterMode = mode)))
         }
     }
 
@@ -4424,11 +4328,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.jurassicWatchGuideDialog ?: return@update current
                     current.copy(
-                        jurassicWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Jurassic(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4474,11 +4378,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.jurassicWatchGuideDialog ?: return@update current
                         current.copy(
-                            jurassicWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Jurassic(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4495,11 +4399,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.jurassicWatchGuideDialog ?: return@update current
                         current.copy(
-                            jurassicWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Jurassic(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4512,9 +4416,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                piratesWatchGuideDialog = VantafynPiratesWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.piratesWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Pirates(
+                    VantafynPiratesWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.piratesWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4522,20 +4428,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closePiratesGuide() {
-        _state.update { it.copy(piratesWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setPiratesSortMode(mode: PiratesSortMode) {
         _state.update { current ->
             val d = current.piratesWatchGuideDialog ?: return@update current
-            current.copy(piratesWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Pirates(d.copy(sortMode = mode)))
         }
     }
 
     fun setPiratesFilterMode(mode: PiratesFilterMode) {
         _state.update { current ->
             val d = current.piratesWatchGuideDialog ?: return@update current
-            current.copy(piratesWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Pirates(d.copy(filterMode = mode)))
         }
     }
 
@@ -4555,11 +4461,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.piratesWatchGuideDialog ?: return@update current
                     current.copy(
-                        piratesWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Pirates(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4605,11 +4511,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.piratesWatchGuideDialog ?: return@update current
                         current.copy(
-                            piratesWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Pirates(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4626,11 +4532,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.piratesWatchGuideDialog ?: return@update current
                         current.copy(
-                            piratesWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Pirates(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: ${result.message}",
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4643,9 +4549,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                pokemonWatchGuideDialog = VantafynPokemonWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.pokemonWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Pokemon(
+                    VantafynPokemonWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.pokemonWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4653,20 +4561,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closePokemonGuide() {
-        _state.update { it.copy(pokemonWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setPokemonSortMode(mode: PokemonSortMode) {
         _state.update { current ->
             val d = current.pokemonWatchGuideDialog ?: return@update current
-            current.copy(pokemonWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Pokemon(d.copy(sortMode = mode)))
         }
     }
 
     fun setPokemonFilterMode(mode: PokemonFilterMode) {
         _state.update { current ->
             val d = current.pokemonWatchGuideDialog ?: return@update current
-            current.copy(pokemonWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Pokemon(d.copy(filterMode = mode)))
         }
     }
 
@@ -4686,11 +4594,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.pokemonWatchGuideDialog ?: return@update current
                     current.copy(
-                        pokemonWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Pokemon(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4736,11 +4644,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.pokemonWatchGuideDialog ?: return@update current
                         current.copy(
-                            pokemonWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Pokemon(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4757,11 +4665,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.pokemonWatchGuideDialog ?: return@update current
                         current.copy(
-                            pokemonWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Pokemon(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: " + result.message,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4774,9 +4682,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                scaryMovieWatchGuideDialog = VantafynScaryMovieWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.scaryMovieWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.ScaryMovie(
+                    VantafynScaryMovieWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.scaryMovieWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4784,20 +4694,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeScaryMovieGuide() {
-        _state.update { it.copy(scaryMovieWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setScaryMovieSortMode(mode: ScaryMovieSortMode) {
         _state.update { current ->
             val d = current.scaryMovieWatchGuideDialog ?: return@update current
-            current.copy(scaryMovieWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.ScaryMovie(d.copy(sortMode = mode)))
         }
     }
 
     fun setScaryMovieFilterMode(mode: ScaryMovieFilterMode) {
         _state.update { current ->
             val d = current.scaryMovieWatchGuideDialog ?: return@update current
-            current.copy(scaryMovieWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.ScaryMovie(d.copy(filterMode = mode)))
         }
     }
 
@@ -4817,11 +4727,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.scaryMovieWatchGuideDialog ?: return@update current
                     current.copy(
-                        scaryMovieWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.ScaryMovie(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4867,11 +4777,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.scaryMovieWatchGuideDialog ?: return@update current
                         current.copy(
-                            scaryMovieWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.ScaryMovie(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4888,11 +4798,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.scaryMovieWatchGuideDialog ?: return@update current
                         current.copy(
-                            scaryMovieWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.ScaryMovie(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: " + result.message,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -4905,9 +4815,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                twilightWatchGuideDialog = VantafynTwilightWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.twilightWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Twilight(
+                    VantafynTwilightWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.twilightWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -4915,20 +4827,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeTwilightGuide() {
-        _state.update { it.copy(twilightWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setTwilightSortMode(mode: TwilightSortMode) {
         _state.update { current ->
             val d = current.twilightWatchGuideDialog ?: return@update current
-            current.copy(twilightWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Twilight(d.copy(sortMode = mode)))
         }
     }
 
     fun setTwilightFilterMode(mode: TwilightFilterMode) {
         _state.update { current ->
             val d = current.twilightWatchGuideDialog ?: return@update current
-            current.copy(twilightWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Twilight(d.copy(filterMode = mode)))
         }
     }
 
@@ -4948,11 +4860,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.twilightWatchGuideDialog ?: return@update current
                     current.copy(
-                        twilightWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Twilight(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -4998,11 +4910,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.twilightWatchGuideDialog ?: return@update current
                         current.copy(
-                            twilightWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Twilight(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5019,11 +4931,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.twilightWatchGuideDialog ?: return@update current
                         current.copy(
-                            twilightWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Twilight(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: " + result.message,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5036,9 +4948,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                underworldWatchGuideDialog = VantafynUnderworldWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.underworldWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.Underworld(
+                    VantafynUnderworldWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.underworldWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -5046,20 +4960,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeUnderworldGuide() {
-        _state.update { it.copy(underworldWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setUnderworldSortMode(mode: UnderworldSortMode) {
         _state.update { current ->
             val d = current.underworldWatchGuideDialog ?: return@update current
-            current.copy(underworldWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Underworld(d.copy(sortMode = mode)))
         }
     }
 
     fun setUnderworldFilterMode(mode: UnderworldFilterMode) {
         _state.update { current ->
             val d = current.underworldWatchGuideDialog ?: return@update current
-            current.copy(underworldWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.Underworld(d.copy(filterMode = mode)))
         }
     }
 
@@ -5079,11 +4993,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.underworldWatchGuideDialog ?: return@update current
                     current.copy(
-                        underworldWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.Underworld(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -5129,11 +5043,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.underworldWatchGuideDialog ?: return@update current
                         current.copy(
-                            underworldWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Underworld(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5150,11 +5064,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.underworldWatchGuideDialog ?: return@update current
                         current.copy(
-                            underworldWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.Underworld(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: " + result.message,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5167,9 +5081,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                xMenWatchGuideDialog = VantafynXMenWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.xMenWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.XMen(
+                    VantafynXMenWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.xMenWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -5177,20 +5093,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeXMenGuide() {
-        _state.update { it.copy(xMenWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setXMenSortMode(mode: XMenSortMode) {
         _state.update { current ->
             val d = current.xMenWatchGuideDialog ?: return@update current
-            current.copy(xMenWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.XMen(d.copy(sortMode = mode)))
         }
     }
 
     fun setXMenFilterMode(mode: XMenFilterMode) {
         _state.update { current ->
             val d = current.xMenWatchGuideDialog ?: return@update current
-            current.copy(xMenWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.XMen(d.copy(filterMode = mode)))
         }
     }
 
@@ -5210,11 +5126,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.xMenWatchGuideDialog ?: return@update current
                     current.copy(
-                        xMenWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.XMen(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -5260,11 +5176,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.xMenWatchGuideDialog ?: return@update current
                         current.copy(
-                            xMenWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.XMen(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5281,11 +5197,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.xMenWatchGuideDialog ?: return@update current
                         current.copy(
-                            xMenWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.XMen(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: " + result.message,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5298,9 +5214,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 enterCodeDialog = null,
-                middleEarthWatchGuideDialog = VantafynMiddleEarthWatchGuideDialogState(
-                    isLoading = true,
-                    movies = it.middleEarthWatchGuideDialog?.movies ?: emptyList(),
+                activeWatchGuide = ActiveWatchGuide.MiddleEarth(
+                    VantafynMiddleEarthWatchGuideDialogState(
+                        isLoading = true,
+                        movies = it.middleEarthWatchGuideDialog?.movies ?: emptyList(),
+                    ),
                 ),
             )
         }
@@ -5308,20 +5226,20 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeMiddleEarthGuide() {
-        _state.update { it.copy(middleEarthWatchGuideDialog = null) }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun setMiddleEarthSortMode(mode: MiddleEarthSortMode) {
         _state.update { current ->
             val d = current.middleEarthWatchGuideDialog ?: return@update current
-            current.copy(middleEarthWatchGuideDialog = d.copy(sortMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.MiddleEarth(d.copy(sortMode = mode)))
         }
     }
 
     fun setMiddleEarthFilterMode(mode: MiddleEarthFilterMode) {
         _state.update { current ->
             val d = current.middleEarthWatchGuideDialog ?: return@update current
-            current.copy(middleEarthWatchGuideDialog = d.copy(filterMode = mode))
+            current.copy(activeWatchGuide = ActiveWatchGuide.MiddleEarth(d.copy(filterMode = mode)))
         }
     }
 
@@ -5341,11 +5259,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { current ->
                     val d = current.middleEarthWatchGuideDialog ?: return@update current
                     current.copy(
-                        middleEarthWatchGuideDialog = d.copy(
+                        activeWatchGuide = ActiveWatchGuide.MiddleEarth(d.copy(
                             isLoading = false,
                             movies = fallbackItems,
                             errorMessage = null,
-                        ),
+                        ))
                     )
                 }
                 return@launch
@@ -5391,11 +5309,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.middleEarthWatchGuideDialog ?: return@update current
                         current.copy(
-                            middleEarthWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.MiddleEarth(d.copy(
                                 isLoading = false,
                                 movies = itemsUi,
                                 errorMessage = null,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5412,11 +5330,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     _state.update { current ->
                         val d = current.middleEarthWatchGuideDialog ?: return@update current
                         current.copy(
-                            middleEarthWatchGuideDialog = d.copy(
+                            activeWatchGuide = ActiveWatchGuide.MiddleEarth(d.copy(
                                 isLoading = false,
                                 movies = fallbackItems,
                                 errorMessage = "Couldn't sync library: " + result.message,
-                            ),
+                            ))
                         )
                     }
                 }
@@ -5457,26 +5375,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeAllWatchGuideDialogs() {
-        _state.update {
-            it.copy(
-                mcuWatchGuideDialog = null,
-                sawWatchGuideDialog = null,
-                residentEvilWatchGuideDialog = null,
-                harryPotterWatchGuideDialog = null,
-                hungerGamesWatchGuideDialog = null,
-                screamWatchGuideDialog = null,
-                matrixWatchGuideDialog = null,
-                jumanjiWatchGuideDialog = null,
-                jurassicWatchGuideDialog = null,
-                piratesWatchGuideDialog = null,
-                pokemonWatchGuideDialog = null,
-                scaryMovieWatchGuideDialog = null,
-                twilightWatchGuideDialog = null,
-                underworldWatchGuideDialog = null,
-                xMenWatchGuideDialog = null,
-                middleEarthWatchGuideDialog = null,
-            )
-        }
+        _state.update { it.copy(activeWatchGuide = null) }
     }
 
     fun openAdminCodeGiftDialog() {
@@ -7695,14 +7594,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         lastBackgroundedAtMs = 0L
 
         if (session != null) {
-            val shouldRefreshSession = bgDuration >= 5_000L ||
+            val shouldRefreshSession = bgDuration >= STALE_BACKGROUND_REFRESH_THRESHOLD_MS ||
                 _state.value.errorMessage != null ||
                 _state.value.homeErrorMessage != null ||
                 (now - lastSessionVerifiedAtMs) >= 60_000L
             if (shouldRefreshSession) {
                 verifyAndRefreshSessionOnResume(
                     currentSession = session,
-                    forceReload = bgDuration >= 5_000L || _state.value.errorMessage != null || _state.value.homeErrorMessage != null,
+                    forceReload = bgDuration >= STALE_BACKGROUND_REFRESH_THRESHOLD_MS || _state.value.errorMessage != null || _state.value.homeErrorMessage != null,
                 )
             }
             offlineSyncScheduler.schedule()
@@ -9020,8 +8919,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     private fun readBottomRailAtmosphere(profileId: String?): BottomRailAtmosphereMode {
         val key = profileId?.let { homeLayoutStorage.getString("bottom_rail_atmosphere_$it", null) }
-        return key?.let { runCatching { BottomRailAtmosphereMode.valueOf(it) }.getOrNull() }
-            ?: BottomRailAtmosphereMode.Off
+            ?: appPreferences.getString("bottom_rail_atmosphere", null)
+        return when (key) {
+            "On", "Active", "MusicOnly" -> BottomRailAtmosphereMode.On
+            "Off" -> BottomRailAtmosphereMode.Off
+            else -> BottomRailAtmosphereMode.Off
+        }
     }
 
     fun setBottomRailAtmosphere(mode: BottomRailAtmosphereMode) {
@@ -9029,6 +8932,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             state.session?.profileId?.let { profileId ->
                 homeLayoutStorage.edit().putString("bottom_rail_atmosphere_$profileId", mode.name).apply()
             }
+            appPreferences.edit().putString("bottom_rail_atmosphere", mode.name).apply()
             state.copy(bottomRailAtmosphere = mode)
         }
     }
@@ -9492,38 +9396,7 @@ data class VantafynHomeUiState(
     val selectedGenre: JellyfinGenreItem? = null,
     val identifyDialog: VantafynIdentifyDialogState? = null,
     val enterCodeDialog: VantafynEnterCodeDialogState? = null,
-    val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState? = null,
-    val isMcuCodeUnlocked: Boolean = false,
-    val sawWatchGuideDialog: VantafynSawWatchGuideDialogState? = null,
-    val isSawCodeUnlocked: Boolean = false,
-    val residentEvilWatchGuideDialog: VantafynResidentEvilWatchGuideDialogState? = null,
-    val isResidentEvilCodeUnlocked: Boolean = false,
-    val harryPotterWatchGuideDialog: VantafynHarryPotterWatchGuideDialogState? = null,
-    val isHarryPotterCodeUnlocked: Boolean = false,
-    val hungerGamesWatchGuideDialog: VantafynHungerGamesWatchGuideDialogState? = null,
-    val isHungerGamesCodeUnlocked: Boolean = false,
-    val screamWatchGuideDialog: VantafynScreamWatchGuideDialogState? = null,
-    val isScreamCodeUnlocked: Boolean = false,
-    val matrixWatchGuideDialog: VantafynMatrixWatchGuideDialogState? = null,
-    val isMatrixCodeUnlocked: Boolean = false,
-    val jumanjiWatchGuideDialog: VantafynJumanjiWatchGuideDialogState? = null,
-    val isJumanjiCodeUnlocked: Boolean = false,
-    val jurassicWatchGuideDialog: VantafynJurassicWatchGuideDialogState? = null,
-    val isJurassicCodeUnlocked: Boolean = false,
-    val piratesWatchGuideDialog: VantafynPiratesWatchGuideDialogState? = null,
-    val isPiratesCodeUnlocked: Boolean = false,
-    val pokemonWatchGuideDialog: VantafynPokemonWatchGuideDialogState? = null,
-    val isPokemonCodeUnlocked: Boolean = false,
-    val scaryMovieWatchGuideDialog: VantafynScaryMovieWatchGuideDialogState? = null,
-    val isScaryMovieCodeUnlocked: Boolean = false,
-    val twilightWatchGuideDialog: VantafynTwilightWatchGuideDialogState? = null,
-    val isTwilightCodeUnlocked: Boolean = false,
-    val underworldWatchGuideDialog: VantafynUnderworldWatchGuideDialogState? = null,
-    val isUnderworldCodeUnlocked: Boolean = false,
-    val xMenWatchGuideDialog: VantafynXMenWatchGuideDialogState? = null,
-    val isXMenCodeUnlocked: Boolean = false,
-    val middleEarthWatchGuideDialog: VantafynMiddleEarthWatchGuideDialogState? = null,
-    val isMiddleEarthCodeUnlocked: Boolean = false,
+    val activeWatchGuide: ActiveWatchGuide? = null,
     val showAdminCodeGiftDialog: Boolean = false,
     val adminGiftUsers: List<JellyfinAdminUser> = emptyList(),
     val isLoadingAdminGiftUsers: Boolean = false,
@@ -9690,6 +9563,55 @@ data class VantafynHomeUiState(
     val chatSearchResults: List<dev.vantafyn.core.jellyfin.JellyfinMediaCard> = emptyList(),
     val isChatSearching: Boolean = false,
 ) {
+
+    val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Mcu)?.state
+
+    val sawWatchGuideDialog: VantafynSawWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Saw)?.state
+
+    val residentEvilWatchGuideDialog: VantafynResidentEvilWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.ResidentEvil)?.state
+
+    val harryPotterWatchGuideDialog: VantafynHarryPotterWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.HarryPotter)?.state
+
+    val hungerGamesWatchGuideDialog: VantafynHungerGamesWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.HungerGames)?.state
+
+    val screamWatchGuideDialog: VantafynScreamWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Scream)?.state
+
+    val matrixWatchGuideDialog: VantafynMatrixWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Matrix)?.state
+
+    val jumanjiWatchGuideDialog: VantafynJumanjiWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Jumanji)?.state
+
+    val jurassicWatchGuideDialog: VantafynJurassicWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Jurassic)?.state
+
+    val piratesWatchGuideDialog: VantafynPiratesWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Pirates)?.state
+
+    val pokemonWatchGuideDialog: VantafynPokemonWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Pokemon)?.state
+
+    val scaryMovieWatchGuideDialog: VantafynScaryMovieWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.ScaryMovie)?.state
+
+    val twilightWatchGuideDialog: VantafynTwilightWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Twilight)?.state
+
+    val underworldWatchGuideDialog: VantafynUnderworldWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.Underworld)?.state
+
+    val xMenWatchGuideDialog: VantafynXMenWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.XMen)?.state
+
+    val middleEarthWatchGuideDialog: VantafynMiddleEarthWatchGuideDialogState?
+        get() = (activeWatchGuide as? ActiveWatchGuide.MiddleEarth)?.state
+
     val currentWatchPartyCandidate: WatchPartyCandidate?
         get() = watchPartyCandidates.getOrNull(watchPartyCurrentIndex)
 
@@ -10400,6 +10322,7 @@ private const val KEY_ADMIN_SPEED_LIMIT_MBPS = "admin_speed_limit_mbps"
 private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
 private const val LibraryScanStartGraceMs = 20_000L
 private const val ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS = 30_000L
+private const val STALE_BACKGROUND_REFRESH_THRESHOLD_MS = 15 * 60_000L
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 100
 
@@ -10427,6 +10350,5 @@ enum class BottomRailAccent(val label: String) {
 
 enum class BottomRailAtmosphereMode(val label: String) {
     Off("Off"),
-    MusicOnly("Music only"),
-    Active("Continuous"),
+    On("On"),
 }

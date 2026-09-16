@@ -43,23 +43,6 @@ class SdkJellyfinSocialRepository(
             val payloadBytes = payload.toByteArray(Charsets.UTF_8)
 
             runCatching {
-                val conn = session.openAuthenticatedConnection("Sessions/Capabilities/Full", "POST")
-                conn.doOutput = true
-                conn.setFixedLengthStreamingMode(payloadBytes.size)
-                conn.connectTimeout = 5000
-                conn.readTimeout = 5000
-                conn.outputStream.use { os ->
-                    os.write(payloadBytes)
-                }
-                val code = conn.responseCode
-                val err = if (code !in 200..299) conn.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty() else ""
-                conn.disconnect()
-                Log.d("VantafynSocial", "reportPresence [Sessions/Capabilities/Full] -> HTTP $code ${if (err.isNotBlank()) "err: $err" else ""}")
-            }.onFailure {
-                Log.w("VantafynSocial", "reportPresence Full error: ${it.message}")
-            }
-
-            runCatching {
                 val conn2 = session.openAuthenticatedConnection("Sessions/Capabilities", "POST")
                 conn2.doOutput = true
                 conn2.setFixedLengthStreamingMode(payloadBytes.size)
