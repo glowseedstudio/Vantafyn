@@ -147,15 +147,29 @@ class SdkJellyfinAchievementRepository(
         }
 
     private fun parseSummary(userId: UUID, json: JSONObject): JellyfinAchievementSummary {
-        val rankName = json.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName")
-            ?: "Rookie"
-        val rankTier = json.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level") ?: 1
-        val currentScore = json.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points") ?: 0
+        val currentScore = json.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points", "TotalScore") ?: 0
+        val tierInfo = AchievementRankHelper.getTier(currentScore)
+        val nextTierInfo = AchievementRankHelper.getNextTier(currentScore)
+
+        val rankName = json.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName", "CustomTitle", "customTitle")
+            ?.takeIf { it.isNotBlank() && !it.equals("Rookie", ignoreCase = true) }
+            ?: tierInfo.name
+        val rankTier = json.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level")
+            ?.takeIf { it > 1 }
+            ?: tierInfo.tierNumber
         val nextRankScore = json.optIntOrNull("NextRankScore", "nextRankScore", "NextTierScore", "nextTierScore")
+            ?: nextTierInfo?.minScore
         val unlockedCount = json.optIntOrNull("UnlockedCount", "unlockedCount", "Unlocked", "unlocked", "EarnedCount", "earnedCount") ?: 0
         val totalCount = json.optIntOrNull("TotalCount", "totalCount", "Total", "total", "BadgeCount", "badgeCount") ?: 0
-        val progressPercentage = json.optIntOrNull("ProgressPercentage", "progressPercentage", "Progress", "progress", "CompletionPercentage")
-            ?: if (totalCount > 0) ((unlockedCount.toFloat() / totalCount.toFloat()) * 100f).toInt().coerceIn(0, 100) else 0
+
+        val rawPercentage = json.optDoubleOrNull("Percentage", "percentage", "ProgressPercentage", "progressPercentage", "Progress", "progress", "CompletionPercentage")
+        val progressPercentage = when {
+            rawPercentage != null && rawPercentage > 0.0 -> rawPercentage.toInt().coerceIn(0, 100)
+            totalCount > 0 -> ((unlockedCount.toFloat() / totalCount.toFloat()) * 100f).toInt().coerceIn(0, 100)
+            else -> 0
+        }
+
+        val rankProgressRatio = AchievementRankHelper.getProgressInTier(currentScore)
 
         return JellyfinAchievementSummary(
             userId = userId,
@@ -166,6 +180,7 @@ class SdkJellyfinAchievementRepository(
             unlockedCount = unlockedCount,
             totalCount = totalCount,
             progressPercentage = progressPercentage,
+            rankProgressRatio = rankProgressRatio,
         )
     }
 

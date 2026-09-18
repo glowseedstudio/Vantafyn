@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import dev.vantafyn.core.jellyfin.AchievementRankHelper
 import dev.vantafyn.core.jellyfin.JellyfinAchievement
 import dev.vantafyn.core.jellyfin.JellyfinAchievementRarity
 import dev.vantafyn.core.jellyfin.JellyfinAchievementSummary
@@ -396,11 +397,23 @@ private fun AchievementsHeaderBar(
 
 @Composable
 private fun AchievementProgressionHero(summary: JellyfinAchievementSummary) {
-    val progressAnimated by animateFloatAsState(
-        targetValue = if (summary.totalCount > 0) summary.unlockedCount.toFloat() / summary.totalCount.toFloat() else 0f,
+    val tierInfo = remember(summary.currentScore) {
+        AchievementRankHelper.getTier(summary.currentScore)
+    }
+    val nextTierInfo = remember(summary.currentScore) {
+        AchievementRankHelper.getNextTier(summary.currentScore)
+    }
+
+    val rankProgressAnimated by animateFloatAsState(
+        targetValue = summary.rankProgressRatio.coerceIn(0f, 1f),
         animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing),
-        label = "achievementProgress",
+        label = "rankProgress",
     )
+
+    val tierAccentColor = remember(tierInfo.colorHex) {
+        runCatching { Color(android.graphics.Color.parseColor(tierInfo.colorHex)) }
+            .getOrDefault(Color(0xFFFFD700))
+    }
 
     Box(
         modifier = Modifier
@@ -429,17 +442,17 @@ private fun AchievementProgressionHero(summary: JellyfinAchievementSummary) {
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFFD700).copy(alpha = 0.15f))
-                            .border(1.dp, Color(0xFFFFD700).copy(alpha = 0.4f), CircleShape),
+                            .background(tierAccentColor.copy(alpha = 0.18f))
+                            .border(1.2.dp, tierAccentColor.copy(alpha = 0.5f), CircleShape),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.EmojiEvents,
                             contentDescription = null,
-                            tint = Color(0xFFFFD700),
-                            modifier = Modifier.size(24.dp),
+                            tint = tierAccentColor,
+                            modifier = Modifier.size(26.dp),
                         )
                     }
                     Column {
@@ -451,55 +464,88 @@ private fun AchievementProgressionHero(summary: JellyfinAchievementSummary) {
                             color = VantafynColors.Ink,
                         )
                         Text(
-                            text = "Tier ${summary.rankTier}",
+                            text = "Tier ${summary.rankTier} • ${summary.currentScore} PTS",
                             style = MaterialTheme.typography.labelSmall,
-                            color = VantafynColors.Muted,
+                            color = tierAccentColor.copy(alpha = 0.9f),
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
                 }
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "${summary.unlockedCount} / ${summary.totalCount}",
+                        text = "${summary.unlockedCount} / ${summary.totalCount} Badges",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = VantafynColors.Ink,
                     )
                     Text(
-                        text = "${summary.progressPercentage}% Completed",
+                        text = "${summary.progressPercentage}% Lifetime Completed",
                         style = MaterialTheme.typography.labelSmall,
                         color = VantafynColors.Muted,
                     )
                 }
             }
 
-            // Custom Vantafyn gradient progress bar
+            // Custom Vantafyn Rank Progression Bar
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(8.dp)
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color.White.copy(alpha = 0.12f)),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    if (progressAnimated > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(progressAnimated.coerceIn(0.02f, 1f))
-                                .height(8.dp)
-                                .clip(RoundedCornerShape(999.dp))
-                                .background(VantafynGradients.accentHorizontal()),
+                    if (nextTierInfo != null) {
+                        Text(
+                            text = "Next: ${nextTierInfo.name.uppercase()}",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = VantafynColors.Ink.copy(alpha = 0.85f),
+                        )
+                        val remaining = (nextTierInfo.minScore - summary.currentScore).coerceAtLeast(0)
+                        Text(
+                            text = "$remaining PTS to rank up",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = tierAccentColor,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    } else {
+                        Text(
+                            text = "MAX RANK REACHED",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = tierAccentColor,
+                        )
+                        Text(
+                            text = "Prestige Available",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VantafynColors.Muted,
                         )
                     }
                 }
-                val nextRankScore = summary.nextRankScore
-                if (nextRankScore != null && nextRankScore > summary.currentScore) {
-                    val remaining = nextRankScore - summary.currentScore
-                    Text(
-                        text = "$remaining PTS to next rank",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = VantafynColors.Muted.copy(alpha = 0.85f),
-                    )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(9.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(Color.White.copy(alpha = 0.12f)),
+                ) {
+                    if (rankProgressAnimated > 0f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(rankProgressAnimated.coerceIn(0.03f, 1f))
+                                .height(9.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(
+                                            tierAccentColor.copy(alpha = 0.85f),
+                                            VantafynColors.Primary,
+                                        ),
+                                    ),
+                                ),
+                        )
+                    }
                 }
             }
         }

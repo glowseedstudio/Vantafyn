@@ -1596,7 +1596,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun openAchievements() {
         navigateMobile(MobileDestination.Achievements)
         _state.update { it.copy(hasUnseenAchievements = false) }
-        loadAchievements()
+        loadAchievements(force = true)
     }
 
     fun loadAchievements(force: Boolean = false) {
@@ -1609,10 +1609,37 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             val summaryResult = summaryDeferred.await()
             val achievementsResult = achievementsDeferred.await()
             _state.update { state ->
+                val rawAchievements = (achievementsResult as? JellyfinResult.Success)?.value ?: state.achievements
+                var resolvedSummary = (summaryResult as? JellyfinResult.Success)?.value ?: state.achievementSummary
+
+                if (rawAchievements.isNotEmpty()) {
+                    val unlockedBadges = rawAchievements.filter { it.isUnlocked }
+                    val unlockedCount = unlockedBadges.size
+                    val totalCount = rawAchievements.size
+                    val earnedBadgeScore = unlockedBadges.sumOf { it.score }
+                    val effectiveScore = maxOf(resolvedSummary?.currentScore ?: 0, earnedBadgeScore)
+                    val tier = dev.vantafyn.core.jellyfin.AchievementRankHelper.getTier(effectiveScore)
+                    val nextTier = dev.vantafyn.core.jellyfin.AchievementRankHelper.getNextTier(effectiveScore)
+                    val rankRatio = dev.vantafyn.core.jellyfin.AchievementRankHelper.getProgressInTier(effectiveScore)
+
+                    resolvedSummary = dev.vantafyn.core.jellyfin.JellyfinAchievementSummary(
+                        userId = session.user.id,
+                        rankName = resolvedSummary?.rankName?.takeIf { !it.equals("Rookie", ignoreCase = true) } ?: tier.name,
+                        rankTier = if ((resolvedSummary?.rankTier ?: 1) > 1) (resolvedSummary?.rankTier ?: 1) else tier.tierNumber,
+                        currentScore = effectiveScore,
+                        nextRankScore = resolvedSummary?.nextRankScore ?: nextTier?.minScore,
+                        unlockedCount = if ((resolvedSummary?.unlockedCount ?: 0) > 0) resolvedSummary!!.unlockedCount else unlockedCount,
+                        totalCount = if ((resolvedSummary?.totalCount ?: 0) > 0) resolvedSummary!!.totalCount else totalCount,
+                        progressPercentage = resolvedSummary?.progressPercentage?.takeIf { it > 0 }
+                            ?: if (totalCount > 0) ((unlockedCount.toFloat() / totalCount.toFloat()) * 100f).toInt().coerceIn(0, 100) else 0,
+                        rankProgressRatio = rankRatio,
+                    )
+                }
+
                 state.copy(
                     isAchievementsLoading = false,
-                    achievementSummary = (summaryResult as? JellyfinResult.Success)?.value ?: state.achievementSummary,
-                    achievements = (achievementsResult as? JellyfinResult.Success)?.value ?: state.achievements,
+                    achievementSummary = resolvedSummary,
+                    achievements = rawAchievements,
                     achievementError = (achievementsResult as? JellyfinResult.Failure)?.message
                         ?: (summaryResult as? JellyfinResult.Failure)?.message,
                 )

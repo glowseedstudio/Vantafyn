@@ -787,9 +787,14 @@ class SdkJellyfinSocialRepository(
                 ?: item.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag", "ImageTag", "imageTag", "UserAvatarTag")
 
             val avatarUrl = toUserAvatarUrl(session, userId, avatarTag)
-            val rankName = item.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName") ?: "Rookie"
-            val rankTier = item.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level") ?: 1
             val currentScore = item.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points", "TotalScore") ?: 0
+            val tierInfo = AchievementRankHelper.getTier(currentScore)
+            val rankName = item.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName", "CustomTitle", "customTitle")
+                ?.takeIf { it.isNotBlank() && !it.equals("Rookie", ignoreCase = true) }
+                ?: tierInfo.name
+            val rankTier = item.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level")
+                ?.takeIf { it > 1 }
+                ?: tierInfo.tierNumber
             val rawOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline", "IsActive", "isActive", "Active", "active")
                 ?: nestedUser?.optBooleanOrNull("Online", "online", "IsOnline", "isOnline", "IsActive", "isActive", "Active", "active")
                 ?: false
