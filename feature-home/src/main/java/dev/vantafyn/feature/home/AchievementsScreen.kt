@@ -437,6 +437,7 @@ private fun AchievementProgressionHero(summary: JellyfinAchievementSummary) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
                 ) {
@@ -455,35 +456,49 @@ private fun AchievementProgressionHero(summary: JellyfinAchievementSummary) {
                             modifier = Modifier.size(26.dp),
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
                         Text(
                             text = summary.rankName.uppercase(),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Black,
-                            letterSpacing = 1.2.sp,
+                            letterSpacing = 1.1.sp,
                             color = VantafynColors.Ink,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         Text(
                             text = "Tier ${summary.rankTier} • ${summary.currentScore} PTS",
                             style = MaterialTheme.typography.labelSmall,
                             color = tierAccentColor.copy(alpha = 0.9f),
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
 
-                Column(horizontalAlignment = Alignment.End) {
-                    Text(
-                        text = "${summary.unlockedCount} / ${summary.totalCount} Badges",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = VantafynColors.Ink,
-                    )
-                    Text(
-                        text = "${summary.progressPercentage}% Lifetime Completed",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = VantafynColors.Muted,
-                    )
+                Spacer(Modifier.width(VantafynSpacing.sm))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                ) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = "${summary.unlockedCount} / ${summary.totalCount}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = VantafynColors.Ink,
+                        )
+                        Text(
+                            text = "${summary.progressPercentage}% Badges",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VantafynColors.Muted,
+                        )
+                    }
                 }
             }
 
