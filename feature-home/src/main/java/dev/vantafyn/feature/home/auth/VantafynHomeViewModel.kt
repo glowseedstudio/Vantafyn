@@ -273,6 +273,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
         }
         viewModelScope.launch {
+            dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.events.collect { event ->
+                handleIncomingPushEvent(event)
+            }
+        }
+        viewModelScope.launch {
             MusicPlaybackController.get(getApplication()).events.collect { event ->
                 if (event is VantafynMusicPlaybackEvent.FavoriteChanged) {
                     handlePlaybackFavoriteChanged(event.trackId, event.isFavorite, event.track)
@@ -1610,15 +1615,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun startAchievementPolling() {
         if (!_state.value.achievementsEnabled || !_state.value.isAchievementsAvailable) return
-        // Forward to unified polling loop so achievement and social/gift polling share the exact same radio burst
-        startSocialPolling()
+        pollAchievementUnlocks()
     }
 
     fun stopAchievementPolling() {
-        if (!_state.value.socialEnabled) {
-            socialPollingJob?.cancel()
-            socialPollingJob = null
-        }
+        // No-op: background periodic polling removed in favor of UnifiedPush event triggers
     }
 
     private val pendingAchievementUnlocks = mutableListOf<JellyfinAchievementUnlock>()
@@ -1949,225 +1950,105 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun handleIncomingPushEvent(event: dev.vantafyn.core.integrations.push.VantafynPushEvent) {
+        val session = _state.value.session ?: return
+        when (event) {
+            is dev.vantafyn.core.integrations.push.VantafynPushEvent.ChatMessage -> {
+                val activePeer = _state.value.activeChatPeer
+                val isChattingWithSender = _state.value.mobileDestination == MobileDestination.Chat &&
+                    activePeer?.userId?.toString() == event.senderId
+
+                if (isChattingWithSender && activePeer != null) {
+                    val convId = event.conversationId.ifBlank {
+                        _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
+                    }
+                    viewModelScope.launch {
+                        when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
+                            is JellyfinResult.Success -> {
+                                _state.update { it.copy(activeChatMessages = msgRes.value) }
+                                socialRepository.markConversationRead(session, convId)
+                            }
+                            else -> Unit
+                        }
+                    }
+                } else {
+                    val parsedSenderId = runCatching { java.util.UUID.fromString(event.senderId) }.getOrDefault(session.user.id)
+                    val previewMsg = JellyfinSocialMessage(
+                        messageId = "${event.conversationId}_${event.timestamp}",
+                        conversationId = event.conversationId,
+                        senderId = parsedSenderId,
+                        senderName = event.senderName,
+                        senderAvatarTag = null,
+                        senderAvatarUrl = null,
+                        recipientId = session.user.id,
+                        content = event.messageText,
+                        timestamp = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).format(java.util.Date(event.timestamp)),
+                        isRead = false,
+                        isFromSelf = false,
+                    )
+                    _state.update {
+                        it.copy(
+                            activeSocialIslandPreview = previewMsg,
+                            socialUnreadCount = it.socialUnreadCount + 1,
+                        )
+                    }
+                    loadSocialData(force = false)
+                }
+            }
+            is dev.vantafyn.core.integrations.push.VantafynPushEvent.AchievementUnlock -> {
+                pollAchievementUnlocks()
+            }
+            is dev.vantafyn.core.integrations.push.VantafynPushEvent.DebugTest -> {
+                _state.update { it.copy(mobileMessage = "UnifiedPush: ${event.title} - ${event.message}") }
+            }
+            is dev.vantafyn.core.integrations.push.VantafynPushEvent.Unknown -> Unit
+        }
+    }
+
     fun startSocialPolling() {
         val shouldPollSocial = _state.value.socialEnabled
         val shouldPollAchievements = _state.value.achievementsEnabled && _state.value.isAchievementsAvailable
         if (!shouldPollSocial && !shouldPollAchievements) return
 
+        val session = _state.value.session ?: return
+        if (!_state.value.isAppForeground) return
+
+        // 1. Refresh presence once on start/resume
+        viewModelScope.launch {
+            socialRepository.reportPresence(session)
+        }
+
+        // 2. Refresh initial social data once on start/resume
+        if (shouldPollSocial) {
+            loadSocialData(force = false)
+            checkPendingGiftsForUser(session)
+        }
+
+        // 3. Background/idle continuous polling is ELIMINATED in favor of UnifiedPush.
+        // If the user is actively viewing MobileDestination.Chat, maintain an active-screen
+        // refresh while they are reading/typing, and terminate as soon as they leave chat.
+        val isChatting = _state.value.mobileDestination == MobileDestination.Chat
+        if (!isChatting) {
+            socialPollingJob?.cancel()
+            socialPollingJob = null
+            return
+        }
+
         socialPollingJob?.cancel()
         socialPollingJob = viewModelScope.launch {
-            // Deduplicate presence report on initial launch/resume (Item C)
-            var lastPresenceReportTime = System.currentTimeMillis()
-            while (isActive) {
-                val session = _state.value.session
-                if (session == null || !_state.value.isAppForeground) {
-                    break
-                }
-                val currentSocialEnabled = _state.value.socialEnabled
-                val currentAchievementsEnabled = _state.value.achievementsEnabled && _state.value.isAchievementsAvailable
-                if (!currentSocialEnabled && !currentAchievementsEnabled) {
-                    break
-                }
-
-                // Suppress background network polling completely during full-screen media playback, music listening, downloads, or preferences
-                val currentDest = _state.value.mobileDestination
-                if (currentDest in setOf(MobileDestination.Player, MobileDestination.Music, MobileDestination.Downloads, MobileDestination.Profile, MobileDestination.PlaybackPreferences)) {
-                    delay(90_000L)
-                    continue
-                }
-
-                val isPowerSave = isPowerSaveMode()
-
-                // Check connectivity (Item B): if offline, do not wake radio/dispatch failing HTTP calls
-                if (!isNetworkConnected()) {
-                    val offlineSleep = if (isPowerSave) 90_000L else 45_000L
-                    delay(offlineSleep)
-                    continue
-                }
-
-                var hadActivityOrChanges = false
-
-                if (currentSocialEnabled) {
-                    // Keep session presence active on Jellyfin server every 90 seconds
-                    val now = System.currentTimeMillis()
-                    if (now - lastPresenceReportTime >= 90_000L) {
-                        lastPresenceReportTime = now
-                        launch { socialRepository.reportPresence(session) }
-                    }
-
-                    val isChatting = _state.value.mobileDestination == MobileDestination.Chat
-                    checkPendingGiftsForUser(session)
-
-                    val isSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
-
-                    if (isChatting) {
-                        hadActivityOrChanges = true
-                        val activePeer = _state.value.activeChatPeer
-                        if (activePeer != null) {
-                            val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
-                            val clearedPrefs = runCatching {
-                                getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
-                            }.getOrNull()
-                            val cutoff = maxOf(
-                                clearedPrefs?.getLong("cleared_${activePeer.userId}", 0L) ?: 0L,
-                                clearedPrefs?.getLong("cleared_$convId", 0L) ?: 0L
-                            )
-                            when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
-                                is JellyfinResult.Success -> {
-                                    val filtered = if (cutoff > 0L) {
-                                        msgRes.value.filter { msg ->
-                                            val t = dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(msg.timestamp)
-                                            t > cutoff
-                                        }
-                                    } else {
-                                        msgRes.value
-                                    }
-                                    var hasChatGifts = false
-                                    filtered.filter { !it.isFromSelf && it.content.contains("[vantafyn_gift|") }.forEach { msg ->
-                                        val incomingGift = VantafynCodeGift.fromSerializedMessage(msg.content)
-                                        if (incomingGift != null) {
-                                            VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, incomingGift)
-                                            hasChatGifts = true
-                                        }
-                                    }
-                                    if (hasChatGifts) {
-                                        checkPendingGiftsForUser(session)
-                                    }
-                                    _state.update { it.copy(activeChatMessages = filtered) }
-                                    socialRepository.markConversationRead(session, convId)
-                                }
-                                else -> Unit
-                            }
+            while (isActive && _state.value.mobileDestination == MobileDestination.Chat) {
+                val activePeer = _state.value.activeChatPeer
+                if (activePeer != null) {
+                    val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
+                    when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
+                        is JellyfinResult.Success -> {
+                            _state.update { it.copy(activeChatMessages = msgRes.value) }
+                            socialRepository.markConversationRead(session, convId)
                         }
-                    } else if (isSocialScreen) {
-                        hadActivityOrChanges = true
-                        loadSocialData(force = false, includeDiscoverable = true)
-                        _state.value.socialConversations.forEach { c ->
-                            val txt = c.lastMessageText
-                            if (!txt.isNullOrBlank()) {
-                                seenMessageKeys += "${c.conversationId}_${c.lastMessageTimestamp}_$txt"
-                            }
-                        }
-                    } else {
-                        // Check unread summary and conversations periodically (unified with gifts and achievements)
-                        when (val convRes = socialRepository.getConversations(session)) {
-                            is JellyfinResult.Success -> {
-                                val newConvos = convRes.value
-                                val totalUnread = newConvos.sumOf { it.unreadCount }
-
-                                var foundIncomingGifts = false
-                                for (convo in newConvos) {
-                                    if (convo.unreadCount > 0 && convo.lastSenderId != session.user.id) {
-                                        val lastText = convo.lastMessageText
-                                        if (!lastText.isNullOrBlank() && lastText.contains("[vantafyn_gift|")) {
-                                            val incomingGift = VantafynCodeGift.fromSerializedMessage(lastText)
-                                            if (incomingGift != null) {
-                                                VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, incomingGift)
-                                                foundIncomingGifts = true
-                                            }
-                                        }
-                                        if (convo.unreadCount > 1) {
-                                            val msgRes = socialRepository.getMessages(session, convo.conversationId, convo.peerUserId)
-                                            if (msgRes is JellyfinResult.Success) {
-                                                msgRes.value.filter { !it.isFromSelf && it.content.contains("[vantafyn_gift|") }.forEach { msg ->
-                                                    val g = VantafynCodeGift.fromSerializedMessage(msg.content)
-                                                    if (g != null) {
-                                                        VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, g)
-                                                        foundIncomingGifts = true
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                if (foundIncomingGifts) {
-                                    hadActivityOrChanges = true
-                                    checkPendingGiftsForUser(session)
-                                }
-
-                                val latestUnreadConvo = newConvos.firstOrNull { it.unreadCount > 0 && it.lastSenderId != session.user.id }
-                                val msgText = latestUnreadConvo?.lastMessageText
-                                if (latestUnreadConvo != null && !msgText.isNullOrBlank()) {
-                                    val incomingGift = VantafynCodeGift.fromSerializedMessage(msgText)
-                                    if (incomingGift != null) {
-                                        VantafynGiftStorage.enqueueGift(getApplication(), session.server.url, incomingGift)
-                                        checkPendingGiftsForUser(session)
-                                    }
-                                    val messageKey = "${latestUnreadConvo.conversationId}_${latestUnreadConvo.lastMessageTimestamp}_$msgText"
-                                    if (messageKey !in seenMessageKeys) {
-                                        hadActivityOrChanges = true
-                                        seenMessageKeys += messageKey
-                                        val previewMsg = JellyfinSocialMessage(
-                                            messageId = messageKey,
-                                            conversationId = latestUnreadConvo.conversationId,
-                                            senderId = latestUnreadConvo.peerUserId,
-                                            senderName = latestUnreadConvo.peerName,
-                                            senderAvatarTag = latestUnreadConvo.peerAvatarTag,
-                                            senderAvatarUrl = latestUnreadConvo.peerAvatarUrl,
-                                            recipientId = session.user.id,
-                                            content = msgText,
-                                            timestamp = latestUnreadConvo.lastMessageTimestamp,
-                                            isRead = false,
-                                            isFromSelf = false,
-                                        )
-                                        _state.update {
-                                            it.copy(
-                                                activeSocialIslandPreview = previewMsg,
-                                                socialConversations = newConvos,
-                                                socialUnreadCount = totalUnread,
-                                            )
-                                        }
-                                    } else {
-                                        _state.update {
-                                            it.copy(
-                                                socialConversations = newConvos,
-                                                socialUnreadCount = totalUnread,
-                                            )
-                                        }
-                                    }
-                                } else {
-                                    _state.update {
-                                        it.copy(
-                                            socialConversations = newConvos,
-                                            socialUnreadCount = totalUnread,
-                                        )
-                                    }
-                                }
-                            }
-                            else -> Unit
-                        }
+                        else -> Unit
                     }
                 }
-
-                // Coalesced Achievement check: executes in the exact same radio wake burst
-                if (currentAchievementsEnabled) {
-                    val hadUnlocks = pollAchievementUnlocksOnce(session, resolveDeviceId())
-                    if (hadUnlocks) {
-                        hadActivityOrChanges = true
-                    }
-                }
-
-                if (hadActivityOrChanges) {
-                    idlePollCyclesWithoutChanges = 0
-                } else {
-                    idlePollCyclesWithoutChanges++
-                }
-
-                val nextIsChatting = _state.value.mobileDestination == MobileDestination.Chat
-                val nextIsSocialScreen = _state.value.mobileDestination == MobileDestination.Social || _state.value.isSocialPanelOpen
-                val interval = when {
-                    nextIsChatting -> if (isPowerSave) 10_000L else 6_000L
-                    nextIsSocialScreen -> if (isPowerSave) 20_000L else 12_000L
-                    else -> {
-                        // Idle homescreen backoff (Item D) & Power Saver scaling (Item E)
-                        val base = if (isPowerSave) 90_000L else 45_000L
-                        val maxIdle = if (isPowerSave) 180_000L else 120_000L
-                        val step = if (isPowerSave) 30_000L else 15_000L
-                        val backoffCycles = (idlePollCyclesWithoutChanges - 2).coerceAtLeast(0)
-                        (base + backoffCycles * step).coerceAtMost(maxIdle)
-                    }
-                }
-                delay(interval)
+                delay(if (isPowerSaveMode()) 10_000L else 6_000L)
             }
         }
     }
@@ -2282,6 +2163,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     loadSocialData(force = false)
+                    viewModelScope.launch {
+                        val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                        pushRepo.notifyChat(session, friend.userId.toString(), session.user.name, convId, "Recommended \"${detail.title}\"")
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update {
@@ -2308,6 +2193,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     loadSocialData(force = false)
+                    viewModelScope.launch {
+                        val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                        pushRepo.notifyChat(session, peer.userId.toString(), session.user.name, convId, text)
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update {

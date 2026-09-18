@@ -22,6 +22,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IRealtimeTransport, InMemoryRealtimeTransport>();
         serviceCollection.AddSingleton<IPersonalPlaylistStore, FilePersonalPlaylistStore>();
         serviceCollection.AddSingleton<IPushRegistrationStore, FilePushRegistrationStore>();
+        serviceCollection.AddSingleton<IPushNotificationService, PushNotificationService>();
         serviceCollection.AddSingleton<IOmbiClientFactory, OmbiClientFactory>();
         serviceCollection.AddSingleton<IOmbiUserSessionStore, FileOmbiUserSessionStore>();
         serviceCollection.AddHttpClient();

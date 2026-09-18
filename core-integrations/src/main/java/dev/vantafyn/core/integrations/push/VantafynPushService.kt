@@ -34,13 +34,35 @@ class VantafynPushService : PushService() {
         val manager = UnifiedPushManager.getInstance(applicationContext)
         manager.onPushReceived(payload.sizeBytes)
 
-        // If test/debug notification, display a system notification
+        // Display notifications based on parsed event
         val contentString = runCatching { String(message.content, Charsets.UTF_8) }.getOrNull()
-        if (contentString != null && (contentString.contains("debug_test") || contentString.contains("Vantafyn Push Test"))) {
+        if (contentString != null) {
             val json = runCatching { org.json.JSONObject(contentString) }.getOrNull()
-            val title = json?.optString("title") ?: "Vantafyn Push Test"
-            val body = json?.optString("message") ?: json?.optString("body") ?: "UnifiedPush test notification received"
-            VantafynPushNotifier.showNotification(applicationContext, title, body)
+            when (json?.optString("type")) {
+                "chat_message" -> {
+                    val senderName = json.optString("senderName", "Friend")
+                    val messageText = json.optString("messageText", "New message received")
+                    val conversationId = json.optString("conversationId", "")
+                    val senderId = json.optString("senderId", "")
+                    VantafynPushNotifier.showChatMessage(applicationContext, senderName, messageText, conversationId, senderId)
+                }
+                "achievement_unlock" -> {
+                    val title = json.optString("title", "Achievement Unlocked")
+                    val desc = json.optString("description", "")
+                    val badgeId = json.optString("achievementId", "")
+                    VantafynPushNotifier.showAchievementUnlock(applicationContext, title, desc, badgeId)
+                }
+                "debug_test" -> {
+                    val title = json.optString("title", "Vantafyn Push Test")
+                    val body = json.optString("message", "UnifiedPush test notification received")
+                    VantafynPushNotifier.showNotification(applicationContext, title, body)
+                }
+                else -> {
+                    if (contentString.contains("Vantafyn Push Test")) {
+                        VantafynPushNotifier.showNotification(applicationContext, "Vantafyn Push Test", "UnifiedPush test notification received")
+                    }
+                }
+            }
         }
     }
 

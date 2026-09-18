@@ -24,7 +24,7 @@ namespace Vantafyn.Plugin.Companion.Notifications;
 public sealed partial class PushNotificationsController(
     IAuthorizationContext authorizationContext,
     IPushRegistrationStore store,
-    IHttpClientFactory httpClientFactory,
+    IPushNotificationService pushService,
     ILogger<PushNotificationsController> logger,
     IClock clock) : ControllerBase
 {
@@ -146,105 +146,122 @@ public sealed partial class PushNotificationsController(
 
         var userId = await this.CurrentUserIdAsync(authorizationContext).ConfigureAwait(false);
 
-        List<DevicePushRegistration> targets = [];
-        if (!string.IsNullOrWhiteSpace(request?.DeviceId))
-        {
-            var dev = await store.GetDeviceAsync(userId, request.DeviceId.Trim(), cancellationToken).ConfigureAwait(false);
-            if (dev == null)
-            {
-                return NotFound(new { error = $"Device with ID '{request.DeviceId}' not registered for current user." });
-            }
-            targets.Add(dev);
-        }
-        else
-        {
-            var userDevices = await store.GetDevicesForUserAsync(userId, cancellationToken).ConfigureAwait(false);
-            targets.AddRange(userDevices);
-        }
-
-        if (targets.Count == 0)
-        {
-            return BadRequest(new { error = "No registered push devices found for this user." });
-        }
-
-        var payloadObject = new
+        var payload = new
         {
             type = "debug_test",
             title = "Vantafyn Push Test",
             message = "UnifiedPush test notification from Vantafyn Companion server",
             timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         };
-        var payloadJson = JsonSerializer.Serialize(payloadObject);
 
-        var client = httpClientFactory.CreateClient();
-        client.Timeout = TimeSpan.FromSeconds(10);
-
-        var devicesSucceeded = 0;
-        var staleEndpointsRemoved = 0;
-
-        foreach (var target in targets)
+        PushDispatchResult result;
+        if (!string.IsNullOrWhiteSpace(request?.DeviceId))
         {
-            try
-            {
-                using var msg = new HttpRequestMessage(HttpMethod.Post, target.Endpoint)
-                {
-                    Content = new StringContent(payloadJson, Encoding.UTF8, "application/json")
-                };
-                msg.Headers.TryAddWithoutValidation("Urgency", "high");
-                msg.Headers.TryAddWithoutValidation("TTL", "60");
+            result = await pushService.SendToDeviceAsync(userId, request.DeviceId.Trim(), payload, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            result = await pushService.SendToUserAsync(userId, payload, cancellationToken).ConfigureAwait(false);
+        }
 
-                using var response = await client.SendAsync(msg, cancellationToken).ConfigureAwait(false);
-
-                if (response.IsSuccessStatusCode)
-                {
-                    devicesSucceeded++;
-                    logger.LogInformation(
-                        "Test push delivered successfully to user {UserId}, device {DeviceId} ({MaskedEndpoint})",
-                        userId,
-                        target.DeviceId,
-                        MaskEndpoint(target.Endpoint));
-                }
-                else if (response.StatusCode == HttpStatusCode.NotFound || response.StatusCode == HttpStatusCode.Gone)
-                {
-                    // Stale endpoint returned by distributor (e.g. ntfy or gotify indicates topic is expired / unregistered)
-                    staleEndpointsRemoved++;
-                    await store.RemoveDeviceAsync(userId, target.DeviceId, cancellationToken).ConfigureAwait(false);
-
-                    logger.LogWarning(
-                        "Stale UnifiedPush endpoint detected (HTTP {StatusCode}) for user {UserId}, device {DeviceId} ({MaskedEndpoint}); removed device registration",
-                        (int)response.StatusCode,
-                        userId,
-                        target.DeviceId,
-                        MaskEndpoint(target.Endpoint));
-                }
-                else
-                {
-                    logger.LogWarning(
-                        "UnifiedPush delivery to device {DeviceId} returned HTTP {StatusCode} ({MaskedEndpoint})",
-                        target.DeviceId,
-                        (int)response.StatusCode,
-                        MaskEndpoint(target.Endpoint));
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(
-                    ex,
-                    "Failed to dispatch test push to device {DeviceId} ({MaskedEndpoint})",
-                    target.DeviceId,
-                    MaskEndpoint(target.Endpoint));
-            }
+        if (result.DevicesContacted == 0)
+        {
+            return BadRequest(new { error = "No registered push devices found for this user." });
         }
 
         var responseData = new PushTestResponse(
-            Success: devicesSucceeded > 0,
-            DevicesContacted: targets.Count,
-            DevicesSucceeded: devicesSucceeded,
-            StaleEndpointsRemoved: staleEndpointsRemoved,
-            Message: $"Sent to {devicesSucceeded}/{targets.Count} device(s). {staleEndpointsRemoved} stale endpoint(s) cleaned up."
+            Success: result.DevicesSucceeded > 0,
+            DevicesContacted: result.DevicesContacted,
+            DevicesSucceeded: result.DevicesSucceeded,
+            StaleEndpointsRemoved: result.StaleEndpointsRemoved,
+            Message: $"Sent to {result.DevicesSucceeded}/{result.DevicesContacted} device(s). {result.StaleEndpointsRemoved} stale endpoint(s) cleaned up."
         );
 
         return Ok(responseData);
+    }
+
+    [HttpPost("NotifyChat")]
+    public async Task<IActionResult> NotifyChat([FromBody] PushNotifyChatRequest request, CancellationToken cancellationToken)
+    {
+        if (Plugin.Instance?.Configuration.NotificationsEnabled != true)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Push notifications are disabled." });
+        }
+
+        var senderUserId = await this.CurrentUserIdAsync(authorizationContext).ConfigureAwait(false);
+
+        if (request == null || string.IsNullOrWhiteSpace(request.MessageText) || request.RecipientUserId == Guid.Empty)
+        {
+            return BadRequest(new { error = "Invalid chat notification request. RecipientUserId and MessageText are required." });
+        }
+
+        var payload = new
+        {
+            type = "chat_message",
+            senderId = senderUserId.ToString(),
+            senderName = request.SenderName ?? "Friend",
+            conversationId = request.ConversationId ?? senderUserId.ToString(),
+            messageText = request.MessageText.Trim().TakePrefix(500),
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        var result = await pushService.SendToUserAsync(request.RecipientUserId, payload, cancellationToken).ConfigureAwait(false);
+
+        logger.LogInformation(
+            "Dispatched chat push notification from {SenderId} to {RecipientId}: contacted={Contacted}, succeeded={Succeeded}",
+            senderUserId,
+            request.RecipientUserId,
+            result.DevicesContacted,
+            result.DevicesSucceeded);
+
+        return Ok(new
+        {
+            sent = result.DevicesSucceeded > 0,
+            devicesContacted = result.DevicesContacted,
+            devicesSucceeded = result.DevicesSucceeded
+        });
+    }
+
+    [HttpPost("NotifyAchievement")]
+    public async Task<IActionResult> NotifyAchievement([FromBody] PushNotifyAchievementRequest request, CancellationToken cancellationToken)
+    {
+        if (Plugin.Instance?.Configuration.NotificationsEnabled != true)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Push notifications are disabled." });
+        }
+
+        var currentUserId = await this.CurrentUserIdAsync(authorizationContext).ConfigureAwait(false);
+
+        if (request == null || string.IsNullOrWhiteSpace(request.AchievementId) || string.IsNullOrWhiteSpace(request.Title))
+        {
+            return BadRequest(new { error = "Invalid achievement notification request. AchievementId and Title are required." });
+        }
+
+        var payload = new
+        {
+            type = "achievement_unlock",
+            userId = currentUserId.ToString(),
+            achievementId = request.AchievementId,
+            title = request.Title,
+            description = request.Description ?? string.Empty,
+            timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        var result = await pushService.SendToUserAsync(currentUserId, payload, cancellationToken).ConfigureAwait(false);
+
+        logger.LogInformation(
+            "Dispatched achievement unlock push notification to user {UserId} for badge {BadgeId}: contacted={Contacted}, succeeded={Succeeded}",
+            currentUserId,
+            request.AchievementId,
+            result.DevicesContacted,
+            result.DevicesSucceeded);
+
+        return Ok(new
+        {
+            sent = result.DevicesSucceeded > 0,
+            devicesContacted = result.DevicesContacted,
+            devicesSucceeded = result.DevicesSucceeded
+        });
     }
 
     private static string MaskEndpoint(string endpoint)

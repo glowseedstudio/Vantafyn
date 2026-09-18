@@ -51,3 +51,22 @@ public sealed record PushTestResponse(
     int StaleEndpointsRemoved,
     string? Message
 );
+
+public sealed record PushNotifyChatRequest(
+    Guid RecipientUserId,
+    string? ConversationId,
+    string? SenderName,
+    string MessageText
+);
+
+public sealed record PushNotifyAchievementRequest(
+    string AchievementId,
+    string Title,
+    string? Description = null
+);
+
+public sealed record PushDispatchResult(
+    int DevicesContacted,
+    int DevicesSucceeded,
+    int StaleEndpointsRemoved
+);

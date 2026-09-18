@@ -121,6 +121,66 @@ class CompanionPushRepository(
         }
     }
 
+    suspend fun notifyChat(
+        session: JellyfinSession,
+        recipientUserId: String,
+        senderName: String?,
+        conversationId: String?,
+        messageText: String,
+    ): Result<Unit> = withContext(ioDispatcher) {
+        try {
+            val body = JSONObject().apply {
+                put("recipientUserId", recipientUserId)
+                if (!conversationId.isNullOrBlank()) put("conversationId", conversationId)
+                if (!senderName.isNullOrBlank()) put("senderName", senderName)
+                put("messageText", messageText)
+            }
+            val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/NotifyChat", "POST")
+            conn.doOutput = true
+            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
+
+            val code = conn.responseCode
+            conn.disconnect()
+            if (code in 200..299) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("HTTP $code"))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error dispatching chat push notification", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun notifyAchievement(
+        session: JellyfinSession,
+        achievementId: String,
+        title: String,
+        description: String? = null,
+    ): Result<Unit> = withContext(ioDispatcher) {
+        try {
+            val body = JSONObject().apply {
+                put("achievementId", achievementId)
+                put("title", title)
+                if (!description.isNullOrBlank()) put("description", description)
+            }
+            val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/NotifyAchievement", "POST")
+            conn.doOutput = true
+            OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
+
+            val code = conn.responseCode
+            conn.disconnect()
+            if (code in 200..299) {
+                Result.success(Unit)
+            } else {
+                Result.failure(Exception("HTTP $code"))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error dispatching achievement push notification", e)
+            Result.failure(e)
+        }
+    }
+
     companion object {
         private const val TAG = "CompanionPushRepo"
     }
