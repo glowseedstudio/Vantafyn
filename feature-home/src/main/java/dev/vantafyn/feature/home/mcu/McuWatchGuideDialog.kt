@@ -464,6 +464,275 @@ fun EnterCodeDialog(
 }
 
 @Composable
+fun EnterCodeTabContent(
+    onSubmitCode: (String) -> Unit,
+    onOpenMcuGuide: () -> Unit,
+    onOpenSawGuide: () -> Unit = {},
+    onOpenResidentEvilGuide: () -> Unit = {},
+    onOpenHarryPotterGuide: () -> Unit = {},
+    onOpenHungerGamesGuide: () -> Unit = {},
+    onOpenScreamGuide: () -> Unit = {},
+    onOpenMatrixGuide: () -> Unit = {},
+    onOpenJumanjiGuide: () -> Unit = {},
+    onOpenJurassicGuide: () -> Unit = {},
+    onOpenPiratesGuide: () -> Unit = {},
+    onOpenPokemonGuide: () -> Unit = {},
+    onOpenScaryMovieGuide: () -> Unit = {},
+    onOpenTwilightGuide: () -> Unit = {},
+    onOpenUnderworldGuide: () -> Unit = {},
+    onOpenXMenGuide: () -> Unit = {},
+    onOpenMiddleEarthGuide: () -> Unit = {},
+    isMcuUnlocked: Boolean = false,
+    isSawUnlocked: Boolean = false,
+    isResidentEvilUnlocked: Boolean = false,
+    isHarryPotterUnlocked: Boolean = false,
+    isHungerGamesUnlocked: Boolean = false,
+    isScreamUnlocked: Boolean = false,
+    isMatrixUnlocked: Boolean = false,
+    isJumanjiUnlocked: Boolean = false,
+    isJurassicUnlocked: Boolean = false,
+    isPiratesUnlocked: Boolean = false,
+    isPokemonUnlocked: Boolean = false,
+    isScaryMovieUnlocked: Boolean = false,
+    isTwilightUnlocked: Boolean = false,
+    isUnderworldUnlocked: Boolean = false,
+    isXMenUnlocked: Boolean = false,
+    isMiddleEarthUnlocked: Boolean = false,
+    errorMessage: String? = null,
+    isSubmitting: Boolean = false,
+) {
+    var codeInput by remember { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        // Text field
+        VantafynTextField(
+            value = codeInput,
+            onValueChange = { codeInput = it.uppercase() },
+            label = "Unlock Code (e.g. MCU)",
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Characters,
+                imeAction = ImeAction.Done,
+            ),
+        )
+
+        // Error message
+        AnimatedVisibility(visible = errorMessage != null) {
+            if (errorMessage != null) {
+                Text(
+                    text = errorMessage,
+                    color = Color(0xFFFF8A8A),
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
+        }
+
+        // Submit button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            VantafynButton(
+                text = if (isSubmitting) "Unlocking..." else "Unlock",
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onSubmitCode(codeInput)
+                },
+                enabled = codeInput.isNotBlank() && !isSubmitting,
+            )
+        }
+
+        // Unlocked Collections section
+        if (isMcuUnlocked || isSawUnlocked || isResidentEvilUnlocked || isHarryPotterUnlocked ||
+            isHungerGamesUnlocked || isScreamUnlocked || isMatrixUnlocked || isJumanjiUnlocked ||
+            isJurassicUnlocked || isPiratesUnlocked || isPokemonUnlocked || isScaryMovieUnlocked ||
+            isTwilightUnlocked || isUnderworldUnlocked || isXMenUnlocked || isMiddleEarthUnlocked) {
+            HorizontalDivider(
+                color = Color.White.copy(alpha = 0.08f),
+                modifier = Modifier.padding(vertical = 2.dp),
+            )
+            val franchiseMap = remember { VantafynGiftFranchises.all.associateBy { it.code } }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Unlocked Collections",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (isMcuUnlocked) {
+                    val f = franchiseMap["MCU"]
+                    UnlockedCollectionCard(
+                        title = "MCU: Road to Doomsday",
+                        subtitle = "Official Timeline Watch Guide",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: VantafynColors.Primary,
+                        onClick = onOpenMcuGuide,
+                    )
+                }
+                if (isSawUnlocked) {
+                    val f = franchiseMap["SAW"]
+                    UnlockedCollectionCard(
+                        title = "SAW: The Complete Guide",
+                        subtitle = "10-film franchise watch guide",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFF8B0000),
+                        onClick = onOpenSawGuide,
+                    )
+                }
+                if (isResidentEvilUnlocked) {
+                    val f = franchiseMap["R-EVIL"]
+                    UnlockedCollectionCard(
+                        title = "Resident Evil: Alice Saga",
+                        subtitle = "All 6 Milla Jovovich films",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFB01C2E),
+                        onClick = onOpenResidentEvilGuide,
+                    )
+                }
+                if (isHarryPotterUnlocked) {
+                    val f = franchiseMap["POTTER"]
+                    UnlockedCollectionCard(
+                        title = "Harry Potter: Complete Guide",
+                        subtitle = "11-film Hogwarts & Fantastic Beasts guide",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFD4AF37),
+                        onClick = onOpenHarryPotterGuide,
+                    )
+                }
+                if (isHungerGamesUnlocked) {
+                    val f = franchiseMap["HUNGER"]
+                    UnlockedCollectionCard(
+                        title = "The Hunger Games: Complete Saga",
+                        subtitle = "All 5 films — prequel & Panem rebellion",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFE67E22),
+                        onClick = onOpenHungerGamesGuide,
+                    )
+                }
+                if (isScreamUnlocked) {
+                    val f = franchiseMap["SCREAM"]
+                    UnlockedCollectionCard(
+                        title = "Scream: Complete Slasher Guide",
+                        subtitle = "All 7 films — Ghostface through the decades",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFC0392B),
+                        onClick = onOpenScreamGuide,
+                    )
+                }
+                if (isMatrixUnlocked) {
+                    val f = franchiseMap["MATRIX"]
+                    UnlockedCollectionCard(
+                        title = "The Matrix: Digital Reality Guide",
+                        subtitle = "All 4 films — Zion to Machine City",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFF00AA33),
+                        onClick = onOpenMatrixGuide,
+                    )
+                }
+                if (isJumanjiUnlocked) {
+                    val f = franchiseMap["JUMANJI"]
+                    UnlockedCollectionCard(
+                        title = "Jumanji: Complete Adventure Guide",
+                        subtitle = "All 3 films — board & video games",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFF27AE60),
+                        onClick = onOpenJumanjiGuide,
+                    )
+                }
+                if (isJurassicUnlocked) {
+                    val f = franchiseMap["JURASSIC"]
+                    UnlockedCollectionCard(
+                        title = "Jurassic Park & World: Reborn",
+                        subtitle = "All 7 films — Isla Nublar to Rebirth",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFE74C3C),
+                        onClick = onOpenJurassicGuide,
+                    )
+                }
+                if (isPiratesUnlocked) {
+                    val f = franchiseMap["PIRATES"]
+                    UnlockedCollectionCard(
+                        title = "Pirates of the Caribbean",
+                        subtitle = "All 5 films — Jack Sparrow's voyages",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFD4AF37),
+                        onClick = onOpenPiratesGuide,
+                    )
+                }
+                if (isPokemonUnlocked) {
+                    val f = franchiseMap["POKEMON"]
+                    UnlockedCollectionCard(
+                        title = "Pokémon: The Complete Collection",
+                        subtitle = "All 24 films — Kanto to Detective Pikachu",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFE3350D),
+                        onClick = onOpenPokemonGuide,
+                    )
+                }
+                if (isScaryMovieUnlocked) {
+                    val f = franchiseMap["SCARY"]
+                    UnlockedCollectionCard(
+                        title = "Scary Movie: Complete Spoof Guide",
+                        subtitle = "All 6 films — spoofing every horror classic",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFF00E676),
+                        onClick = onOpenScaryMovieGuide,
+                    )
+                }
+                if (isTwilightUnlocked) {
+                    val f = franchiseMap["TWILIGHT"]
+                    UnlockedCollectionCard(
+                        title = "The Twilight Saga: Complete Romance",
+                        subtitle = "All 5 films — Bella, Edward & Jacob",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFF9C27B0),
+                        onClick = onOpenTwilightGuide,
+                    )
+                }
+                if (isUnderworldUnlocked) {
+                    val f = franchiseMap["UNDERWORLD"]
+                    UnlockedCollectionCard(
+                        title = "Underworld: Blood War Chronicles",
+                        subtitle = "All 5 films — Vampires vs Lycans",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFF1E88E5),
+                        onClick = onOpenUnderworldGuide,
+                    )
+                }
+                if (isXMenUnlocked) {
+                    val f = franchiseMap["X-MEN"]
+                    UnlockedCollectionCard(
+                        title = "X-Men: The Complete Mutant Saga",
+                        subtitle = "All 13 films — First Class to Logan",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFF59E0B),
+                        onClick = onOpenXMenGuide,
+                    )
+                }
+                if (isMiddleEarthUnlocked) {
+                    val f = franchiseMap["MORDOR"]
+                    UnlockedCollectionCard(
+                        title = "Middle-earth: The Complete Legendarium",
+                        subtitle = "All 7 films — Rohirrim, Hobbit & LOTR",
+                        posterUrl = f?.posterUrl.orEmpty(),
+                        accentColor = f?.accentColor ?: Color(0xFFD4AF37),
+                        onClick = onOpenMiddleEarthGuide,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun UnlockedCollectionCard(
     title: String,
     subtitle: String,

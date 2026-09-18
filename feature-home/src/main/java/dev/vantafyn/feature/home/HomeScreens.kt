@@ -94,6 +94,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -121,6 +122,9 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -380,6 +384,7 @@ import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import dev.vantafyn.core.ui.R as CoreUiR
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
+import dev.vantafyn.feature.home.auth.VantafynEnterCodeDialogState
 import dev.vantafyn.feature.home.auth.VantafynIdentifyDialogState
 import dev.vantafyn.feature.home.auth.VantafynHomeViewModel
 import dev.vantafyn.feature.home.mcu.*
@@ -1271,10 +1276,19 @@ private fun ServerConfirmScreen(
                 val server = state.server
                 SetupMaterialize(delayMillis = 180, modifier = Modifier.fillMaxWidth()) {
                     val borderAlpha = remember { Animatable(0f) }
+                    val lifecycleOwner = LocalLifecycleOwner.current
+                    var isResumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED) }
+                    DisposableEffect(lifecycleOwner) {
+                        val observer = LifecycleEventObserver { _, event ->
+                            isResumed = event == Lifecycle.Event.ON_RESUME
+                        }
+                        lifecycleOwner.lifecycle.addObserver(observer)
+                        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+                    }
                     val infiniteTransition = rememberInfiniteTransition(label = "serverBorderSweep")
                     val borderShift by infiniteTransition.animateFloat(
                         initialValue = 0f,
-                        targetValue = 1f,
+                        targetValue = if (isResumed) 1f else 0f,
                         animationSpec = infiniteRepeatable(
                             animation = tween(durationMillis = 5_200, easing = LinearEasing),
                             repeatMode = RepeatMode.Restart,
@@ -2500,8 +2514,8 @@ private fun PlaybackLanguageField(
                                 }
                             }
                         }
-                    }
                 }
+            }
         }
     }
 }
@@ -3204,8 +3218,6 @@ private fun HomeScreen(
             onRefreshAdmin = viewModel::pollAdminOverview,
             onRefreshAdminManual = viewModel::refreshAdminOverviewManual,
             onOpenMedia = viewModel::openMedia,
-            onMarkWhatsNewSeen = viewModel::markWhatsNewSeen,
-            onToggleWhatsNew = viewModel::toggleWhatsNew,
             onRetryMedia = viewModel::retryMediaDetail,
             onSearchQueryChanged = viewModel::onSearchQueryChanged,
             onLoadFavorites = viewModel::loadFavorites,
@@ -3434,8 +3446,6 @@ private fun MobileShellScreen(
     onRefreshAdmin: () -> Unit,
     onRefreshAdminManual: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
-    onMarkWhatsNewSeen: () -> Unit,
-    onToggleWhatsNew: () -> Unit,
     onRetryMedia: () -> Unit,
     onSearchQueryChanged: (String) -> Unit,
     onLoadFavorites: () -> Unit,
@@ -4020,8 +4030,6 @@ private fun MobileShellScreen(
                             notificationPermissionState = notificationPermissionState,
                             onNotificationPermissionAction = onNotificationPermissionSettingsAction,
                             onOpenMedia = onOpenMedia,
-                            onMarkWhatsNewSeen = onMarkWhatsNewSeen,
-                            onToggleWhatsNew = onToggleWhatsNew,
                             onToggleAchievementsEnabled = onToggleAchievementsEnabled,
                             onToggleSocialEnabled = onToggleSocialEnabled,
                             onToggleSocialDockEnabled = onToggleSocialDockEnabled,
@@ -4347,6 +4355,56 @@ private fun MobileShellScreen(
                     else -> NavigationRailMode.Main(state.mobileDestination.bottomNavRoot(state.previousMobileDestination))
                 }
 
+                AnimatedVisibility(
+                    visible = state.connectionStale,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    enter = fadeIn(animationSpec = tween(300)) + slideInVertically(animationSpec = tween(300)) { -it / 2 },
+                    exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(animationSpec = tween(200)) { -it / 2 },
+                ) {
+                    VantafynGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { viewModel.reconnectStaleConnection() },
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Link,
+                                contentDescription = null,
+                                tint = VantafynColors.Muted,
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Connection may be stale",
+                                    color = VantafynColors.Ink,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                                Text(
+                                    "Tap to reconnect",
+                                    color = VantafynColors.Muted,
+                                    style = MaterialTheme.typography.bodySmall,
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.Rounded.Refresh,
+                                contentDescription = "Reconnect",
+                                tint = VantafynColors.Muted,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    }
+                }
+
                 MobileBottomNav(
                     mode = railMode,
                     onSelected = { destination ->
@@ -4634,8 +4692,13 @@ private fun MobileShellScreen(
         )
     }
     state.enterCodeDialog?.let { enterCodeState ->
-        EnterCodeDialog(
-            onDismiss = viewModel::closeEnterCodeDialog,
+        LaunchedEffect(Unit) { viewModel.markWhatsNewSeen() }
+        VantafynHubDialog(
+            whatsNewItems = state.whatsNewItems,
+            onOpenWhatsNewItem = { id -> viewModel.closeEnterCodeDialog(); onOpenMedia(id) },
+            onMarkWhatsNewSeen = viewModel::markWhatsNewSeen,
+            hasUnseenWhatsNew = state.hasUnseenWhatsNew,
+            enterCodeState = enterCodeState,
             onSubmitCode = viewModel::submitUnlockCode,
             onOpenMcuGuide = viewModel::openMcuGuide,
             onOpenSawGuide = viewModel::openSawGuide,
@@ -4653,24 +4716,7 @@ private fun MobileShellScreen(
             onOpenUnderworldGuide = viewModel::openUnderworldGuide,
             onOpenXMenGuide = viewModel::openXMenGuide,
             onOpenMiddleEarthGuide = viewModel::openMiddleEarthGuide,
-            isMcuUnlocked = enterCodeState.isMcuUnlocked,
-            isSawUnlocked = enterCodeState.isSawUnlocked,
-            isResidentEvilUnlocked = enterCodeState.isResidentEvilUnlocked,
-            isHarryPotterUnlocked = enterCodeState.isHarryPotterUnlocked,
-            isHungerGamesUnlocked = enterCodeState.isHungerGamesUnlocked,
-            isScreamUnlocked = enterCodeState.isScreamUnlocked,
-            isMatrixUnlocked = enterCodeState.isMatrixUnlocked,
-            isJumanjiUnlocked = enterCodeState.isJumanjiUnlocked,
-            isJurassicUnlocked = enterCodeState.isJurassicUnlocked,
-            isPiratesUnlocked = enterCodeState.isPiratesUnlocked,
-            isPokemonUnlocked = enterCodeState.isPokemonUnlocked,
-            isScaryMovieUnlocked = enterCodeState.isScaryMovieUnlocked,
-            isTwilightUnlocked = enterCodeState.isTwilightUnlocked,
-            isUnderworldUnlocked = enterCodeState.isUnderworldUnlocked,
-            isXMenUnlocked = enterCodeState.isXMenUnlocked,
-            isMiddleEarthUnlocked = enterCodeState.isMiddleEarthUnlocked,
-            errorMessage = enterCodeState.errorMessage,
-            isSubmitting = enterCodeState.isSubmitting,
+            onDismiss = viewModel::closeEnterCodeDialog,
         )
     }
     state.mcuWatchGuideDialog?.let { mcuState ->
@@ -12744,8 +12790,6 @@ private fun SettingsScreen(
     notificationPermissionState: VantafynPermissionUiState,
     onNotificationPermissionAction: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
-    onMarkWhatsNewSeen: () -> Unit,
-    onToggleWhatsNew: () -> Unit,
     onToggleAchievementsEnabled: () -> Unit = {},
     onToggleSocialEnabled: () -> Unit = {},
     onToggleSocialDockEnabled: () -> Unit = {},
@@ -12765,7 +12809,7 @@ private fun SettingsScreen(
     var currentSubScreen by rememberSaveable { mutableStateOf(SettingsSubScreen.Main) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
-    var showWhatsNew by remember { mutableStateOf(false) }
+    var showUnifiedPushDiagnostics by remember { mutableStateOf(false) }
     var showPairTvSheet by remember { mutableStateOf(false) }
     var permissionDetail by remember { mutableStateOf<PermissionDetail?>(null) }
     var revealActive by remember(state.session?.profileId) { mutableStateOf(true) }
@@ -12824,7 +12868,6 @@ private fun SettingsScreen(
                                     state = state,
                                     onChangePhoto = { avatarPicker.open() },
                                     onRemovePhoto = onDeleteProfileImage,
-                                    onOpenEnterCode = viewModel::openEnterCodeDialog,
                                     onOpenMcuGuide = viewModel::openMcuGuide,
                                 )
                             }
@@ -13080,16 +13123,6 @@ private fun SettingsScreen(
                                 ),
                             )
                         }
-                        item { SettingsGroupHeader("Explore & Highlights") }
-                        item {
-                            WhatsNewSettingsRow(
-                                enabled = state.whatsNewEnabled,
-                                hasUnseen = state.hasUnseenWhatsNew,
-                                itemCount = remember(state.whatsNewItems) { groupWhatsNewItems(state.whatsNewItems).size },
-                                onToggle = onToggleWhatsNew,
-                                onClick = { showWhatsNew = true },
-                            )
-                        }
                         item {
                             SettingsCardGroup(
                                 items = listOf(
@@ -13324,6 +13357,14 @@ private fun SettingsScreen(
                                             onClick = { showVersionDialog = true },
                                         )
                                     },
+                                    {
+                                        SettingsNavigationRow(
+                                            title = "UnifiedPush Diagnostics",
+                                            subtitle = "Background push connection and distributor status",
+                                            icon = Icons.Rounded.Notifications,
+                                            onClick = { showUnifiedPushDiagnostics = true },
+                                        )
+                                    },
                                 ),
                             )
                         }
@@ -13347,6 +13388,12 @@ private fun SettingsScreen(
     if (showVersionDialog) {
         AppVersionDialog(onDismiss = { showVersionDialog = false })
     }
+    if (showUnifiedPushDiagnostics) {
+        UnifiedPushDiagnosticsDialog(
+            session = state.session,
+            onDismiss = { showUnifiedPushDiagnostics = false },
+        )
+    }
     permissionDetail?.let { detail ->
         PermissionDetailDialog(
             detail = detail,
@@ -13355,20 +13402,6 @@ private fun SettingsScreen(
             onNotificationAction = {
                 permissionDetail = null
                 onNotificationPermissionAction()
-            },
-        )
-    }
-    if (showWhatsNew) {
-        WhatsNewModal(
-            items = state.whatsNewItems,
-            onDismiss = {
-                showWhatsNew = false
-                onMarkWhatsNewSeen()
-            },
-            onOpenItem = { id ->
-                showWhatsNew = false
-                onMarkWhatsNewSeen()
-                onOpenMedia(id)
             },
         )
     }
@@ -13410,8 +13443,6 @@ private fun ProfileSettingsScreen(
     notificationPermissionState: VantafynPermissionUiState,
     onNotificationPermissionAction: () -> Unit,
     onOpenMedia: (java.util.UUID) -> Unit,
-    onMarkWhatsNewSeen: () -> Unit,
-    onToggleWhatsNew: () -> Unit,
     onToggleAchievementsEnabled: () -> Unit = {},
     onToggleSocialEnabled: () -> Unit = {},
     onToggleSocialDockEnabled: () -> Unit = {},
@@ -13447,8 +13478,6 @@ private fun ProfileSettingsScreen(
     notificationPermissionState = notificationPermissionState,
     onNotificationPermissionAction = onNotificationPermissionAction,
     onOpenMedia = onOpenMedia,
-    onMarkWhatsNewSeen = onMarkWhatsNewSeen,
-    onToggleWhatsNew = onToggleWhatsNew,
     onToggleAchievementsEnabled = onToggleAchievementsEnabled,
     onToggleSocialEnabled = onToggleSocialEnabled,
     onToggleSocialDockEnabled = onToggleSocialDockEnabled,
@@ -14141,11 +14170,322 @@ private fun WhatsNewModal(
 }
 
 @Composable
+private fun VantafynHubDialog(
+    whatsNewItems: List<JellyfinMediaItem>,
+    onOpenWhatsNewItem: (java.util.UUID) -> Unit,
+    onMarkWhatsNewSeen: () -> Unit,
+    hasUnseenWhatsNew: Boolean,
+    enterCodeState: VantafynEnterCodeDialogState,
+    onSubmitCode: (String) -> Unit,
+    onOpenMcuGuide: () -> Unit,
+    onOpenSawGuide: () -> Unit = {},
+    onOpenResidentEvilGuide: () -> Unit = {},
+    onOpenHarryPotterGuide: () -> Unit = {},
+    onOpenHungerGamesGuide: () -> Unit = {},
+    onOpenScreamGuide: () -> Unit = {},
+    onOpenMatrixGuide: () -> Unit = {},
+    onOpenJumanjiGuide: () -> Unit = {},
+    onOpenJurassicGuide: () -> Unit = {},
+    onOpenPiratesGuide: () -> Unit = {},
+    onOpenPokemonGuide: () -> Unit = {},
+    onOpenScaryMovieGuide: () -> Unit = {},
+    onOpenTwilightGuide: () -> Unit = {},
+    onOpenUnderworldGuide: () -> Unit = {},
+    onOpenXMenGuide: () -> Unit = {},
+    onOpenMiddleEarthGuide: () -> Unit = {},
+    onDismiss: () -> Unit,
+) {
+    var selectedTab by remember { mutableIntStateOf(0) }
+    val groupedWhatsNew = remember(whatsNewItems) { groupWhatsNewItems(whatsNewItems) }
+    val tabs = listOf("What's New", "Watch Guides")
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxSize()
+                .imePadding()
+                .padding(horizontal = 20.dp, vertical = 24.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 440.dp)
+                    .heightIn(max = this@BoxWithConstraints.maxHeight * 0.9f)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(VantafynColors.Graphite.copy(alpha = 0.96f))
+                    .vantafynAnimatedModalBorder(cornerRadius = 28.dp)
+                    .padding(22.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(VantafynColors.Primary.copy(alpha = 0.16f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AutoAwesome,
+                                contentDescription = null,
+                                tint = VantafynColors.Ink,
+                                modifier = Modifier.size(22.dp),
+                            )
+                        }
+                        Column {
+                            Text(
+                                "Vantafyn Hub",
+                                color = VantafynColors.Ink,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 19.sp,
+                            )
+                            Text(
+                                "What's new & watch guides",
+                                color = VantafynColors.Muted,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                    IconButton(onClick = onDismiss) {
+                        Text("\u2715", color = VantafynColors.Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                // Tab bar
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFF00E5FF).copy(alpha = 0.08f),
+                                    Color(0xFF5B8CFF).copy(alpha = 0.10f),
+                                    Color(0xFF9B5CFF).copy(alpha = 0.10f),
+                                    Color(0xFF00E5FF).copy(alpha = 0.08f),
+                                )
+                            )
+                        )
+                        .padding(3.dp),
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        tabs.forEachIndexed { index, label ->
+                            val isSelected = selectedTab == index
+                            val hasBadge = index == 0 && hasUnseenWhatsNew
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(
+                                        if (isSelected) Brush.horizontalGradient(
+                                            listOf(
+                                                Color(0xFF00E5FF).copy(alpha = 0.14f),
+                                                Color(0xFF9B5CFF).copy(alpha = 0.16f),
+                                            )
+                                        )
+                                        else Brush.horizontalGradient(
+                                            listOf(
+                                                Color(0xFF00E5FF).copy(alpha = 0.03f),
+                                                Color(0xFF9B5CFF).copy(alpha = 0.03f),
+                                            )
+                                        ),
+                                    )
+                                    .clickable { selectedTab = index }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        label,
+                                        color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                    )
+                                    if (hasBadge) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(7.dp)
+                                                .clip(CircleShape)
+                                                .background(VantafynGradients.accentHorizontal()),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Tab content
+                when (selectedTab) {
+                    0 -> {
+                        // What's New tab
+                        if (groupedWhatsNew.isEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Text(
+                                        "\uD83C\uDF1F",
+                                        fontSize = 32.sp,
+                                    )
+                                    Text(
+                                        "All caught up!",
+                                        color = VantafynColors.Ink,
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        "No new content since your last visit.",
+                                        color = VantafynColors.Muted,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                    )
+                                }
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                items(groupedWhatsNew, key = { it.id }) { whatsNewItem ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable {
+                                                when (whatsNewItem) {
+                                                    is WhatsNewItem.Single -> onOpenWhatsNewItem(whatsNewItem.item.id)
+                                                    is WhatsNewItem.SeriesGroup -> {
+                                                        val targetId = whatsNewItem.seriesItem?.id ?: whatsNewItem.episodes.firstOrNull()?.seriesId
+                                                        if (targetId != null) onOpenWhatsNewItem(targetId)
+                                                    }
+                                                }
+                                                onMarkWhatsNewSeen()
+                                            }
+                                            .padding(vertical = 6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(48.dp)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(Brush.linearGradient(listOf(Color(0xFF24304D), Color(0xFF393456), VantafynColors.SurfaceHigh))),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            val artwork = whatsNewItem.imageUrl
+                                            if (artwork != null) {
+                                                AsyncImage(
+                                                    model = artwork,
+                                                    contentDescription = whatsNewItem.title,
+                                                    modifier = Modifier.fillMaxSize(),
+                                                    contentScale = ContentScale.Crop,
+                                                )
+                                            } else {
+                                                Text(
+                                                    initials(whatsNewItem.title),
+                                                    color = VantafynColors.Ink.copy(alpha = 0.78f),
+                                                    style = MaterialTheme.typography.titleSmall,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                )
+                                            }
+                                        }
+                                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(
+                                                whatsNewItem.title,
+                                                color = VantafynColors.Ink,
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                fontWeight = FontWeight.SemiBold,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                            Text(
+                                                whatsNewItem.subtitle,
+                                                color = VantafynColors.Muted,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                maxLines = 1,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    1 -> {
+                        // Watch Guides tab
+                        EnterCodeTabContent(
+                            onSubmitCode = onSubmitCode,
+                            onOpenMcuGuide = onOpenMcuGuide,
+                            onOpenSawGuide = onOpenSawGuide,
+                            onOpenResidentEvilGuide = onOpenResidentEvilGuide,
+                            onOpenHarryPotterGuide = onOpenHarryPotterGuide,
+                            onOpenHungerGamesGuide = onOpenHungerGamesGuide,
+                            onOpenScreamGuide = onOpenScreamGuide,
+                            onOpenMatrixGuide = onOpenMatrixGuide,
+                            onOpenJumanjiGuide = onOpenJumanjiGuide,
+                            onOpenJurassicGuide = onOpenJurassicGuide,
+                            onOpenPiratesGuide = onOpenPiratesGuide,
+                            onOpenPokemonGuide = onOpenPokemonGuide,
+                            onOpenScaryMovieGuide = onOpenScaryMovieGuide,
+                            onOpenTwilightGuide = onOpenTwilightGuide,
+                            onOpenUnderworldGuide = onOpenUnderworldGuide,
+                            onOpenXMenGuide = onOpenXMenGuide,
+                            onOpenMiddleEarthGuide = onOpenMiddleEarthGuide,
+                            isMcuUnlocked = enterCodeState.isMcuUnlocked,
+                            isSawUnlocked = enterCodeState.isSawUnlocked,
+                            isResidentEvilUnlocked = enterCodeState.isResidentEvilUnlocked,
+                            isHarryPotterUnlocked = enterCodeState.isHarryPotterUnlocked,
+                            isHungerGamesUnlocked = enterCodeState.isHungerGamesUnlocked,
+                            isScreamUnlocked = enterCodeState.isScreamUnlocked,
+                            isMatrixUnlocked = enterCodeState.isMatrixUnlocked,
+                            isJumanjiUnlocked = enterCodeState.isJumanjiUnlocked,
+                            isJurassicUnlocked = enterCodeState.isJurassicUnlocked,
+                            isPiratesUnlocked = enterCodeState.isPiratesUnlocked,
+                            isPokemonUnlocked = enterCodeState.isPokemonUnlocked,
+                            isScaryMovieUnlocked = enterCodeState.isScaryMovieUnlocked,
+                            isTwilightUnlocked = enterCodeState.isTwilightUnlocked,
+                            isUnderworldUnlocked = enterCodeState.isUnderworldUnlocked,
+                            isXMenUnlocked = enterCodeState.isXMenUnlocked,
+                            isMiddleEarthUnlocked = enterCodeState.isMiddleEarthUnlocked,
+                            errorMessage = enterCodeState.errorMessage,
+                            isSubmitting = enterCodeState.isSubmitting,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ProfileDashboardCard(
     state: VantafynHomeUiState,
     onChangePhoto: () -> Unit,
     onRemovePhoto: () -> Unit,
-    onOpenEnterCode: () -> Unit = {},
     onOpenMcuGuide: () -> Unit = {},
 ) {
     GlassPanel {
@@ -14205,17 +14545,6 @@ private fun ProfileDashboardCard(
                 VantafynGlassChip(onClick = onRemovePhoto) {
                     Text("Remove photo", color = Color(0xFFFFC2C2), fontWeight = FontWeight.SemiBold)
                 }
-            }
-            VantafynGlassChip(
-                onClick = onOpenEnterCode,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Lock,
-                    contentDescription = "Unlock Code",
-                    modifier = Modifier.size(16.dp),
-                    tint = Color.White,
-                )
             }
         }
     }
@@ -14995,6 +15324,249 @@ private fun AppVersionDialog(onDismiss: () -> Unit) {
         },
     )
 }
+
+@Composable
+private fun UnifiedPushDiagnosticsDialog(
+    session: dev.vantafyn.core.jellyfin.JellyfinSession?,
+    onDismiss: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pushManager = remember { dev.vantafyn.core.integrations.push.UnifiedPushManager.getInstance(context) }
+    val pushStatus by pushManager.status.collectAsStateWithLifecycle()
+    var isSendingTestPush by remember { mutableStateOf(false) }
+    var testPushMessage by remember { mutableStateOf<String?>(null) }
+    var isTestPushError by remember { mutableStateOf(false) }
+
+    LaunchedEffect(Unit) {
+        pushManager.refreshStatus()
+        if (session != null && pushStatus.hasEndpoint && pushStatus.serverSyncState == dev.vantafyn.core.integrations.push.ServerPushSyncState.NotSynced) {
+            dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(context).syncCurrentEndpointWithSession(session)
+        }
+    }
+
+    AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .vantafynAnimatedModalBorder(),
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        dismissButton = {
+            if (pushStatus.registrationState == dev.vantafyn.core.integrations.push.UnifiedPushRegistrationState.Registered) {
+                TextButton(onClick = {
+                    if (session != null) {
+                        dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(context).unregisterFromServer(session)
+                    }
+                    pushManager.unregister()
+                }) {
+                    Text("Unregister", color = Color(0xFFFF5D73))
+                }
+            } else if (pushStatus.isSupported) {
+                TextButton(onClick = { pushManager.registerWithDistributor() }) {
+                    Text("Register")
+                }
+            }
+        },
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Text(
+                "UnifiedPush Diagnostics",
+                color = VantafynColors.Ink,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Text(
+                    "Diagnostics for self-hosted push notifications via any UnifiedPush distributor (e.g., ntfy). Secrets and endpoint URLs are never exposed.",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DiagnosticsRow(
+                        label = "UnifiedPush supported",
+                        value = if (pushStatus.isSupported) "Yes" else "No",
+                        isHighlight = pushStatus.isSupported,
+                    )
+                    DiagnosticsRow(
+                        label = "Distributor detected",
+                        value = pushStatus.availableDistributors.joinToString(", ") { it.name }.ifBlank { "None installed" },
+                    )
+                    DiagnosticsRow(
+                        label = "Selected distributor",
+                        value = pushStatus.selectedDistributor ?: "None",
+                    )
+                    DiagnosticsRow(
+                        label = "Registration state",
+                        value = pushStatus.registrationState.name,
+                        isHighlight = pushStatus.registrationState == dev.vantafyn.core.integrations.push.UnifiedPushRegistrationState.Registered,
+                    )
+                    DiagnosticsRow(
+                        label = "Endpoint present",
+                        value = if (pushStatus.hasEndpoint) "Yes" else "No",
+                        isHighlight = pushStatus.hasEndpoint,
+                    )
+                    DiagnosticsRow(
+                        label = "Server sync",
+                        value = pushStatus.serverSyncState.name,
+                        isHighlight = pushStatus.serverSyncState == dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced,
+                        isError = pushStatus.serverSyncState == dev.vantafyn.core.integrations.push.ServerPushSyncState.Failed,
+                    )
+                    pushStatus.lastServerSyncTimestampMillis?.let {
+                        DiagnosticsRow(
+                            label = "Last server sync",
+                            value = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(it)),
+                        )
+                    }
+                    DiagnosticsRow(
+                        label = "Last push received",
+                        value = pushStatus.lastPushTimestampMillis?.let {
+                            java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(it))
+                        } ?: "None yet",
+                    )
+                    if (!pushStatus.lastFailureReason.isNullOrBlank()) {
+                        DiagnosticsRow(
+                            label = "Last failure reason",
+                            value = pushStatus.lastFailureReason ?: "",
+                            isError = true,
+                        )
+                    }
+                }
+
+                if (session != null && pushStatus.hasEndpoint) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    isSendingTestPush = true
+                                    testPushMessage = null
+                                    val res = dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(context).sendTestPush(session)
+                                    isSendingTestPush = false
+                                    if (res.isSuccess) {
+                                        isTestPushError = false
+                                        testPushMessage = res.getOrNull() ?: "Test push sent from server"
+                                    } else {
+                                        isTestPushError = true
+                                        testPushMessage = res.exceptionOrNull()?.message ?: "Failed to send test push"
+                                    }
+                                }
+                            },
+                            enabled = !isSendingTestPush && pushStatus.serverSyncState == dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced,
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = VantafynColors.Primary,
+                                contentColor = Color.White,
+                            ),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            if (isSendingTestPush) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Sending Test Push...")
+                            } else {
+                                Icon(Icons.Rounded.Notifications, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(8.dp))
+                                Text("Send Test Push from Server")
+                            }
+                        }
+
+                        if (pushStatus.serverSyncState != dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced) {
+                            OutlinedButton(
+                                onClick = {
+                                    dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(context).syncCurrentEndpointWithSession(session)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text("Sync Endpoint with Server")
+                            }
+                        }
+
+                        if (!testPushMessage.isNullOrBlank()) {
+                            Text(
+                                testPushMessage ?: "",
+                                color = if (isTestPushError) Color(0xFFFF5D73) else VantafynColors.Primary,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+
+                if (pushStatus.availableDistributors.size > 1) {
+                    Text(
+                        "Available Distributors:",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    pushStatus.availableDistributors.forEach { dist ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (dist.isSelected) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.05f))
+                                .clickable { pushManager.registerWithDistributor(dist.packageName) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(dist.name, color = VantafynColors.Ink, style = MaterialTheme.typography.bodyMedium)
+                            if (dist.isSelected) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = "Selected",
+                                    tint = VantafynColors.Primary,
+                                    modifier = Modifier.size(18.dp),
+                                    )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun DiagnosticsRow(
+    label: String,
+    value: String,
+    isHighlight: Boolean = false,
+    isError: Boolean = false,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = VantafynColors.Muted,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            text = value,
+            color = when {
+                isError -> Color(0xFFFF5D73)
+                isHighlight -> VantafynColors.Primary
+                else -> VantafynColors.Ink
+            },
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
 
 @Composable
 private fun SoftBadge(
@@ -17493,7 +18065,7 @@ private fun HomeCustomizeEditorPanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .heightIn(max = panelMaxHeight)
-                .shadow(28.dp, RoundedCornerShape(30.dp), clip = false)
+                .shadow(12.dp, RoundedCornerShape(30.dp), clip = false)
                 .then(
                     if (reducedMotion) {
                         Modifier.border(1.dp, Color.White.copy(alpha = 0.18f), RoundedCornerShape(30.dp))
@@ -19559,7 +20131,7 @@ private fun PeopleSection(detail: JellyfinMediaDetail, onPerson: (java.util.UUID
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
         Text("Cast & Crew", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
-            items(detail.people, key = { it.id }) { person ->
+            itemsIndexed(detail.people, key = { index, person -> "${person.id}-$index" }) { index, person ->
                 Column(modifier = Modifier.width(104.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs)) {
                     Box(
                         modifier = Modifier
@@ -22147,12 +22719,9 @@ private fun ContextAction(icon: String, label: String, onClick: () -> Unit, enab
 }
 
 private fun getSubsonicCredentials(context: android.content.Context): dev.vantafyn.core.subsonic.SubsonicCredentials? {
-    val prefs = context.getSharedPreferences("vantafyn_subsonic_prefs", android.content.Context.MODE_PRIVATE)
-    val url = prefs.getString("subsonic_url", null) ?: return null
-    val user = prefs.getString("subsonic_username", null) ?: return null
-    val pass = prefs.getString("subsonic_password", null) ?: return null
-    if (url.isBlank() || user.isBlank() || pass.isBlank()) return null
-    return dev.vantafyn.core.subsonic.SubsonicCredentials(serverUrl = url, username = user, passwordOrToken = pass)
+    val creds = dev.vantafyn.core.media.SecureSubsonicStorage.read(context) ?: return null
+    if (creds.serverUrl.isBlank() || creds.username.isBlank() || creds.password.isBlank()) return null
+    return dev.vantafyn.core.subsonic.SubsonicCredentials(serverUrl = creds.serverUrl, username = creds.username, passwordOrToken = creds.password)
 }
 
 private fun JellyfinMediaCard.toMediaActionTarget(): MediaActionTarget =

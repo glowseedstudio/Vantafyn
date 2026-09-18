@@ -6,6 +6,7 @@ using Vantafyn.Plugin.Companion.Requests;
 using Vantafyn.Plugin.Companion.UserSettings;
 using Vantafyn.Plugin.Companion.WatchParties;
 using Vantafyn.Plugin.Companion.PersonalPlaylists;
+using Vantafyn.Plugin.Companion.Notifications;
 
 namespace Vantafyn.Plugin.Companion;
 
@@ -20,6 +21,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IWatchPartyService, InMemoryWatchPartyService>();
         serviceCollection.AddSingleton<IRealtimeTransport, InMemoryRealtimeTransport>();
         serviceCollection.AddSingleton<IPersonalPlaylistStore, FilePersonalPlaylistStore>();
+        serviceCollection.AddSingleton<IPushRegistrationStore, FilePushRegistrationStore>();
         serviceCollection.AddSingleton<IOmbiClientFactory, OmbiClientFactory>();
         serviceCollection.AddSingleton<IOmbiUserSessionStore, FileOmbiUserSessionStore>();
         serviceCollection.AddHttpClient();

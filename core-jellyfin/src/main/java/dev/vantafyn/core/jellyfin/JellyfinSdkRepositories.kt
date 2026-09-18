@@ -407,6 +407,17 @@ class SdkJellyfinAuthRepository(
         }
     }
 
+    override suspend fun pingServer(session: JellyfinSession): Boolean =
+        withContext(ioDispatcher) {
+            try {
+                val api = jellyfin.createApi(baseUrl = session.server.url, accessToken = session.accessToken)
+                api.systemApi.getSystemInfo()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
+
     private suspend fun <T> runCatchingResult(block: suspend () -> T): JellyfinResult<T> =
         withContext(ioDispatcher) {
             try {
@@ -5532,7 +5543,8 @@ private fun BaseItemDto.toDetail(
         ?: audiobookParts.takeIf { it.isNotEmpty() }?.sumOf { it.durationMs ?: 0L }
     val embeddedChapters = toChapters(totalDurationMs)
     val finalChapters = if (embeddedChapters.isNotEmpty()) embeddedChapters else audiobookParts
-    val isAudiobookItem = finalChapters.isNotEmpty() || type in setOf(BaseItemKind.AUDIO_BOOK, BaseItemKind.BOOK) ||
+    val isAudiobookItem = type in setOf(BaseItemKind.AUDIO_BOOK, BaseItemKind.BOOK) ||
+        (type == BaseItemKind.FOLDER && audiobookParts.isNotEmpty()) ||
         (type == BaseItemKind.AUDIO && mediaSources.orEmpty().any { it.container?.lowercase() in setOf("m4b", "m4a") })
     val authorName = albumArtist
         ?: artists.orEmpty().firstOrNull()

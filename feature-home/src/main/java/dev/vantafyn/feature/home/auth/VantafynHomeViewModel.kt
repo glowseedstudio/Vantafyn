@@ -126,6 +126,7 @@ import dev.vantafyn.core.jellyfin.WatchPartyVoteValue
 import dev.vantafyn.core.jellyfin.JellyfinChapter
 import dev.vantafyn.core.jellyfin.isAudiobookMedia
 import dev.vantafyn.core.media.VantafynAudioTrack
+import dev.vantafyn.core.media.SecureSubsonicStorage
 import dev.vantafyn.core.media.AutoplaySettings
 import dev.vantafyn.core.media.LongRunningTaskRegistry
 import dev.vantafyn.core.media.LongRunningTaskType
@@ -207,6 +208,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private var lastCompanionAvailabilityCheckAt: Long = 0L
     private var lastAchievementAvailabilityProfileId: String? = null
     private var lastAchievementAvailabilityCheckAt: Long = 0L
+    private var lastAdminPollAtMs: Long = 0L
     private var lastSocialAvailabilityProfileId: String? = null
     private var lastSocialAvailabilityCheckAt: Long = 0L
     private val seenMessageKeys = mutableSetOf<String>()
@@ -267,6 +269,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 .distinctUntilChanged()
                 .collect { session ->
                     dev.vantafyn.core.media.VantafynMediaCache.updateJellyfinSession(session)
+                    dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(application).onSessionChanged(session)
                 }
         }
         viewModelScope.launch {
@@ -425,12 +428,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             )
             val success = client.ping()
             if (success) {
-                val prefs = getApplication<Application>().getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
-                prefs.edit()
-                    .putString("subsonic_url", url)
-                    .putString("subsonic_username", user)
-                    .putString("subsonic_password", pass)
-                    .apply()
+                SecureSubsonicStorage.save(getApplication(), url, user, pass)
                 markSetupCompleted()
                 _state.update {
                     it.copy(
@@ -2997,7 +2995,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun openEnterCodeDialog() {
         val unlockedCodes = watchGuideRepository.getUnlockedCodes()
         val isMcuUnlocked = unlockedCodes.contains("MCU")
-        val isSawUnlocked = unlockedCodes.contains("JIGSAW")
+        val isSawUnlocked = unlockedCodes.contains("SAW") || unlockedCodes.contains("JIGSAW")
         val isResidentEvilUnlocked = unlockedCodes.contains("R-EVIL") || unlockedCodes.contains("RESIDENTEVIL")
         val isHarryPotterUnlocked = unlockedCodes.contains("POTTER") || unlockedCodes.contains("HARRYPOTTER")
         val isHungerGamesUnlocked = unlockedCodes.contains("HUNGER") || unlockedCodes.contains("HUNGERGAMES")
@@ -5840,12 +5838,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun getSubsonicCredentials(): dev.vantafyn.core.subsonic.SubsonicCredentials? {
-        val prefs = getApplication<Application>().getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
-        val url = prefs.getString("subsonic_url", null) ?: return null
-        val user = prefs.getString("subsonic_username", null) ?: return null
-        val pass = prefs.getString("subsonic_password", null) ?: return null
-        if (url.isBlank() || user.isBlank() || pass.isBlank()) return null
-        return dev.vantafyn.core.subsonic.SubsonicCredentials(serverUrl = url, username = user, passwordOrToken = pass)
+        val creds = SecureSubsonicStorage.read(getApplication()) ?: return null
+        if (creds.serverUrl.isBlank() || creds.username.isBlank() || creds.password.isBlank()) return null
+        return dev.vantafyn.core.subsonic.SubsonicCredentials(serverUrl = creds.serverUrl, username = creds.username, passwordOrToken = creds.password)
     }
 
     fun onSearchQueryChanged(query: String) {
@@ -6098,11 +6093,41 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         homeLayoutStorage.edit().putString("whats_new_seen_$profileId", ids.joinToString(",")).apply()
     }
 
+    private fun cachePlugins(plugins: List<dev.vantafyn.core.jellyfin.JellyfinAdminPlugin>) {
+        val session = _state.value.session ?: return
+        val encoded = plugins.joinToString("|||") { plugin ->
+            "${plugin.id}|${plugin.name}|${plugin.version.orEmpty()}|${plugin.description.orEmpty()}|${plugin.status.orEmpty()}|${plugin.hasImage}|${plugin.canUninstall}"
+        }
+        homeLayoutStorage.edit().putString("admin_plugins_cache_${session.profileId}", encoded).apply()
+    }
+
+    private fun loadCachedPlugins(): List<dev.vantafyn.core.jellyfin.JellyfinAdminPlugin> {
+        val session = _state.value.session ?: return emptyList()
+        val raw = homeLayoutStorage.getString("admin_plugins_cache_${session.profileId}", null) ?: return emptyList()
+        return raw.split("|||").filter { it.isNotBlank() }.mapNotNull { entry ->
+            val parts = entry.split("|")
+            if (parts.size < 7) return@mapNotNull null
+            val id = runCatching { java.util.UUID.fromString(parts[0]) }.getOrNull() ?: return@mapNotNull null
+            dev.vantafyn.core.jellyfin.JellyfinAdminPlugin(
+                id = id,
+                name = parts[1],
+                version = parts[2].takeIf { it.isNotBlank() },
+                description = parts[3].takeIf { it.isNotBlank() },
+                status = parts[4].takeIf { it.isNotBlank() },
+                hasImage = parts[5].toBooleanStrictOrNull() ?: false,
+                canUninstall = parts[6].toBooleanStrictOrNull() ?: false,
+            )
+        }
+    }
+
     fun loadAdminOverview() {
         refreshAdminOverview(showLoading = _state.value.adminOverview == null)
     }
 
     fun pollAdminOverview() {
+        val now = System.currentTimeMillis()
+        if (now - lastAdminPollAtMs < 60_000L) return
+        lastAdminPollAtMs = now
         refreshAdminOverview(showLoading = false)
     }
 
@@ -6123,9 +6148,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is JellyfinResult.Success -> {
                     _state.update { state ->
                         val tracking = state.libraryScanTrackingAfter(result.value)
-                        val overview = result.value.takeUnless {
-                            it.plugins.isEmpty() && state.adminOverview?.plugins?.isNotEmpty() == true
-                        } ?: result.value.copy(plugins = state.adminOverview?.plugins.orEmpty())
+                        val cachedPlugins = loadCachedPlugins()
+                        val effectivePlugins = when {
+                            result.value.plugins.isNotEmpty() -> {
+                                cachePlugins(result.value.plugins)
+                                result.value.plugins
+                            }
+                            state.adminOverview?.plugins?.isNotEmpty() == true -> state.adminOverview.plugins
+                            cachedPlugins.isNotEmpty() -> cachedPlugins
+                            else -> result.value.plugins
+                        }
+                        val overview = result.value.copy(plugins = effectivePlugins)
                         state.copy(
                             isAdminLoading = false,
                             isAdminRefreshing = false,
@@ -7585,44 +7618,60 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun onAppForegrounded() {
         isAppForeground = true
-        resetInactivityBackoff()
         _state.update { it.copy(isAppForeground = true) }
-        dismissedGiftIdsInSession.clear()
         val session = _state.value.session
-        if (session != null) {
-            checkPendingGiftsForUser(session)
-        }
         val now = System.currentTimeMillis()
-        val bgDuration = if (lastBackgroundedAtMs > 0L) now - lastBackgroundedAtMs else 0L
+        val sinceLastVerified = now - lastSessionVerifiedAtMs
+
+        if (session != null && sinceLastVerified < 30_000L) {
+            lastBackgroundedAtMs = 0L
+            return
+        }
+
+        resetInactivityBackoff()
+        dismissedGiftIdsInSession.clear()
         lastBackgroundedAtMs = 0L
 
         if (session != null) {
-            val shouldRefreshSession = bgDuration >= STALE_BACKGROUND_REFRESH_THRESHOLD_MS ||
-                _state.value.errorMessage != null ||
-                _state.value.homeErrorMessage != null ||
-                (now - lastSessionVerifiedAtMs) >= 60_000L
-            if (shouldRefreshSession) {
-                verifyAndRefreshSessionOnResume(
-                    currentSession = session,
-                    forceReload = bgDuration >= STALE_BACKGROUND_REFRESH_THRESHOLD_MS || _state.value.errorMessage != null || _state.value.homeErrorMessage != null,
-                )
-            }
-            offlineSyncScheduler.schedule()
-            refreshAchievementsAvailability()
-            if (_state.value.isAchievementsAvailable) {
-                pollAchievementUnlocks()
-            }
+            checkPendingGiftsForUser(session)
+
             if (_state.value.socialEnabled) {
                 viewModelScope.launch { socialRepository.reportPresence(session) }
             }
             startSocialPolling()
+
+            if (sinceLastVerified > STALE_CONNECTION_THRESHOLD_MS && !_state.value.connectionStale) {
+                _state.update { it.copy(connectionStale = true) }
+            }
         }
-        if (_state.value.adminOverview != null && _state.value.session?.user?.isAdministrator == true) {
+        if (_state.value.mobileDestination == MobileDestination.Admin &&
+            _state.value.session?.user?.isAdministrator == true
+        ) {
             pollAdminOverview()
         }
         _state.value.session
-            ?.takeIf { shouldUseWatchPartyRealtime(_state.value) }
+            ?.takeIf { _state.value.activeWatchParty != null }
             ?.let { startWatchPartyRealtime(it) }
+    }
+
+    fun reconnectStaleConnection() {
+        val session = _state.value.session ?: return
+        _state.update { it.copy(connectionStale = false) }
+        viewModelScope.launch {
+            val alive = authRepository.pingServer(session)
+            if (!alive) {
+                verifyAndRefreshSessionOnResume(currentSession = session, forceReload = true)
+            } else {
+                lastSessionVerifiedAtMs = System.currentTimeMillis()
+                if (_state.value.errorMessage != null || _state.value.homeErrorMessage != null) {
+                    verifyAndRefreshSessionOnResume(currentSession = session, forceReload = false)
+                }
+            }
+        }
+    }
+
+    fun dismissStaleConnection() {
+        _state.update { it.copy(connectionStale = false) }
     }
 
     fun onAppBackgrounded() {
@@ -9565,6 +9614,7 @@ data class VantafynHomeUiState(
     val socialBlockedUsers: List<dev.vantafyn.core.jellyfin.JellyfinBlockedUser> = emptyList(),
     val chatSearchResults: List<dev.vantafyn.core.jellyfin.JellyfinMediaCard> = emptyList(),
     val isChatSearching: Boolean = false,
+    val connectionStale: Boolean = false,
 ) {
 
     val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState?
@@ -10326,6 +10376,7 @@ private const val WATCH_PARTY_REALTIME_TASK_ID = "watchParty.realtime"
 private const val LibraryScanStartGraceMs = 20_000L
 private const val ACHIEVEMENT_UNLOCK_POLL_INTERVAL_MS = 30_000L
 private const val STALE_BACKGROUND_REFRESH_THRESHOLD_MS = 15 * 60_000L
+private const val STALE_CONNECTION_THRESHOLD_MS = 2 * 60 * 60_000L
 private val WATCH_PARTY_INVITE_EXPIRY_OPTIONS = setOf(30, 60, 300)
 private const val LibraryItemsPageSize = 100
 

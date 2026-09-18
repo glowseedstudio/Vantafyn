@@ -315,7 +315,7 @@ val JellyfinMediaItem.isAudiobookMedia: Boolean
     get() = isAudiobook || itemType.equals("AudioBook", ignoreCase = true) || itemType.equals("Book", ignoreCase = true)
 
 val JellyfinMediaDetail.isAudiobookMedia: Boolean
-    get() = isAudiobook || itemType.equals("AudioBook", ignoreCase = true) || (itemType.equals("Folder", ignoreCase = true) && chapters.isNotEmpty()) || (itemType.equals("Book", ignoreCase = true) && mediaSources.any { it.container?.lowercase() in setOf("m4b", "mp3", "m4a", "aac", "ogg", "opus", "flac") })
+    get() = isAudiobook || itemType.equals("AudioBook", ignoreCase = true) || (itemType.equals("Book", ignoreCase = true) && mediaSources.any { it.container?.lowercase() in setOf("m4b", "mp3", "m4a", "aac", "ogg", "opus", "flac") })
 
 
 data class JellyfinMediaInfoLine(
@@ -1134,6 +1134,7 @@ interface JellyfinAuthRepository {
     suspend fun importPairedSession(payload: TvPairingPayload): JellyfinResult<JellyfinSession>
     suspend fun removeProfile(profileId: String)
     suspend fun logout()
+    suspend fun pingServer(session: JellyfinSession): Boolean
 }
 
 interface JellyfinLibraryRepository {

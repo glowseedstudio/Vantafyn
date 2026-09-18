@@ -1,6 +1,7 @@
 package dev.vantafyn.feature.home.pairing
 
 import android.util.Log
+import dev.vantafyn.core.jellyfin.TvCryptoUtils
 import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
 import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.jellyfin.TvPairingResponse
@@ -130,7 +131,12 @@ object MobileTvPairingClient {
                 connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 connection.setRequestProperty("Accept", "application/json")
 
-                val jsonBytes = payload.toJson().toByteArray(Charsets.UTF_8)
+                // Encrypt the payload using AES-GCM with a key derived from the pairing code
+                val encryptedPayload = TvCryptoUtils.encryptWithPairingCode(payload.toJson(), payload.code)
+                val escapedEncrypted = encryptedPayload.replace("\\", "\\\\").replace("\"", "\\\"")
+                val escapedCode = payload.code.replace("\\", "\\\\").replace("\"", "\\\"")
+                val encryptedBody = """{"encrypted":true,"code":"$escapedCode","data":"$escapedEncrypted"}"""
+                val jsonBytes = encryptedBody.toByteArray(Charsets.UTF_8)
                 connection.outputStream.use { os: OutputStream ->
                     os.write(jsonBytes)
                     os.flush()
@@ -143,7 +149,6 @@ object MobileTvPairingClient {
                     connection.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
                 }
 
-                Log.d(TAG, "Pairing response from $targetIp:$port: HTTP $responseCode -> $responseBody")
                 val parsedResponse = TvPairingResponse.fromJson(responseBody)
 
                 if (responseCode == 200 && parsedResponse?.status == "ok") {

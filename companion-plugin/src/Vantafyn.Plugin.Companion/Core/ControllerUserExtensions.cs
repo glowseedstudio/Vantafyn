@@ -5,9 +5,9 @@ namespace Vantafyn.Plugin.Companion.Core;
 
 internal static class ControllerUserExtensions
 {
-    public static Guid CurrentUserId(this ControllerBase controller, IAuthorizationContext authorizationContext)
+    public static async Task<Guid> CurrentUserIdAsync(this ControllerBase controller, IAuthorizationContext authorizationContext)
     {
-        var auth = authorizationContext.GetAuthorizationInfo(controller.Request).GetAwaiter().GetResult();
+        var auth = await authorizationContext.GetAuthorizationInfo(controller.Request).ConfigureAwait(false);
         if (auth.UserId == Guid.Empty)
         {
             throw new UnauthorizedAccessException("Authenticated Jellyfin user could not be resolved.");
@@ -15,4 +15,7 @@ internal static class ControllerUserExtensions
 
         return auth.UserId;
     }
+
+    public static Guid CurrentUserId(this ControllerBase controller, IAuthorizationContext authorizationContext) =>
+        controller.CurrentUserIdAsync(authorizationContext).GetAwaiter().GetResult();
 }

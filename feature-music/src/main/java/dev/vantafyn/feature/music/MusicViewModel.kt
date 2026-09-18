@@ -38,6 +38,7 @@ import dev.vantafyn.core.jellyfin.JellyfinRepositoryProvider
 import dev.vantafyn.core.jellyfin.JellyfinResult
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.media.MusicPlaybackController
+import dev.vantafyn.core.media.SecureSubsonicStorage
 import dev.vantafyn.core.media.AppForegroundStateRepository
 import dev.vantafyn.core.media.VantafynMusicPlaybackEvent
 import dev.vantafyn.core.media.VantafynMusicPlaybackState
@@ -58,6 +59,8 @@ import dev.vantafyn.feature.music.harmonia.HarmoniaPlaybackTracker
 import dev.vantafyn.feature.music.harmonia.HarmoniaRecap
 import dev.vantafyn.feature.music.harmonia.HarmoniaRecapPreview
 import dev.vantafyn.feature.music.harmonia.SqliteHarmoniaStore
+import dev.vantafyn.feature.music.cache.MusicLibraryCacheScope
+import dev.vantafyn.feature.music.cache.MusicLibraryCacheStore
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -82,6 +85,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private val harmoniaStore = SqliteHarmoniaStore(application)
     private val harmoniaTracker = HarmoniaPlaybackTracker(harmoniaStore)
     private val harmoniaGenerator = HarmoniaGenerator(harmoniaStore, harmoniaStore)
+    private val musicLibraryCache = MusicLibraryCacheStore(application)
     private var session: JellyfinSession? = null
     private var lyricsJob: Job? = null
     private var downloadStatusJob: Job? = null
@@ -92,6 +96,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     private var lastPausedState: Boolean? = null
     private var playRequestJob: Job? = null
     private var musicPageJob: Job? = null
+    private var musicLibraryRefreshJob: Job? = null
     private var pendingPlayTrackId: UUID? = null
     private var musicScreenActive = false
     private var popupLyricsActive = false
@@ -230,11 +235,8 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun getSubsonicCredentials(): SubsonicCredentials? {
-        val prefs = getApplication<Application>().getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
-        val url = prefs.getString("subsonic_url", null) ?: return null
-        val user = prefs.getString("subsonic_username", null) ?: return null
-        val pass = prefs.getString("subsonic_password", null) ?: return null
-        return SubsonicCredentials(url, user, pass)
+        val creds = SecureSubsonicStorage.read(getApplication()) ?: return null
+        return SubsonicCredentials(creds.serverUrl, creds.username, creds.password)
     }
 
     fun isSubsonicActive(): Boolean {
@@ -242,6 +244,29 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         val mode = ExperiencePreferences.getExperienceMode(context)
         val backend = ExperiencePreferences.getMusicBackendType(context)
         return mode == ExperienceMode.MusicOnly && backend == MusicBackendType.OpenSubsonic
+    }
+
+    private fun JellyfinSession.musicCacheScope(): MusicLibraryCacheScope =
+        MusicLibraryCacheScope(
+            providerId = "jellyfin",
+            serverId = server.localId,
+            profileId = profileId,
+        )
+
+    private fun SubsonicCredentials.musicCacheScope(): MusicLibraryCacheScope =
+        MusicLibraryCacheScope(
+            providerId = "opensubsonic",
+            serverId = serverUrl.trim().lowercase(),
+            profileId = username,
+        )
+
+    private suspend fun cacheHomeLibrary(scope: MusicLibraryCacheScope, home: JellyfinMusicHome) {
+        musicLibraryCache.replaceHomeLibrary(
+            scope = scope,
+            albums = home.albums,
+            artists = home.artists,
+            playlists = home.playlists,
+        )
     }
 
     fun loadHome(isRetryAfterRestore: Boolean = false) {
@@ -306,6 +331,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                                 },
                             )
                             homeCache[cacheKey] = jHome
+                            runCatching { cacheHomeLibrary(creds.musicCacheScope(), jHome) }
                             _state.update { it.copy(isLoading = false, home = jHome, errorMessage = null) }
                             loadRecentlyPlayed()
                         }
@@ -340,9 +366,11 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             when (val result = musicRepository.getMusicHome(activeSession)) {
                 is JellyfinResult.Success -> {
                     homeCache[cacheKey] = result.value
+                    runCatching { cacheHomeLibrary(activeSession.musicCacheScope(), result.value) }
                     _state.update {
                         it.copy(isLoading = false, home = result.value, errorMessage = null)
                     }
+                    refreshCompleteSongsInBackground(activeSession, MusicSongsFilter.All, alphabetKey = null)
                     loadHarmoniaPreviews(activeSession)
                 }
                 is JellyfinResult.Failure -> {
@@ -996,12 +1024,55 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun changeSimilarArtistsSeed() {
+        val activeSession = session ?: return
+        val home = _state.value.home ?: return
+        val candidates = similarArtistSeedCandidates(home)
+        if (candidates.isEmpty()) return
+        val currentSeed = home.similarSeedArtist
+        val currentIndex = candidates.indexOfFirst { it.name.equals(currentSeed, ignoreCase = true) }
+        val orderedCandidates = if (currentIndex >= 0) {
+            candidates.drop(currentIndex + 1) + candidates.take(currentIndex + 1)
+        } else {
+            candidates
+        }
+
+        viewModelScope.launch {
+            _state.update { it.copy(isSimilarArtistsLoading = true, errorMessage = null) }
+            var updatedHome: JellyfinMusicHome? = null
+            for (candidate in orderedCandidates) {
+                val result = musicRepository.getSimilarArtists(activeSession, candidate.id, limit = 12)
+                if (result is JellyfinResult.Success && result.value.isNotEmpty()) {
+                    updatedHome = _state.value.home?.copy(
+                        similarArtists = result.value,
+                        similarSeedArtist = candidate.name,
+                    )
+                    break
+                }
+            }
+            _state.update { state ->
+                val homeUpdate = updatedHome
+                if (homeUpdate != null) {
+                    val cacheKey = "jellyfin_${activeSession.server.localId}_${activeSession.profileId}"
+                    homeCache[cacheKey] = homeUpdate
+                    state.copy(home = homeUpdate, isSimilarArtistsLoading = false)
+                } else {
+                    state.copy(isSimilarArtistsLoading = false)
+                }
+            }
+        }
+    }
+
     fun showSongs() {
         _state.update { it.copy(songsFilter = MusicSongsFilter.All, songsAlphabetKey = null, songsSearchQuery = "") }
         loadSongsPage(startIndex = 0)
     }
 
-    private fun loadSongsPage(startIndex: Int) {
+    fun refreshSongsLibrary() {
+        loadSongsPage(startIndex = 0, forceRefresh = true)
+    }
+
+    private fun loadSongsPage(startIndex: Int, forceRefresh: Boolean = false) {
         if (isSubsonicActive()) {
             val creds = getSubsonicCredentials()
             if (creds != null) {
@@ -1074,15 +1145,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
             }
             val result =
                 if (filter.shouldLoadAsCompleteSongList()) {
-                    when (val allSongs = musicRepository.getAllSongs(activeSession, limit = MusicAllSongsLimit)) {
-                        is JellyfinResult.Success -> JellyfinResult.Success(
-                            allSongs.value
-                                .filterForSongs(filter, alphabetKey)
-                                .sortedWith(musicSongSortComparator)
-                                .toCompleteSongsPage(),
-                        )
-                        is JellyfinResult.Failure -> allSongs
-                    }
+                    loadCompleteSongsPage(activeSession, filter, alphabetKey, forceRefresh)
                 } else {
                     musicRepository.getSongsPage(activeSession, startIndex, filter = filter, alphabetKey = alphabetKey)
                 }
@@ -1093,6 +1156,85 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(isMusicPageLoading = false, errorMessage = result.message)
                 }
+            }
+        }
+    }
+
+    private suspend fun loadCompleteSongsPage(
+        activeSession: JellyfinSession,
+        filter: MusicSongsFilter,
+        alphabetKey: String?,
+        forceRefresh: Boolean,
+    ): JellyfinResult<JellyfinMusicTrackPage> {
+        val scope = activeSession.musicCacheScope()
+        val cachedTracks = runCatching {
+            musicLibraryCache.getSongs(scope, filter, alphabetKey)
+        }.getOrDefault(emptyList())
+        val cacheIsFresh = cachedTracks.isNotEmpty() && runCatching {
+            musicLibraryCache.hasFreshSongs(scope)
+        }.getOrDefault(false)
+
+        if (!forceRefresh && cacheIsFresh) {
+            return JellyfinResult.Success(cachedTracks.toCompleteSongsPage())
+        }
+
+        if (!forceRefresh && cachedTracks.isNotEmpty()) {
+            refreshCompleteSongsInBackground(activeSession, filter, alphabetKey)
+            return JellyfinResult.Success(cachedTracks.toCompleteSongsPage())
+        }
+
+        return when (val allSongs = musicRepository.getAllSongs(activeSession, limit = MusicAllSongsLimit)) {
+            is JellyfinResult.Success -> {
+                runCatching { musicLibraryCache.replaceSongs(scope, allSongs.value) }
+                val localTracks = runCatching {
+                    musicLibraryCache.getSongs(scope, filter, alphabetKey)
+                }.getOrDefault(
+                    allSongs.value
+                        .filterForSongs(filter, alphabetKey)
+                        .sortedWith(musicSongSortComparator),
+                )
+                JellyfinResult.Success(localTracks.toCompleteSongsPage())
+            }
+            is JellyfinResult.Failure -> {
+                if (cachedTracks.isNotEmpty()) {
+                    JellyfinResult.Success(cachedTracks.toCompleteSongsPage())
+                } else {
+                    allSongs
+                }
+            }
+        }
+    }
+
+    private fun refreshCompleteSongsInBackground(
+        activeSession: JellyfinSession,
+        filter: MusicSongsFilter,
+        alphabetKey: String?,
+    ) {
+        if (musicLibraryRefreshJob?.isActive == true) return
+        val scope = activeSession.musicCacheScope()
+        musicLibraryRefreshJob = viewModelScope.launch {
+            when (val allSongs = musicRepository.getAllSongs(activeSession, limit = MusicAllSongsLimit)) {
+                is JellyfinResult.Success -> {
+                    runCatching { musicLibraryCache.replaceSongs(scope, allSongs.value) }
+                    val refreshedTracks = runCatching {
+                        musicLibraryCache.getSongs(scope, filter, alphabetKey)
+                    }.getOrDefault(
+                        allSongs.value
+                            .filterForSongs(filter, alphabetKey)
+                            .sortedWith(musicSongSortComparator),
+                    )
+                    _state.update { state ->
+                        val stillSameSongsScreen = state.screen is MusicScreenState.Songs &&
+                            state.songsFilter == filter &&
+                            state.songsAlphabetKey.takeIf { filter.supportsAlphabetRail() }?.normalizedSongsAlphabetKey() == alphabetKey
+                        if (!stillSameSongsScreen) {
+                            state
+                        } else {
+                            state.copy(screen = MusicScreenState.Songs(refreshedTracks.toCompleteSongsPage()))
+                        }
+                    }
+                }
+                is JellyfinResult.Failure -> Unit
             }
         }
     }
@@ -2359,12 +2501,50 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 } else {
                     "Added $count tracks to ${playlist.name}"
                 }
-                _state.update {
-                    it.copy(
+                var newTotalItems = 0
+                _state.update { state ->
+                    val updatedScreen = if (state.screen is MusicScreenState.Playlist && state.screen.playlist.id == playlist.id) {
+                        val currentTracks = state.screen.tracks
+                        val updatedTracks = currentTracks + tracks
+                        val total = (state.screen.page.totalItems + count).coerceAtLeast(updatedTracks.size)
+                        newTotalItems = total
+                        state.screen.copy(
+                            page = state.screen.page.copy(
+                                tracks = updatedTracks,
+                                totalItems = total,
+                            )
+                        )
+                    } else {
+                        state.screen
+                    }
+                    state.copy(
+                        screen = updatedScreen,
                         message = msg,
                         playlistDuplicatePrompt = null,
-                        home = it.home?.incrementPlaylistCount(playlist.id, delta = count),
+                        home = state.home?.incrementPlaylistCount(playlist.id, delta = count),
                     )
+                }
+
+                // If currently viewing this playlist, refresh download status observation with new count
+                if (newTotalItems > 0) {
+                    observePlaylistDownloadStatus(activeSession, playlist.id, newTotalItems)
+                }
+
+                // If the playlist was already downloaded offline, automatically queue the newly added tracks
+                val progress = offlineDownloadManager.getPlaylistDownloadProgress(
+                    session = activeSession,
+                    playlistId = playlist.id,
+                    expectedTrackCount = 1,
+                )
+                if (progress.completedCount > 0) {
+                    offlineDownloadManager.queueMusicPlaylist(
+                        session = activeSession,
+                        playlist = playlist,
+                        tracks = tracks,
+                        requireWifi = readDownloadWifiOnlyDefault(),
+                    )
+                    val expectedCount = if (newTotalItems > 0) newTotalItems else (progress.totalCount + count)
+                    observePlaylistDownloadStatus(activeSession, playlist.id, expectedCount)
                 }
             }
             is JellyfinResult.Failure -> {
@@ -2391,14 +2571,17 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 is JellyfinResult.Success -> {
                     val removedTrackIds = tracks.map { it.id }.toSet()
                     val removedCount = tracks.size
+                    var remainingTotal = -1
                     _state.update { state ->
                         val updatedScreen = if (state.screen is MusicScreenState.Playlist && state.screen.playlist.id == playlist.id) {
                             val currentTracks = state.screen.tracks
                             val remainingTracks = currentTracks.filterNot { removedTrackIds.contains(it.id) }
+                            val total = (state.screen.page.totalItems - removedCount).coerceAtLeast(0)
+                            remainingTotal = total
                             state.screen.copy(
                                 page = state.screen.page.copy(
                                     tracks = remainingTracks,
-                                    totalItems = (state.screen.page.totalItems - removedCount).coerceAtLeast(0)
+                                    totalItems = total
                                 )
                             )
                         } else {
@@ -2409,6 +2592,9 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                             message = if (removedCount == 1) "Removed from ${playlist.name}" else "Removed $removedCount tracks from ${playlist.name}",
                             home = state.home?.decrementPlaylistCount(playlist.id, count = removedCount),
                         )
+                    }
+                    if (remainingTotal >= 0) {
+                        observePlaylistDownloadStatus(activeSession, playlist.id, remainingTotal)
                     }
                 }
                 is JellyfinResult.Failure -> {
@@ -2886,6 +3072,7 @@ class MusicViewModel(application: Application) : AndroidViewModel(application) {
                 is JellyfinResult.Success -> {
                     val cacheKey = "jellyfin_${activeSession.server.localId}_${activeSession.profileId}"
                     homeCache[cacheKey] = homeResult.value
+                    runCatching { cacheHomeLibrary(activeSession.musicCacheScope(), homeResult.value) }
                     val found = homeResult.value.playlists.any { playlist ->
                         playlist.id == playlistId || playlist.name.equals(playlistName, ignoreCase = true)
                     }
@@ -2967,6 +3154,7 @@ data class MusicUiState(
     val selectedHomeMood: MusicHomeMood = MusicHomeMood.All,
     val playlistDuplicatePrompt: PlaylistDuplicatePrompt? = null,
     val isCheckingPlaylistDuplicates: Boolean = false,
+    val isSimilarArtistsLoading: Boolean = false,
 )
 
 enum class MusicHomeMood(val label: String) {
@@ -3017,6 +3205,15 @@ private fun MusicSongsFilter.supportsAlphabetRail(): Boolean =
 
 private fun MusicSongsFilter.shouldLoadAsCompleteSongList(): Boolean =
     this == MusicSongsFilter.All || this == MusicSongsFilter.AZ || this == MusicSongsFilter.Favorites
+
+private fun similarArtistSeedCandidates(home: JellyfinMusicHome): List<JellyfinMusicArtist> {
+    val artistsByName = home.artists.associateBy { it.name.trim().lowercase() }
+    val seedNames = (home.onRepeat + home.recentlyAdded + home.songs)
+        .map { it.artist.trim() }
+        .filter { it.isNotBlank() }
+    return (seedNames.mapNotNull { artistsByName[it.lowercase()] } + home.artists)
+        .distinctBy { it.id }
+}
 
 private fun String?.normalizedSongsAlphabetKey(): String? {
     val value = this?.trim()?.uppercase()?.takeIf { it.isNotEmpty() } ?: return null

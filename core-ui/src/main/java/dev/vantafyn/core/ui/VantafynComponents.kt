@@ -62,6 +62,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -93,6 +94,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -323,20 +325,33 @@ fun VantafynGlassSurface(
             .background(variant.surfaceBrush(selected = selected, focused = focused, enabled = enabled))
             .border(BorderStroke(if (focused) 1.4.dp else 1.dp, variant.borderBrush(selected, focused, enabled)), shape),
     ) {
+        // All gradient overlays rendered in a single draw pass (cached) instead of 3-4 separate Box composables
         Box(
             modifier = Modifier
                 .matchParentSize()
-                .background(
-                    if (variant == VantafynGlassVariant.Dock) {
-                        Brush.verticalGradient(
+                .drawWithCache {
+                    val isDock = variant == VantafynGlassVariant.Dock
+                    if (isDock) {
+                        val dockVertical = Brush.verticalGradient(
                             listOf(
                                 Color.White.copy(alpha = if (enabled) 0.095f else 0.04f),
                                 Color.White.copy(alpha = if (enabled) 0.030f else 0.014f),
                                 Color.Transparent,
                             ),
                         )
+                        val dockAccent = Brush.linearGradient(
+                            listOf(
+                                VantafynGradients.AccentColors.first().copy(alpha = 0.035f),
+                                Color.Transparent,
+                                VantafynGradients.AccentColors.last().copy(alpha = 0.040f),
+                            ),
+                        )
+                        onDrawBehind {
+                            drawRect(dockVertical)
+                            drawRect(dockAccent)
+                        }
                     } else {
-                        Brush.radialGradient(
+                        val radialOverlay = Brush.radialGradient(
                             colors = listOf(
                                 VantafynGlassPalette.CyanSpecular.copy(
                                     alpha = if (enabled) {
@@ -357,29 +372,15 @@ fun VantafynGlassSurface(
                             center = Offset(90f, 20f),
                             radius = 520f,
                         )
-                    },
-                ),
-        )
-        if (variant != VantafynGlassVariant.Dock) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.verticalGradient(
+                        val verticalOverlay = Brush.verticalGradient(
                             colorStops = arrayOf(
                                 0.00f to Color.White.copy(alpha = if (enabled) 0.105f else 0.040f),
                                 0.18f to Color.White.copy(alpha = if (enabled) 0.030f else 0.012f),
                                 0.58f to Color.Transparent,
                                 1.00f to Color.Black.copy(alpha = if (enabled) 0.055f else 0.030f),
                             ),
-                        ),
-                    ),
-            )
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.linearGradient(
+                        )
+                        val linearOverlay = Brush.linearGradient(
                             colorStops = arrayOf(
                                 0.00f to Color.White.copy(alpha = if (enabled) 0.030f else 0.010f),
                                 0.22f to Color.Transparent,
@@ -388,25 +389,15 @@ fun VantafynGlassSurface(
                             ),
                             start = Offset.Zero,
                             end = Offset(720f, 520f),
-                        ),
-                    ),
-            )
-        }
-        if (variant == VantafynGlassVariant.Dock) {
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                VantafynGradients.AccentColors.first().copy(alpha = 0.035f),
-                                Color.Transparent,
-                                VantafynGradients.AccentColors.last().copy(alpha = 0.040f),
-                            ),
-                        ),
-                    ),
-            )
-        }
+                        )
+                        onDrawBehind {
+                            drawRect(radialOverlay)
+                            drawRect(verticalOverlay)
+                            drawRect(linearOverlay)
+                        }
+                    }
+                },
+        )
         Box(modifier = Modifier.padding(contentPadding), content = content)
     }
 }
@@ -1209,10 +1200,19 @@ fun VantafynCircularProgressIndicator(
             }
         }
     } else {
+        val lifecycleOwner = LocalLifecycleOwner.current
+        var isResumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED) }
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                isResumed = event == Lifecycle.Event.ON_RESUME
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        }
         val transition = rememberInfiniteTransition(label = "vantafynCircularSpinner")
         val rotation by transition.animateFloat(
             initialValue = 0f,
-            targetValue = 360f,
+            targetValue = if (isResumed) 360f else 0f,
             animationSpec = infiniteRepeatable(
                 animation = tween(durationMillis = 1100, easing = LinearEasing),
                 repeatMode = RepeatMode.Restart,

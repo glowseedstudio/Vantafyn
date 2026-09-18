@@ -1,0 +1,28 @@
+[
+  {
+    "category": "General",
+    "guid": "fd7d0e8a-89a9-45a6-8f2b-1f4c5bb1c8cb",
+    "name": "Vantafyn Companion",
+    "description": "Optional server-side companion features for Vantafyn clients: UnifiedPush notification routing, settings sync, watch party foundations, and Ombi requests.",
+    "overview": "UnifiedPush notification support, Ombi request routing, settings sync, and watch party coordination.",
+    "owner": "Glowseed Studio",
+    "versions": [
+      {
+        "version": "0.1.0.0",
+        "changelog": "UnifiedPush notifications, settings sync, and requests for Jellyfin 10.11.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.12/Vantafyn.Plugin.Companion_0.1.0_net9.zip",
+        "checksum": "ac322896aca0d8b9b0d198655aa0b754",
+        "timestamp": "2026-09-18T04:46:51Z"
+      },
+      {
+        "version": "0.1.0.1",
+        "changelog": "UnifiedPush notifications, settings sync, and requests for Jellyfin 12.0.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.12/Vantafyn.Plugin.Companion_0.1.0_net10.zip",
+        "checksum": "8607f1991302605e4f46b4b3726d008f",
+        "timestamp": "2026-09-18T04:46:51Z"
+      }
+    ]
+  }
+]

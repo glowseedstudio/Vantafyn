@@ -203,7 +203,7 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                             state.currentTrack != null &&
                             playbackController.sessionPlayer.playbackState == Player.STATE_BUFFERING
                         if (!isBufferingOrStarting) {
-                            if (isForegroundService) {
+                            if (state.currentTrack == null && isForegroundService) {
                                 stopForeground(STOP_FOREGROUND_DETACH)
                                 isForegroundService = false
                                 playbackController.notifyForegroundDetached()
@@ -402,7 +402,6 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         lastWidgetPositionBucket = positionBucket
         lastWidgetUpdateAtMs = now
         persistWidgetState(state)
-        sendBroadcast(Intent(ACTION_PLAYBACK_STATE_CHANGED).setPackage(packageName))
     }
 
     private fun persistWidgetState(state: VantafynMusicPlaybackState) {
@@ -1292,12 +1291,9 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
                 val mode = ExperiencePreferences.getExperienceMode(context)
                 val backend = ExperiencePreferences.getMusicBackendType(context)
                 if (mode == ExperienceMode.MusicOnly && backend == MusicBackendType.OpenSubsonic) {
-                    val prefs = context.getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
-                    val url = prefs.getString("subsonic_url", null)
-                    val user = prefs.getString("subsonic_username", null)
-                    val pass = prefs.getString("subsonic_password", null)
-                    if (url != null && user != null && pass != null) {
-                        SubsonicMusicDataProvider(SubsonicClient(SubsonicCredentials(url, user, pass)), context).setFavorite(currentTrack.id, targetFavorite)
+                    val creds = SecureSubsonicStorage.read(context)
+                    if (creds != null) {
+                        SubsonicMusicDataProvider(SubsonicClient(SubsonicCredentials(creds.serverUrl, creds.username, creds.password)), context).setFavorite(currentTrack.id, targetFavorite)
                     }
                 } else {
                     val repositories = JellyfinRepositoryProvider(context)
@@ -1387,7 +1383,6 @@ class VantafynMusicPlaybackService : MediaLibraryService() {
         const val CUSTOM_COMMAND_TOGGLE_SHUFFLE = "dev.vantafyn.music.command.TOGGLE_SHUFFLE"
         const val CUSTOM_COMMAND_REWIND_15 = "dev.vantafyn.music.command.REWIND_15"
         const val CUSTOM_COMMAND_FAST_FORWARD_30 = "dev.vantafyn.music.command.FAST_FORWARD_30"
-        const val ACTION_PLAYBACK_STATE_CHANGED = "dev.vantafyn.music.action.PLAYBACK_STATE_CHANGED"
         private const val WIDGET_PREFS = "vantafyn_widget_playback"
         private const val KEY_TITLE = "title"
         private const val KEY_ARTIST = "artist"

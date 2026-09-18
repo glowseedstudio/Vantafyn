@@ -13,7 +13,9 @@ import java.security.spec.X509EncodedKeySpec
 import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
 import javax.crypto.SecretKey
+import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -24,6 +26,7 @@ object TvCryptoUtils {
     private const val EC_CURVE = "secp256r1"
     private const val GCM_TAG_LENGTH_BITS = 128
     private const val GCM_IV_LENGTH_BYTES = 12
+    private const val PBKDF2_ITERATIONS = 100_000
     private val secureRandom = SecureRandom()
 
     fun generateEcKeyPair(): KeyPair {
@@ -53,6 +56,57 @@ object TvCryptoUtils {
         val md = MessageDigest.getInstance("SHA-256")
         val aesKeyBytes = md.digest(sharedSecret)
         return SecretKeySpec(aesKeyBytes, "AES")
+    }
+
+    /**
+     * Derives an AES-256 key from a pairing code using PBKDF2.
+     * The salt is stored with the encrypted data so the receiver can derive the same key.
+     */
+    fun deriveKeyFromPairingCode(code: String, salt: ByteArray): SecretKey {
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val spec = PBEKeySpec(code.toCharArray(), salt, PBKDF2_ITERATIONS, 256)
+        val tmp = factory.generateSecret(spec)
+        return SecretKeySpec(tmp.encoded, "AES")
+    }
+
+    /**
+     * Encrypts a payload using a key derived from the pairing code.
+     * Returns Base64(salt) + ":" + Base64(iv) + ":" + Base64(ciphertext).
+     */
+    fun encryptWithPairingCode(plainText: String, code: String): String {
+        val salt = ByteArray(16)
+        secureRandom.nextBytes(salt)
+        val key = deriveKeyFromPairingCode(code, salt)
+
+        val iv = ByteArray(GCM_IV_LENGTH_BYTES)
+        secureRandom.nextBytes(iv)
+
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
+        val cipherBytes = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+
+        return "${Base64.encodeToString(salt, Base64.NO_WRAP)}:${Base64.encodeToString(iv, Base64.NO_WRAP)}:${Base64.encodeToString(cipherBytes, Base64.NO_WRAP)}"
+    }
+
+    /**
+     * Decrypts a payload encrypted with [encryptWithPairingCode].
+     * Returns the plaintext or null if decryption fails (wrong code or tampered data).
+     */
+    fun decryptWithPairingCode(encrypted: String, code: String): String? {
+        return try {
+            val parts = encrypted.split(":", limit = 3)
+            if (parts.size != 3) return null
+            val salt = Base64.decode(parts[0], Base64.NO_WRAP)
+            val iv = Base64.decode(parts[1], Base64.NO_WRAP)
+            val cipherBytes = Base64.decode(parts[2], Base64.NO_WRAP)
+            val key = deriveKeyFromPairingCode(code, salt)
+
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
+            String(cipher.doFinal(cipherBytes), Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
     }
 
     fun encryptAesGcm(plainText: String, key: SecretKey): Pair<String, String> {

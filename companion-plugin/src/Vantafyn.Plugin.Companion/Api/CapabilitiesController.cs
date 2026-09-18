@@ -52,7 +52,7 @@ public sealed class CapabilitiesController(
             notifications = new
             {
                 liveSession = config.NotificationsEnabled,
-                backgroundPush = false
+                backgroundPush = config.NotificationsEnabled
             }
         });
     }

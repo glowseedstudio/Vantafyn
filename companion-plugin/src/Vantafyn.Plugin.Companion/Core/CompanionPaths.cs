@@ -7,6 +7,7 @@ public interface ICompanionPaths
     string PersonalPlaylistsRoot { get; }
     string OmbiSessionsRoot { get; }
     string SecretsRoot { get; }
+    string PushRegistrationsRoot { get; }
 }
 
 public sealed class CompanionPaths : ICompanionPaths
@@ -21,6 +22,8 @@ public sealed class CompanionPaths : ICompanionPaths
     public string OmbiSessionsRoot => Ensure(Path.Combine(DataRoot, "ombi-sessions"));
 
     public string SecretsRoot => Ensure(Path.Combine(DataRoot, "secrets"));
+
+    public string PushRegistrationsRoot => Ensure(Path.Combine(DataRoot, "push-registrations"));
 
     private static string Ensure(string path)
     {

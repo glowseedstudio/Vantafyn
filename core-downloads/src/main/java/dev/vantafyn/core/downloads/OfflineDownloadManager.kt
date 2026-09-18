@@ -163,6 +163,7 @@ class OfflineDownloadManager(
     ): JellyfinResult<Int> {
         if (tracks.isEmpty()) return JellyfinResult.Failure("This playlist does not have any tracks to save.")
         var queued = 0
+        var existingCompleted = 0
         var firstFailure: JellyfinResult.Failure? = null
         tracks.forEachIndexed { index, track ->
             val enriched = track.copy(
@@ -181,13 +182,18 @@ class OfflineDownloadManager(
                 is JellyfinResult.Success -> {
                     val ordered = result.value.copy(sortTitle = index.toString().padStart(5, '0') + " ${track.title}")
                     repository.upsert(ordered)
-                    queued += 1
+                    if (result.value.state == DownloadState.Completed) {
+                        existingCompleted += 1
+                    } else {
+                        queued += 1
+                    }
                 }
                 is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result
             }
         }
         return when {
             queued > 0 -> JellyfinResult.Success(queued)
+            existingCompleted > 0 -> JellyfinResult.Success(existingCompleted)
             firstFailure != null -> firstFailure
             else -> JellyfinResult.Failure("This playlist could not be saved offline.")
         }
@@ -201,6 +207,7 @@ class OfflineDownloadManager(
     ): JellyfinResult<Int> {
         if (tracks.isEmpty()) return JellyfinResult.Failure("This album does not have any tracks to save.")
         var queued = 0
+        var existingCompleted = 0
         var firstFailure: JellyfinResult.Failure? = null
         tracks.forEachIndexed { index, track ->
             val enriched = track.copy(
@@ -212,13 +219,18 @@ class OfflineDownloadManager(
                 is JellyfinResult.Success -> {
                     val ordered = result.value.copy(sortTitle = index.toString().padStart(5, '0') + " ${track.title}")
                     repository.upsert(ordered)
-                    queued += 1
+                    if (result.value.state == DownloadState.Completed) {
+                        existingCompleted += 1
+                    } else {
+                        queued += 1
+                    }
                 }
                 is JellyfinResult.Failure -> if (firstFailure == null) firstFailure = result
             }
         }
         return when {
             queued > 0 -> JellyfinResult.Success(queued)
+            existingCompleted > 0 -> JellyfinResult.Success(existingCompleted)
             firstFailure != null -> firstFailure
             else -> JellyfinResult.Failure("This album could not be saved offline.")
         }
@@ -470,9 +482,18 @@ class OfflineDownloadManager(
         )
         val playlistRecords = all.filter { it.parentId == playlistId.toString() }
         val completedCount = playlistRecords.count { it.state == DownloadState.Completed }
-        val inProgressCount = playlistRecords.count { it.state == DownloadState.Downloading || it.state == DownloadState.Queued }
-        val isCompleted = completedCount >= expectedTrackCount
-        val isDownloading = inProgressCount > 0 || (playlistRecords.isNotEmpty() && !isCompleted)
+        val inProgressCount = playlistRecords.count {
+            it.state in setOf(
+                DownloadState.Downloading,
+                DownloadState.Queued,
+                DownloadState.Preparing,
+                DownloadState.Finalizing,
+                DownloadState.WaitingForWifi,
+                DownloadState.WaitingForNetwork,
+            )
+        }
+        val isCompleted = expectedTrackCount > 0 && completedCount >= expectedTrackCount
+        val isDownloading = inProgressCount > 0
         val progress = if (expectedTrackCount > 0) (completedCount.toFloat() / expectedTrackCount.toFloat()).coerceIn(0f, 1f) else 0f
         return MediaDownloadProgress(
             completedCount = completedCount,
@@ -495,9 +516,18 @@ class OfflineDownloadManager(
         )
         val albumRecords = all.filter { it.albumId == albumId.toString() }
         val completedCount = albumRecords.count { it.state == DownloadState.Completed }
-        val inProgressCount = albumRecords.count { it.state == DownloadState.Downloading || it.state == DownloadState.Queued }
-        val isCompleted = completedCount >= expectedTrackCount
-        val isDownloading = inProgressCount > 0 || (albumRecords.isNotEmpty() && !isCompleted)
+        val inProgressCount = albumRecords.count {
+            it.state in setOf(
+                DownloadState.Downloading,
+                DownloadState.Queued,
+                DownloadState.Preparing,
+                DownloadState.Finalizing,
+                DownloadState.WaitingForWifi,
+                DownloadState.WaitingForNetwork,
+            )
+        }
+        val isCompleted = expectedTrackCount > 0 && completedCount >= expectedTrackCount
+        val isDownloading = inProgressCount > 0
         val progress = if (expectedTrackCount > 0) (completedCount.toFloat() / expectedTrackCount.toFloat()).coerceIn(0f, 1f) else 0f
         return MediaDownloadProgress(
             completedCount = completedCount,

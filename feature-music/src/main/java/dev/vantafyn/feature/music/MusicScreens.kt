@@ -561,7 +561,9 @@ fun MusicScreen(
                         musicListBoundsInWindow = runCatching { coords.boundsInWindow() }.getOrNull()
                     },
                 contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
-                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(
+                    if (state.screen is MusicScreenState.Songs) 10.dp else VantafynSpacing.lg
+                ),
             ) {
                 val home = state.home
                 val isHomeEmpty = home == null || (
@@ -596,6 +598,17 @@ fun MusicScreen(
                                         isFavorite = s.playlist.isFavorite,
                                         onClick = { viewModel.togglePlaylistFavorite(s.playlist) },
                                     )
+                                }
+                            }
+                            is MusicScreenState.Songs -> {
+                                {
+                                    IconButton(onClick = viewModel::refreshSongsLibrary) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Refresh,
+                                            contentDescription = "Refresh music library",
+                                            tint = VantafynColors.Ink,
+                                        )
+                                    }
                                 }
                             }
                             else -> null
@@ -834,6 +847,8 @@ fun MusicScreen(
                                                     onLongPress = { artist -> musicContextItem = MusicContextItem.Artist(artist) },
                                                     title = "Similar to ${home.similarSeedArtist}",
                                                     icon = Icons.Rounded.AutoAwesome,
+                                                    onChange = viewModel::changeSimilarArtistsSeed,
+                                                    changeEnabled = !state.isSimilarArtistsLoading,
                                                 )
                                             }
                                         }
@@ -1070,7 +1085,12 @@ fun MusicScreen(
                         MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = contentRevealKey) {
                             MusicDetailHeader(
                                 title = screen.album.title,
-                                subtitle = screen.album.artist ?: "Album",
+                                subtitle = run {
+                                    val artist = screen.album.artist ?: "Album"
+                                    val trackCount = screen.tracks.size
+                                    val totalMs = screen.tracks.sumOf { it.durationMs ?: 0L }
+                                    if (trackCount > 0) "$artist · $trackCount tracks · ${totalMs.formatTotalDuration()}" else artist
+                                },
                                 imageUrl = screen.album.artworkUrl,
                                 onBack = viewModel::showHome,
                                 onDownload = { viewModel.queueAlbumDownload(screen.album, screen.tracks) },
@@ -1169,7 +1189,11 @@ fun MusicScreen(
                         MusicContentReveal(index = 0, animate = nestedRevealActive, revealKey = contentRevealKey) {
                             MusicDetailHeader(
                                 title = screen.playlist.name,
-                                subtitle = "${screen.page.totalItems.coerceAtLeast(screen.tracks.size)} tracks",
+                                subtitle = run {
+                                    val trackCount = screen.page.totalItems.coerceAtLeast(screen.tracks.size)
+                                    val totalMs = screen.tracks.sumOf { it.durationMs ?: 0L }
+                                    "$trackCount tracks · ${totalMs.formatTotalDuration()}"
+                                },
                                 imageUrl = screen.playlist.imageUrl,
                                 onBack = viewModel::showHome,
                                 onDownload = { viewModel.queuePlaylistDownload(screen.playlist, screen.tracks) },
@@ -1250,6 +1274,22 @@ fun MusicScreen(
                     }
                     item(key = "songs-track-list-title") {
                         Text("All Songs", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+                    }
+                    if (filteredTracks.isEmpty() && state.isMusicPageLoading) {
+                        item(key = "songs-initial-loading") {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 20.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(28.dp),
+                                    color = VantafynColors.Primary,
+                                    strokeWidth = 2.5.dp,
+                                )
+                            }
+                        }
                     }
                     itemsIndexed(
                         items = filteredTracks,
@@ -1878,7 +1918,7 @@ private fun HarmoniaRecapCard(
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(28.dp)
+                    .blur(15.dp)
                     .alpha(0.35f),
                 contentScale = ContentScale.Crop,
             )
@@ -2156,7 +2196,7 @@ private fun SavedHarmoniaCard(
                 contentDescription = null,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(26.dp)
+                    .blur(15.dp)
                     .alpha(0.32f),
                 contentScale = ContentScale.Crop,
             )
@@ -2804,7 +2844,7 @@ private fun HarmoniaNebulaBackdrop(slideIndex: Int, artworkUrl: String?) {
             contentDescription = null,
             modifier = Modifier
                 .fillMaxSize()
-                .blur(45.dp)
+                .blur(20.dp)
                 .alpha(0.25f),
             contentScale = ContentScale.Crop,
         )
@@ -2984,10 +3024,19 @@ private fun HarmoniaIntroVisual(totalMs: Long, trackCount: Int) {
         )
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isResumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            isResumed = event == Lifecycle.Event.ON_RESUME
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val infiniteTransition = rememberInfiniteTransition(label = "introPulse")
     val pulseScale by infiniteTransition.animateFloat(
         initialValue = 0.96f,
-        targetValue = 1.04f,
+        targetValue = if (isResumed) 1.04f else 0.96f,
         animationSpec = infiniteRepeatable(tween(2400, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
         label = "introPulseScale",
     )
@@ -3773,10 +3822,19 @@ private fun HarmoniaPersonaVisual(persona: HarmoniaPersona) {
         else -> Icons.Rounded.Headphones
     }
 
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var isResumed by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState == Lifecycle.State.RESUMED) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            isResumed = event == Lifecycle.Event.ON_RESUME
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     val infiniteTransition = rememberInfiniteTransition(label = "personaGlow")
     val glowScale by infiniteTransition.animateFloat(
         initialValue = 0.95f,
-        targetValue = 1.05f,
+        targetValue = if (isResumed) 1.05f else 0.95f,
         animationSpec = infiniteRepeatable(tween(2000, easing = FastOutSlowInEasing), repeatMode = RepeatMode.Reverse),
         label = "personaGlowScale",
     )
@@ -5574,22 +5632,44 @@ private fun MusicArtistRow(
     onLongPress: ((JellyfinMusicArtist) -> Unit)? = null,
     title: String = "Artists",
     icon: ImageVector? = null,
+    onChange: (() -> Unit)? = null,
+    changeEnabled: Boolean = true,
 ) {
     if (artists.isEmpty()) return
     Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            if (icon != null) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = VantafynColors.Ink,
-                    modifier = Modifier.size(18.dp),
-                )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (icon != null) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = VantafynColors.Ink,
+                        modifier = Modifier.size(18.dp),
+                    )
+                }
+                Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
             }
-            Text(title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold)
+            if (onChange != null) {
+                IconButton(
+                    onClick = onChange,
+                    enabled = changeEnabled,
+                    modifier = Modifier.size(38.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Shuffle,
+                        contentDescription = "Change similar artists",
+                        tint = VantafynColors.Ink.copy(alpha = if (changeEnabled) 0.85f else 0.35f),
+                        modifier = Modifier.size(19.dp),
+                    )
+                }
+            }
         }
         LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(artists, key = { index, artist -> "${artist.id}-$index" }) { _, artist ->
@@ -6358,9 +6438,9 @@ private fun MusicDetailHeader(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         if (trackImageUrls.size >= 2) {
-            PlaylistArtGrid(trackImageUrls, Modifier.size(188.dp))
+            PlaylistArtGrid(trackImageUrls, Modifier.size(216.dp))
         } else {
-            MusicCollectionArtwork(imageUrl, Modifier.size(188.dp), title = title, subtitle = subtitle)
+            MusicCollectionArtwork(imageUrl, Modifier.size(216.dp), title = title, subtitle = subtitle)
         }
         Text(
             title,
@@ -6448,7 +6528,7 @@ private fun MusicDetailHeader(
                             .size(54.dp)
                             .clip(RoundedCornerShape(18.dp))
                             .clickable(
-                                enabled = downloadButtonState == DetailDownloadState.READY,
+                                enabled = downloadButtonState != DetailDownloadState.DOWNLOADING,
                                 onClick = onDownload,
                             ),
                         variant = VantafynGlassVariant.Card,
@@ -10044,7 +10124,10 @@ private fun PremiumCoverPlaceholder(
 }
 
 @Composable
-private fun PlaylistArtGrid(trackImageUrls: List<String>, modifier: Modifier = Modifier) {
+private fun PlaylistArtGrid(
+    trackImageUrls: List<String>,
+    modifier: Modifier = Modifier,
+) {
     val urls = trackImageUrls.take(4)
     val fallback = urls.firstOrNull()
     Box(
@@ -10386,6 +10469,13 @@ private fun Long.formatTime(): String {
     } else {
         "$minutes:${seconds.toString().padStart(2, '0')}"
     }
+}
+
+private fun Long.formatTotalDuration(): String {
+    val totalMinutes = (this / 60_000L).coerceAtLeast(0L)
+    val hours = totalMinutes / 60L
+    val minutes = totalMinutes % 60L
+    return if (hours > 0) "${hours}h ${minutes}m" else "${minutes}m"
 }
 
 private fun Int.groupedMusicCountLabel(): String = "%,d".format(this)

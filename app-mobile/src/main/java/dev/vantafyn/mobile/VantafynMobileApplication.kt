@@ -13,8 +13,22 @@ import coil3.request.crossfade
 import dev.vantafyn.core.media.VantafynMediaCache
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
+import dev.vantafyn.core.integrations.push.UnifiedPushManager
+import dev.vantafyn.core.integrations.push.UnifiedPushRegistrationState
 
 class VantafynMobileApplication : Application(), SingletonImageLoader.Factory {
+
+    override fun onCreate() {
+        super.onCreate()
+        val pushManager = UnifiedPushManager.getInstance(this)
+        // Initialize push server sync listener
+        dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(this)
+
+        if (pushManager.status.value.registrationState == UnifiedPushRegistrationState.Registered) {
+            // Re-register upon startup as recommended by UnifiedPush spec to maintain registration consistency
+            pushManager.registerWithDistributor()
+        }
+    }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         val okHttpClient = OkHttpClient.Builder()
@@ -23,22 +37,13 @@ class VantafynMobileApplication : Application(), SingletonImageLoader.Factory {
             .addInterceptor { chain ->
                 val original = chain.request()
                 val headers = VantafynMediaCache.authHeaderProvider?.invoke().orEmpty()
-                android.util.Log.d("VantafynImage", ">>> REQ: ${original.url} headers=$headers")
                 val reqBuilder = original.newBuilder()
                 headers.forEach { (k, v) ->
                     if (original.header(k) == null) {
                         reqBuilder.addHeader(k, v)
                     }
                 }
-                val finalReq = reqBuilder.build()
-                try {
-                    val resp = chain.proceed(finalReq)
-                    android.util.Log.d("VantafynImage", "<<< RESP: ${resp.code} ${resp.message} for ${finalReq.url}")
-                    resp
-                } catch (e: Exception) {
-                    android.util.Log.e("VantafynImage", "<<< ERR: ${e.message} for ${finalReq.url}", e)
-                    throw e
-                }
+                chain.proceed(reqBuilder.build())
             }
             .build()
 

@@ -99,6 +99,21 @@ class AudiobookModelTest {
     }
 
     @Test
+    fun doesNotTreatMovieSceneChaptersAsAudiobook() {
+        val detail = createMediaDetail(
+            title = "The New Mutants",
+            itemType = "Movie",
+            chapters = listOf(
+                JellyfinChapter("scene-1", "Scene 1", startPositionMs = 0L, durationMs = 900_000L),
+                JellyfinChapter("scene-2", "Scene 2", startPositionMs = 900_000L, durationMs = 900_000L),
+            ),
+            isAudiobook = false,
+        )
+
+        assertFalse(detail.isAudiobookMedia)
+    }
+
+    @Test
     fun identifiesBookFolderCorrectly() {
         val bookFolderItem = createMediaItem(
             title = "Book 01 - Harry Potter and the Philosopher's Stone",

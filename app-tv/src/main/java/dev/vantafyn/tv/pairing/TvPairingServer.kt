@@ -2,6 +2,7 @@ package dev.vantafyn.tv.pairing
 
 import android.os.Build
 import android.util.Log
+import dev.vantafyn.core.jellyfin.TvCryptoUtils
 import dev.vantafyn.core.jellyfin.TvDiscoveryBeacon
 import dev.vantafyn.core.jellyfin.TvPairingPayload
 import dev.vantafyn.core.jellyfin.TvPairingResponse
@@ -14,6 +15,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.DatagramPacket
@@ -94,8 +96,6 @@ class TvPairingServer(
         currentCode = generatePairingCode()
         expiresAtEpochMs = System.currentTimeMillis() + EXPIRY_DURATION_MS
         failedAttempts.set(0)
-
-        Log.d(TAG, "Starting TV Pairing Server with code: $currentCode")
 
         // 1. Start ServerSocket
         var startedSocket: ServerSocket? = null
@@ -227,7 +227,7 @@ class TvPairingServer(
                 return
             }
 
-            val payload = TvPairingPayload.fromJson(body)
+            val payload = parsePairingPayload(body)
             if (payload == null) {
                 sendHttpResponse(socket, 400, TvPairingResponse.error("INVALID_PAYLOAD", "Malformed pairing payload"))
                 return
@@ -236,8 +236,6 @@ class TvPairingServer(
             // Validate code (case-insensitive and trimmed)
             val normalizedProvided = payload.code.trim().replace("-", "").replace(" ", "").uppercase()
             val normalizedCurrent = currentCode.trim().replace("-", "").replace(" ", "").uppercase()
-
-            Log.d(TAG, "Checking code: provided='$normalizedProvided' vs current='$normalizedCurrent'")
 
             if (normalizedProvided != normalizedCurrent) {
                 val currentFails = failedAttempts.incrementAndGet()
@@ -251,7 +249,6 @@ class TvPairingServer(
             }
 
             // Valid code! Send success response
-            Log.d(TAG, "Pairing successful for user ${payload.userName} on server ${payload.serverName}")
             sendHttpResponse(socket, 200, TvPairingResponse.success())
 
             // Notify callback on Main dispatcher
@@ -264,6 +261,27 @@ class TvPairingServer(
             try {
                 sendHttpResponse(socket, 500, TvPairingResponse.error("INTERNAL_ERROR", "Failed to process pairing"))
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * Parses the pairing payload, handling both encrypted and legacy plaintext formats.
+     * Encrypted format: {"encrypted": true, "code": "...", "data": "base64(salt):base64(iv):base64(ciphertext)"}
+     * Legacy format: plain TvPairingPayload JSON (deprecated, will be removed)
+     */
+    private fun parsePairingPayload(body: String): TvPairingPayload? {
+        return try {
+            val json = org.json.JSONObject(body)
+            if (json.optBoolean("encrypted", false)) {
+                val code = json.getString("code")
+                val data = json.getString("data")
+                val decrypted = TvCryptoUtils.decryptWithPairingCode(data, code) ?: return null
+                TvPairingPayload.fromJson(decrypted)
+            } else {
+                TvPairingPayload.fromJson(body)
+            }
+        } catch (_: Exception) {
+            null
         }
     }
 

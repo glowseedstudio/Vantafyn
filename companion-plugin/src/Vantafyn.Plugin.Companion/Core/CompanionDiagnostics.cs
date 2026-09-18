@@ -31,7 +31,7 @@ public sealed class CompanionDiagnostics : ICompanionDiagnostics
             },
             watchParties = new { state = configuration.WatchPartiesEnabled ? "ready" : "disabled" },
             personalPlaylists = new { state = configuration.PersonalPlaylistsEnabled ? "ready" : "disabled" },
-            notifications = new { liveSession = configuration.NotificationsEnabled, backgroundPush = false }
+            notifications = new { liveSession = configuration.NotificationsEnabled, backgroundPush = configuration.NotificationsEnabled }
         };
     }
 }

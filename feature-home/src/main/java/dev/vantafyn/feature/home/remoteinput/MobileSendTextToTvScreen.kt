@@ -65,6 +65,9 @@ import dev.vantafyn.core.ui.VantafynTextField
 import dev.vantafyn.feature.home.CompactBackButton
 import dev.vantafyn.feature.home.auth.VantafynHomeUiState
 import dev.vantafyn.feature.home.pairing.DiscoveredTv
+import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.Lifecycle
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -111,14 +114,20 @@ fun MobileSendTextToTvScreen(
     }
 
     // Periodically sync active TV focus state (e.g. detect password field focus change)
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(selectedTv) {
         val tv = selectedTv ?: return@LaunchedEffect
-        while (isActive) {
-            val fieldStatus = MobileTvInputClient.getTvFieldStatus(tv.ipAddress, tv.port)
-            isSensitiveTarget = fieldStatus.isSensitive
-            targetFieldName = fieldStatus.fieldName
-            delay(1_500L)
-        }
+        snapshotFlow { lifecycleOwner.lifecycle.currentState }
+            .collect { state ->
+                if (state == Lifecycle.State.STARTED) {
+                    while (isActive) {
+                        val fieldStatus = MobileTvInputClient.getTvFieldStatus(tv.ipAddress, tv.port)
+                        isSensitiveTarget = fieldStatus.isSensitive
+                        targetFieldName = fieldStatus.fieldName
+                        delay(1_500L)
+                    }
+                }
+            }
     }
 
     fun sendText() {

@@ -37,6 +37,7 @@ kotlin {
 
 dependencies {
     implementation(project(":core-jellyfin"))
+    implementation(project(":core-integrations"))
     implementation(project(":core-cast"))
     implementation(project(":core-media"))
     implementation(project(":core-ui"))
@@ -55,9 +56,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.fragment)
     implementation(libs.androidx.lifecycle.runtime.ktx)
-
-    implementation(libs.androidx.glance.appwidget)
-    implementation(libs.androidx.glance.material3)
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)

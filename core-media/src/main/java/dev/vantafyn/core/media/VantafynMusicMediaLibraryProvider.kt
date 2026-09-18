@@ -420,12 +420,9 @@ internal class VantafynMusicMediaLibraryProvider(context: Context) {
     }
 
     private fun getSubsonicCredentials(): SubsonicCredentials? {
-        val prefs = appContext.getSharedPreferences("vantafyn_subsonic_prefs", Context.MODE_PRIVATE)
-        val url = prefs.getString("subsonic_url", null) ?: return null
-        val user = prefs.getString("subsonic_username", null) ?: return null
-        val pass = prefs.getString("subsonic_password", null) ?: return null
-        if (url.isBlank() || user.isBlank()) return null
-        return SubsonicCredentials(url, user, pass)
+        val creds = SecureSubsonicStorage.read(appContext) ?: return null
+        if (creds.serverUrl.isBlank() || creds.username.isBlank()) return null
+        return SubsonicCredentials(creds.serverUrl, creds.username, creds.password)
     }
 
     private suspend fun ensureReady(): Boolean {

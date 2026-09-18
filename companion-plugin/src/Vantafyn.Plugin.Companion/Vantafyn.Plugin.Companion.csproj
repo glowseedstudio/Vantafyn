@@ -10,16 +10,18 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>
 
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'net9.0'">
     <PackageReference Include="Jellyfin.Controller" Version="10.11.11" PrivateAssets="all" />
     <PackageReference Include="Jellyfin.Model" Version="10.11.11" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" Version="2.3.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <PackageReference Include="Jellyfin.Controller" Version="12.0.0" PrivateAssets="all" />
     <PackageReference Include="Jellyfin.Model" Version="12.0.0" PrivateAssets="all" />
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Core" Version="2.3.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
