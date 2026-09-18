@@ -1,6 +1,26 @@
 # Install Vantafyn Companion
 
-For a complete server test checklist, including Jellyfin Plugin Manager/catalog setup, see [SERVER_TESTING.md](SERVER_TESTING.md).
+## Option 1: Jellyfin Plugin Repository (Recommended)
+
+To install directly within Jellyfin without manual file copying:
+
+1. Open Jellyfin **Dashboard** ➔ **Plugins** ➔ **Repositories**.
+2. Click **`+` (Add)**.
+3. Set:
+   - **Repository Name**: `Vantafyn Companion Repository`
+   - **Repository URL**:
+     ```text
+     https://raw.githubusercontent.com/glowseedstudio/Vantafyn/main/companion-plugin/manifest.json
+     ```
+4. Click **Save**.
+5. Switch to the **Catalog** tab, locate **Vantafyn Companion**, and click **Install**.
+6. Restart Jellyfin.
+
+---
+
+## Option 2: Manual Install
+
+For a complete server test checklist, see [SERVER_TESTING.md](SERVER_TESTING.md).
 
 ## Build
 

@@ -4,10 +4,26 @@ Vantafyn Companion is an optional Jellyfin server plugin for Vantafyn-specific s
 
 It does not replace Jellyfin users, authentication, media libraries, playback, watched state, or favourites.
 
+## Installation via Jellyfin Plugin Repository
+
+The easiest way to install and keep Vantafyn Companion updated is via Jellyfin's built-in Plugin Catalog:
+
+1. In the Jellyfin web client, navigate to **Dashboard** ➔ **Plugins** ➔ **Repositories**.
+2. Click **`+` (Add Repository)**.
+3. Enter:
+   - **Repository Name**: `Vantafyn Companion Repository`
+   - **Repository URL**:
+     ```text
+     https://raw.githubusercontent.com/glowseedstudio/Vantafyn/main/companion-plugin/manifest.json
+     ```
+4. Click **Save**.
+5. Go to the **Catalog** tab, find **Vantafyn Companion**, and click **Install**.
+6. Restart your Jellyfin server.
+
 ## Compatibility
 
-- Jellyfin Server: 10.11.11 baseline
-- Target framework: `net9.0`
+- **Jellyfin Server 10.11+** (`net9.0`, ABI `10.11.0.0`)
+- **Jellyfin Server 12.0+** (`net10.0`, ABI `12.0.0.0`)
 - Plugin version: `0.1.0`
 - API version: `1`
 

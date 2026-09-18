@@ -115,9 +115,26 @@ While Vantafyn works seamlessly out-of-the-box with any standard Jellyfin server
 
 | Plugin | What It Unlocks | Source |
 | :--- | :--- | :---: |
+| **Vantafyn Companion** | UnifiedPush notification routing, server settings sync, Watch Parties, and Ombi requests | [Repository](#installing-the-vantafyn-companion-plugin) |
 | **Achievement Badges** | Milestone badges, rank tiers, server member friends list, and 1-to-1 direct messaging | [GitHub](https://github.com/ZL154/AchievementBadges_for_Jellyfin) |
 | **Playback Reporting** | Server analytics, watch time breakdowns, and Most Watched media trends in Admin | [GitHub](https://github.com/jellyfin/jellyfin-plugin-playbackreporting) |
 | **Intro Skipper** | Automatic audio fingerprint analysis to show seamless "Skip Intro" & "Skip Credits" buttons | [GitHub](https://github.com/Intro-Skipper/intro-skipper) |
+
+### Installing the Vantafyn Companion Plugin
+
+To install the official **Vantafyn Companion** plugin directly through Jellyfin's Plugin Catalog:
+
+1. Open the Jellyfin Web Admin: **Dashboard** ➔ **Plugins** ➔ **Repositories** tab.
+2. Click the **`+` (Add)** button.
+3. Enter:
+   - **Repository Name**: `Vantafyn Companion Repository`
+   - **Repository URL**:
+     ```text
+     https://raw.githubusercontent.com/glowseedstudio/Vantafyn/main/companion-plugin/manifest.json
+     ```
+4. Click **Save**.
+5. Switch to the **Catalog** tab, locate **Vantafyn Companion** under General, and click **Install**.
+6. Restart your Jellyfin server when prompted.
 
 ---
 
