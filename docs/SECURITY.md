@@ -9,11 +9,11 @@ Vantafyn is an open-source, privacy-first client for Jellyfin on Android and And
 Security fixes and maintenance patches are actively released for the latest production versions:
 
 | Component | Supported Version | Status |
-| :--- | :--- | :--- |
-| **Vantafyn Mobile (Phone/Tablet/Auto)** | `>= 0.9.13` | :white_check_mark: Supported |
-| **Vantafyn Android TV** | `>= 0.9.13` | :white_check_mark: Supported |
-| **Vantafyn Companion (Jellyfin Plugin)** | `>= 0.1.0` (Jellyfin 10.11 & 12.0) | :white_check_mark: Supported |
-| `< 0.9.13` | Older builds | :x: Unsupported (Upgrade recommended) |
+| :--- | :---: | :--- |
+| **Vantafyn Mobile (Phone/Tablet/Auto)** | `>= 0.9.14` | :white_check_mark: Supported |
+| **Vantafyn Android TV** | `>= 0.9.14` | :white_check_mark: Supported |
+| **Vantafyn Companion Plugin** | `>= 0.1.1` | :white_check_mark: Supported |
+| `< 0.9.14` | Older builds | :x: Unsupported (Upgrade recommended) |
 
 ---
 

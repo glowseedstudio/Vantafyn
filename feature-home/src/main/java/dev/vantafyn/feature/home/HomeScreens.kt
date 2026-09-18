@@ -4371,7 +4371,13 @@ private fun MobileShellScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clickable { viewModel.reconnectStaleConnection() },
+                        cornerRadius = 20.dp,
                     ) {
+                        RailInteriorAtmosphere(
+                            mode = state.bottomRailAtmosphere,
+                            cornerRadius = 20.dp,
+                            modifier = Modifier.matchParentSize(),
+                        )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -4382,7 +4388,7 @@ private fun MobileShellScreen(
                             Icon(
                                 imageVector = Icons.Rounded.Link,
                                 contentDescription = null,
-                                tint = VantafynColors.Muted,
+                                tint = if (state.bottomRailAtmosphere == BottomRailAtmosphereMode.On) VantafynColors.Ink else VantafynColors.Muted,
                                 modifier = Modifier.size(20.dp),
                             )
                             Column(modifier = Modifier.weight(1f)) {
@@ -4390,18 +4396,18 @@ private fun MobileShellScreen(
                                     "Connection may be stale",
                                     color = VantafynColors.Ink,
                                     style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.Medium,
+                                    fontWeight = FontWeight.SemiBold,
                                 )
                                 Text(
                                     "Tap to reconnect",
-                                    color = VantafynColors.Muted,
+                                    color = if (state.bottomRailAtmosphere == BottomRailAtmosphereMode.On) VantafynColors.Ink.copy(alpha = 0.78f) else VantafynColors.Muted,
                                     style = MaterialTheme.typography.bodySmall,
                                 )
                             }
                             Icon(
                                 imageVector = Icons.Rounded.Refresh,
                                 contentDescription = "Reconnect",
-                                tint = VantafynColors.Muted,
+                                tint = if (state.bottomRailAtmosphere == BottomRailAtmosphereMode.On) VantafynColors.Ink else VantafynColors.Muted,
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -15484,6 +15490,37 @@ private fun UnifiedPushDiagnosticsDialog(
                             }
                         }
 
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    isSendingTestPush = true
+                                    testPushMessage = null
+                                    val repo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                                    val res = repo.notifyChat(
+                                        session = session,
+                                        recipientUserId = session.user.id.toString(),
+                                        senderName = "Chat Push Test",
+                                        conversationId = "diag-chat-test",
+                                        messageText = "Hello from UnifiedPush! Chat push notifications are functioning."
+                                    )
+                                    isSendingTestPush = false
+                                    if (res.isSuccess) {
+                                        isTestPushError = false
+                                        testPushMessage = "Dispatched test chat push to your device(s)"
+                                    } else {
+                                        isTestPushError = true
+                                        testPushMessage = res.exceptionOrNull()?.message ?: "Failed to dispatch chat push"
+                                    }
+                                }
+                            },
+                            enabled = !isSendingTestPush && pushStatus.serverSyncState == dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Rounded.ChatBubbleOutline, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Send Test Chat Push to Self")
+                        }
+
                         if (pushStatus.serverSyncState != dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced) {
                             OutlinedButton(
                                 onClick = {
@@ -15505,7 +15542,7 @@ private fun UnifiedPushDiagnosticsDialog(
                     }
                 }
 
-                if (pushStatus.availableDistributors.size > 1) {
+                if (pushStatus.availableDistributors.isNotEmpty()) {
                     Text(
                         "Available Distributors:",
                         color = VantafynColors.Ink,
@@ -21107,6 +21144,7 @@ private fun MagneticGlidingCircle(
 private fun RailInteriorAtmosphere(
     mode: BottomRailAtmosphereMode,
     modifier: Modifier = Modifier,
+    cornerRadius: androidx.compose.ui.unit.Dp = 30.dp,
 ) {
     val isEnabled = mode == BottomRailAtmosphereMode.On
     val atmosphereAlpha by animateFloatAsState(
@@ -21123,7 +21161,7 @@ private fun RailInteriorAtmosphere(
                 alpha = atmosphereAlpha
                 clip = true
             }
-            .clip(RoundedCornerShape(30.dp))
+            .clip(RoundedCornerShape(cornerRadius))
             .drawWithCache {
                 val width = size.width
                 val height = size.height
@@ -22905,7 +22943,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.13"
+private const val VANTAFYN_APP_VERSION = "0.9.14"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

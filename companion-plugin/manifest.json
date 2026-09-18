@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.1.0.0",
+        "version": "0.1.1.0",
         "changelog": "UnifiedPush notifications, settings sync, and requests for Jellyfin 10.11.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.13/Vantafyn.Plugin.Companion_0.1.0_net9.zip",
-        "checksum": "7146dd0fbb4f0b4d470a643a57f4e68b",
-        "timestamp": "2026-09-18T08:08:35Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.14/Vantafyn.Plugin.Companion_0.1.1_net9.zip",
+        "checksum": "23417b8c66076ac433171476f19947e4",
+        "timestamp": "2026-09-18T22:17:25Z"
       },
       {
-        "version": "0.1.0.1",
+        "version": "0.1.1.1",
         "changelog": "UnifiedPush notifications, settings sync, and requests for Jellyfin 12.0.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.13/Vantafyn.Plugin.Companion_0.1.0_net10.zip",
-        "checksum": "280b8ebcc8d0ed7a9399c715556a3ea9",
-        "timestamp": "2026-09-18T08:08:35Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.14/Vantafyn.Plugin.Companion_0.1.1_net10.zip",
+        "checksum": "e3289da2d33cd88ac80efa44e71c5e82",
+        "timestamp": "2026-09-18T22:17:25Z"
       }
     ]
   }

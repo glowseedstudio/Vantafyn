@@ -51,6 +51,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -6472,8 +6473,7 @@ private fun MusicDetailHeader(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                VantafynButton(
-                    "Play",
+                MusicDetailPlayButton(
                     onClick = onPlay,
                     modifier = Modifier.weight(1f),
                 )
@@ -6615,6 +6615,63 @@ private fun MusicDetailHeader(
             }
         }
         Spacer(Modifier.height(2.dp))
+    }
+}
+
+@Composable
+private fun MusicDetailPlayButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    var isTruncated by remember { mutableStateOf(false) }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .height(54.dp)
+            .clip(shape)
+            .background(VantafynGradients.accentHorizontal())
+            .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)), shape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        val showText = maxWidth >= 105.dp && !isTruncated
+
+        if (showText) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.padding(horizontal = 12.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(22.dp),
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "Play",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    softWrap = false,
+                    onTextLayout = { layoutResult ->
+                        if (layoutResult.hasVisualOverflow) {
+                            isTruncated = true
+                        }
+                    },
+                )
+            }
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.PlayArrow,
+                contentDescription = "Play",
+                tint = Color.White,
+                modifier = Modifier.size(26.dp),
+            )
+        }
     }
 }
 

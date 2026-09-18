@@ -40,9 +40,15 @@ class CompanionPushRepository(
     ): Result<Unit> = withContext(ioDispatcher) {
         try {
             val body = JSONObject().apply {
+                put("DeviceId", deviceId)
                 put("deviceId", deviceId)
+                put("Endpoint", endpoint)
                 put("endpoint", endpoint)
-                if (!distributor.isNullOrBlank()) put("distributor", distributor)
+                if (!distributor.isNullOrBlank()) {
+                    put("Distributor", distributor)
+                    put("distributor", distributor)
+                }
+                put("ClientName", clientName)
                 put("clientName", clientName)
             }
             val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/Register", "POST")
@@ -60,7 +66,7 @@ class CompanionPushRepository(
                 Log.i(TAG, "Successfully registered push endpoint with Companion server (deviceId=$deviceId)")
                 Result.success(Unit)
             } else {
-                Log.w(TAG, "Failed to register push endpoint with Companion server: HTTP $code")
+                Log.w(TAG, "Failed to register push endpoint with Companion server: HTTP $code ($responseText)")
                 Result.failure(Exception("HTTP $code: $responseText"))
             }
         } catch (e: Exception) {
@@ -95,6 +101,7 @@ class CompanionPushRepository(
     ): Result<String> = withContext(ioDispatcher) {
         try {
             val body = JSONObject().apply {
+                put("DeviceId", deviceId)
                 put("deviceId", deviceId)
             }
             val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/Test", "POST")
@@ -111,8 +118,10 @@ class CompanionPushRepository(
             if (code in 200..299) {
                 val json = runCatching { JSONObject(responseText) }.getOrNull()
                 val msg = json?.optString("message") ?: "Test push sent from server"
+                Log.i(TAG, "Test push successfully sent: $msg")
                 Result.success(msg)
             } else {
+                Log.w(TAG, "Failed to send test push from server: HTTP $code ($responseText)")
                 Result.failure(Exception("HTTP $code: $responseText"))
             }
         } catch (e: Exception) {
@@ -129,22 +138,47 @@ class CompanionPushRepository(
         messageText: String,
     ): Result<Unit> = withContext(ioDispatcher) {
         try {
+            val cleanUuid = runCatching {
+                val raw = recipientUserId.replace("-", "").trim()
+                if (raw.length == 32) {
+                    "${raw.substring(0, 8)}-${raw.substring(8, 12)}-${raw.substring(12, 16)}-${raw.substring(16, 20)}-${raw.substring(20, 32)}"
+                } else {
+                    java.util.UUID.fromString(recipientUserId.trim()).toString()
+                }
+            }.getOrDefault(recipientUserId.trim())
+
             val body = JSONObject().apply {
-                put("recipientUserId", recipientUserId)
-                if (!conversationId.isNullOrBlank()) put("conversationId", conversationId)
-                if (!senderName.isNullOrBlank()) put("senderName", senderName)
+                put("RecipientUserId", cleanUuid)
+                put("recipientUserId", cleanUuid)
+                if (!conversationId.isNullOrBlank()) {
+                    put("ConversationId", conversationId)
+                    put("conversationId", conversationId)
+                }
+                if (!senderName.isNullOrBlank()) {
+                    put("SenderName", senderName)
+                    put("senderName", senderName)
+                }
+                put("MessageText", messageText)
                 put("messageText", messageText)
             }
+            Log.d(TAG, "notifyChat request body: $body")
             val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/NotifyChat", "POST")
             conn.doOutput = true
             OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
 
             val code = conn.responseCode
+            val responseText = runCatching {
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
             conn.disconnect()
+
             if (code in 200..299) {
+                Log.i(TAG, "Successfully dispatched chat push notification to recipient $cleanUuid: HTTP $code ($responseText)")
                 Result.success(Unit)
             } else {
-                Result.failure(Exception("HTTP $code"))
+                Log.w(TAG, "Failed to dispatch chat push notification: HTTP $code ($responseText)")
+                Result.failure(Exception("HTTP $code: $responseText"))
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error dispatching chat push notification", e)
@@ -160,20 +194,32 @@ class CompanionPushRepository(
     ): Result<Unit> = withContext(ioDispatcher) {
         try {
             val body = JSONObject().apply {
+                put("AchievementId", achievementId)
                 put("achievementId", achievementId)
+                put("Title", title)
                 put("title", title)
-                if (!description.isNullOrBlank()) put("description", description)
+                if (!description.isNullOrBlank()) {
+                    put("Description", description)
+                    put("description", description)
+                }
             }
             val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/NotifyAchievement", "POST")
             conn.doOutput = true
             OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body.toString()) }
 
             val code = conn.responseCode
+            val responseText = runCatching {
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
             conn.disconnect()
+
             if (code in 200..299) {
+                Log.i(TAG, "Successfully dispatched achievement push notification: HTTP $code ($responseText)")
                 Result.success(Unit)
             } else {
-                Result.failure(Exception("HTTP $code"))
+                Log.w(TAG, "Failed to dispatch achievement push notification: HTTP $code ($responseText)")
+                Result.failure(Exception("HTTP $code: $responseText"))
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error dispatching achievement push notification", e)

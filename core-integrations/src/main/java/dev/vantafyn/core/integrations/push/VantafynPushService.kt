@@ -27,6 +27,9 @@ class VantafynPushService : PushService() {
             receivedAtMillis = System.currentTimeMillis(),
         )
 
+        val contentString = runCatching { String(message.content, Charsets.UTF_8) }.getOrNull()
+        Log.i(TAG, "UnifiedPush onMessage received: instance='$instance', bytes=${message.content.size}, decrypted=${message.decrypted}, content=$contentString")
+
         // Route to the internal dispatcher
         UnifiedPushPayloadDispatcher.dispatch(payload)
 
@@ -35,7 +38,6 @@ class VantafynPushService : PushService() {
         manager.onPushReceived(payload.sizeBytes)
 
         // Display notifications based on parsed event
-        val contentString = runCatching { String(message.content, Charsets.UTF_8) }.getOrNull()
         if (contentString != null) {
             val json = runCatching { org.json.JSONObject(contentString) }.getOrNull()
             when (json?.optString("type")) {

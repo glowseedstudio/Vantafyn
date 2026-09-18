@@ -47,8 +47,12 @@ class UnifiedPushManager private constructor(private val context: Context) {
      * If [distributorPackage] is null, it checks for a saved distributor or the default installed distributor.
      */
     fun registerWithDistributor(distributorPackage: String? = null) {
-        val target = distributorPackage ?: UnifiedPush.getSavedDistributor(appContext)
-        if (target != null) {
+        val available = runCatching { UnifiedPush.getDistributors(appContext) }.getOrDefault(emptyList())
+        val target = distributorPackage
+            ?: UnifiedPush.getSavedDistributor(appContext)
+            ?: available.firstOrNull()
+
+        if (!target.isNullOrBlank()) {
             Log.i(TAG, "Saving UnifiedPush distributor: $target")
             UnifiedPush.saveDistributor(appContext, target)
         }
@@ -209,6 +213,11 @@ class UnifiedPushManager private constructor(private val context: Context) {
         val distributors = getAvailableDistributors()
         val isSupported = distributors.isNotEmpty()
         val savedDistributor = UnifiedPush.getSavedDistributor(appContext)
+            ?: if (distributors.size == 1) {
+                distributors.first().packageName.also {
+                    UnifiedPush.saveDistributor(appContext, it)
+                }
+            } else null
         val hasEndpoint = prefs.contains(KEY_ENDPOINT_HASH)
         val regStateName = prefs.getString(KEY_REG_STATE, UnifiedPushRegistrationState.Unregistered.name)
         val regState = runCatching {

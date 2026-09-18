@@ -20,7 +20,7 @@ class JellyfinAuthenticatedHttpTest {
         val header = testSession.mediaBrowserAuthHeader()
 
         assertEquals(
-            "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"profile-uuid-1234\", Version=\"0.9.13\", Token=\"secret-token-xyz\"",
+            "MediaBrowser Client=\"Vantafyn\", Device=\"Android\", DeviceId=\"profile-uuid-1234\", Version=\"0.9.14\", Token=\"secret-token-xyz\"",
             header,
         )
     }

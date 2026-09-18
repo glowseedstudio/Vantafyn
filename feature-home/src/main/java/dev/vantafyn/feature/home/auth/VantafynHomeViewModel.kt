@@ -2165,7 +2165,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadSocialData(force = false)
                     viewModelScope.launch {
                         val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
-                        pushRepo.notifyChat(session, friend.userId.toString(), session.user.name, convId, "Recommended \"${detail.title}\"")
+                        val res = pushRepo.notifyChat(session, friend.userId.toString(), session.user.name, convId, "Recommended \"${detail.title}\"")
+                        android.util.Log.i("VantafynHomeViewModel", "notifyChat (recommendation) result: $res")
                     }
                 }
                 is JellyfinResult.Failure -> {
@@ -2195,7 +2196,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadSocialData(force = false)
                     viewModelScope.launch {
                         val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
-                        pushRepo.notifyChat(session, peer.userId.toString(), session.user.name, convId, text)
+                        val chatRes = pushRepo.notifyChat(session, peer.userId.toString(), session.user.name, convId, text)
+                        android.util.Log.i("VantafynHomeViewModel", "notifyChat (chat message) result: $chatRes")
                     }
                 }
                 is JellyfinResult.Failure -> {

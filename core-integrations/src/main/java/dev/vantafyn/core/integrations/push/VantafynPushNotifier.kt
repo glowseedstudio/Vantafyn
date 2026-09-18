@@ -46,6 +46,7 @@ object VantafynPushNotifier {
 
     fun showChatMessage(context: Context, senderName: String, messageText: String, conversationId: String, senderId: String) {
         try {
+            Log.i(TAG, "showChatMessage called: senderName='$senderName', message='$messageText', convId='$conversationId', senderId='$senderId'")
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 ?: return
 
@@ -58,6 +59,7 @@ object VantafynPushNotifier {
                 .setContentText(messageText)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(messageText))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(true)
 
             notificationManager.notify(notificationId, builder.build())
@@ -71,6 +73,7 @@ object VantafynPushNotifier {
 
     fun showAchievementUnlock(context: Context, title: String, description: String, badgeId: String) {
         try {
+            Log.i(TAG, "showAchievementUnlock called: title='$title', badgeId='$badgeId'")
             val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                 ?: return
 
@@ -82,6 +85,7 @@ object VantafynPushNotifier {
                 .setContentTitle("Achievement Unlocked: $title")
                 .setContentText(description.ifBlank { "You unlocked a new badge!" })
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(true)
 
             notificationManager.notify(notificationId, builder.build())
@@ -95,14 +99,20 @@ object VantafynPushNotifier {
 
     private fun ensureChannel(manager: NotificationManager, channelId: String, channelName: String, desc: String) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                channelName,
-                NotificationManager.IMPORTANCE_DEFAULT,
-            ).apply {
-                description = desc
+            val existing = manager.getNotificationChannel(channelId)
+            if (existing == null) {
+                val channel = NotificationChannel(
+                    channelId,
+                    channelName,
+                    NotificationManager.IMPORTANCE_HIGH,
+                ).apply {
+                    description = desc
+                    enableVibration(true)
+                    enableLights(true)
+                    setShowBadge(true)
+                }
+                manager.createNotificationChannel(channel)
             }
-            manager.createNotificationChannel(channel)
         }
     }
 }

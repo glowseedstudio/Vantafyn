@@ -24,8 +24,8 @@ class VantafynMobileApplication : Application(), SingletonImageLoader.Factory {
         // Initialize push server sync listener
         dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(this)
 
-        if (pushManager.status.value.registrationState == UnifiedPushRegistrationState.Registered) {
-            // Re-register upon startup as recommended by UnifiedPush spec to maintain registration consistency
+        // Automatically register on startup if a distributor is available or previously registered
+        if (pushManager.status.value.isSupported) {
             pushManager.registerWithDistributor()
         }
     }
