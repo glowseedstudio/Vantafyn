@@ -12,5 +12,5 @@ fi
 
 "$ROOT/scripts/build.sh"
 mkdir -p "$PLUGIN_DIR"
-cp -R "$ROOT/artifacts/Vantafyn.Plugin.Companion_0.1.0/"* "$PLUGIN_DIR/"
+cp -R "$ROOT/artifacts/net9.0/"* "$PLUGIN_DIR/"
 echo "Copied Vantafyn Companion to $PLUGIN_DIR. Restart Jellyfin to load it."

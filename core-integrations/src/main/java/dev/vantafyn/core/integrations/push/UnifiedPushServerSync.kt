@@ -35,7 +35,12 @@ class UnifiedPushServerSync private constructor(context: Context) {
     }
 
     fun onSessionChanged(session: JellyfinSession?) {
+        val previousSession = activeSession
         activeSession = session
+        if (previousSession != null && (session == null || previousSession.user.id != session.user.id)) {
+            Log.i(TAG, "User changed or logged out, unregistering device $deviceId from previous user ${previousSession.user.id}")
+            unregisterFromServer(previousSession)
+        }
         if (session != null) {
             val storedEndpoint = pushManager.getStoredEndpoint()
             if (!storedEndpoint.isNullOrBlank()) {
@@ -61,9 +66,23 @@ class UnifiedPushServerSync private constructor(context: Context) {
         }
     }
 
+    suspend fun unregisterOtherDevices(session: JellyfinSession): Result<Int> {
+        return pushRepo.unregisterOtherDevices(session, deviceId)
+    }
+
+    fun getActiveUserId(): String? {
+        val sessionUserId = activeSession?.user?.id?.toString()
+        if (!sessionUserId.isNullOrBlank()) return sessionUserId
+
+        val prefs = appContext.getSharedPreferences("vantafyn_jellyfin_session", Context.MODE_PRIVATE)
+        val lastProfileId = prefs.getString("profiles.last", null) ?: return null
+        return prefs.getString("profile.$lastProfileId.user.id", null)
+    }
+
     suspend fun sendTestPush(session: JellyfinSession): Result<String> {
         return pushRepo.sendTestPush(session, deviceId)
     }
+
 
     private fun syncWithServer(session: JellyfinSession, endpoint: String) {
         syncScope.launch {

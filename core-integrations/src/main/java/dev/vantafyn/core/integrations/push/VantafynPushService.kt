@@ -46,13 +46,23 @@ class VantafynPushService : PushService() {
                     val messageText = json.optString("messageText", "New message received")
                     val conversationId = json.optString("conversationId", "")
                     val senderId = json.optString("senderId", "")
-                    VantafynPushNotifier.showChatMessage(applicationContext, senderName, messageText, conversationId, senderId)
+                    if (conversationId != "diag-chat-test" && isSenderCurrentUser(senderId)) {
+                        Log.i(TAG, "UnifiedPush onMessage: ignoring chat notification sent by current user ($senderId)")
+                    } else if (UnifiedPushPayloadDispatcher.isAppInForeground) {
+                        Log.i(TAG, "UnifiedPush onMessage: app in foreground, suppressing system notification (handled in-app)")
+                    } else {
+                        VantafynPushNotifier.showChatMessage(applicationContext, senderName, messageText, conversationId, senderId)
+                    }
                 }
                 "achievement_unlock" -> {
                     val title = json.optString("title", "Achievement Unlocked")
                     val desc = json.optString("description", "")
                     val badgeId = json.optString("achievementId", "")
-                    VantafynPushNotifier.showAchievementUnlock(applicationContext, title, desc, badgeId)
+                    if (UnifiedPushPayloadDispatcher.isAppInForeground) {
+                        Log.i(TAG, "UnifiedPush onMessage: app in foreground, suppressing achievement notification (handled in-app)")
+                    } else {
+                        VantafynPushNotifier.showAchievementUnlock(applicationContext, title, desc, badgeId)
+                    }
                 }
                 "debug_test" -> {
                     val title = json.optString("title", "Vantafyn Push Test")
@@ -84,7 +94,16 @@ class VantafynPushService : PushService() {
         Log.w(TAG, "UnifiedPush distributor temporarily unavailable for instance '$instance'")
     }
 
+    private fun isSenderCurrentUser(senderId: String): Boolean {
+        if (senderId.isBlank()) return false
+        val activeUserId = UnifiedPushServerSync.getInstance(applicationContext).getActiveUserId() ?: return false
+        val cleanSender = senderId.replace("-", "").lowercase()
+        val cleanCurrent = activeUserId.replace("-", "").lowercase()
+        return cleanSender == cleanCurrent
+    }
+
     companion object {
         private const val TAG = "VantafynPushService"
     }
 }
+

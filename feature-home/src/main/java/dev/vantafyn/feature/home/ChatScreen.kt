@@ -179,6 +179,11 @@ fun ChatScreen(
     var prevMessageCount by remember { mutableStateOf(visibleMessages.size) }
     var isInitialLoad by remember { mutableStateOf(true) }
 
+    LaunchedEffect(peer.userId) {
+        kotlinx.coroutines.delay(400)
+        isInitialLoad = false
+    }
+
     val reducedMotion = rememberReducedMotionPreference()
     var revealProgress by remember { mutableFloatStateOf(if (reducedMotion) 1f else 0f) }
     LaunchedEffect(Unit) {
@@ -269,7 +274,7 @@ fun ChatScreen(
                     .padding(horizontal = VantafynSpacing.md),
             ) {
                 if (visibleMessages.isEmpty()) {
-                    if (isInitialLoad || isSending) {
+                    if (isInitialLoad) {
                         ChatMessageThreadSkeleton()
                     } else {
                         ChatEmptyState(

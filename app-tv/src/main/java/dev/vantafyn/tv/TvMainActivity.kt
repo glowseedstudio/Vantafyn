@@ -33,11 +33,31 @@ import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 
+import android.content.Intent
+import dev.vantafyn.core.integrations.push.VantafynPushNotifier
+
 private val TvCinematicEasing = CubicBezierEasing(0.19f, 1f, 0.22f, 1f)
 
 class TvMainActivity : ComponentActivity() {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        VantafynPushNotifier.routeIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VantafynPushNotifier.routeIntent(intent)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setContent {
             VantafynTheme {

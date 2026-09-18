@@ -32,6 +32,11 @@ sealed interface VantafynPushEvent {
     data class Unknown(val rawJson: String) : VantafynPushEvent
 }
 
+sealed interface PushNavigationTarget {
+    data class Chat(val conversationId: String, val senderId: String, val senderName: String?) : PushNavigationTarget
+    data class Achievement(val badgeId: String) : PushNavigationTarget
+}
+
 /**
  * Internal message router for incoming UnifiedPush payloads.
  * Exposes shared flows for raw payloads and typed [VantafynPushEvent] instances
@@ -40,11 +45,27 @@ sealed interface VantafynPushEvent {
 object UnifiedPushPayloadDispatcher {
     private const val TAG = "UnifiedPushDispatcher"
 
+    @Volatile
+    var isAppInForeground: Boolean = false
+
     private val _incomingPayloads = MutableSharedFlow<UnifiedPushPayload>(extraBufferCapacity = 64)
     val incomingPayloads: SharedFlow<UnifiedPushPayload> = _incomingPayloads.asSharedFlow()
 
     private val _events = MutableSharedFlow<VantafynPushEvent>(extraBufferCapacity = 64)
     val events: SharedFlow<VantafynPushEvent> = _events.asSharedFlow()
+
+    private val _pendingNavigation = MutableSharedFlow<PushNavigationTarget>(replay = 1, extraBufferCapacity = 8)
+    val pendingNavigation: SharedFlow<PushNavigationTarget> = _pendingNavigation.asSharedFlow()
+
+    fun navigateTo(target: PushNavigationTarget) {
+        Log.i(TAG, "Queued push notification navigation target: $target")
+        _pendingNavigation.tryEmit(target)
+    }
+
+    fun clearPendingNavigation() {
+        _pendingNavigation.resetReplayCache()
+    }
+
 
     fun dispatch(payload: UnifiedPushPayload) {
         Log.i(TAG, "Received push payload: size=${payload.sizeBytes} bytes, isDecrypted=${payload.isDecrypted}, timestamp=${payload.receivedAtMillis}")

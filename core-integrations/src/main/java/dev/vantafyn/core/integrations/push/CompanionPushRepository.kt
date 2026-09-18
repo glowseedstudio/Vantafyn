@@ -95,6 +95,69 @@ class CompanionPushRepository(
         }
     }
 
+    suspend fun getRegisteredDevices(
+        session: JellyfinSession,
+    ): Result<List<String>> = withContext(ioDispatcher) {
+        try {
+            val conn = session.openAuthenticatedConnection("Vantafyn/Notifications/Push/Devices", "GET")
+            val code = conn.responseCode
+            val responseText = runCatching {
+                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+            }.getOrDefault("")
+            conn.disconnect()
+
+            if (code in 200..299) {
+                val json = JSONObject(responseText)
+                val arr = json.optJSONArray("devices")
+                val deviceIds = mutableListOf<String>()
+                if (arr != null) {
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.optJSONObject(i)
+                        val id = obj?.optString("deviceId") ?: obj?.optString("DeviceId")
+                        if (!id.isNullOrBlank()) {
+                            deviceIds.add(id)
+                        }
+                    }
+                }
+                Result.success(deviceIds)
+            } else {
+                Result.failure(Exception("HTTP $code: $responseText"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting registered devices from Companion server", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun unregisterOtherDevices(
+        session: JellyfinSession,
+        currentDeviceId: String,
+    ): Result<Int> = withContext(ioDispatcher) {
+        try {
+            val devicesRes = getRegisteredDevices(session)
+            if (devicesRes.isFailure) {
+                return@withContext Result.failure(devicesRes.exceptionOrNull() ?: Exception("Unknown error"))
+            }
+            val devices = devicesRes.getOrNull().orEmpty()
+            var removedCount = 0
+            for (devId in devices) {
+                if (!devId.equals(currentDeviceId, ignoreCase = true)) {
+                    val unregRes = unregisterDevice(session, devId)
+                    if (unregRes.isSuccess) {
+                        removedCount++
+                    }
+                }
+            }
+            Log.i(TAG, "Cleaned up $removedCount other registered device(s) for user ${session.user.id}")
+            Result.success(removedCount)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error cleaning up other registered devices", e)
+            Result.failure(e)
+        }
+    }
+
+
     suspend fun sendTestPush(
         session: JellyfinSession,
         deviceId: String,

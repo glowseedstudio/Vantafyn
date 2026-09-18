@@ -17,8 +17,10 @@ import dev.vantafyn.core.ui.VantafynTheme
 import dev.vantafyn.core.ui.VantafynPermissionSheet
 import dev.vantafyn.feature.home.VantafynAppContent
 import dev.vantafyn.feature.player.VantafynPipState
+import android.content.Intent
 import android.view.KeyEvent
 import androidx.fragment.app.FragmentActivity
+import dev.vantafyn.core.integrations.push.VantafynPushNotifier
 
 class MobileMainActivity : FragmentActivity() {
 
@@ -48,8 +50,25 @@ class MobileMainActivity : FragmentActivity() {
         VantafynPipState.update(isInPictureInPictureMode)
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        VantafynPushNotifier.routeIntent(intent)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = false
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        VantafynPushNotifier.routeIntent(intent)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),

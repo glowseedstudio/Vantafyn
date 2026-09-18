@@ -239,12 +239,26 @@ fun SocialScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 CompactBackButton(onClick = onBack)
-                Text(
-                    text = "Friends & Messages",
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = VantafynColors.Ink,
-                )
+                val topBarTitle = when (selectedTab) {
+                    SocialTab.Messages -> "Messages"
+                    SocialTab.Friends -> "Friends"
+                    SocialTab.Requests -> "Friend Requests"
+                    SocialTab.Find -> "Add Friend"
+                }
+                AnimatedContent(
+                    targetState = topBarTitle,
+                    transitionSpec = {
+                        fadeIn(tween(180)).togetherWith(fadeOut(tween(140)))
+                    },
+                    label = "socialTopBarTitle",
+                ) { title ->
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                    )
+                }
             }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),

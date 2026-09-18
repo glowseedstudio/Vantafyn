@@ -278,6 +278,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
         }
         viewModelScope.launch {
+            dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.pendingNavigation.collect { target ->
+                handlePushNavigation(target)
+            }
+        }
+        viewModelScope.launch {
             MusicPlaybackController.get(getApplication()).events.collect { event ->
                 if (event is VantafynMusicPlaybackEvent.FavoriteChanged) {
                     handlePlaybackFavoriteChanged(event.trackId, event.isFavorite, event.track)
@@ -295,11 +300,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             when (event) {
                 Lifecycle.Event.ON_START, Lifecycle.Event.ON_RESUME -> {
                     _state.update { it.copy(isAppForeground = true) }
+                    dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = true
                     startAchievementPolling()
                     startSocialPolling()
                 }
                 Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_PAUSE -> {
-                    _state.update { it.copy(isAppForeground = false) }
+                    _state.update { it.copy(isAppForeground = false, activeSocialIslandPreview = null) }
+                    dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = false
                     stopAchievementPolling()
                     stopSocialPolling()
                 }
@@ -926,9 +933,15 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun logout() {
+        val currentSession = _state.value.session
         stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
             _state.update { it.copy(confirmLogout = false, isLogoutTransitioning = true) }
+            currentSession?.let { session ->
+                runCatching {
+                    dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(getApplication()).unregisterFromServer(session)
+                }
+            }
             PlaybackOutputCoordinator.get(getApplication()).clearForLogoutOrServerSwitch()
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.Logout)
             authRepository.logout()
@@ -955,10 +968,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun logoutCurrentProfile() {
-        val profileId = _state.value.session?.profileId ?: return
+        val currentSession = _state.value.session
+        val profileId = currentSession?.profileId ?: return
         stopWatchPartyRealtime(clearInvites = true)
         viewModelScope.launch {
             _state.update { it.copy(confirmLogout = false, isLogoutTransitioning = true) }
+            runCatching {
+                dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(getApplication()).unregisterFromServer(currentSession)
+            }
             PlaybackOutputCoordinator.get(getApplication()).clearForLogoutOrServerSwitch()
             MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.ProfileSwitch)
             authRepository.removeProfile(profileId)
@@ -1965,7 +1982,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     viewModelScope.launch {
                         when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
                             is JellyfinResult.Success -> {
-                                _state.update { it.copy(activeChatMessages = msgRes.value) }
+                                val filtered = filterClearedMessages(session, activePeer.userId, convId, msgRes.value)
+                                _state.update { it.copy(activeChatMessages = filtered) }
                                 socialRepository.markConversationRead(session, convId)
                             }
                             else -> Unit
@@ -1988,7 +2006,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     )
                     _state.update {
                         it.copy(
-                            activeSocialIslandPreview = previewMsg,
+                            activeSocialIslandPreview = if (it.isAppForeground) previewMsg else null,
                             socialUnreadCount = it.socialUnreadCount + 1,
                         )
                     }
@@ -2002,6 +2020,103 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 _state.update { it.copy(mobileMessage = "UnifiedPush: ${event.title} - ${event.message}") }
             }
             is dev.vantafyn.core.integrations.push.VantafynPushEvent.Unknown -> Unit
+        }
+    }
+
+    private fun handlePushNavigation(target: dev.vantafyn.core.integrations.push.PushNavigationTarget) {
+        dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.clearPendingNavigation()
+        _state.update { it.copy(activeSocialIslandPreview = null) }
+        when (target) {
+            is dev.vantafyn.core.integrations.push.PushNavigationTarget.Chat -> {
+                viewModelScope.launch {
+                    var attempts = 0
+                    while (_state.value.session == null && attempts < 25) {
+                        delay(200)
+                        attempts++
+                    }
+                    val session = _state.value.session ?: return@launch
+                    if (_state.value.step != VantafynSetupStep.Home) {
+                        _state.update { it.copy(step = VantafynSetupStep.Home) }
+                    }
+                    val senderId = target.senderId
+                    if (senderId.isNotBlank()) {
+                        openChatBySenderId(senderId, target.senderName)
+                    } else if (target.conversationId.isNotBlank()) {
+                        val conv = _state.value.socialConversations.firstOrNull { it.conversationId == target.conversationId }
+                        if (conv != null) {
+                            openChatWithFriend(
+                                dev.vantafyn.core.jellyfin.JellyfinFriend(
+                                    userId = conv.peerUserId,
+                                    username = conv.peerName.ifBlank { target.senderName ?: "Friend" },
+                                    displayName = conv.peerName.ifBlank { target.senderName ?: "Friend" },
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+            is dev.vantafyn.core.integrations.push.PushNavigationTarget.Achievement -> {
+                viewModelScope.launch {
+                    var attempts = 0
+                    while (_state.value.session == null && attempts < 25) {
+                        delay(200)
+                        attempts++
+                    }
+                    if (_state.value.session != null) {
+                        if (_state.value.step != VantafynSetupStep.Home) {
+                            _state.update { it.copy(step = VantafynSetupStep.Home) }
+                        }
+                        openAchievements()
+                    }
+                }
+            }
+        }
+    }
+
+    fun openChatBySenderId(senderId: String, senderName: String? = null) {
+        val uuid = runCatching { UUID.fromString(senderId) }.getOrNull() ?: return
+        val existingFriend = _state.value.socialFriends.firstOrNull { it.userId == uuid }
+            ?: _state.value.socialConversations.firstOrNull { it.peerUserId == uuid }?.let {
+                dev.vantafyn.core.jellyfin.JellyfinFriend(
+                    userId = uuid,
+                    username = it.peerName.ifBlank { senderName ?: "Friend" },
+                    displayName = it.peerName.ifBlank { senderName ?: "Friend" },
+                )
+            }
+            ?: dev.vantafyn.core.jellyfin.JellyfinFriend(
+                userId = uuid,
+                username = senderName ?: "Friend",
+                displayName = senderName ?: "Friend",
+            )
+        openChatWithFriend(existingFriend)
+    }
+
+    private fun filterClearedMessages(
+        session: JellyfinSession,
+        peerUserId: UUID,
+        convId: String?,
+        messages: List<JellyfinSocialMessage>,
+    ): List<JellyfinSocialMessage> {
+        val prefs = runCatching {
+            getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
+        }.getOrNull() ?: return messages
+
+        val peerCutoff = prefs.getLong("cleared_$peerUserId", 0L)
+        val convCutoff = if (!convId.isNullOrBlank()) prefs.getLong("cleared_$convId", 0L) else 0L
+        val msgConvCutoffs = messages.mapNotNull { msg ->
+            if (msg.conversationId.isNotBlank()) prefs.getLong("cleared_${msg.conversationId}", 0L).takeIf { it > 0L } else null
+        }
+        val cutoff = (listOf(peerCutoff, convCutoff) + msgConvCutoffs).maxOrNull() ?: 0L
+
+        if (cutoff <= 0L) return messages
+
+        return messages.filter { msg ->
+            val t = dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(msg.timestamp)
+            if (t <= 0L) {
+                msg.isFromSelf
+            } else {
+                t > cutoff
+            }
         }
     }
 
@@ -2042,7 +2157,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == activePeer.userId }?.conversationId ?: activePeer.userId.toString()
                     when (val msgRes = socialRepository.getMessages(session, convId, activePeer.userId)) {
                         is JellyfinResult.Success -> {
-                            _state.update { it.copy(activeChatMessages = msgRes.value) }
+                            val filtered = filterClearedMessages(session, activePeer.userId, convId, msgRes.value)
+                            _state.update { it.copy(activeChatMessages = filtered) }
                             socialRepository.markConversationRead(session, convId)
                         }
                         else -> Unit
@@ -2103,23 +2219,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
         navigateMobile(MobileDestination.Chat)
         viewModelScope.launch {
-            val clearedPrefs = runCatching {
-                getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
-            }.getOrNull()
-            val cutoff = maxOf(
-                clearedPrefs?.getLong("cleared_${friend.userId}", 0L) ?: 0L,
-                clearedPrefs?.getLong("cleared_$convId", 0L) ?: 0L
-            )
             when (val res = socialRepository.getMessages(session, convId, friend.userId)) {
                 is JellyfinResult.Success -> {
-                    val msgs = if (cutoff > 0L) {
-                        res.value.filter { msg ->
-                            val t = dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(msg.timestamp)
-                            t > cutoff
-                        }
-                    } else {
-                        res.value
-                    }
+                    val msgs = filterClearedMessages(session, friend.userId, convId, res.value)
                     _state.update { it.copy(activeChatMessages = msgs) }
                     socialRepository.markConversationRead(session, convId)
                     loadSocialData(force = false)
@@ -2196,7 +2298,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadSocialData(force = false)
                     viewModelScope.launch {
                         val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
-                        val chatRes = pushRepo.notifyChat(session, peer.userId.toString(), session.user.name, convId, text)
+                        val snippet = dev.vantafyn.core.jellyfin.formatSocialSnippet(text)
+                        val chatRes = pushRepo.notifyChat(session, peer.userId.toString(), session.user.name, convId, snippet)
                         android.util.Log.i("VantafynHomeViewModel", "notifyChat (chat message) result: $chatRes")
                     }
                 }
@@ -2216,14 +2319,27 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val session = _state.value.session ?: return
         val peerId = conversation.peerUserId
         val convId = conversation.conversationId
-        val clearedCutoff = System.currentTimeMillis()
+
+        val maxActiveTime = _state.value.activeChatMessages.mapNotNull {
+            dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(it.timestamp).takeIf { t -> t > 0L }
+        }.maxOrNull() ?: 0L
+        val convLastTime = dev.vantafyn.core.jellyfin.parseSocialTimestampToMillis(conversation.lastMessageTimestamp)
+        val maxKnownServerTime = maxOf(maxActiveTime, convLastTime)
+        val clearedCutoff = if (maxKnownServerTime > 0L) maxKnownServerTime else System.currentTimeMillis()
 
         try {
             val prefs = getApplication<Application>().getSharedPreferences("vantafyn_cleared_chats_${session.user.id}", Context.MODE_PRIVATE)
-            prefs.edit()
+            val editor = prefs.edit()
                 .putLong("cleared_$peerId", clearedCutoff)
-                .putLong("cleared_$convId", clearedCutoff)
-                .apply()
+            if (convId.isNotBlank()) {
+                editor.putLong("cleared_$convId", clearedCutoff)
+            }
+            _state.value.activeChatMessages.forEach { msg ->
+                if (msg.conversationId.isNotBlank()) {
+                    editor.putLong("cleared_${msg.conversationId}", clearedCutoff)
+                }
+            }
+            editor.apply()
         } catch (e: Exception) {}
 
         _state.update { curr ->
@@ -2245,7 +2361,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     fun clearChatWithActivePeer() {
         val peer = _state.value.activeChatPeer ?: return
         val conv = _state.value.socialConversations.firstOrNull { it.peerUserId == peer.userId }
-        val convId = conv?.conversationId ?: peer.userId.toString()
+        val activeMsgConvId = _state.value.activeChatMessages.firstOrNull { it.conversationId.isNotBlank() }?.conversationId
+        val convId = conv?.conversationId ?: activeMsgConvId ?: peer.userId.toString()
         val dummyConv = conv ?: JellyfinSocialConversation(
             conversationId = convId,
             peerUserId = peer.userId,
@@ -2312,12 +2429,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun acceptFriendRequest(requestId: String) {
         val session = _state.value.session ?: return
+        val targetReq = _state.value.socialRequests.firstOrNull { it.id == requestId }
         viewModelScope.launch {
             _state.update { it.copy(activeIncomingFriendRequest = null) }
             when (val res = socialRepository.acceptFriendRequest(session, requestId)) {
                 is JellyfinResult.Success -> {
                     _state.update { it.copy(mobileMessage = "Friend request accepted") }
                     loadSocialData(force = true)
+                    targetReq?.let { req ->
+                        launch {
+                            val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                            val pushRes = pushRepo.notifyChat(
+                                session = session,
+                                recipientUserId = req.senderId.toString(),
+                                senderName = session.user.name,
+                                conversationId = null,
+                                messageText = "Accepted your friend request! 🎉",
+                            )
+                            android.util.Log.i("VantafynHomeViewModel", "notifyChat (friend request accepted) result: $pushRes")
+                        }
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(mobileMessage = res.message) }
@@ -2488,13 +2619,28 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (target.isBlank()) return
         val session = _state.value.session ?: return
         viewModelScope.launch {
-            val displayName = _state.value.socialDiscoverableUsers.firstOrNull {
-                it.userId.toString() == target || it.username == target
-            }?.displayName ?: target
+            val matchedUser = _state.value.socialDiscoverableUsers.firstOrNull {
+                it.userId.toString() == target || it.username.equals(target, ignoreCase = true)
+            }
+            val displayName = matchedUser?.displayName ?: target
             when (val res = socialRepository.sendFriendRequest(session, target)) {
                 is JellyfinResult.Success -> {
                     _state.update { it.copy(mobileMessage = "Friend request sent to $displayName") }
                     loadSocialData(force = true)
+                    val targetUserId = matchedUser?.userId?.toString() ?: target
+                    if (runCatching { UUID.fromString(targetUserId) }.isSuccess) {
+                        launch {
+                            val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                            val pushRes = pushRepo.notifyChat(
+                                session = session,
+                                recipientUserId = targetUserId,
+                                senderName = session.user.name,
+                                conversationId = null,
+                                messageText = "Sent you a friend request! 👋",
+                            )
+                            android.util.Log.i("VantafynHomeViewModel", "notifyChat (friend request) result: $pushRes")
+                        }
+                    }
                 }
                 is JellyfinResult.Failure -> {
                     _state.update { it.copy(mobileMessage = res.message) }
@@ -5351,6 +5497,21 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             } catch (_: Exception) {
                 // Persistent queue ensures gift arrival
             }
+            try {
+                val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                val giftTitle = gift.franchiseTitle.ifBlank { "Watch Guide" }
+                val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == recipientId }?.conversationId ?: recipientId.toString()
+                val pushRes = pushRepo.notifyChat(
+                    session = session,
+                    recipientUserId = recipientId.toString(),
+                    senderName = session.user.name,
+                    conversationId = convId,
+                    messageText = "Sent you the $giftTitle Watch Guide! 🎁",
+                )
+                android.util.Log.i("VantafynHomeViewModel", "notifyChat (watch guide gift) result: $pushRes")
+            } catch (e: Exception) {
+                android.util.Log.w("VantafynHomeViewModel", "Failed to dispatch watch guide gift push", e)
+            }
         }
     }
 
@@ -7334,15 +7495,37 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 status = WatchPartyInviteStatus.Pending,
             )
             when (val result = watchPartyRepository.sendInvite(session, invite, selectedSessions.toList())) {
-                is JellyfinResult.Success -> _state.update {
-                    it.copy(
-                        isWatchPartyLoading = false,
-                        activeWatchParty = ensuredParty,
-                        sentWatchPartyInvites = it.sentWatchPartyInvites + invite,
-                        selectedWatchPartyRecipientSessionIds = emptySet(),
-                        showWatchPartyInviteSentAnimation = it.watchPartyInviteAnimationEnabled,
-                        watchPartyError = null,
-                    )
+                is JellyfinResult.Success -> {
+                    _state.update {
+                        it.copy(
+                            isWatchPartyLoading = false,
+                            activeWatchParty = ensuredParty,
+                            sentWatchPartyInvites = it.sentWatchPartyInvites + invite,
+                            selectedWatchPartyRecipientSessionIds = emptySet(),
+                            showWatchPartyInviteSentAnimation = it.watchPartyInviteAnimationEnabled,
+                            watchPartyError = null,
+                        )
+                    }
+                    val mediaTitle = snapshot.watchPartySelectedMedia?.title
+                    val partyMsg = if (!mediaTitle.isNullOrBlank()) {
+                        "Invited you to watch \"$mediaTitle\" in a Watch Party! 🍿"
+                    } else {
+                        "Invited you to join a Watch Party! 🍿"
+                    }
+                    val distinctUserIds = recipients.mapNotNull { it.userId }.distinct()
+                    distinctUserIds.forEach { recUserId ->
+                        launch {
+                            val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                            val pushRes = pushRepo.notifyChat(
+                                session = session,
+                                recipientUserId = recUserId.toString(),
+                                senderName = session.user.name,
+                                conversationId = null,
+                                messageText = partyMsg,
+                            )
+                            android.util.Log.i("VantafynHomeViewModel", "notifyChat (watch party invite) result: $pushRes")
+                        }
+                    }
                 }
                 is JellyfinResult.Failure -> _state.update {
                     it.copy(

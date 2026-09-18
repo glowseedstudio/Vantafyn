@@ -7,8 +7,20 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
+import android.app.PendingIntent
+import android.content.Intent
+
 object VantafynPushNotifier {
     private const val TAG = "VantafynPushNotifier"
+
+    const val EXTRA_ACTION = "vantafyn_action"
+    const val EXTRA_CONVERSATION_ID = "conversation_id"
+    const val EXTRA_SENDER_ID = "sender_id"
+    const val EXTRA_SENDER_NAME = "sender_name"
+    const val EXTRA_BADGE_ID = "badge_id"
+
+    const val ACTION_OPEN_CHAT = "open_chat"
+    const val ACTION_OPEN_ACHIEVEMENTS = "open_achievements"
 
     private const val CHANNEL_ID_GENERAL = "vantafyn_push_channel"
     private const val CHANNEL_NAME_GENERAL = "Vantafyn Push Notifications"
@@ -20,6 +32,61 @@ object VantafynPushNotifier {
     private const val CHANNEL_NAME_ACHIEVEMENTS = "Vantafyn Achievements"
 
     private const val TEST_NOTIFICATION_ID = 9001
+
+    private fun getPendingIntentFlags(): Int {
+        return PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
+    }
+
+    private fun createGeneralPendingIntent(context: Context): PendingIntent? {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        } ?: return null
+        return PendingIntent.getActivity(context, TEST_NOTIFICATION_ID, intent, getPendingIntentFlags())
+    }
+
+    private fun createChatPendingIntent(context: Context, conversationId: String, senderId: String, senderName: String): PendingIntent? {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_ACTION, ACTION_OPEN_CHAT)
+            putExtra(EXTRA_CONVERSATION_ID, conversationId)
+            putExtra(EXTRA_SENDER_ID, senderId)
+            putExtra(EXTRA_SENDER_NAME, senderName)
+        } ?: return null
+        val reqCode = (conversationId.ifBlank { senderId }).hashCode()
+        return PendingIntent.getActivity(context, reqCode, intent, getPendingIntentFlags())
+    }
+
+    private fun createAchievementPendingIntent(context: Context, badgeId: String): PendingIntent? {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_ACTION, ACTION_OPEN_ACHIEVEMENTS)
+            putExtra(EXTRA_BADGE_ID, badgeId)
+        } ?: return null
+        val reqCode = badgeId.hashCode()
+        return PendingIntent.getActivity(context, reqCode, intent, getPendingIntentFlags())
+    }
+
+    fun routeIntent(intent: Intent?): Boolean {
+        val action = intent?.getStringExtra(EXTRA_ACTION) ?: return false
+        Log.i(TAG, "Routing notification intent action: '$action'")
+        when (action) {
+            ACTION_OPEN_CHAT -> {
+                val convId = intent.getStringExtra(EXTRA_CONVERSATION_ID).orEmpty()
+                val senderId = intent.getStringExtra(EXTRA_SENDER_ID).orEmpty()
+                val senderName = intent.getStringExtra(EXTRA_SENDER_NAME)
+                if (senderId.isNotBlank() || convId.isNotBlank()) {
+                    UnifiedPushPayloadDispatcher.navigateTo(PushNavigationTarget.Chat(convId, senderId, senderName))
+                    return true
+                }
+            }
+            ACTION_OPEN_ACHIEVEMENTS -> {
+                val badgeId = intent.getStringExtra(EXTRA_BADGE_ID).orEmpty()
+                UnifiedPushPayloadDispatcher.navigateTo(PushNavigationTarget.Achievement(badgeId))
+                return true
+            }
+        }
+        return false
+    }
 
     fun showNotification(context: Context, title: String, message: String) {
         try {
@@ -34,6 +101,8 @@ object VantafynPushNotifier {
                 .setContentText(message)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setAutoCancel(true)
+
+            createGeneralPendingIntent(context)?.let { builder.setContentIntent(it) }
 
             notificationManager.notify(TEST_NOTIFICATION_ID, builder.build())
             Log.i(TAG, "Displayed general push notification: title='$title'")
@@ -62,6 +131,8 @@ object VantafynPushNotifier {
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(true)
 
+            createChatPendingIntent(context, conversationId, senderId, senderName)?.let { builder.setContentIntent(it) }
+
             notificationManager.notify(notificationId, builder.build())
             Log.i(TAG, "Displayed chat push notification from '$senderName'")
         } catch (e: SecurityException) {
@@ -87,6 +158,8 @@ object VantafynPushNotifier {
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setAutoCancel(true)
+
+            createAchievementPendingIntent(context, badgeId)?.let { builder.setContentIntent(it) }
 
             notificationManager.notify(notificationId, builder.build())
             Log.i(TAG, "Displayed achievement unlock push notification: title='$title'")

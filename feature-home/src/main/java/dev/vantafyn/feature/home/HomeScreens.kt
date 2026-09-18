@@ -15521,6 +15521,36 @@ private fun UnifiedPushDiagnosticsDialog(
                             Text("Send Test Chat Push to Self")
                         }
 
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    isSendingTestPush = true
+                                    testPushMessage = null
+                                    val res = dev.vantafyn.core.integrations.push.UnifiedPushServerSync.getInstance(context).unregisterOtherDevices(session)
+                                    isSendingTestPush = false
+                                    if (res.isSuccess) {
+                                        val count = res.getOrDefault(0)
+                                        isTestPushError = false
+                                        testPushMessage = if (count > 0) {
+                                            "Purged $count other registered device(s) from server"
+                                        } else {
+                                            "No other registered devices on server"
+                                        }
+                                    } else {
+                                        isTestPushError = true
+                                        testPushMessage = res.exceptionOrNull()?.message ?: "Failed to purge devices"
+                                    }
+                                }
+                            },
+                            enabled = !isSendingTestPush && pushStatus.serverSyncState == dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Icon(Icons.Rounded.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Purge Other Devices on Server")
+                        }
+
+
                         if (pushStatus.serverSyncState != dev.vantafyn.core.integrations.push.ServerPushSyncState.Synced) {
                             OutlinedButton(
                                 onClick = {
