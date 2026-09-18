@@ -37,6 +37,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":core-integrations"))
     implementation(project(":core-jellyfin"))
     implementation(project(":core-media"))
     implementation(project(":core-ui"))
