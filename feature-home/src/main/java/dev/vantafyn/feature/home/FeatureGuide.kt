@@ -7,6 +7,8 @@ import androidx.compose.material.icons.rounded.ArtTrack
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Bedtime
 import androidx.compose.material.icons.rounded.Bolt
+import androidx.compose.material.icons.rounded.CardGiftcard
+import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Cast
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Dashboard
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lyrics
 import androidx.compose.material.icons.rounded.MilitaryTech
+import androidx.compose.material.icons.rounded.Movie
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.OndemandVideo
@@ -113,6 +116,21 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     // ----------------------------------------------------
     // Make it yours
     // ----------------------------------------------------
+    DiscoverFeature(
+        id = "profile_avatar_shortcuts",
+        title = "Avatar Shortcuts & What's New",
+        shortDescription = "Tap for What's New & Settings; touch and hold to reveal Secret Franchise Watch Guides.",
+        category = DiscoverCategory.MakeItYours,
+        icon = Icons.Rounded.Person,
+        isNew = true,
+        detailedDescription = "Your Home screen profile avatar is an intelligent shortcut hub. When new movies or TV episodes arrive on your Jellyfin server, an animated glowing gradient notification dot appears on your avatar. Tap your avatar to open Settings and browse the full What's New feed. Touch and hold (long-press) your avatar anytime to instantly open the Franchise Watch Guides vault without navigating menus.",
+        steps = listOf(
+            "Tap avatar on Home to open Settings and review the What's New feed",
+            "Notice the glowing gradient dot when fresh media has arrived on your server",
+            "Touch and hold (long-press) your avatar to open Franchise Watch Guides directly",
+        ),
+        deepLinkAction = "open_settings",
+    ),
     DiscoverFeature(
         id = "experience_modes",
         title = "Experience Modes",
@@ -250,6 +268,37 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         isNew = true,
         detailedDescription = "Long-press any friend or conversation to Star, Remove, or Block. Long-press pending outgoing requests to cancel invites instantly without leaving the screen.",
         deepLinkAction = "open_social",
+    ),
+    DiscoverFeature(
+        id = "chat_gift_cards",
+        title = "Franchise Watch Guide Gifts",
+        shortDescription = "Gift and share unlocked franchise watch guides with friends directly in chat.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.CardGiftcard,
+        isNew = true,
+        detailedDescription = "Spread the love of cinema with friends! When you unlock a franchise watch guide, send it as a special interactive gift in 1:1 chat messages with an optional personal note. Friends receive a rich gift card with franchise artwork and can claim and launch the guide in one tap.",
+        steps = listOf(
+            "Open 1:1 chat with any friend",
+            "Tap the Gift icon next to the message input",
+            "Select an unlocked franchise and write an optional note",
+            "Friend receives an interactive card to claim and open the guide",
+        ),
+        deepLinkAction = "open_social",
+    ),
+    DiscoverFeature(
+        id = "unifiedpush_battery_saver",
+        title = "UnifiedPush & Companion Plugin",
+        shortDescription = "Real-time instant push notifications with zero background battery drain.",
+        category = DiscoverCategory.Social,
+        icon = Icons.Rounded.Bolt,
+        isNew = true,
+        detailedDescription = "Say goodbye to battery-draining polling loops. Vantafyn pairs with the official Vantafyn Companion Jellyfin plugin and UnifiedPush (ntfy) to deliver instant push notifications for chats, friend invites, watch party invites, and achievement unlocks with negligible battery impact.",
+        steps = listOf(
+            "Install the Vantafyn Companion plugin on your Jellyfin server",
+            "Set up ntfy or your preferred UnifiedPush distributor on your Android device",
+            "Receive real-time push alerts with zero battery drain",
+        ),
+        deepLinkAction = "open_settings",
     ),
 
     // ----------------------------------------------------
@@ -411,6 +460,22 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
             "Or open Vantafyn on an Android Automotive OS head unit",
             "Browse downloads, resume watching when safely parked, or stream your music library effortlessly",
         ),
+    ),
+    DiscoverFeature(
+        id = "franchise_watch_guides",
+        title = "Franchise Watch Guides",
+        shortDescription = "Curated chronological timelines for iconic movie sagas, matched to your library.",
+        category = DiscoverCategory.Watching,
+        icon = Icons.Rounded.Movie,
+        isNew = true,
+        detailedDescription = "Experience legendary film sagas in their ultimate chronological or release order. Explore curated guides for Marvel Cinematic Universe (MCU), Star Wars, Saw, Harry Potter, Hunger Games, Scream, The Matrix, Jurassic Park, Middle-Earth, Pirates of the Caribbean, Pokémon, Twilight, Underworld, and X-Men. Vantafyn cross-references each entry against your personal Jellyfin server library, showing what you own and offering one-tap playback.",
+        steps = listOf(
+            "Touch and hold (long-press) your profile avatar on the Home screen",
+            "Or enter a franchise secret code (e.g. MCU, SAW, POTTER, LOTR, MATRIX)",
+            "Browse chronological timelines with matching library indicators",
+            "Tap any title to view details or start playback immediately",
+        ),
+        deepLinkAction = "open_watch_guides",
     ),
     DiscoverFeature(
         id = "replaygain",
@@ -640,6 +705,21 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         detailedDescription = "Tap any item to see its full detail page: backdrop, poster, logo, year, runtime, rating, overview, genres, cast filmography, related titles, and media source info.",
     ),
     DiscoverFeature(
+        id = "library_genres",
+        title = "Genre Browsing & Filter Chips",
+        shortDescription = "Quickly browse and filter your movie and TV collections by genre.",
+        category = DiscoverCategory.YourLibrary,
+        icon = Icons.Rounded.Category,
+        isNew = true,
+        detailedDescription = "Navigate deep libraries effortlessly. When browsing movies or series, tap any genre chip or open the genre grid to view all titles tagged with Action, Sci-Fi, Horror, Comedy, Drama, Animation, and more.",
+        steps = listOf(
+            "Open Libraries tab and select a Movie or TV library",
+            "Tap a genre chip or switch to the Genre Browser",
+            "Filter instantly to the exact vibe you want to watch",
+        ),
+        deepLinkAction = "open_libraries",
+    ),
+    DiscoverFeature(
         id = "requests",
         title = "Content Requests",
         shortDescription = "Request movies and TV shows through Ombi integration.",
@@ -715,6 +795,23 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         icon = Icons.Rounded.Send,
         adminOnly = true,
         detailedDescription = "From Active Sessions, tap a session to send a display message. Messages appear on the user\u2019s Jellyfin client.",
+        deepLinkAction = "open_admin",
+    ),
+    DiscoverFeature(
+        id = "admin_identify",
+        title = "Media Identify & Matcher",
+        shortDescription = "Search TMDB, IMDB, or TVDB to correct metadata directly from your phone.",
+        category = DiscoverCategory.AdminTools,
+        icon = Icons.Rounded.Search,
+        adminOnly = true,
+        isNew = true,
+        detailedDescription = "Easily fix unmatched or misidentified movies and TV series without opening the server web dashboard. From any media details screen, admins can launch the native Identify tool, search across external metadata providers (TheMovieDb, TheTVDB, IMDb), select the exact match, and trigger instant server metadata and artwork refreshes.",
+        steps = listOf(
+            "Open any movie or TV series detail page as server administrator",
+            "Tap the Identify tool in the options menu",
+            "Search by title, year, or provider ID",
+            "Confirm match to trigger automatic metadata and artwork update",
+        ),
         deepLinkAction = "open_admin",
     ),
 )

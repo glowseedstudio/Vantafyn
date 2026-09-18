@@ -4116,6 +4116,7 @@ private fun MobileShellScreen(
                                     "open_favorites" -> onNavigate(MobileDestination.Favorites)
                                     "open_downloads" -> onNavigate(MobileDestination.Downloads)
                                     "open_requests" -> onNavigate(MobileDestination.Requests)
+                                    "open_watch_guides", "open_enter_code" -> viewModel.openEnterCodeDialog()
                                     else -> Unit
                                 }
                             },
@@ -4208,6 +4209,8 @@ private fun MobileShellScreen(
                                     isServerSearching = state.isChatSearching,
                                     onSearchServerMedia = onSearchChatMedia,
                                     onOpenMedia = onOpenMedia,
+                                    onClaimGift = viewModel::claimReceivedGift,
+                                    onOpenWatchGuide = viewModel::submitUnlockCode,
                                 )
                             }
                         }
@@ -22902,7 +22905,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.12"
+private const val VANTAFYN_APP_VERSION = "0.9.13"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

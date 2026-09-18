@@ -380,6 +380,7 @@ private fun DiscoverFeatureCard(
                                         "open_favorites" -> "Open My List"
                                         "open_downloads" -> "Open Downloads"
                                         "open_requests" -> "Open Requests"
+                                        "open_watch_guides" -> "Open Watch Guides"
                                         else -> "Open"
                                     },
                                     color = VantafynColors.Primary,

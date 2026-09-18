@@ -119,6 +119,11 @@ import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
+import dev.vantafyn.feature.home.gift.VantafynCodeGift
+import dev.vantafyn.feature.home.gift.VantafynGiftFranchises
+import androidx.compose.material.icons.rounded.CardGiftcard
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import java.text.DateFormat
 import java.text.SimpleDateFormat
 import java.util.Locale
@@ -143,6 +148,8 @@ fun ChatScreen(
     isServerSearching: Boolean = false,
     onSearchServerMedia: (String) -> Unit = {},
     onOpenMedia: (UUID) -> Unit = {},
+    onClaimGift: (VantafynCodeGift) -> Unit = {},
+    onOpenWatchGuide: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
@@ -304,6 +311,8 @@ fun ChatScreen(
                                 isLatestOverall = isLatestOverall,
                                 onLongPress = { activeReactionTargetMessage = msg },
                                 onOpenMedia = onOpenMedia,
+                                onClaimGift = onClaimGift,
+                                onOpenWatchGuide = onOpenWatchGuide,
                             )
 
                             if (isLastInGroup && index > 0) {
@@ -743,11 +752,14 @@ private fun ChatMessageItem(
     isLatestOverall: Boolean,
     onLongPress: () -> Unit = {},
     onOpenMedia: (UUID) -> Unit = {},
+    onClaimGift: (VantafynCodeGift) -> Unit = {},
+    onOpenWatchGuide: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val isSelf = message.isFromSelf
     val formattedTime = remember(message.timestamp) { formatMessageTime(message.timestamp) }
     val mediaRec = remember(message.content) { parseMediaRecommendation(message.content) }
+    val gift = remember(message.content) { VantafynCodeGift.fromSerializedMessage(message.content) }
     val haptic = LocalHapticFeedback.current
 
     // Dynamic Corner Radius for smooth message grouping
@@ -767,7 +779,16 @@ private fun ChatMessageItem(
         modifier = modifier.fillMaxWidth(),
         horizontalAlignment = if (isSelf) Alignment.End else Alignment.Start,
     ) {
-        if (mediaRec != null) {
+        if (gift != null) {
+            GiftMessageCard(
+                gift = gift,
+                isSelf = isSelf,
+                timestamp = formattedTime,
+                onClaim = { onClaimGift(gift) },
+                onOpenGuide = { onOpenWatchGuide(gift.franchiseCode) },
+                onLongPress = onLongPress,
+            )
+        } else if (mediaRec != null) {
             MediaRecommendationCard(
                 recommendation = mediaRec,
                 isSelf = isSelf,
@@ -1127,6 +1148,276 @@ private fun MediaRecommendationCard(
                     )
                     Text(
                         text = "Watch Now",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Watch Guide Gift Card Component ──────────────────────────────────────────
+
+@Composable
+private fun GiftMessageCard(
+    gift: VantafynCodeGift,
+    isSelf: Boolean,
+    timestamp: String?,
+    onClaim: () -> Unit,
+    onOpenGuide: () -> Unit,
+    onLongPress: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val haptic = LocalHapticFeedback.current
+    val accentColor = remember(gift.accentColorHex) { Color(gift.accentColorHex) }
+
+    val resolvedPosterUrl = remember(gift.posterUrl, gift.franchiseCode) {
+        gift.posterUrl?.takeIf { it.isNotBlank() }
+            ?: VantafynGiftFranchises.all.firstOrNull { it.code.equals(gift.franchiseCode, ignoreCase = true) }?.posterUrl
+    }
+
+    Box(
+        modifier = modifier
+            .width(280.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                },
+            )
+            .background(
+                Brush.verticalGradient(
+                    if (isSelf) {
+                        listOf(
+                            Color(0xFF1E173E).copy(alpha = 0.98f),
+                            Color(0xFF2C164D).copy(alpha = 0.98f),
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF131826).copy(alpha = 0.98f),
+                            Color(0xFF0F1420).copy(alpha = 0.98f),
+                        )
+                    },
+                ),
+            )
+            .border(
+                width = 1.5.dp,
+                brush = Brush.verticalGradient(
+                    listOf(
+                        accentColor.copy(alpha = 0.75f),
+                        accentColor.copy(alpha = 0.35f),
+                        Color.White.copy(alpha = 0.10f),
+                    ),
+                ),
+                shape = RoundedCornerShape(22.dp),
+            )
+            .vantafynAnimatedModalBorder(cornerRadius = 22.dp)
+            .padding(13.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header tag + timestamp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("✨", fontSize = 12.sp)
+                    Text(
+                        text = if (isSelf) "GIFT SENT" else "SPECIAL GIFT",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Black,
+                        color = accentColor,
+                        letterSpacing = 1.sp,
+                    )
+                }
+                if (!timestamp.isNullOrBlank()) {
+                    Text(
+                        text = timestamp,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+
+            // Poster Artwork + Franchise Info Row
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Franchise Poster or Icon Box
+                if (!resolvedPosterUrl.isNullOrBlank()) {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 74.dp, height = 108.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .border(1.5.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.05f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        AsyncImage(
+                            model = resolvedPosterUrl,
+                            contentDescription = gift.franchiseTitle,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(width = 74.dp, height = 108.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(accentColor.copy(alpha = 0.15f))
+                            .border(1.5.dp, accentColor.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Movie,
+                            contentDescription = null,
+                            tint = accentColor,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
+                }
+
+                // Franchise Title & Badge Info
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    // Badge pill
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(accentColor.copy(alpha = 0.25f))
+                            .border(1.dp, accentColor.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = gift.franchiseBadge,
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            letterSpacing = 0.6.sp,
+                            maxLines = 1,
+                        )
+                    }
+
+                    Text(
+                        text = gift.franchiseTitle,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = "From ${gift.senderName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 11.sp,
+                        color = VantafynColors.Muted,
+                        maxLines = 1,
+                    )
+                }
+            }
+
+            // Note snippet if attached
+            if (!gift.note.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                ) {
+                    Text(
+                        text = "\"${gift.note}\"",
+                        color = Color.White.copy(alpha = 0.88f),
+                        fontSize = 12.sp,
+                        fontStyle = FontStyle.Italic,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            // Code Display Pill
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accentColor.copy(alpha = 0.16f))
+                    .border(1.dp, accentColor.copy(alpha = 0.45f), RoundedCornerShape(12.dp))
+                    .padding(vertical = 7.dp, horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "CODE:",
+                        color = accentColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                    )
+                    Text(
+                        text = gift.franchiseCode,
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        letterSpacing = 2.sp,
+                    )
+                }
+            }
+
+            // Action Button: Claim / Open Guide
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                accentColor,
+                                accentColor.copy(alpha = 0.85f),
+                            ),
+                        ),
+                    )
+                    .clickable {
+                        onClaim()
+                        onOpenGuide()
+                    }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CardGiftcard,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = if (isSelf) "View Watch Guide" else "Claim & Open Guide",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
@@ -1830,7 +2121,9 @@ private fun QuickReactionModal(
                 // Message preview snippet
                 val previewText = remember(targetMessage.content) {
                     val mediaRec = parseMediaRecommendation(targetMessage.content)
+                    val gift = VantafynCodeGift.fromSerializedMessage(targetMessage.content)
                     when {
+                        gift != null -> "🎁 ${gift.franchiseTitle}"
                         mediaRec != null -> "🎬 ${mediaRec.title}"
                         else -> targetMessage.content.take(60)
                     }
