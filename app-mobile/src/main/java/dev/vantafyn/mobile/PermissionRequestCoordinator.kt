@@ -27,6 +27,12 @@ import dev.vantafyn.core.ui.VantafynPermissionUiState
 private const val PREFS_NAME = "vantafyn_permissions"
 private const val KEY_NOTIFICATION_REQUESTED = "notification_requested"
 private const val KEY_NOTIFICATION_DISMISSED = "notification_dismissed"
+private const val KEY_CHAT_NOTIFICATION_DISMISSED = "chat_notification_dismissed"
+
+private enum class PermissionRequestSource {
+    Music,
+    Chat,
+}
 
 class PermissionRequestCoordinator(
     private val activity: Activity,
@@ -34,10 +40,15 @@ class PermissionRequestCoordinator(
 ) {
     private val prefs = activity.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     private var pendingAction: (() -> Unit)? = null
+    private var pendingSource: PermissionRequestSource? = null
 
     var notificationState by mutableStateOf(readNotificationState())
         private set
     var showMusicNotificationExplainer by mutableStateOf(false)
+        private set
+    var showChatNotificationExplainer by mutableStateOf(false)
+        private set
+    var noticeTitle by mutableStateOf<String?>(null)
         private set
     var noticeMessage by mutableStateOf<String?>(null)
         private set
@@ -69,9 +80,22 @@ class PermissionRequestCoordinator(
                 }
             }
             VantafynPermissionStatus.PermanentlyDenied -> {
+                noticeTitle = "Music controls are limited"
                 noticeMessage = "Music will still play in the app, but lock-screen controls may not appear unless notifications are allowed in Android Settings."
                 onContinue()
             }
+        }
+    }
+
+    fun requestForChatNotifications() {
+        refresh()
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(activity, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+
+        val dismissed = prefs.getBoolean(KEY_CHAT_NOTIFICATION_DISMISSED, false)
+        if (!dismissed) {
+            showChatNotificationExplainer = true
         }
     }
 
@@ -81,7 +105,10 @@ class PermissionRequestCoordinator(
             VantafynPermissionStatus.PermanentlyDenied -> openAppNotificationSettings()
             VantafynPermissionStatus.Granted,
             VantafynPermissionStatus.Unsupported,
-            -> noticeMessage = "Music controls are already allowed on this device."
+            -> {
+                noticeTitle = "Notification permission"
+                noticeMessage = "Music controls and notifications are already allowed on this device."
+            }
             else -> {
                 pendingAction = null
                 showMusicNotificationExplainer = true
@@ -97,6 +124,7 @@ class PermissionRequestCoordinator(
             pendingAction = null
             return
         }
+        pendingSource = PermissionRequestSource.Music
         prefs.edit()
             .putBoolean(KEY_NOTIFICATION_REQUESTED, true)
             .putBoolean(KEY_NOTIFICATION_DISMISSED, false)
@@ -108,21 +136,54 @@ class PermissionRequestCoordinator(
         showMusicNotificationExplainer = false
         prefs.edit().putBoolean(KEY_NOTIFICATION_DISMISSED, true).apply()
         notificationState = readNotificationState()
+        noticeTitle = "Music controls are limited"
         noticeMessage = "Music will still play in the app, but lock-screen controls may not appear unless notifications are allowed."
         pendingAction?.invoke()
         pendingAction = null
     }
 
+    fun allowChatNotifications() {
+        showChatNotificationExplainer = false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            notificationState = readNotificationState()
+            return
+        }
+        if (notificationState.status == VantafynPermissionStatus.PermanentlyDenied) {
+            openAppNotificationSettings()
+            return
+        }
+        pendingSource = PermissionRequestSource.Chat
+        prefs.edit()
+            .putBoolean(KEY_NOTIFICATION_REQUESTED, true)
+            .putBoolean(KEY_CHAT_NOTIFICATION_DISMISSED, false)
+            .apply()
+        launcher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    fun dismissChatExplainer() {
+        showChatNotificationExplainer = false
+        prefs.edit().putBoolean(KEY_CHAT_NOTIFICATION_DISMISSED, true).apply()
+        notificationState = readNotificationState()
+    }
+
     fun onNotificationPermissionResult(granted: Boolean) {
         notificationState = readNotificationState()
         if (!granted) {
-            noticeMessage = "Music will still play in the app, but lock-screen controls may not appear unless notifications are allowed."
+            if (pendingSource == PermissionRequestSource.Chat) {
+                noticeTitle = "Chat notifications disabled"
+                noticeMessage = "Chat notifications are disabled. You can enable them in Android Settings to receive message alerts."
+            } else {
+                noticeTitle = "Music controls are limited"
+                noticeMessage = "Music will still play in the app, but lock-screen controls may not appear unless notifications are allowed."
+            }
         }
+        pendingSource = null
         pendingAction?.invoke()
         pendingAction = null
     }
 
     fun dismissNotice() {
+        noticeTitle = null
         noticeMessage = null
     }
 

@@ -6390,7 +6390,7 @@ private fun toUserMessage(throwable: Throwable): String {
         throwable is AuthenticationException -> throwable.message ?: "Unable to authenticate"
         throwable is SecurityException -> throwable.message ?: "That address belongs to a different Jellyfin server"
         httpStatus == 401 || (className.contains("InvalidStatusException") && message.contains("401")) -> "Session expired or invalid credentials"
-        httpStatus == 403 || (className.contains("InvalidStatusException") && message.contains("403")) -> "Admin privileges required on server"
+        httpStatus == 403 || (className.contains("InvalidStatusException") && message.contains("403")) -> "Access denied by server (HTTP 403 Forbidden)"
         httpStatus == 404 -> "Item or resource not found on server"
         httpStatus in 502..504 -> "Server gateway unavailable or timed out"
         httpStatus != null && httpStatus in 500..599 -> "Jellyfin server error (HTTP $httpStatus)"

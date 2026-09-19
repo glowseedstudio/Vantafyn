@@ -452,6 +452,7 @@ fun VantafynAppContent(
     isCarMode: Boolean = false,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
+    onRequestChatNotificationsPermission: () -> Unit = {},
     onNotificationPermissionSettingsAction: () -> Unit = {},
     viewModel: VantafynHomeViewModel = viewModel(),
 ) {
@@ -626,6 +627,7 @@ fun VantafynAppContent(
                     viewModel = viewModel,
                     notificationPermissionState = notificationPermissionState,
                     onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+                    onRequestChatNotificationsPermission = onRequestChatNotificationsPermission,
                     onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
                     reducedMotion = reducedMotion,
                 )
@@ -673,6 +675,7 @@ private fun HomeScreenHost(
     viewModel: VantafynHomeViewModel,
     notificationPermissionState: VantafynPermissionUiState,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
+    onRequestChatNotificationsPermission: () -> Unit = {},
     onNotificationPermissionSettingsAction: () -> Unit,
     reducedMotion: Boolean,
 ) {
@@ -696,6 +699,7 @@ private fun HomeScreenHost(
             viewModel = viewModel,
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+            onRequestChatNotificationsPermission = onRequestChatNotificationsPermission,
             onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
         )
     }
@@ -3152,6 +3156,7 @@ private fun HomeScreen(
     viewModel: VantafynHomeViewModel,
     notificationPermissionState: VantafynPermissionUiState = VantafynPermissionUiState(),
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit) = { action -> action() },
+    onRequestChatNotificationsPermission: () -> Unit = {},
     onNotificationPermissionSettingsAction: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -3328,6 +3333,7 @@ private fun HomeScreen(
             onNavigateBack = viewModel::navigateMobileBack,
             notificationPermissionState = notificationPermissionState,
             onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+            onRequestChatNotificationsPermission = onRequestChatNotificationsPermission,
             onNotificationPermissionSettingsAction = onNotificationPermissionSettingsAction,
             modifier = modifier,
         )
@@ -3556,6 +3562,7 @@ private fun MobileShellScreen(
     onNavigateBack: () -> Unit,
     notificationPermissionState: VantafynPermissionUiState,
     onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
+    onRequestChatNotificationsPermission: () -> Unit = {},
     onNotificationPermissionSettingsAction: () -> Unit,
     onSelectExperienceMode: (ExperienceMode) -> Unit = {},
     onSelectMusicBackend: (MusicBackendType) -> Unit = {},
@@ -3585,6 +3592,9 @@ private fun MobileShellScreen(
         } else if (wasInPlayer) {
             wasInPlayer = false
             lastPlayerExitTime = System.currentTimeMillis()
+        }
+        if (state.mobileDestination == MobileDestination.Chat || state.mobileDestination == MobileDestination.Social) {
+            onRequestChatNotificationsPermission()
         }
     }
 
@@ -4153,6 +4163,9 @@ private fun MobileShellScreen(
                             onSelectTab = onSetActiveSocialTab,
                         )
                         MobileDestination.Chat -> {
+                            LaunchedEffect(Unit) {
+                                onRequestChatNotificationsPermission()
+                            }
                             state.activeChatPeer?.let { peer ->
                                 val chatMediaItems = remember(state.home, state.libraryItems, state.favorites) {
                                     val fromHome = state.home?.sections?.flatMap { it.items }.orEmpty()

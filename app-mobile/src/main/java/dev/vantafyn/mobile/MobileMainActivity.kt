@@ -19,6 +19,8 @@ import dev.vantafyn.feature.home.VantafynAppContent
 import dev.vantafyn.feature.player.VantafynPipState
 import android.content.Intent
 import android.view.KeyEvent
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.fragment.app.FragmentActivity
 import dev.vantafyn.core.integrations.push.VantafynPushNotifier
 
@@ -88,6 +90,7 @@ class MobileMainActivity : FragmentActivity() {
                             tv = false,
                             notificationPermissionState = permissionCoordinator.notificationState,
                             onRequestMusicControlsPermission = permissionCoordinator::requestForMusicControls,
+                            onRequestChatNotificationsPermission = permissionCoordinator::requestForChatNotifications,
                             onNotificationPermissionSettingsAction = permissionCoordinator::requestFromSettings,
                         )
                         if (permissionCoordinator.showMusicNotificationExplainer) {
@@ -101,9 +104,21 @@ class MobileMainActivity : FragmentActivity() {
                                 onSecondary = permissionCoordinator::notNow,
                             )
                         }
+                        if (permissionCoordinator.showChatNotificationExplainer) {
+                            VantafynPermissionSheet(
+                                icon = Icons.Rounded.ChatBubbleOutline,
+                                title = "Allow chat notifications?",
+                                body = "Vantafyn uses notifications to alert you when friends send you messages, media recommendations, and watch party invites.",
+                                trustNote = "Vantafyn only uses notifications for chat messages and unlocks. It does not use notifications for ads or tracking.",
+                                primaryAction = "Allow notifications",
+                                secondaryAction = "Not now",
+                                onPrimary = permissionCoordinator::allowChatNotifications,
+                                onSecondary = permissionCoordinator::dismissChatExplainer,
+                            )
+                        }
                         permissionCoordinator.noticeMessage?.let { message ->
                             VantafynPermissionSheet(
-                                title = "Music controls are limited",
+                                title = permissionCoordinator.noticeTitle ?: "Notification permission",
                                 body = message,
                                 primaryAction = "OK",
                                 secondaryAction = "Open Android Settings",
