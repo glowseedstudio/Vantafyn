@@ -118,16 +118,16 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     // ----------------------------------------------------
     DiscoverFeature(
         id = "profile_avatar_shortcuts",
-        title = "Avatar Shortcuts & What's New",
-        shortDescription = "Tap for What's New & Settings; touch and hold to reveal Secret Franchise Watch Guides.",
+        title = "Avatar Shortcuts: Settings, What's New & Watch Guides",
+        shortDescription = "Tap avatar to open Settings; touch and hold to open the tabbed hub for What's New & Watch Guides.",
         category = DiscoverCategory.MakeItYours,
         icon = Icons.Rounded.Person,
         isNew = true,
-        detailedDescription = "Your Home screen profile avatar is an intelligent shortcut hub. When new movies or TV episodes arrive on your Jellyfin server, an animated glowing gradient notification dot appears on your avatar. Tap your avatar to open Settings and browse the full What's New feed. Touch and hold (long-press) your avatar anytime to instantly open the Franchise Watch Guides vault without navigating menus.",
+        detailedDescription = "Your Home screen profile avatar is an intelligent shortcut hub. Tap your avatar to open Settings. Touch and hold (long-press) your avatar to open a tabbed glass modal where you can access both What's New and Secret Franchise Watch Guides. In addition, an animated glowing gradient notification dot alerts you whenever fresh movies or episodes arrive on your Jellyfin server.",
         steps = listOf(
-            "Tap avatar on Home to open Settings and review the What's New feed",
+            "Tap avatar on Home to open Settings",
+            "Touch and hold (long-press) avatar to open the tabbed modal for both What's New & Franchise Watch Guides",
             "Notice the glowing gradient dot when fresh media has arrived on your server",
-            "Touch and hold (long-press) your avatar to open Franchise Watch Guides directly",
         ),
         deepLinkAction = "open_settings",
     ),
@@ -199,10 +199,10 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
     DiscoverFeature(
         id = "bottom_rail",
         title = "Bottom Rail & Magnetic Gliding Dock",
-        shortDescription = "Glass navigation dock with magnetic gliding indicator, touch ripples, and glowing borders.",
+        shortDescription = "Glass navigation dock with a fluid magnetic gliding indicator.",
         category = DiscoverCategory.MakeItYours,
         icon = Icons.Rounded.FiberManualRecord,
-        detailedDescription = "Experience a tactile glass dock at the bottom of your screen. Features a smooth magnetic indicator that glides fluidly between tabs, optional breathing ambient borders, and touch ripples configured in Settings \u2192 Appearance.",
+        detailedDescription = "Experience a tactile glass dock at the bottom of your screen with a smooth magnetic indicator that glides fluidly between destinations as you browse.",
         deepLinkAction = "open_settings",
     ),
     DiscoverFeature(

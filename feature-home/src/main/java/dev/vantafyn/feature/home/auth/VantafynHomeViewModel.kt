@@ -1606,11 +1606,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             _state.update { it.copy(isAchievementsLoading = true, achievementError = null) }
             val summaryDeferred = async { achievementRepository.getSummary(session) }
             val achievementsDeferred = async { achievementRepository.getAchievements(session) }
+            val leaderboardDeferred = async { achievementRepository.getLeaderboard(session) }
             val summaryResult = summaryDeferred.await()
             val achievementsResult = achievementsDeferred.await()
+            val leaderboardResult = leaderboardDeferred.await()
             _state.update { state ->
                 val rawAchievements = (achievementsResult as? JellyfinResult.Success)?.value ?: state.achievements
                 var resolvedSummary = (summaryResult as? JellyfinResult.Success)?.value ?: state.achievementSummary
+                val rawLeaderboard = (leaderboardResult as? JellyfinResult.Success)?.value ?: state.achievementLeaderboard
 
                 if (rawAchievements.isNotEmpty()) {
                     val unlockedBadges = rawAchievements.filter { it.isUnlocked }
@@ -1636,13 +1639,63 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     )
                 }
 
+                val mergedLeaderboard = if (resolvedSummary != null && rawLeaderboard.isNotEmpty()) {
+                    val updated = rawLeaderboard.map { lbUser ->
+                        if (lbUser.userId == session.user.id) {
+                            lbUser.copy(
+                                currentScore = maxOf(lbUser.currentScore, resolvedSummary!!.currentScore),
+                                rankName = resolvedSummary!!.rankName,
+                                rankTier = resolvedSummary!!.rankTier,
+                                unlockedCount = maxOf(lbUser.unlockedCount, resolvedSummary!!.unlockedCount),
+                                isCurrentUser = true,
+                            )
+                        } else lbUser
+                    }.sortedWith(
+                        compareByDescending<dev.vantafyn.core.jellyfin.JellyfinLeaderboardUser> { it.currentScore }
+                            .thenBy { it.username.lowercase() }
+                    )
+                    updated.mapIndexed { index, user -> user.copy(rankPosition = index + 1) }
+                } else rawLeaderboard
+
                 state.copy(
                     isAchievementsLoading = false,
                     achievementSummary = resolvedSummary,
                     achievements = rawAchievements,
+                    achievementLeaderboard = mergedLeaderboard,
                     achievementError = (achievementsResult as? JellyfinResult.Failure)?.message
                         ?: (summaryResult as? JellyfinResult.Failure)?.message,
                 )
+            }
+        }
+    }
+
+    fun loadLeaderboard(force: Boolean = false) {
+        val session = _state.value.session ?: return
+        if (!force && _state.value.achievementLeaderboard.isNotEmpty()) return
+        viewModelScope.launch {
+            _state.update { it.copy(isLeaderboardLoading = true) }
+            val result = achievementRepository.getLeaderboard(session)
+            if (result is JellyfinResult.Success) {
+                val currentUserId = session.user.id
+                val mySummary = _state.value.achievementSummary
+                val updated = result.value.map { lbUser ->
+                    if (lbUser.userId == currentUserId && mySummary != null) {
+                        lbUser.copy(
+                            currentScore = maxOf(lbUser.currentScore, mySummary.currentScore),
+                            rankName = mySummary.rankName,
+                            rankTier = mySummary.rankTier,
+                            unlockedCount = maxOf(lbUser.unlockedCount, mySummary.unlockedCount),
+                            isCurrentUser = true,
+                        )
+                    } else lbUser
+                }.sortedWith(
+                    compareByDescending<dev.vantafyn.core.jellyfin.JellyfinLeaderboardUser> { it.currentScore }
+                        .thenBy { it.username.lowercase() }
+                )
+                val ranked = updated.mapIndexed { index, user -> user.copy(rankPosition = index + 1) }
+                _state.update { it.copy(achievementLeaderboard = ranked, isLeaderboardLoading = false) }
+            } else {
+                _state.update { it.copy(isLeaderboardLoading = false) }
             }
         }
     }
@@ -9693,6 +9746,8 @@ data class VantafynHomeUiState(
     val isAchievementsLoading: Boolean = false,
     val achievementSummary: JellyfinAchievementSummary? = null,
     val achievements: List<JellyfinAchievement> = emptyList(),
+    val achievementLeaderboard: List<dev.vantafyn.core.jellyfin.JellyfinLeaderboardUser> = emptyList(),
+    val isLeaderboardLoading: Boolean = false,
     val achievementError: String? = null,
     val activeAchievementUnlock: JellyfinAchievementUnlock? = null,
     val socialEnabled: Boolean = true,

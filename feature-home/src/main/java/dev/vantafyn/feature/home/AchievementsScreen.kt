@@ -1,11 +1,17 @@
 package dev.vantafyn.feature.home
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.graphics.graphicsLayer
@@ -45,6 +51,7 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Explore
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.Leaderboard
 import androidx.compose.material.icons.rounded.Lightbulb
 import androidx.compose.material.icons.rounded.LocalFireDepartment
 import androidx.compose.material.icons.rounded.Lock
@@ -90,6 +97,7 @@ import dev.vantafyn.core.jellyfin.AchievementRankHelper
 import dev.vantafyn.core.jellyfin.JellyfinAchievement
 import dev.vantafyn.core.jellyfin.JellyfinAchievementRarity
 import dev.vantafyn.core.jellyfin.JellyfinAchievementSummary
+import dev.vantafyn.core.jellyfin.JellyfinLeaderboardUser
 import dev.vantafyn.core.ui.VantafynButton
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGlassCard
@@ -104,6 +112,11 @@ import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 
+private enum class AchievementViewMode(val label: String, val icon: ImageVector) {
+    Badges("My Badges", Icons.Rounded.EmojiEvents),
+    Leaderboard("Leaderboard", Icons.Rounded.Leaderboard),
+}
+
 private enum class AchievementFilter(val label: String) {
     All("All"),
     Unlocked("Unlocked"),
@@ -116,14 +129,18 @@ fun AchievementsScreen(
     userImageUrl: String?,
     summary: JellyfinAchievementSummary?,
     achievements: List<JellyfinAchievement>,
+    leaderboard: List<JellyfinLeaderboardUser> = emptyList(),
     isLoading: Boolean,
+    isLeaderboardLoading: Boolean = false,
     error: String?,
     onBack: () -> Unit,
     onRetry: () -> Unit,
+    onRefreshLeaderboard: () -> Unit = onRetry,
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
 
+    var selectedViewMode by remember { mutableStateOf(AchievementViewMode.Badges) }
     var selectedFilter by remember { mutableStateOf(AchievementFilter.All) }
     var selectedCategory by remember { mutableStateOf<String?>(null) }
     var detailAchievement by remember { mutableStateOf<JellyfinAchievement?>(null) }
@@ -168,101 +185,139 @@ fun AchievementsScreen(
                     translationY = (1f - revealProgress) * 28.dp.toPx()
                 },
         ) {
-            // Top action bar with chevron back button and refresh
+            // Top action bar with chevron back button, score pill, and refresh
+            val currentUserInLeaderboard = leaderboard.firstOrNull { it.isCurrentUser }
+                ?: leaderboard.firstOrNull { it.username.equals(userName, ignoreCase = true) }
             AchievementsHeaderBar(
                 summary = summary,
+                userScore = summary?.currentScore ?: currentUserInLeaderboard?.currentScore,
                 onBack = onBack,
-                onRefresh = onRetry,
-                isLoading = isLoading,
+                onRefresh = {
+                    if (selectedViewMode == AchievementViewMode.Badges) {
+                        onRetry()
+                    } else {
+                        onRefreshLeaderboard()
+                    }
+                },
+                isLoading = if (selectedViewMode == AchievementViewMode.Badges) isLoading else isLeaderboardLoading,
             )
 
-            if (isLoading && achievements.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(
-                        color = VantafynColors.Primary,
-                        modifier = Modifier.size(36.dp),
-                    )
-                }
-            } else if (achievements.isEmpty()) {
-                AchievementsUnavailableView(
-                    message = error ?: "Install and enable the Achievement Badges for Jellyfin plugin to unlock badges, rank tiers, and milestones.",
-                    onRetry = onRetry,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 320.dp),
-                    state = gridState,
-                    contentPadding = PaddingValues(
-                        start = VantafynSpacing.lg,
-                        end = VantafynSpacing.lg,
-                        top = VantafynSpacing.xs,
-                        bottom = 96.dp,
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                    horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                ) {
-                    // Centered User Profile Avatar & Name
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        UserProfileHeader(
-                            userName = userName,
-                            userImageUrl = userImageUrl,
-                        )
-                    }
+            // Segmented mode toggle between Badges and Leaderboard
+            AchievementViewModeToggle(
+                selectedMode = selectedViewMode,
+                onSelectMode = { selectedViewMode = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = VantafynSpacing.lg, vertical = 6.dp),
+            )
 
-                    // Progression summary card with app gradient progress
-                    if (summary != null) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
-                            AchievementProgressionHero(summary = summary)
-                        }
-                    }
-
-                    // Filter controls with Vantafyn animated-border glass pills
-                    item(span = { GridItemSpan(maxLineSpan) }) {
-                        AchievementFilterStrip(
-                            selectedFilter = selectedFilter,
-                            onSelectFilter = { selectedFilter = it },
-                            categories = categories,
-                            selectedCategory = selectedCategory,
-                            onSelectCategory = {
-                                selectedCategory = if (selectedCategory == it) null else it
-                            },
-                        )
-                    }
-
-                    // Empty filter state
-                    if (filteredAchievements.isEmpty()) {
-                        item(span = { GridItemSpan(maxLineSpan) }) {
+            AnimatedContent(
+                targetState = selectedViewMode,
+                transitionSpec = {
+                    fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(180))
+                },
+                label = "achievement_view_mode_content",
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+            ) { mode ->
+                when (mode) {
+                    AchievementViewMode.Badges -> {
+                        if (isLoading && achievements.isEmpty()) {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp),
+                                modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Text(
-                                    text = "No achievements found in this category",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = VantafynColors.Muted,
+                                CircularProgressIndicator(
+                                    color = VantafynColors.Primary,
+                                    modifier = Modifier.size(36.dp),
                                 )
                             }
-                        }
-                    } else {
-                        items(filteredAchievements, key = { it.id }) { achievement ->
-                            AchievementCard(
-                                achievement = achievement,
-                                onClick = { detailAchievement = achievement },
+                        } else if (achievements.isEmpty()) {
+                            AchievementsUnavailableView(
+                                message = error ?: "Install and enable the Achievement Badges for Jellyfin plugin to unlock badges, rank tiers, and milestones.",
+                                onRetry = onRetry,
+                                modifier = Modifier.fillMaxSize(),
                             )
+                        } else {
+                            LazyVerticalGrid(
+                                columns = GridCells.Adaptive(minSize = 320.dp),
+                                state = gridState,
+                                contentPadding = PaddingValues(
+                                    start = VantafynSpacing.lg,
+                                    end = VantafynSpacing.lg,
+                                    top = VantafynSpacing.xs,
+                                    bottom = 96.dp,
+                                ),
+                                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                                horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                                // Centered User Profile Avatar & Name
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    UserProfileHeader(
+                                        userName = userName,
+                                        userImageUrl = userImageUrl,
+                                    )
+                                }
+
+                                // Progression summary card with app gradient progress
+                                if (summary != null) {
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        AchievementProgressionHero(summary = summary)
+                                    }
+                                }
+
+                                // Filter controls with Vantafyn animated-border glass pills
+                                item(span = { GridItemSpan(maxLineSpan) }) {
+                                    AchievementFilterStrip(
+                                        selectedFilter = selectedFilter,
+                                        onSelectFilter = { selectedFilter = it },
+                                        categories = categories,
+                                        selectedCategory = selectedCategory,
+                                        onSelectCategory = {
+                                            selectedCategory = if (selectedCategory == it) null else it
+                                        },
+                                    )
+                                }
+
+                                // Empty filter state
+                                if (filteredAchievements.isEmpty()) {
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 48.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = "No achievements found in this category",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = VantafynColors.Muted,
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    items(filteredAchievements, key = { it.id }) { achievement ->
+                                        AchievementCard(
+                                            achievement = achievement,
+                                            onClick = { detailAchievement = achievement },
+                                        )
+                                    }
+                                }
+                            }
                         }
+                    }
+                    AchievementViewMode.Leaderboard -> {
+                        AchievementLeaderboardView(
+                            leaderboard = leaderboard,
+                            isLoading = isLeaderboardLoading,
+                            userName = userName,
+                            userImageUrl = userImageUrl,
+                            summary = summary,
+                            onRefresh = onRefreshLeaderboard,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
@@ -333,6 +388,7 @@ private fun UserProfileHeader(
 @Composable
 private fun AchievementsHeaderBar(
     summary: JellyfinAchievementSummary?,
+    userScore: Int? = summary?.currentScore,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
     isLoading: Boolean,
@@ -347,7 +403,8 @@ private fun AchievementsHeaderBar(
         CompactBackButton(onClick = onBack)
 
         Row(verticalAlignment = Alignment.CenterVertically) {
-            if (summary != null) {
+            val scoreToDisplay = userScore ?: summary?.currentScore
+            if (scoreToDisplay != null) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
@@ -367,7 +424,7 @@ private fun AchievementsHeaderBar(
                             modifier = Modifier.size(14.dp),
                         )
                         Text(
-                            text = "${summary.currentScore} PTS",
+                            text = "$scoreToDisplay PTS",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFFFD700),
@@ -1268,3 +1325,809 @@ private fun JellyfinAchievementRarity.toColor(): Color =
         JellyfinAchievementRarity.Mythic -> Color(0xFFFF1744)
         JellyfinAchievementRarity.Unknown -> Color(0xFF9E9E9E)
     }
+
+private fun parseHexColor(hex: String, fallback: Color = VantafynColors.Primary): Color =
+    try {
+        val clean = hex.removePrefix("#")
+        val colorLong = clean.toLong(16)
+        if (clean.length == 6) {
+            Color(0xFF000000 or colorLong)
+        } else if (clean.length == 8) {
+            Color(colorLong)
+        } else {
+            fallback
+        }
+    } catch (_: Exception) {
+        fallback
+    }
+
+@Composable
+private fun AchievementViewModeToggle(
+    selectedMode: AchievementViewMode,
+    onSelectMode: (AchievementViewMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.55f))
+            .border(
+                width = 1.dp,
+                color = Color.White.copy(alpha = 0.10f),
+                shape = RoundedCornerShape(999.dp),
+            )
+            .padding(4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            AchievementViewMode.entries.forEach { mode ->
+                val isSelected = mode == selectedMode
+                val backgroundColor = if (isSelected) {
+                    VantafynColors.SurfaceHigh.copy(alpha = 0.95f)
+                } else {
+                    Color.Transparent
+                }
+                val contentColor = if (isSelected) {
+                    VantafynColors.Primary
+                } else {
+                    VantafynColors.Muted
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(999.dp))
+                        .then(
+                            if (isSelected) {
+                                Modifier.vantafynAnimatedModalBorder(
+                                    cornerRadius = 999.dp,
+                                    strokeWidth = 1.2.dp,
+                                    durationMillis = 4000,
+                                )
+                            } else {
+                                Modifier
+                            }
+                        )
+                        .background(backgroundColor)
+                        .clickable { onSelectMode(mode) }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = mode.icon,
+                            contentDescription = null,
+                            tint = contentColor,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            text = mode.label,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            color = if (isSelected) VantafynColors.Ink else VantafynColors.Muted,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AchievementLeaderboardView(
+    leaderboard: List<JellyfinLeaderboardUser>,
+    isLoading: Boolean,
+    userName: String,
+    userImageUrl: String?,
+    summary: JellyfinAchievementSummary?,
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (isLoading && leaderboard.isEmpty()) {
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center,
+        ) {
+            CircularProgressIndicator(
+                color = VantafynColors.Primary,
+                modifier = Modifier.size(36.dp),
+            )
+        }
+        return
+    }
+
+    if (leaderboard.isEmpty()) {
+        LeaderboardEmptyView(
+            onRefresh = onRefresh,
+            modifier = modifier,
+        )
+        return
+    }
+
+    val currentUser = leaderboard.firstOrNull { it.isCurrentUser }
+        ?: leaderboard.firstOrNull { it.username.equals(userName, ignoreCase = true) }
+
+    val nextPlayer = if (currentUser != null && currentUser.rankPosition > 1) {
+        leaderboard.firstOrNull { it.rankPosition == currentUser.rankPosition - 1 }
+    } else {
+        null
+    }
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = VantafynSpacing.lg,
+            end = VantafynSpacing.lg,
+            top = VantafynSpacing.xs,
+            bottom = 96.dp,
+        ),
+        verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
+    ) {
+        // Hero standing card
+        item {
+            LeaderboardUserStandingHero(
+                currentUser = currentUser,
+                userName = userName,
+                userImageUrl = userImageUrl,
+                summary = summary,
+                totalMembers = leaderboard.size,
+                nextPlayer = nextPlayer,
+            )
+        }
+
+        // Top 3 Podium
+        item {
+            LeaderboardPodium(topUsers = leaderboard.take(3))
+        }
+
+        // Section header for remaining ranks
+        if (leaderboard.size > 3) {
+            item {
+                Text(
+                    text = "Server Members",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = VantafynColors.Ink,
+                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp),
+                )
+            }
+
+            items(leaderboard.drop(3), key = { it.userId.toString() + "_${it.rankPosition}" }) { user ->
+                LeaderboardMemberCard(user = user)
+            }
+        }
+    }
+}
+
+@Composable
+private fun LeaderboardUserStandingHero(
+    currentUser: JellyfinLeaderboardUser?,
+    userName: String,
+    userImageUrl: String?,
+    summary: JellyfinAchievementSummary?,
+    totalMembers: Int,
+    nextPlayer: JellyfinLeaderboardUser?,
+    modifier: Modifier = Modifier,
+) {
+    val displayScore = currentUser?.currentScore ?: summary?.currentScore ?: 0
+    val displayTier = AchievementRankHelper.getTier(displayScore)
+    val tierColor = parseHexColor(displayTier.colorHex)
+    val rankText = if (currentUser != null && currentUser.rankPosition > 0) {
+        "#${currentUser.rankPosition}"
+    } else {
+        "--"
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(
+                        VantafynColors.SurfaceHigh.copy(alpha = 0.85f),
+                        VantafynColors.Surface.copy(alpha = 0.9f),
+                    ),
+                ),
+            )
+            .vantafynAnimatedModalBorder(cornerRadius = 20.dp, strokeWidth = 1.4.dp, durationMillis = 4400)
+            .padding(VantafynSpacing.lg),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md)) {
+            // Header row with pill
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = VantafynColors.Primary,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Text(
+                        text = "YOUR SERVER STANDING",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp,
+                        color = VantafynColors.Ink,
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(VantafynColors.Primary.copy(alpha = 0.15f))
+                        .border(1.dp, VantafynColors.Primary.copy(alpha = 0.4f), RoundedCornerShape(999.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        text = if (totalMembers > 0) "$rankText of $totalMembers" else rankText,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Primary,
+                    )
+                }
+            }
+
+            // Middle row: Avatar + details
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .clip(CircleShape)
+                        .border(2.dp, tierColor.copy(alpha = 0.6f), CircleShape)
+                        .background(VantafynColors.SurfaceHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val avatar = currentUser?.avatarUrl ?: userImageUrl
+                    if (!avatar.isNullOrBlank()) {
+                        AsyncImage(
+                            model = avatar,
+                            contentDescription = userName,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Text(
+                            text = extractUserInitials(userName),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = VantafynColors.Ink,
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = userName.ifBlank { "You" },
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = VantafynColors.Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(tierColor.copy(alpha = 0.16f))
+                                .border(1.dp, tierColor.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                text = displayTier.name,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = tierColor,
+                            )
+                        }
+
+                        Text(
+                            text = "• ${currentUser?.unlockedCount ?: summary?.unlockedCount ?: 0} badges",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VantafynColors.Muted,
+                        )
+                    }
+                }
+
+                // Points counter
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = "$displayScore",
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Black,
+                        color = Color(0xFFFFD700),
+                    )
+                    Text(
+                        text = "TOTAL PTS",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        letterSpacing = 1.sp,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+
+            // Bottom callout: standing commentary
+            val commentary = when {
+                currentUser?.rankPosition == 1 -> "👑 Supreme Champion! You hold #1 position across the entire server."
+                nextPlayer != null -> {
+                    val gap = (nextPlayer.currentScore - displayScore).coerceAtLeast(1)
+                    "⚡ Only $gap PTS to overtake ${nextPlayer.username} for #${nextPlayer.rankPosition}!"
+                }
+                else -> "✨ Stream content and complete achievement badges to rise up the leaderboard."
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(VantafynColors.SurfaceHigh.copy(alpha = 0.6f))
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                Text(
+                    text = commentary,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (currentUser?.rankPosition == 1) Color(0xFFFFD700) else VantafynColors.Ink,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LeaderboardPodium(
+    topUsers: List<JellyfinLeaderboardUser>,
+    modifier: Modifier = Modifier,
+) {
+    if (topUsers.isEmpty()) return
+
+    val first = topUsers.firstOrNull()
+    val second = topUsers.getOrNull(1)
+    val third = topUsers.getOrNull(2)
+
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        // 2nd Place (Silver)
+        if (second != null) {
+            PodiumPillar(
+                user = second,
+                rankNumber = 2,
+                pedestalHeight = 100.dp,
+                accentColor = Color(0xFFC0C0C0),
+                modifier = Modifier.weight(1f),
+            )
+        } else if (topUsers.size > 1) {
+            Spacer(Modifier.weight(1f))
+        }
+
+        // 1st Place (Gold)
+        if (first != null) {
+            PodiumPillar(
+                user = first,
+                rankNumber = 1,
+                pedestalHeight = 135.dp,
+                accentColor = Color(0xFFFFD700),
+                isFirst = true,
+                modifier = Modifier.weight(if (topUsers.size == 1) 1f else 1.15f),
+            )
+        }
+
+        // 3rd Place (Bronze)
+        if (third != null) {
+            PodiumPillar(
+                user = third,
+                rankNumber = 3,
+                pedestalHeight = 80.dp,
+                accentColor = Color(0xFFCD7F32),
+                modifier = Modifier.weight(1f),
+            )
+        } else if (topUsers.size > 1) {
+            Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun PodiumPillar(
+    user: JellyfinLeaderboardUser,
+    rankNumber: Int,
+    pedestalHeight: androidx.compose.ui.unit.Dp,
+    accentColor: Color,
+    isFirst: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    val tierColor = parseHexColor(AchievementRankHelper.getTier(user.currentScore).colorHex)
+    val avatarSize = if (isFirst) 62.dp else 48.dp
+
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // Crown / Trophy icon for #1
+        if (isFirst) {
+            Icon(
+                imageVector = Icons.Rounded.EmojiEvents,
+                contentDescription = null,
+                tint = accentColor,
+                modifier = Modifier
+                    .size(26.dp)
+                    .padding(bottom = 2.dp),
+            )
+        } else {
+            Spacer(Modifier.height(18.dp))
+        }
+
+        // Avatar
+        Box(
+            modifier = Modifier
+                .size(avatarSize)
+                .clip(CircleShape)
+                .then(
+                    if (isFirst) {
+                        Modifier.vantafynAnimatedModalBorder(cornerRadius = 31.dp, strokeWidth = 2.dp, durationMillis = 3600)
+                    } else {
+                        Modifier.border(1.8.dp, accentColor.copy(alpha = 0.7f), CircleShape)
+                    }
+                )
+                .background(VantafynColors.SurfaceHigh),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!user.avatarUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = user.avatarUrl,
+                    contentDescription = user.username,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                )
+            } else {
+                Text(
+                    text = extractUserInitials(user.username),
+                    style = if (isFirst) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = VantafynColors.Ink,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(6.dp))
+
+        // Username
+        Text(
+            text = user.username,
+            style = if (isFirst) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = if (user.isCurrentUser) VantafynColors.Primary else VantafynColors.Ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+        )
+
+        // Points
+        Text(
+            text = "${user.currentScore} PTS",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.ExtraBold,
+            color = accentColor,
+            textAlign = TextAlign.Center,
+        )
+
+        // Rank Tier
+        Text(
+            text = user.rankName,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            color = tierColor,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        // Pedestal Box
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(pedestalHeight)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 8.dp, bottomEnd = 8.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            accentColor.copy(alpha = if (isFirst) 0.32f else 0.22f),
+                            accentColor.copy(alpha = 0.06f),
+                        ),
+                    ),
+                )
+                .border(
+                    width = 1.2.dp,
+                    brush = Brush.verticalGradient(
+                        listOf(
+                            accentColor.copy(alpha = 0.7f),
+                            accentColor.copy(alpha = 0.2f),
+                        ),
+                    ),
+                    shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 8.dp, bottomEnd = 8.dp),
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "$rankNumber",
+                style = if (isFirst) MaterialTheme.typography.displaySmall else MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Black,
+                color = accentColor.copy(alpha = 0.85f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun LeaderboardMemberCard(
+    user: JellyfinLeaderboardUser,
+    modifier: Modifier = Modifier,
+) {
+    val tierColor = parseHexColor(AchievementRankHelper.getTier(user.currentScore).colorHex)
+    val cardModifier = if (user.isCurrentUser) {
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .vantafynAnimatedModalBorder(cornerRadius = 16.dp, strokeWidth = 1.4.dp, durationMillis = 4200)
+    } else {
+        modifier.fillMaxWidth()
+    }
+
+    VantafynGlassCard(
+        modifier = cardModifier,
+        selected = user.isCurrentUser,
+        cornerRadius = 16.dp,
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Rank position badge
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (user.isCurrentUser) VantafynColors.Primary.copy(alpha = 0.18f)
+                        else VantafynColors.SurfaceHigh.copy(alpha = 0.6f)
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (user.isCurrentUser) VantafynColors.Primary.copy(alpha = 0.45f)
+                        else Color.White.copy(alpha = 0.10f),
+                        shape = CircleShape,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "#${user.rankPosition}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (user.isCurrentUser) VantafynColors.Primary else VantafynColors.Ink,
+                )
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Avatar with online status
+            Box(
+                modifier = Modifier.size(42.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .border(1.5.dp, tierColor.copy(alpha = 0.5f), CircleShape)
+                        .background(VantafynColors.SurfaceHigh),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!user.avatarUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = user.avatarUrl,
+                            contentDescription = user.username,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(CircleShape),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Text(
+                            text = extractUserInitials(user.username),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = VantafynColors.Ink,
+                        )
+                    }
+                }
+
+                if (user.isOnline) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .align(Alignment.BottomEnd)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00E676))
+                            .border(1.5.dp, VantafynColors.Surface, CircleShape),
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(12.dp))
+
+            // Member names & tier info
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        text = user.username,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (user.isCurrentUser) FontWeight.Bold else FontWeight.SemiBold,
+                        color = if (user.isCurrentUser) VantafynColors.Primary else VantafynColors.Ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (user.isCurrentUser) {
+                        Text(
+                            text = "(You)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = VantafynColors.Primary,
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = user.rankName,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Medium,
+                        color = tierColor,
+                    )
+                    Text(
+                        text = "•",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VantafynColors.Muted,
+                    )
+                    Text(
+                        text = "${user.unlockedCount} badges",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
+            // Score & Rank Tier
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = "${user.currentScore} PTS",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color(0xFFFFD700),
+                )
+                Text(
+                    text = "Tier ${user.rankTier}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VantafynColors.Muted,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LeaderboardEmptyView(
+    onRefresh: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = VantafynSpacing.lg, vertical = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        VantafynGlassCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = 24.dp,
+            contentPadding = PaddingValues(24.dp),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xFFFFD700).copy(alpha = 0.25f),
+                                    Color(0xFFFF9100).copy(alpha = 0.2f),
+                                ),
+                            ),
+                        )
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Leaderboard,
+                        contentDescription = null,
+                        tint = Color(0xFFFFD700),
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+
+                Text(
+                    text = "Server Leaderboard",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+
+                Text(
+                    text = "No leaderboard scores recorded yet. Watch movies, shows, and unlock badges to establish the server rankings!",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                )
+
+                VantafynButton(
+                    text = "Refresh Rankings",
+                    onClick = onRefresh,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+        }
+    }
+}

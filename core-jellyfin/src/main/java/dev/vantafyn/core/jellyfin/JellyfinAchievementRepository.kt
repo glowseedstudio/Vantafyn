@@ -146,6 +146,157 @@ class SdkJellyfinAchievementRepository(
             }
         }
 
+    override suspend fun getLeaderboard(session: JellyfinSession): JellyfinResult<List<JellyfinLeaderboardUser>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                var body = ""
+                for (endpoint in listOf("Plugins/AchievementBadges/leaderboard", "Plugins/AchievementBadges/users")) {
+                    val conn = session.openAuthenticatedConnection(endpoint)
+                    val code = conn.responseCode
+                    if (code in 200..299) {
+                        body = conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        conn.disconnect()
+                        if (body.isNotBlank() && body.trim() != "[]" && body.trim() != "{}") {
+                            break
+                        }
+                    } else {
+                        conn.disconnect()
+                    }
+                }
+
+                val list = parseLeaderboardUsers(session, body)
+                JellyfinResult.Success(list)
+            }.getOrElse { error ->
+                JellyfinResult.Failure(error.message ?: "Failed to fetch leaderboard", error)
+            }
+        }
+
+    private fun parseLeaderboardUsers(session: JellyfinSession, body: String): List<JellyfinLeaderboardUser> {
+        val result = mutableListOf<JellyfinLeaderboardUser>()
+        val trimmed = body.trim()
+        if (trimmed.isNotBlank() && trimmed != "[]" && trimmed != "{}") {
+            val jsonArray: JSONArray = when {
+                trimmed.startsWith("[") -> runCatching { JSONArray(trimmed) }.getOrDefault(JSONArray())
+                trimmed.startsWith("{") -> {
+                    runCatching {
+                        val obj = JSONObject(trimmed)
+                        obj.optJSONArray("Items")
+                            ?: obj.optJSONArray("items")
+                            ?: obj.optJSONArray("Leaderboard")
+                            ?: obj.optJSONArray("leaderboard")
+                            ?: obj.optJSONArray("Users")
+                            ?: obj.optJSONArray("users")
+                            ?: JSONArray()
+                    }.getOrDefault(JSONArray())
+                }
+                else -> JSONArray()
+            }
+
+            for (i in 0 until jsonArray.length()) {
+                val item = jsonArray.optJSONObject(i) ?: continue
+                val nestedUser = item.optJSONObject("User")
+                    ?: item.optJSONObject("user")
+                    ?: item.optJSONObject("Friend")
+                    ?: item.optJSONObject("friend")
+
+                val idStr = nestedUser?.optStringOrNull("Id", "id", "UserId", "userId")
+                    ?: item.optStringOrNull(
+                        "UserId", "userId",
+                        "Id", "id",
+                        "User_Id", "user_id",
+                    ) ?: continue
+
+                val userId = runCatching { UUID.fromString(idStr) }.getOrNull()
+                    ?: runCatching {
+                        val clean = idStr.replace("-", "")
+                        if (clean.length == 32) {
+                            UUID.fromString(
+                                "${clean.substring(0, 8)}-${clean.substring(8, 12)}-${clean.substring(12, 16)}-${clean.substring(16, 20)}-${clean.substring(20, 32)}"
+                            )
+                        } else null
+                    }.getOrNull()
+                    ?: continue
+
+                val username = nestedUser?.optStringOrNull("Username", "username", "Name", "name", "UserName", "userName")
+                    ?: item.optStringOrNull(
+                        "UserName", "userName",
+                        "Username", "username",
+                        "Name", "name",
+                        "DisplayName", "displayName",
+                    ) ?: "User"
+
+                val avatarTag = nestedUser?.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag", "ImageTag", "imageTag")
+                    ?: item.optStringOrNull("PrimaryImageTag", "primaryImageTag", "AvatarTag", "avatarTag", "ImageTag", "imageTag")
+
+                val avatarUrl = if (session.server.url.isNotBlank()) {
+                    val base = "${session.server.url.trimEnd('/')}/Users/$userId/Images/Primary"
+                    val withTag = if (!avatarTag.isNullOrBlank()) "$base?tag=$avatarTag" else base
+                    if (session.accessToken.isNotBlank()) "$withTag${if (withTag.contains("?")) "&" else "?"}api_key=${session.accessToken}" else withTag
+                } else null
+
+                val currentScore = item.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points", "TotalScore") ?: 0
+                val unlockedCount = item.optIntOrNull("UnlockedCount", "unlockedCount", "Unlocked", "unlocked", "BadgeCount") ?: 0
+                val tierInfo = AchievementRankHelper.getTier(currentScore)
+                val rankName = item.optStringOrNull("RankName", "rankName", "Rank", "rank", "TierName", "tierName")
+                    ?.takeIf { it.isNotBlank() && !it.equals("Rookie", ignoreCase = true) }
+                    ?: tierInfo.name
+                val rankTier = item.optIntOrNull("RankTier", "rankTier", "Tier", "tier")
+                    ?.takeIf { it > 1 }
+                    ?: tierInfo.tierNumber
+                val isOnline = item.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
+                    ?: nestedUser?.optBooleanOrNull("Online", "online", "IsOnline", "isOnline")
+                    ?: false
+
+                result.add(
+                    JellyfinLeaderboardUser(
+                        userId = userId,
+                        username = username,
+                        rankName = rankName,
+                        rankTier = rankTier,
+                        currentScore = currentScore,
+                        unlockedCount = unlockedCount,
+                        avatarUrl = avatarUrl,
+                        isOnline = isOnline,
+                        isCurrentUser = userId == session.user.id,
+                    )
+                )
+            }
+        }
+
+        // If the current user is not in the list, synthesize an entry for them
+        if (result.none { it.userId == session.user.id }) {
+            val myAvatarUrl = if (session.server.url.isNotBlank()) {
+                val base = "${session.server.url.trimEnd('/')}/Users/${session.user.id}/Images/Primary"
+                val tag = session.user.primaryImageTag
+                val withTag = if (!tag.isNullOrBlank()) "$base?tag=$tag" else base
+                if (session.accessToken.isNotBlank()) "$withTag${if (withTag.contains("?")) "&" else "?"}api_key=${session.accessToken}" else withTag
+            } else null
+
+            result.add(
+                JellyfinLeaderboardUser(
+                    userId = session.user.id,
+                    username = session.user.name,
+                    rankName = "Rookie",
+                    rankTier = 1,
+                    currentScore = 0,
+                    unlockedCount = 0,
+                    avatarUrl = myAvatarUrl,
+                    isOnline = true,
+                    isCurrentUser = true,
+                )
+            )
+        }
+
+        val sorted = result.sortedWith(
+            compareByDescending<JellyfinLeaderboardUser> { it.currentScore }
+                .thenBy { it.username.lowercase() }
+        )
+
+        return sorted.mapIndexed { index, user ->
+            user.copy(rankPosition = index + 1)
+        }
+    }
+
     private fun parseSummary(userId: UUID, json: JSONObject): JellyfinAchievementSummary {
         val currentScore = json.optIntOrNull("CurrentScore", "currentScore", "Score", "score", "Points", "points", "TotalScore") ?: 0
         val tierInfo = AchievementRankHelper.getTier(currentScore)

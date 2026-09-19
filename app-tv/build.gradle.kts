@@ -11,8 +11,8 @@ android {
         applicationId = "dev.vantafyn.tv"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 23
-        versionName = "0.9.14"
+        versionCode = 24
+        versionName = "0.9.15"
     }
 
     buildTypes {

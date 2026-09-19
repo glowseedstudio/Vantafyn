@@ -3179,6 +3179,7 @@ private fun HomeScreen(
             onSelectMusicBackend = viewModel::switchMusicBackendFromSettings,
             onOpenAchievements = viewModel::openAchievements,
             onRetryAchievements = { viewModel.loadAchievements(force = true) },
+            onRefreshLeaderboard = { viewModel.loadLeaderboard(force = true) },
             onDismissAchievementUnlock = viewModel::dismissAchievementUnlock,
             onToggleAchievementsEnabled = viewModel::toggleAchievementsEnabled,
             onToggleSocialEnabled = viewModel::toggleSocialEnabled,
@@ -3413,6 +3414,7 @@ private fun MobileShellScreen(
     onNavigate: (MobileDestination) -> Unit,
     onOpenAchievements: () -> Unit = {},
     onRetryAchievements: () -> Unit = {},
+    onRefreshLeaderboard: () -> Unit = {},
     onDismissAchievementUnlock: () -> Unit = {},
     onToggleAchievementsEnabled: () -> Unit = {},
     onToggleSocialEnabled: () -> Unit = {},
@@ -4136,10 +4138,13 @@ private fun MobileShellScreen(
                             userImageUrl = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }?.imageUrl,
                             summary = state.achievementSummary,
                             achievements = state.achievements,
+                            leaderboard = state.achievementLeaderboard,
                             isLoading = state.isAchievementsLoading,
+                            isLeaderboardLoading = state.isLeaderboardLoading,
                             error = state.achievementError,
                             onBack = onNavigateBack,
                             onRetry = onRetryAchievements,
+                            onRefreshLeaderboard = onRefreshLeaderboard,
                         )
                         MobileDestination.Social -> SocialScreen(
                             friends = state.socialFriends,
@@ -22986,7 +22991,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.14"
+private const val VANTAFYN_APP_VERSION = "0.9.15"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

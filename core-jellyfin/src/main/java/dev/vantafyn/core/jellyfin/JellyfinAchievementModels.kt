@@ -122,10 +122,24 @@ data class JellyfinAchievementUnlock(
     val unlockedAt: String? = null,
 )
 
+data class JellyfinLeaderboardUser(
+    val userId: UUID,
+    val username: String,
+    val rankName: String = "Rookie",
+    val rankTier: Int = 1,
+    val currentScore: Int = 0,
+    val unlockedCount: Int = 0,
+    val avatarUrl: String? = null,
+    val isOnline: Boolean = false,
+    val rankPosition: Int = 0,
+    val isCurrentUser: Boolean = false,
+)
+
 interface JellyfinAchievementRepository {
     suspend fun checkAvailability(session: JellyfinSession): Boolean
     suspend fun getSummary(session: JellyfinSession): JellyfinResult<JellyfinAchievementSummary>
     suspend fun getAchievements(session: JellyfinSession): JellyfinResult<List<JellyfinAchievement>>
+    suspend fun getLeaderboard(session: JellyfinSession): JellyfinResult<List<JellyfinLeaderboardUser>>
     suspend fun getUnlocksSince(
         session: JellyfinSession,
         sinceIso: String?,

@@ -7,7 +7,7 @@ PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
 VERSION="0.1.2"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="v0.9.14"
+TAG="v0.9.15"
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
