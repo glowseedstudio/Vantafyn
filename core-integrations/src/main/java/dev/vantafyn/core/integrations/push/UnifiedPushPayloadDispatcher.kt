@@ -29,12 +29,26 @@ sealed interface VantafynPushEvent {
         val timestamp: Long,
     ) : VantafynPushEvent
 
+    data class WatchPartyInvite(
+        val partyId: String,
+        val mode: String,
+        val hostName: String?,
+        val mediaTitle: String?,
+        val timestamp: Long,
+    ) : VantafynPushEvent
+
     data class Unknown(val rawJson: String) : VantafynPushEvent
 }
 
 sealed interface PushNavigationTarget {
     data class Chat(val conversationId: String, val senderId: String, val senderName: String?) : PushNavigationTarget
     data class Achievement(val badgeId: String) : PushNavigationTarget
+    data class WatchParty(
+        val partyId: String,
+        val mode: String,
+        val hostName: String?,
+        val mediaTitle: String?,
+    ) : PushNavigationTarget
 }
 
 /**
@@ -64,6 +78,17 @@ object UnifiedPushPayloadDispatcher {
 
     fun clearPendingNavigation() {
         _pendingNavigation.resetReplayCache()
+    }
+
+    fun dispatchWatchPartyEvent(partyId: String, mode: String, hostName: String?, mediaTitle: String?) {
+        val event = VantafynPushEvent.WatchPartyInvite(
+            partyId = partyId,
+            mode = mode,
+            hostName = hostName,
+            mediaTitle = mediaTitle,
+            timestamp = System.currentTimeMillis(),
+        )
+        _events.tryEmit(event)
     }
 
 

@@ -68,6 +68,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.StarBorder
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.PersonRemove
@@ -1056,8 +1057,9 @@ private fun ConversationCard(
                         }
                     }
                     conversation.lastMessageTimestamp?.let { ts ->
+                        val context = LocalContext.current
                         Text(
-                            text = formatConversationDate(ts),
+                            text = formatConversationDate(context, ts),
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isStarred) Color(0xFFFFD700).copy(alpha = 0.85f) else VantafynColors.Muted,
                         )
@@ -1181,33 +1183,47 @@ private fun FriendCard(
                         }
                     }
                 }
-                val isWatching = !friend.currentlyWatching.isNullOrBlank()
+                val rawWatching = friend.currentlyWatching
+                val isPlaying = !rawWatching.isNullOrBlank()
+                val isAudio = friend.isListeningToAudio || rawWatching?.startsWith("Listening to ", ignoreCase = true) == true
+                val actionPrefix = if (isAudio) "Listening to" else "Watching"
+                val displayTitle = if (rawWatching?.startsWith("Listening to ", ignoreCase = true) == true) {
+                    rawWatching.removePrefix("Listening to ").trim()
+                } else {
+                    rawWatching.orEmpty()
+                }
+                val context = LocalContext.current
                 val statusText = when {
-                    isWatching -> "Watching ${friend.currentlyWatching}"
+                    isPlaying -> "$actionPrefix $displayTitle"
                     friend.isOnline -> "Online"
-                    !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
+                    !friend.lastSeen.isNullOrBlank() -> SocialDateFormatter.formatSocialLastSeen(context, friend.lastSeen)
                     else -> "Offline"
+                }
+                val statusColor = when {
+                    isAudio -> Color(0xFF00E5FF)
+                    isPlaying || friend.isOnline -> Color(0xFF55F0C0)
+                    else -> VantafynColors.Muted
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    if (isWatching) {
+                    if (isPlaying) {
                         Icon(
-                            imageVector = Icons.Rounded.PlayArrow,
+                            imageVector = if (isAudio) Icons.Rounded.MusicNote else Icons.Rounded.PlayArrow,
                             contentDescription = null,
-                            tint = Color(0xFF55F0C0),
+                            tint = statusColor,
                             modifier = Modifier.size(13.dp),
                         )
                     }
                     Text(
                         text = statusText,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (isWatching) Color(0xFF55F0C0) else VantafynColors.Muted,
+                        color = statusColor,
                         maxLines = 1,
                         overflow = TextOverflow.Clip,
-                        modifier = if (isWatching) {
+                        modifier = if (isPlaying) {
                             rememberLifecycleAwareMarquee(
                                 iterations = Int.MAX_VALUE,
                                 initialDelayMillis = 2000,
@@ -1335,33 +1351,47 @@ private fun FriendActionBottomSheet(
                                 }
                             }
                         }
-                        val isWatching = !friend.currentlyWatching.isNullOrBlank()
+                        val rawWatching = friend.currentlyWatching
+                        val isPlaying = !rawWatching.isNullOrBlank()
+                        val isAudio = friend.isListeningToAudio || rawWatching?.startsWith("Listening to ", ignoreCase = true) == true
+                        val actionPrefix = if (isAudio) "Listening to" else "Watching"
+                        val displayTitle = if (rawWatching?.startsWith("Listening to ", ignoreCase = true) == true) {
+                            rawWatching.removePrefix("Listening to ").trim()
+                        } else {
+                            rawWatching.orEmpty()
+                        }
+                        val context = LocalContext.current
                         val statusText = when {
-                            isWatching -> "Watching ${friend.currentlyWatching}"
+                            isPlaying -> "$actionPrefix $displayTitle"
                             friend.isOnline -> "Online"
-                            !friend.lastSeen.isNullOrBlank() -> "Last active ${friend.lastSeen?.take(10)}"
+                            !friend.lastSeen.isNullOrBlank() -> SocialDateFormatter.formatSocialLastSeen(context, friend.lastSeen)
                             else -> "Offline"
+                        }
+                        val statusColor = when {
+                            isAudio -> Color(0xFF00E5FF)
+                            isPlaying || friend.isOnline -> Color(0xFF55F0C0)
+                            else -> VantafynColors.Muted
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                         ) {
-                            if (isWatching) {
+                            if (isPlaying) {
                                 Icon(
-                                    imageVector = Icons.Rounded.PlayArrow,
+                                    imageVector = if (isAudio) Icons.Rounded.MusicNote else Icons.Rounded.PlayArrow,
                                     contentDescription = null,
-                                    tint = Color(0xFF55F0C0),
+                                    tint = statusColor,
                                     modifier = Modifier.size(13.dp),
                                 )
                             }
                             Text(
                                 text = statusText,
                                 style = MaterialTheme.typography.bodySmall,
-                                color = if (isWatching) Color(0xFF55F0C0) else VantafynColors.Muted,
+                                color = statusColor,
                                 maxLines = 1,
                                 overflow = TextOverflow.Clip,
-                                modifier = if (isWatching) {
+                                modifier = if (isPlaying) {
                                     rememberLifecycleAwareMarquee(
                                         iterations = Int.MAX_VALUE,
                                         initialDelayMillis = 2000,
@@ -2092,43 +2122,8 @@ private fun DiscoverUserCard(
     }
 }
 
-private fun formatConversationDate(isoString: String?): String {
-    if (isoString.isNullOrBlank()) return ""
-    return try {
-        val trimmed = isoString.trim()
-        val parsedDate = if (trimmed.contains("T")) {
-            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            format.parse(trimmed.substringBefore(".").substringBefore("Z"))
-        } else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(trimmed)
-        }
-        if (parsedDate != null) {
-            val nowCal = Calendar.getInstance()
-            val msgCal = Calendar.getInstance().apply { time = parsedDate }
-            when {
-                nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) &&
-                    nowCal.get(Calendar.DAY_OF_YEAR) == msgCal.get(Calendar.DAY_OF_YEAR) -> {
-                    DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault()).format(parsedDate)
-                }
-                nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) &&
-                    nowCal.get(Calendar.DAY_OF_YEAR) - msgCal.get(Calendar.DAY_OF_YEAR) == 1 -> {
-                    "Yesterday"
-                }
-                nowCal.get(Calendar.YEAR) == msgCal.get(Calendar.YEAR) -> {
-                    SimpleDateFormat("MMM d", Locale.getDefault()).format(parsedDate)
-                }
-                else -> {
-                    SimpleDateFormat("MMM d, yyyy", Locale.getDefault()).format(parsedDate)
-                }
-            }
-        } else {
-            trimmed.take(10)
-        }
-    } catch (_: Exception) {
-        isoString.take(10)
-    }
+private fun formatConversationDate(context: Context, isoString: String?): String {
+    return SocialDateFormatter.formatConversationDate(context, isoString)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

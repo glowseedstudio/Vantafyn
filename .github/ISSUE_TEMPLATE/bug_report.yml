@@ -1,0 +1,117 @@
+name: "🐛 Bug Report"
+description: "Report an issue, crash, or unexpected behavior in Vantafyn"
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping improve Vantafyn! Please fill out the fields below so we have the details needed to diagnose and reproduce the issue.
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where did this issue occur?
+      multiple: true
+      options:
+        - "Android Mobile (Phone / Foldable / Tablet)"
+        - "Android TV / Google TV"
+        - "Jellyfin Server Plugin (Vantafyn Companion)"
+        - "UnifiedPush / Notification Integration"
+    validations:
+      required: true
+
+  - type: input
+    id: app_version
+    attributes:
+      label: Vantafyn App Version
+      description: Found in Settings or the About screen (e.g. `0.9.16`).
+      placeholder: "e.g. 0.9.16"
+    validations:
+      required: true
+
+  - type: input
+    id: device_info
+    attributes:
+      label: Device Model & Android Version
+      description: What device are you using?
+      placeholder: "e.g. Samsung Galaxy S24 (Android 14) / Motorola Razr 50 Ultra / Chromecast with Google TV 4K"
+    validations:
+      required: true
+
+  - type: input
+    id: jellyfin_version
+    attributes:
+      label: Jellyfin Server Version
+      description: The version of your Jellyfin media server.
+      placeholder: "e.g. 10.9.11 / 10.10.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: companion_plugin
+    attributes:
+      label: Vantafyn Companion Plugin Status
+      description: Is the Vantafyn Companion plugin installed and enabled on your Jellyfin server?
+      options:
+        - "Installed & Active (all features enabled)"
+        - "Installed (some features unticked/disabled)"
+        - "Not installed"
+        - "Unsure / Not applicable"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the issue is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed step-by-step instructions to reproduce the problem.
+      placeholder: |
+        1. Go to '...'
+        2. Tap on '...'
+        3. Scroll down to '...'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual Behavior
+      description: What actually occurred (e.g. app crashed, blank screen, wrong screen opened).
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs_or_media
+    attributes:
+      label: Logs, Screenshots, or Screen Recordings
+      description: Paste any error messages, logcat output, or drag & drop screenshots and videos.
+      render: shell
+
+  - type: checkboxes
+    id: checklists
+    attributes:
+      label: Pre-submission Checklist
+      options:
+        - label: "I have searched existing issues to verify this is not a duplicate."
+          required: true
+        - label: "I am using the latest released version of Vantafyn."
+          required: false

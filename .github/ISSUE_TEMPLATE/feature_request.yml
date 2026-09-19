@@ -1,0 +1,53 @@
+name: "✨ Feature Request"
+description: "Suggest an idea, enhancement, or new feature for Vantafyn"
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting a feature or improvement for Vantafyn!
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Which part of Vantafyn would this feature apply to?
+      multiple: true
+      options:
+        - "Android Mobile (Phone / Foldable / Tablet)"
+        - "Android TV / Google TV"
+        - "Jellyfin Server Plugin (Vantafyn Companion)"
+        - "All / Cross-Platform"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Motivation
+      description: Is your feature request related to a problem or limitation? (e.g. "I'm always frustrated when...")
+    validations:
+      required: false
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe what you would like to see happen and how it should work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Describe any alternative solutions, workflows, or features you've considered.
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional Context, Mockups, or Examples
+      description: Add any mockups, screenshots, or examples from other apps that illustrate your idea.

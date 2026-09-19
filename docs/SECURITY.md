@@ -10,10 +10,10 @@ Security fixes and maintenance patches are actively released for the latest prod
 
 | Component | Supported Version | Status |
 | :--- | :---: | :--- |
-| **Vantafyn Mobile (Phone/Tablet/Auto)** | `>= 0.9.15` | :white_check_mark: Supported |
-| **Vantafyn Android TV** | `>= 0.9.15` | :white_check_mark: Supported |
+| **Vantafyn Mobile (Phone/Tablet/Auto)** | `>= 0.9.16` | :white_check_mark: Supported |
+| **Vantafyn Android TV** | `>= 0.9.16` | :white_check_mark: Supported |
 | **Vantafyn Companion Plugin** | `>= 0.1.1` | :white_check_mark: Supported |
-| `< 0.9.15` | Older builds | :x: Unsupported (Upgrade recommended) |
+| `< 0.9.16` | Older builds | :x: Unsupported (Upgrade recommended) |
 
 ---
 

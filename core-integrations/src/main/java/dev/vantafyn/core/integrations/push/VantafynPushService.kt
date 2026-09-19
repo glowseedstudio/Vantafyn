@@ -48,10 +48,48 @@ class VantafynPushService : PushService() {
                     val senderId = json.optString("senderId", "")
                     if (conversationId != "diag-chat-test" && isSenderCurrentUser(senderId)) {
                         Log.i(TAG, "UnifiedPush onMessage: ignoring chat notification sent by current user ($senderId)")
-                    } else if (UnifiedPushPayloadDispatcher.isAppInForeground) {
-                        Log.i(TAG, "UnifiedPush onMessage: app in foreground, suppressing system notification (handled in-app)")
                     } else {
-                        VantafynPushNotifier.showChatMessage(applicationContext, senderName, messageText, conversationId, senderId)
+                        val isWatchParty = messageText.contains("[watch_party_invite|") ||
+                            (messageText.contains("Watch Party") && (messageText.contains("🍿") || messageText.contains("Invited you to")))
+                        if (isWatchParty) {
+                            var partyId = ""
+                            var mode = "WatchTogether"
+                            var hostName = senderName
+                            var mediaTitle: String? = null
+                            if (messageText.contains("[watch_party_invite|")) {
+                                val tagContent = messageText.substringAfter("[watch_party_invite|").substringBefore("]")
+                                val parts = tagContent.split("|")
+                                partyId = parts.getOrNull(0).orEmpty()
+                                mode = parts.getOrNull(1).orEmpty().ifBlank { "WatchTogether" }
+                                hostName = parts.getOrNull(2)?.ifBlank { senderName } ?: senderName
+                                mediaTitle = parts.getOrNull(3)?.takeIf { it.isNotBlank() }
+                            } else {
+                                if (messageText.contains("Swipe to Match", ignoreCase = true)) {
+                                    mode = "SwipeToMatch"
+                                }
+                                val match = Regex("""\"([^\"]+)\"""").find(messageText)
+                                mediaTitle = match?.groupValues?.getOrNull(1)
+                                partyId = conversationId.ifBlank { senderId }
+                            }
+
+                            if (UnifiedPushPayloadDispatcher.isAppInForeground) {
+                                Log.i(TAG, "UnifiedPush onMessage: watch party invite received in foreground, routing to in-app event")
+                                UnifiedPushPayloadDispatcher.dispatchWatchPartyEvent(partyId, mode, hostName, mediaTitle)
+                            } else {
+                                VantafynPushNotifier.showWatchPartyInviteNotification(
+                                    context = applicationContext,
+                                    hostName = hostName,
+                                    partyId = partyId,
+                                    mode = mode,
+                                    mediaTitle = mediaTitle,
+                                    rawMessage = messageText,
+                                )
+                            }
+                        } else if (UnifiedPushPayloadDispatcher.isAppInForeground) {
+                            Log.i(TAG, "UnifiedPush onMessage: app in foreground, suppressing system notification (handled in-app)")
+                        } else {
+                            VantafynPushNotifier.showChatMessage(applicationContext, senderName, messageText, conversationId, senderId)
+                        }
                     }
                 }
                 "achievement_unlock" -> {

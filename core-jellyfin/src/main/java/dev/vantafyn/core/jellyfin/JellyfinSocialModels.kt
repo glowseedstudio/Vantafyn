@@ -16,6 +16,7 @@ data class JellyfinFriend(
     val currentlyWatching: String? = null,
     val equippedBadgeName: String? = null,
     val equippedBadgeIcon: String? = null,
+    val isListeningToAudio: Boolean = false,
 )
 
 data class JellyfinFriendRequest(

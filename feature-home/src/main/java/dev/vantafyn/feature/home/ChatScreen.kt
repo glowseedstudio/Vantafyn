@@ -56,6 +56,8 @@ import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AutoAwesome
+import dev.vantafyn.core.jellyfin.WatchPartyMode
 import androidx.compose.material.icons.rounded.ChatBubbleOutline
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.foundation.lazy.LazyRow
@@ -65,6 +67,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Movie
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Search
@@ -150,6 +153,7 @@ fun ChatScreen(
     onOpenMedia: (UUID) -> Unit = {},
     onClaimGift: (VantafynCodeGift) -> Unit = {},
     onOpenWatchGuide: (String) -> Unit = {},
+    onJoinWatchParty: (UUID, WatchPartyMode, String, String?) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     BackHandler(onBack = onBack)
@@ -318,6 +322,7 @@ fun ChatScreen(
                                 onOpenMedia = onOpenMedia,
                                 onClaimGift = onClaimGift,
                                 onOpenWatchGuide = onOpenWatchGuide,
+                                onJoinWatchParty = onJoinWatchParty,
                             )
 
                             if (isLastInGroup && index > 0) {
@@ -484,6 +489,7 @@ private fun ChatHeader(
     onClearChat: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -616,19 +622,27 @@ private fun ChatHeader(
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (!peer.currentlyWatching.isNullOrBlank()) {
+                        val rawWatching = peer.currentlyWatching
+                        if (!rawWatching.isNullOrBlank()) {
+                            val isAudio = peer.isListeningToAudio || rawWatching.startsWith("Listening to ", ignoreCase = true)
+                            val displayAction = if (isAudio) "Listening to" else "Watching"
+                            val displayTitle = if (rawWatching.startsWith("Listening to ", ignoreCase = true)) {
+                                rawWatching.removePrefix("Listening to ").trim()
+                            } else {
+                                rawWatching
+                            }
                             Icon(
-                                imageVector = Icons.Rounded.PlayArrow,
+                                imageVector = if (isAudio) Icons.Rounded.MusicNote else Icons.Rounded.PlayArrow,
                                 contentDescription = null,
-                                tint = Color(0xFF55F0C0),
+                                tint = if (isAudio) Color(0xFF00E5FF) else Color(0xFF55F0C0),
                                 modifier = Modifier.size(12.dp),
                             )
                             Text(
-                                text = "Watching ${peer.currentlyWatching}",
+                                text = "$displayAction $displayTitle",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Medium,
-                                color = Color(0xFF55F0C0),
+                                color = if (isAudio) Color(0xFF00E5FF) else Color(0xFF55F0C0),
                                 maxLines = 1,
                                 overflow = TextOverflow.Clip,
                                 modifier = rememberLifecycleAwareMarquee(
@@ -641,7 +655,7 @@ private fun ChatHeader(
                             Text(
                                 text = when {
                                     peer.isOnline -> "Active now"
-                                    !peer.lastSeen.isNullOrBlank() -> "Last seen ${peer.lastSeen?.take(10)}"
+                                    !peer.lastSeen.isNullOrBlank() -> SocialDateFormatter.formatSocialLastSeen(context, peer.lastSeen)
                                     else -> "Offline"
                                 },
                                 style = MaterialTheme.typography.labelSmall,
@@ -759,12 +773,14 @@ private fun ChatMessageItem(
     onOpenMedia: (UUID) -> Unit = {},
     onClaimGift: (VantafynCodeGift) -> Unit = {},
     onOpenWatchGuide: (String) -> Unit = {},
+    onJoinWatchParty: (UUID, WatchPartyMode, String, String?) -> Unit = { _, _, _, _ -> },
     modifier: Modifier = Modifier,
 ) {
     val isSelf = message.isFromSelf
     val formattedTime = remember(message.timestamp) { formatMessageTime(message.timestamp) }
     val mediaRec = remember(message.content) { parseMediaRecommendation(message.content) }
     val gift = remember(message.content) { VantafynCodeGift.fromSerializedMessage(message.content) }
+    val watchPartyInvite = remember(message.content) { parseWatchPartyInvite(message.content) }
     val haptic = LocalHapticFeedback.current
 
     // Dynamic Corner Radius for smooth message grouping
@@ -799,6 +815,14 @@ private fun ChatMessageItem(
                 isSelf = isSelf,
                 timestamp = formattedTime,
                 onOpenMedia = onOpenMedia,
+                onLongPress = onLongPress,
+            )
+        } else if (watchPartyInvite != null) {
+            WatchPartyMessageCard(
+                invite = watchPartyInvite,
+                isSelf = isSelf,
+                timestamp = formattedTime,
+                onJoin = { onJoinWatchParty(watchPartyInvite.partyId, watchPartyInvite.mode, watchPartyInvite.hostName, watchPartyInvite.mediaTitle) },
                 onLongPress = onLongPress,
             )
         } else {
@@ -903,7 +927,7 @@ private fun ChatMessageItem(
         }
 
         // Timestamp, Profile Picture & Read Receipt (Seen) under messages
-        if (showTimestamp && mediaRec == null) {
+        if (showTimestamp && mediaRec == null && gift == null && watchPartyInvite == null) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1156,6 +1180,179 @@ private fun MediaRecommendationCard(
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ── Watch Party Invite Card Component ─────────────────────────────────────────
+
+@Composable
+private fun WatchPartyMessageCard(
+    invite: WatchPartyInvitePayload,
+    isSelf: Boolean,
+    timestamp: String?,
+    onJoin: () -> Unit,
+    onLongPress: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val haptic = LocalHapticFeedback.current
+    val isSwipeToMatch = invite.mode == WatchPartyMode.SwipeToMatch
+
+    Box(
+        modifier = modifier
+            .width(268.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .combinedClickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = {},
+                onLongClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                },
+            )
+            .background(
+                Brush.verticalGradient(
+                    if (isSelf) {
+                        listOf(
+                            Color(0xFF22153D).copy(alpha = 0.96f),
+                            Color(0xFF2E134E).copy(alpha = 0.96f),
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF0F1B33).copy(alpha = 0.96f),
+                            Color(0xFF132238).copy(alpha = 0.96f),
+                        )
+                    },
+                ),
+            )
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    if (isSelf) {
+                        listOf(
+                            Color(0xFFBA68C8).copy(alpha = 0.55f),
+                            Color(0xFF7C4DFF).copy(alpha = 0.45f),
+                        )
+                    } else {
+                        listOf(
+                            Color(0xFF00E5FF).copy(alpha = 0.55f),
+                            Color(0xFF7C4DFF).copy(alpha = 0.40f),
+                        )
+                    },
+                ),
+                shape = RoundedCornerShape(20.dp),
+            )
+            .padding(13.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // Header tag
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (isSwipeToMatch) Icons.Rounded.AutoAwesome else Icons.Rounded.Movie,
+                        contentDescription = null,
+                        tint = if (isSwipeToMatch) Color(0xFFFFD54F) else Color(0xFF00E5FF),
+                        modifier = Modifier.size(14.dp),
+                    )
+                    Text(
+                        text = if (isSwipeToMatch) "SWIPE TO MATCH" else "WATCH PARTY INVITE",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSwipeToMatch) Color(0xFFFFD54F) else Color(0xFF00E5FF),
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+                if (!timestamp.isNullOrBlank()) {
+                    Text(
+                        text = timestamp,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontSize = 9.sp,
+                        color = VantafynColors.Muted,
+                    )
+                }
+            }
+
+            // Info Column
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = if (isSwipeToMatch) {
+                        "Pick something together 🍿"
+                    } else if (!invite.mediaTitle.isNullOrBlank()) {
+                        invite.mediaTitle
+                    } else {
+                        "Watch Party with ${invite.hostName}"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = if (isSwipeToMatch) {
+                        if (isSelf) "You invited ${invite.hostName} to swipe and match movies together."
+                        else "${invite.hostName} invited you to swipe and match movies together!"
+                    } else {
+                        if (isSelf) "You invited ${invite.hostName} to watch together."
+                        else "${invite.hostName} invited you to watch together!"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    fontSize = 11.5.sp,
+                    color = Color.White.copy(alpha = 0.76f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+
+            // Action Button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (isSwipeToMatch) {
+                            Brush.horizontalGradient(
+                                listOf(
+                                    Color(0xFFFF9800),
+                                    Color(0xFFE91E63),
+                                )
+                            )
+                        } else {
+                            VantafynGradients.accentHorizontal()
+                        }
+                    )
+                    .clickable { onJoin() }
+                    .padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = if (isSwipeToMatch) Icons.Rounded.AutoAwesome else Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = if (isSwipeToMatch) "Start Swiping 🍿" else "Join Watch Party 🍿",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        fontSize = 12.sp,
                     )
                 }
             }
@@ -2073,6 +2270,31 @@ private fun parseMediaRecommendation(raw: String): MediaRecommendationPayload? {
     return MediaRecommendationPayload(id = id, title = title, itemType = itemType, year = year, imageUrl = imageUrl)
 }
 
+data class WatchPartyInvitePayload(
+    val partyId: UUID,
+    val mode: WatchPartyMode,
+    val hostName: String,
+    val mediaTitle: String?,
+)
+
+private fun parseWatchPartyInvite(raw: String): WatchPartyInvitePayload? {
+    if (!raw.contains("[watch_party_invite|")) return null
+    val content = raw.substringAfter("[watch_party_invite|").substringBefore("]")
+    val parts = content.split("|")
+    if (parts.isEmpty()) return null
+    val idStr = parts[0].trim()
+    val partyId = try { UUID.fromString(idStr) } catch (_: Exception) { return null }
+    val modeStr = parts.getOrNull(1)?.trim().orEmpty()
+    val mode = if (modeStr.equals("SwipeToMatch", ignoreCase = true)) {
+        WatchPartyMode.SwipeToMatch
+    } else {
+        WatchPartyMode.FixedTitle
+    }
+    val hostName = parts.getOrNull(2)?.trim()?.ifBlank { "Friend" } ?: "Friend"
+    val mediaTitle = parts.getOrNull(3)?.trim()?.takeIf { it.isNotBlank() }
+    return WatchPartyInvitePayload(partyId = partyId, mode = mode, hostName = hostName, mediaTitle = mediaTitle)
+}
+
 private fun parseReaction(raw: String): Pair<String, String>? {
     if (!raw.startsWith("[reaction|") || !raw.endsWith("]")) return null
     val content = raw.removePrefix("[reaction|").removeSuffix("]")
@@ -2186,19 +2408,11 @@ private fun QuickReactionModal(
 private fun formatMessageTime(isoString: String?): String? {
     if (isoString.isNullOrBlank()) return null
     return try {
-        val trimmed = isoString.trim()
-        val parsedDate = if (trimmed.contains("T")) {
-            val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US).apply {
-                timeZone = TimeZone.getTimeZone("UTC")
-            }
-            format.parse(trimmed.substringBefore(".").substringBefore("Z"))
-        } else {
-            SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(trimmed)
-        }
+        val parsedDate = SocialDateFormatter.parseIsoTimestamp(isoString)
         if (parsedDate != null) {
             DateFormat.getTimeInstance(DateFormat.SHORT, Locale.getDefault()).format(parsedDate)
         } else {
-            trimmed
+            isoString
         }
     } catch (_: Exception) {
         isoString

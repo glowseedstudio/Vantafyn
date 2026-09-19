@@ -858,7 +858,10 @@ private fun WatchPartyInviteOverlay(
         val remainingSeconds = ((activeInvite.expiresAt - now).coerceAtLeast(0L) / 1_000L).toInt()
         VantafynGlassPanel(
             modifier = Modifier
-                .swipeToDismissTopNotification(onClearMessage)
+                .swipeToDismissTopNotification {
+                    onDecline()
+                    onClearMessage()
+                }
                 .padding(horizontal = 12.dp, vertical = 8.dp)
                 .vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.5.dp),
             cornerRadius = 28.dp,
@@ -3992,6 +3995,7 @@ private fun MobileShellScreen(
                             onToggleWatchPartyInvitesEnabled = onToggleWatchPartyInvitesEnabled,
                             onToggleWatchPartyInviteAnimationEnabled = onToggleWatchPartyInviteAnimationEnabled,
                             onSetWatchPartyInviteExpirySeconds = onSetWatchPartyInviteExpirySeconds,
+                            onClearMatchDeckTrigger = viewModel::clearWatchPartyMatchDeckTrigger,
                         )
                         MobileDestination.Admin -> AdminScreen(
                             state = state,
@@ -4229,6 +4233,9 @@ private fun MobileShellScreen(
                                     onOpenMedia = onOpenMedia,
                                     onClaimGift = viewModel::claimReceivedGift,
                                     onOpenWatchGuide = viewModel::submitUnlockCode,
+                                    onJoinWatchParty = { partyId, mode, host, title ->
+                                        viewModel.joinWatchPartyDirect(partyId, mode, host, title)
+                                    },
                                 )
                             }
                         }
@@ -11147,6 +11154,7 @@ private fun WatchPartyScreen(
     onToggleWatchPartyInvitesEnabled: () -> Unit,
     onToggleWatchPartyInviteAnimationEnabled: () -> Unit,
     onSetWatchPartyInviteExpirySeconds: (Int) -> Unit,
+    onClearMatchDeckTrigger: () -> Unit = {},
 ) {
     var showMatchDeck by rememberSaveable { mutableStateOf(false) }
     val revealKey = "watch-party-${state.session?.profileId}"
@@ -11158,6 +11166,12 @@ private fun WatchPartyScreen(
     }
     LaunchedEffect(state.watchPartyMode) {
         if (state.watchPartyMode != WatchPartyMode.SwipeToMatch) showMatchDeck = false
+    }
+    LaunchedEffect(state.showWatchPartyMatchDeck) {
+        if (state.showWatchPartyMatchDeck && state.watchPartyMode == WatchPartyMode.SwipeToMatch) {
+            showMatchDeck = true
+            onClearMatchDeckTrigger()
+        }
     }
     LaunchedEffect(state.showWatchPartyInviteSentAnimation) {
         if (state.showWatchPartyInviteSentAnimation) {
@@ -12836,6 +12850,7 @@ private fun SettingsScreen(
     var currentSubScreen by rememberSaveable { mutableStateOf(SettingsSubScreen.Main) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
+    var showSpecialThanksDialog by remember { mutableStateOf(false) }
     var showUnifiedPushDiagnostics by remember { mutableStateOf(false) }
     var showPairTvSheet by remember { mutableStateOf(false) }
     var permissionDetail by remember { mutableStateOf<PermissionDetail?>(null) }
@@ -13386,6 +13401,14 @@ private fun SettingsScreen(
                                     },
                                     {
                                         SettingsNavigationRow(
+                                            title = "Special Thanks",
+                                            subtitle = "Recognizing the legends who helped build Vantafyn",
+                                            icon = Icons.Rounded.Favorite,
+                                            onClick = { showSpecialThanksDialog = true },
+                                        )
+                                    },
+                                    {
+                                        SettingsNavigationRow(
                                             title = "UnifiedPush Diagnostics",
                                             subtitle = "Background push connection and distributor status",
                                             icon = Icons.Rounded.Notifications,
@@ -13414,6 +13437,9 @@ private fun SettingsScreen(
     }
     if (showVersionDialog) {
         AppVersionDialog(onDismiss = { showVersionDialog = false })
+    }
+    if (showSpecialThanksDialog) {
+        SpecialThanksDialog(onDismiss = { showSpecialThanksDialog = false })
     }
     if (showUnifiedPushDiagnostics) {
         UnifiedPushDiagnosticsDialog(
@@ -15345,6 +15371,79 @@ private fun AppVersionDialog(onDismiss: () -> Unit) {
                     "♥",
                     color = Color(0xFFFF5D73),
                     style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+    )
+}
+
+@Composable
+private fun SpecialThanksDialog(onDismiss: () -> Unit) {
+    AlertDialog(
+        modifier = Modifier
+            .imePadding()
+            .vantafynAnimatedModalBorder(),
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = VantafynColors.Primary, fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(64.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF3366).copy(alpha = 0.15f))
+                        .border(1.5.dp, Color(0xFFFF3366).copy(alpha = 0.35f), CircleShape),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Favorite,
+                        contentDescription = null,
+                        tint = Color(0xFFFF6688),
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
+                Text(
+                    text = "Special Thanks",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(VantafynGradients.accentHorizontal())
+                        .padding(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        text = "Alyx — Star Quality Assurance",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Text(
+                    text = "A massive thank you to Alyx for being my tester and putting up with relentless testing scenarios day in and day out.\n\nThey have single-handedly helped me test features, catch bugs, and progress Vantafyn to where it is today. You are an absolute legend!",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 20.sp,
+                )
+                Text(
+                    text = "♥",
+                    color = Color(0xFFFF5D73),
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                 )
             }
@@ -22991,7 +23090,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.15"
+private const val VANTAFYN_APP_VERSION = "0.9.16"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

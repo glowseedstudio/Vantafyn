@@ -303,12 +303,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = true
                     startAchievementPolling()
                     startSocialPolling()
+                    _state.value.session
+                        ?.takeIf { _state.value.activeWatchParty != null || _state.value.mobileDestination == MobileDestination.WatchParty }
+                        ?.let { startWatchPartyRealtime(it) }
                 }
                 Lifecycle.Event.ON_STOP, Lifecycle.Event.ON_PAUSE -> {
                     _state.update { it.copy(isAppForeground = false, activeSocialIslandPreview = null) }
                     dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = false
                     stopAchievementPolling()
                     stopSocialPolling()
+                    stopWatchPartyRealtime(clearInvites = false)
                 }
                 else -> {}
             }
@@ -2029,19 +2033,48 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     friend.copy(
                         isOnline = isOnline,
                         currentlyWatching = watching,
-                        lastSeen = if (isOnline) "Now" else friend.lastSeen,
+                        lastSeen = if (isOnline) "Now" else (disc?.lastSeen ?: friend.lastSeen),
+                        rankTier = disc?.rankTier?.takeIf { it > 1 } ?: friend.rankTier,
+                        rankName = disc?.rankName?.takeIf { it.isNotBlank() && it != "Rookie" } ?: friend.rankName,
+                        currentScore = disc?.currentScore?.takeIf { it > 0 } ?: friend.currentScore,
+                        equippedBadgeName = disc?.equippedBadgeName ?: friend.equippedBadgeName,
+                        equippedBadgeIcon = disc?.equippedBadgeIcon ?: friend.equippedBadgeIcon,
+                        avatarUrl = disc?.avatarUrl ?: friend.avatarUrl,
+                        isListeningToAudio = disc?.isListeningToAudio ?: friend.isListeningToAudio,
                     )
                 }
+
+                val updatedConvos = convos.map { conv ->
+                    val disc = mergedDiscoverable.firstOrNull { it.userId == conv.peerUserId }
+                        ?: updatedFriends.firstOrNull { it.userId == conv.peerUserId }
+                    if (disc != null) {
+                        conv.copy(
+                            peerRankTier = if (disc.rankTier > 1) disc.rankTier else conv.peerRankTier,
+                            peerAvatarUrl = disc.avatarUrl ?: conv.peerAvatarUrl,
+                            peerIsOnline = disc.isOnline,
+                        )
+                    } else {
+                        conv
+                    }
+                }
+
+                val currentPeer = state.activeChatPeer
+                val updatedActivePeer = if (currentPeer != null) {
+                    updatedFriends.firstOrNull { it.userId == currentPeer.userId }
+                        ?: mergedDiscoverable.firstOrNull { it.userId == currentPeer.userId }
+                        ?: currentPeer
+                } else null
 
                 state.copy(
                     isSocialLoading = false,
                     socialFriends = updatedFriends,
                     socialRequests = validRequests,
-                    socialConversations = convos,
+                    socialConversations = updatedConvos,
                     socialUnreadCount = unread,
                     socialDiscoverableUsers = mergedDiscoverable,
                     socialBlockedUsers = blockedUsers,
                     activeIncomingFriendRequest = activeReq,
+                    activeChatPeer = updatedActivePeer,
                 )
             }
         }
@@ -2095,6 +2128,35 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             is dev.vantafyn.core.integrations.push.VantafynPushEvent.AchievementUnlock -> {
                 pollAchievementUnlocks()
+            }
+            is dev.vantafyn.core.integrations.push.VantafynPushEvent.WatchPartyInvite -> {
+                if (_state.value.watchPartyInvitesEnabled) {
+                    val partyUuid = runCatching { UUID.fromString(event.partyId) }.getOrNull() ?: UUID.randomUUID()
+                    val partyMode = if (event.mode.equals("SwipeToMatch", ignoreCase = true)) {
+                        WatchPartyMode.SwipeToMatch
+                    } else {
+                        WatchPartyMode.FixedTitle
+                    }
+                    val now = System.currentTimeMillis()
+                    val invite = WatchPartyInvite(
+                        inviteId = UUID.randomUUID(),
+                        partyId = partyUuid,
+                        serverAccountId = _state.value.session?.server?.serverId ?: _state.value.session?.server?.localId,
+                        mode = partyMode,
+                        mediaItemId = null,
+                        mediaType = "Media",
+                        mediaTitle = event.mediaTitle,
+                        mediaArtworkUrl = null,
+                        hostUserId = UUID.randomUUID(),
+                        hostDisplayName = event.hostName ?: "Friend",
+                        recipientUserId = _state.value.session?.user?.id,
+                        recipientDisplayName = _state.value.session?.user?.name ?: "You",
+                        createdAt = now,
+                        expiresAt = now + (_state.value.watchPartyInviteExpirySeconds * 1000L),
+                        status = WatchPartyInviteStatus.Pending,
+                    )
+                    _state.update { enqueueIncomingWatchPartyInvite(it, invite) }
+                }
             }
             is dev.vantafyn.core.integrations.push.VantafynPushEvent.DebugTest -> {
                 _state.update { it.copy(mobileMessage = "UnifiedPush: ${event.title} - ${event.message}") }
@@ -2150,17 +2212,126 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     }
                 }
             }
+            is dev.vantafyn.core.integrations.push.PushNavigationTarget.WatchParty -> {
+                viewModelScope.launch {
+                    var attempts = 0
+                    while (_state.value.session == null && attempts < 25) {
+                        delay(200)
+                        attempts++
+                    }
+                    val session = _state.value.session ?: return@launch
+                    if (_state.value.step != VantafynSetupStep.Home) {
+                        _state.update { it.copy(step = VantafynSetupStep.Home) }
+                    }
+                    val partyUuid = runCatching { UUID.fromString(target.partyId) }.getOrNull() ?: return@launch
+                    val partyMode = if (target.mode.equals("SwipeToMatch", ignoreCase = true)) {
+                        WatchPartyMode.SwipeToMatch
+                    } else {
+                        WatchPartyMode.FixedTitle
+                    }
+                    joinWatchPartyDirect(
+                        partyId = partyUuid,
+                        mode = partyMode,
+                        hostDisplayName = target.hostName ?: "Friend",
+                        mediaTitle = target.mediaTitle,
+                    )
+                }
+            }
         }
+    }
+
+    fun joinWatchPartyDirect(
+        partyId: UUID,
+        mode: WatchPartyMode,
+        hostDisplayName: String,
+        mediaTitle: String? = null,
+        mediaItemId: String? = null,
+    ) {
+        val snapshot = _state.value
+        val session = snapshot.session ?: return
+        viewModelScope.launch {
+            MusicPlaybackController.get(getApplication()).stop(clearQueue = true, reason = VantafynMusicStopReason.VideoPlayback)
+            _state.update {
+                it.copy(
+                    isWatchPartyLoading = true,
+                    watchPartyError = null,
+                    incomingWatchPartyMessage = "Joining $hostDisplayName's Watch Party",
+                )
+            }
+            val rules = snapshot.watchPartyRules
+            when (val result = watchPartyRepository.joinSyncPlayGroup(session, partyId, rules)) {
+                is JellyfinResult.Success -> {
+                    val media = if (!mediaTitle.isNullOrBlank()) {
+                        WatchPartySelectedMedia(
+                            id = runCatching { UUID.fromString(mediaItemId.orEmpty()) }.getOrDefault(UUID.randomUUID()),
+                            title = mediaTitle,
+                            subtitle = null,
+                            itemType = "Media",
+                            artworkUrl = null,
+                            backdropUrl = null,
+                        )
+                    } else null
+                    _state.update {
+                        it.copy(
+                            isWatchPartyLoading = false,
+                            activeWatchParty = WatchPartySession(
+                                id = partyId,
+                                name = "$hostDisplayName's Watch Party",
+                                serverId = session.server.serverId ?: session.server.localId,
+                                serverName = session.server.name,
+                                role = dev.vantafyn.core.jellyfin.WatchPartyRole.Participant,
+                                rules = rules,
+                                mode = mode,
+                                selectedMedia = media,
+                                members = listOf(
+                                    dev.vantafyn.core.jellyfin.WatchPartyMember(
+                                        id = session.user.id.toString(),
+                                        displayName = session.user.name,
+                                        role = dev.vantafyn.core.jellyfin.WatchPartyRole.Participant,
+                                    ),
+                                ),
+                            ),
+                            watchPartyMode = mode,
+                            watchPartySelectedMedia = media,
+                            mobileDestination = MobileDestination.WatchParty,
+                            showWatchPartyMatchDeck = (mode == WatchPartyMode.SwipeToMatch),
+                            watchPartyError = null,
+                        )
+                    }
+                    startWatchPartyRealtime(session)
+                    if (mode == WatchPartyMode.SwipeToMatch) {
+                        loadWatchParty()
+                    }
+                }
+                is JellyfinResult.Failure -> {
+                    _state.update {
+                        it.copy(
+                            isWatchPartyLoading = false,
+                            watchPartyError = "Could not join Watch Party: ${result.message}",
+                            mobileDestination = MobileDestination.WatchParty,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    fun clearWatchPartyMatchDeckTrigger() {
+        _state.update { it.copy(showWatchPartyMatchDeck = false) }
     }
 
     fun openChatBySenderId(senderId: String, senderName: String? = null) {
         val uuid = runCatching { UUID.fromString(senderId) }.getOrNull() ?: return
         val existingFriend = _state.value.socialFriends.firstOrNull { it.userId == uuid }
+            ?: _state.value.socialDiscoverableUsers.firstOrNull { it.userId == uuid }
             ?: _state.value.socialConversations.firstOrNull { it.peerUserId == uuid }?.let {
                 dev.vantafyn.core.jellyfin.JellyfinFriend(
                     userId = uuid,
                     username = it.peerName.ifBlank { senderName ?: "Friend" },
                     displayName = it.peerName.ifBlank { senderName ?: "Friend" },
+                    avatarUrl = it.peerAvatarUrl,
+                    rankTier = it.peerRankTier,
+                    isOnline = it.peerIsOnline,
                 )
             }
             ?: dev.vantafyn.core.jellyfin.JellyfinFriend(
@@ -2279,16 +2450,29 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun openChatWithFriend(friend: JellyfinFriend) {
         val session = _state.value.session ?: return
-        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == friend.userId }?.conversationId ?: friend.userId.toString()
+        val disc = _state.value.socialDiscoverableUsers.firstOrNull { it.userId == friend.userId }
+            ?: _state.value.socialFriends.firstOrNull { it.userId == friend.userId }
+        val enrichedFriend = friend.copy(
+            rankTier = disc?.rankTier?.takeIf { it > 1 } ?: friend.rankTier,
+            rankName = disc?.rankName?.takeIf { it.isNotBlank() && it != "Rookie" } ?: friend.rankName,
+            currentScore = disc?.currentScore?.takeIf { it > 0 } ?: friend.currentScore,
+            equippedBadgeName = disc?.equippedBadgeName ?: friend.equippedBadgeName,
+            equippedBadgeIcon = disc?.equippedBadgeIcon ?: friend.equippedBadgeIcon,
+            avatarUrl = disc?.avatarUrl ?: friend.avatarUrl,
+            isOnline = disc?.isOnline ?: friend.isOnline,
+            currentlyWatching = disc?.currentlyWatching ?: friend.currentlyWatching,
+            isListeningToAudio = disc?.isListeningToAudio ?: friend.isListeningToAudio,
+        )
+        val convId = _state.value.socialConversations.firstOrNull { it.peerUserId == enrichedFriend.userId }?.conversationId ?: enrichedFriend.userId.toString()
         _state.update { curr ->
             val updatedConvos = curr.socialConversations.map { conv ->
-                if (conv.peerUserId == friend.userId || conv.conversationId == convId) {
+                if (conv.peerUserId == enrichedFriend.userId || conv.conversationId == convId) {
                     conv.copy(unreadCount = 0)
                 } else conv
             }
             val newTotalUnread = updatedConvos.sumOf { it.unreadCount }
             curr.copy(
-                activeChatPeer = friend,
+                activeChatPeer = enrichedFriend,
                 activeChatMessages = emptyList(),
                 chatErrorMessage = null,
                 isSocialPanelOpen = false,
@@ -2299,9 +2483,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
         navigateMobile(MobileDestination.Chat)
         viewModelScope.launch {
-            when (val res = socialRepository.getMessages(session, convId, friend.userId)) {
+            when (val res = socialRepository.getMessages(session, convId, enrichedFriend.userId)) {
                 is JellyfinResult.Success -> {
-                    val msgs = filterClearedMessages(session, friend.userId, convId, res.value)
+                    val msgs = filterClearedMessages(session, enrichedFriend.userId, convId, res.value)
                     _state.update { it.copy(activeChatMessages = msgs) }
                     socialRepository.markConversationRead(session, convId)
                     loadSocialData(force = false)
@@ -2315,6 +2499,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun openChatFromConversation(conv: JellyfinSocialConversation) {
         val friend = _state.value.socialFriends.firstOrNull { it.userId == conv.peerUserId }
+            ?: _state.value.socialDiscoverableUsers.firstOrNull { it.userId == conv.peerUserId }
             ?: JellyfinFriend(
                 userId = conv.peerUserId,
                 username = conv.peerName,
@@ -7587,20 +7772,25 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         )
                     }
                     val mediaTitle = snapshot.watchPartySelectedMedia?.title
-                    val partyMsg = if (!mediaTitle.isNullOrBlank()) {
-                        "Invited you to watch \"$mediaTitle\" in a Watch Party! 🍿"
+                    val inviteTag = "[watch_party_invite|${ensuredParty.id}|${ensuredParty.mode.name}|${session.user.name}|${mediaTitle.orEmpty()}]"
+                    val partyMsg = if (ensuredParty.mode == WatchPartyMode.SwipeToMatch) {
+                        "Invited you to pick something together with Swipe to Match! 🍿\n$inviteTag"
+                    } else if (!mediaTitle.isNullOrBlank()) {
+                        "Invited you to watch \"$mediaTitle\" in a Watch Party! 🍿\n$inviteTag"
                     } else {
-                        "Invited you to join a Watch Party! 🍿"
+                        "Invited you to join a Watch Party! 🍿\n$inviteTag"
                     }
                     val distinctUserIds = recipients.mapNotNull { it.userId }.distinct()
                     distinctUserIds.forEach { recUserId ->
                         launch {
+                            val convId = snapshot.socialConversations.firstOrNull { it.peerUserId == recUserId }?.conversationId ?: recUserId.toString()
+                            socialRepository.sendMessage(session, recUserId, convId, partyMsg)
                             val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
                             val pushRes = pushRepo.notifyChat(
                                 session = session,
                                 recipientUserId = recUserId.toString(),
                                 senderName = session.user.name,
-                                conversationId = null,
+                                conversationId = convId,
                                 messageText = partyMsg,
                             )
                             android.util.Log.i("VantafynHomeViewModel", "notifyChat (watch party invite) result: $pushRes")
@@ -8330,7 +8520,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (snapshot.watchPartyVotes.any { it.candidateId == candidate.id && it.memberId == memberId }) return
         val vote = WatchPartyVote(candidate.id, memberId, value)
         val votes = snapshot.watchPartyVotes.filterNot { it.candidateId == candidate.id && it.memberId == memberId } + vote
-        val match = if (value == WatchPartyVoteValue.Yes && snapshot.watchPartyRules.isMatched(votes, candidate.id, memberCount = 1)) {
+        val memberCount = (snapshot.activeWatchParty?.members?.size ?: 1).coerceAtLeast(1)
+        val match = if (value == WatchPartyVoteValue.Yes && snapshot.watchPartyRules.isMatched(votes, candidate.id, memberCount = memberCount)) {
             WatchPartyMatch(candidate, votes.filter { it.candidateId == candidate.id })
         } else {
             null
@@ -9735,6 +9926,7 @@ data class VantafynHomeUiState(
     val watchPartyInviteExpirySeconds: Int = 60,
     val incomingWatchPartyInvites: List<WatchPartyInvite> = emptyList(),
     val incomingWatchPartyMessage: String? = null,
+    val showWatchPartyMatchDeck: Boolean = false,
     val errorMessage: String? = null,
     val whatsNewItems: List<JellyfinMediaItem> = emptyList(),
     val hasUnseenWhatsNew: Boolean = false,

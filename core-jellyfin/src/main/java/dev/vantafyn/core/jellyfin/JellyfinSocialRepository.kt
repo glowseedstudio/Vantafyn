@@ -582,6 +582,9 @@ class SdkJellyfinSocialRepository(
                                             currentlyWatching = lbUser.currentlyWatching ?: existing.currentlyWatching,
                                             lastSeen = lbUser.lastSeen ?: existing.lastSeen,
                                             avatarUrl = lbUser.avatarUrl.takeIf { !it.isNullOrBlank() } ?: existing.avatarUrl,
+                                            equippedBadgeName = lbUser.equippedBadgeName ?: existing.equippedBadgeName,
+                                            equippedBadgeIcon = lbUser.equippedBadgeIcon ?: existing.equippedBadgeIcon,
+                                            isListeningToAudio = lbUser.isListeningToAudio || existing.isListeningToAudio,
                                         )
                                     } else {
                                         userMap[lbUser.userId] = lbUser
@@ -624,6 +627,7 @@ class SdkJellyfinSocialRepository(
                     val isTrulyActive = nowPlaying != null || (isActive && lastActivityTime > 0L && timeDiff < 90 * 1000L)
                     Log.d("VantafynSocial", "Session: uId=$uId uName=$uName dev=$devName isAct=$isActive timeDiffMs=$timeDiff isTrulyAct=$isTrulyActive")
 
+                    val isAudio = isAudioPlayback(nowPlaying)
                     val mediaTitle = formatNowPlayingDescription(nowPlaying, nowPlaying?.optStringOrNull("Name", "name"))
                     val watchingDesc = when {
                         !mediaTitle.isNullOrBlank() -> mediaTitle
@@ -638,6 +642,7 @@ class SdkJellyfinSocialRepository(
                             isOnline = isTrulyActive,
                             currentlyWatching = if (isTrulyActive) (mediaTitle ?: existing.currentlyWatching ?: watchingDesc) else existing.currentlyWatching,
                             lastSeen = if (isTrulyActive) "Now" else existing.lastSeen,
+                            isListeningToAudio = if (isTrulyActive && mediaTitle != null) isAudio else existing.isListeningToAudio,
                         )
                     } else {
                         userMap[uId] = JellyfinFriend(
@@ -654,6 +659,7 @@ class SdkJellyfinSocialRepository(
                             currentlyWatching = watchingDesc,
                             equippedBadgeName = null,
                             equippedBadgeIcon = null,
+                            isListeningToAudio = if (isTrulyActive && mediaTitle != null) isAudio else false,
                         )
                     }
                 }
@@ -850,6 +856,8 @@ class SdkJellyfinSocialRepository(
             val equippedBadgeName = item.optStringOrNull("EquippedBadgeName", "equippedBadgeName", "ShowcaseBadge", "showcaseBadge")
             val equippedBadgeIcon = item.optStringOrNull("EquippedBadgeIcon", "equippedBadgeIcon", "BadgeIcon", "badgeIcon")
 
+            val isAudioPlaying = isAudioPlayback(nowPlayingObj)
+
             result += JellyfinFriend(
                 userId = userId,
                 username = username,
@@ -864,6 +872,7 @@ class SdkJellyfinSocialRepository(
                 currentlyWatching = currentlyWatching,
                 equippedBadgeName = equippedBadgeName,
                 equippedBadgeIcon = equippedBadgeIcon,
+                isListeningToAudio = isAudioPlaying,
             )
         }
         return result
@@ -1011,6 +1020,10 @@ class SdkJellyfinSocialRepository(
             val lastMessageText = item.optStringOrNull("lastMessage", "LastMessage", "content", "text")
             val lastMessageTimestamp = item.optStringOrNull("lastAt", "LastAt", "sentAt", "timestamp", "date")
             val unreadCount = item.optIntOrNull("unreadCount", "UnreadCount", "unread") ?: 0
+            val peerRankTier = item.optIntOrNull("peerRankTier", "RankTier", "rankTier", "Tier", "tier", "Level", "level", "PeerRankTier")
+                ?: item.optJSONObject("peer")?.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level")
+                ?: item.optJSONObject("User")?.optIntOrNull("RankTier", "rankTier", "Tier", "tier", "Level", "level")
+                ?: 1
 
             result += JellyfinSocialConversation(
                 conversationId = convId,
@@ -1018,7 +1031,7 @@ class SdkJellyfinSocialRepository(
                 peerName = peerName,
                 peerAvatarTag = null,
                 peerAvatarUrl = peerAvatarUrl,
-                peerRankTier = 1,
+                peerRankTier = peerRankTier,
                 peerIsOnline = false,
                 lastMessageText = lastMessageText,
                 lastMessageTimestamp = lastMessageTimestamp,
@@ -1138,8 +1151,40 @@ class SdkJellyfinSocialRepository(
         return null
     }
 
+    private fun isAudioPlayback(obj: JSONObject?): Boolean {
+        if (obj == null) return false
+        val mediaType = obj.optStringOrNull("MediaType", "mediaType")
+        val type = obj.optStringOrNull("Type", "type")
+        return mediaType?.equals("Audio", ignoreCase = true) == true ||
+            type?.equals("Audio", ignoreCase = true) == true ||
+            type?.equals("MusicAlbum", ignoreCase = true) == true ||
+            type?.equals("AudioBook", ignoreCase = true) == true ||
+            type?.equals("MusicArtist", ignoreCase = true) == true
+    }
+
     private fun formatNowPlayingDescription(nowPlayingObj: JSONObject?, fallback: String? = null): String? {
         if (nowPlayingObj != null) {
+            val isAudio = isAudioPlayback(nowPlayingObj)
+            if (isAudio) {
+                val artistsArr = nowPlayingObj.optJSONArray("Artists") ?: nowPlayingObj.optJSONArray("artists")
+                val artistList = mutableListOf<String>()
+                if (artistsArr != null) {
+                    for (i in 0 until artistsArr.length()) {
+                        val a = artistsArr.optString(i)
+                        if (!a.isNullOrBlank()) artistList.add(a)
+                    }
+                }
+                val artist = artistList.firstOrNull()
+                    ?: nowPlayingObj.optStringOrNull("AlbumArtist", "albumArtist", "Artist", "artist")
+                val song = nowPlayingObj.optStringOrNull("Name", "name", "Title", "title")
+                return when {
+                    !artist.isNullOrBlank() && !song.isNullOrBlank() -> "$artist — $song"
+                    !song.isNullOrBlank() -> song
+                    !artist.isNullOrBlank() -> artist
+                    else -> "Music"
+                }
+            }
+
             val seriesName = nowPlayingObj.optStringOrNull("SeriesName", "seriesName")
             val episodeName = nowPlayingObj.optStringOrNull("Name", "name", "EpisodeName", "episodeName", "Title", "title")
 
@@ -1155,6 +1200,17 @@ class SdkJellyfinSocialRepository(
             if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
                 runCatching {
                     val obj = JSONObject(trimmed)
+                    val isAudio = isAudioPlayback(obj)
+                    if (isAudio) {
+                        val artist = obj.optStringOrNull("AlbumArtist", "albumArtist", "Artist", "artist")
+                        val song = obj.optStringOrNull("Name", "name", "Title", "title")
+                        return when {
+                            !artist.isNullOrBlank() && !song.isNullOrBlank() -> "$artist — $song"
+                            !song.isNullOrBlank() -> song
+                            !artist.isNullOrBlank() -> artist
+                            else -> "Music"
+                        }
+                    }
                     val sName = obj.optStringOrNull("SeriesName", "seriesName")
                     val eName = obj.optStringOrNull("Name", "name", "EpisodeName", "episodeName", "Title", "title")
                     if (!sName.isNullOrBlank() && !eName.isNullOrBlank() && !sName.equals(eName, ignoreCase = true)) {

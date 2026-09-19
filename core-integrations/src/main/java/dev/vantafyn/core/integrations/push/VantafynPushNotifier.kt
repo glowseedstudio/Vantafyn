@@ -18,9 +18,14 @@ object VantafynPushNotifier {
     const val EXTRA_SENDER_ID = "sender_id"
     const val EXTRA_SENDER_NAME = "sender_name"
     const val EXTRA_BADGE_ID = "badge_id"
+    const val EXTRA_PARTY_ID = "party_id"
+    const val EXTRA_PARTY_MODE = "party_mode"
+    const val EXTRA_HOST_NAME = "host_name"
+    const val EXTRA_MEDIA_TITLE = "media_title"
 
     const val ACTION_OPEN_CHAT = "open_chat"
     const val ACTION_OPEN_ACHIEVEMENTS = "open_achievements"
+    const val ACTION_OPEN_WATCH_PARTY = "open_watch_party"
 
     private const val CHANNEL_ID_GENERAL = "vantafyn_push_channel"
     private const val CHANNEL_NAME_GENERAL = "Vantafyn Push Notifications"
@@ -30,6 +35,9 @@ object VantafynPushNotifier {
 
     private const val CHANNEL_ID_ACHIEVEMENTS = "vantafyn_achievements_channel"
     private const val CHANNEL_NAME_ACHIEVEMENTS = "Vantafyn Achievements"
+
+    private const val CHANNEL_ID_WATCH_PARTY = "vantafyn_watchparty_channel"
+    private const val CHANNEL_NAME_WATCH_PARTY = "Vantafyn Watch Parties"
 
     private const val TEST_NOTIFICATION_ID = 9001
 
@@ -66,6 +74,25 @@ object VantafynPushNotifier {
         return PendingIntent.getActivity(context, reqCode, intent, getPendingIntentFlags())
     }
 
+    private fun createWatchPartyPendingIntent(
+        context: Context,
+        partyId: String,
+        mode: String,
+        hostName: String?,
+        mediaTitle: String?,
+    ): PendingIntent? {
+        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_ACTION, ACTION_OPEN_WATCH_PARTY)
+            putExtra(EXTRA_PARTY_ID, partyId)
+            putExtra(EXTRA_PARTY_MODE, mode)
+            putExtra(EXTRA_HOST_NAME, hostName)
+            putExtra(EXTRA_MEDIA_TITLE, mediaTitle)
+        } ?: return null
+        val reqCode = partyId.hashCode()
+        return PendingIntent.getActivity(context, reqCode, intent, getPendingIntentFlags())
+    }
+
     fun routeIntent(intent: Intent?): Boolean {
         val action = intent?.getStringExtra(EXTRA_ACTION) ?: return false
         Log.i(TAG, "Routing notification intent action: '$action'")
@@ -83,6 +110,16 @@ object VantafynPushNotifier {
                 val badgeId = intent.getStringExtra(EXTRA_BADGE_ID).orEmpty()
                 UnifiedPushPayloadDispatcher.navigateTo(PushNavigationTarget.Achievement(badgeId))
                 return true
+            }
+            ACTION_OPEN_WATCH_PARTY -> {
+                val partyId = intent.getStringExtra(EXTRA_PARTY_ID).orEmpty()
+                val mode = intent.getStringExtra(EXTRA_PARTY_MODE).orEmpty()
+                val hostName = intent.getStringExtra(EXTRA_HOST_NAME)
+                val mediaTitle = intent.getStringExtra(EXTRA_MEDIA_TITLE)
+                if (partyId.isNotBlank()) {
+                    UnifiedPushPayloadDispatcher.navigateTo(PushNavigationTarget.WatchParty(partyId, mode, hostName, mediaTitle))
+                    return true
+                }
             }
         }
         return false
@@ -167,6 +204,62 @@ object VantafynPushNotifier {
             Log.w(TAG, "Notification permission not granted, unable to display achievement push notification", e)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to display achievement push notification", e)
+        }
+    }
+
+    fun showWatchPartyInviteNotification(
+        context: Context,
+        hostName: String,
+        partyId: String,
+        mode: String,
+        mediaTitle: String?,
+        rawMessage: String,
+    ) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                ?: return
+
+            ensureChannel(notificationManager, CHANNEL_ID_WATCH_PARTY, CHANNEL_NAME_WATCH_PARTY, "Watch Party invites from friends")
+
+            val title = if (mode.equals("SwipeToMatch", ignoreCase = true)) {
+                "Swipe to Match Invite from $hostName"
+            } else if (!mediaTitle.isNullOrBlank()) {
+                "Watch Party: $mediaTitle"
+            } else {
+                "Watch Party Invite from $hostName"
+            }
+
+            val cleanMessage = rawMessage.substringBefore("[watch_party_invite|").trim()
+            val text = if (cleanMessage.isNotBlank()) {
+                cleanMessage
+            } else if (mode.equals("SwipeToMatch", ignoreCase = true)) {
+                "$hostName invited you to pick something together with Swipe to Match! 🍿"
+            } else if (!mediaTitle.isNullOrBlank()) {
+                "$hostName invited you to watch \"$mediaTitle\" together! 🍿"
+            } else {
+                "$hostName invited you to join a Watch Party! 🍿"
+            }
+
+            val notificationId = (partyId.ifBlank { hostName }).hashCode()
+            val builder = NotificationCompat.Builder(context, CHANNEL_ID_WATCH_PARTY)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setAutoCancel(true)
+
+            createWatchPartyPendingIntent(context, partyId, mode, hostName, mediaTitle)?.let {
+                builder.setContentIntent(it)
+            }
+
+            notificationManager.notify(notificationId, builder.build())
+            Log.i(TAG, "Displayed watch party invite push notification for party $partyId from $hostName")
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Notification permission not granted, unable to display watch party invite push notification", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to display watch party invite push notification", e)
         }
     }
 
