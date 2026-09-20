@@ -27,16 +27,15 @@ If an extension is not bundled, Vantafyn still works normally with Android's pla
 
 ## Subtitles
 
-ASS/SSA external subtitle tracks are mapped to Media3's `TEXT_SSA` MIME type. Basic SSA/ASS parsing works through Media3 where supported. Full libass-quality styling requires a compatible libass extension to be bundled and detected at runtime.
+ASS/SSA subtitle tracks (embedded in MKV or external) are natively rendered using `io.github.peerless2012:ass-media` (bundled via Maven Central). This integrates native `libass` JNI bindings for OpenGL (Android 10+) and Canvas (Android 9 and below), enabling full anime styling, positioning, fonts, and dialogue effects without requiring server-side burn-in transcoding. If `ass-media` is unavailable, basic SSA/ASS parsing falls back cleanly to Media3's default subtitle decoders.
 
 ## Server Compatibility
 
-Most users should not need to change anything on their server. Jellyfin can still direct play supported formats and transcode unsupported formats. These client-side extension hooks improve direct playback only when:
-
-- the server exposes a compatible direct stream, and
-- the extension decoder is included in the app build, and
-- the device can sustain the decode cost.
+Most users should not need to change anything on their server. Jellyfin can direct play supported formats and transcode unsupported formats. With bundled native `libass`, ASS/SSA subtitles direct-play smoothly without requiring transcoding sessions.
 
 ## Build Notes
 
-No native extension AARs are currently committed into this repository. To add one later, include the AAR through Gradle and keep it in `core-media` so all playback surfaces share the same capability.
+- `io.github.peerless2012:ass-media` is bundled directly via `core-media` from Maven Central.
+- Constant bitrate seeking (`setConstantBitrateSeekingEnabled` + `setConstantBitrateSeekingAlwaysEnabled`) is active on all extractors.
+- Decoder fallback (`setEnableDecoderFallback(true)`) is enabled to gracefully recover from hardware codec failures.
+- Android 14+ (API 34+) buffer decode-only flag workaround is applied to prevent stuttering/dropped frames on startup.

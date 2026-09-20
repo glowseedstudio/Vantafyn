@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Audiotrack
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
@@ -59,8 +61,12 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.Stop
+import androidx.compose.material.icons.rounded.Style
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import dev.vantafyn.core.media.subtitles.SubtitleStyleConfig
+import dev.vantafyn.core.media.subtitles.SubtitleStylePreferences
+import dev.vantafyn.feature.player.subtitles.SubtitleStylingContent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -129,6 +135,7 @@ import dev.vantafyn.core.media.UpNextCandidate
 import dev.vantafyn.core.media.UpNextDisplayMode
 import dev.vantafyn.core.media.UpNextState
 import dev.vantafyn.core.media.VantafynExoPlayerFactory
+import io.github.peerless2012.ass.media.kt.withAssSupport
 import dev.vantafyn.core.media.VantafynAudioTrack
 import dev.vantafyn.core.media.VantafynPlaybackItem
 import dev.vantafyn.core.media.VantafynSyncPlaybackCommand
@@ -144,6 +151,7 @@ import dev.vantafyn.core.ui.VantafynGlassVariant
 import dev.vantafyn.core.ui.VantafynGradientSpinner
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynSpacing
+import dev.vantafyn.core.ui.DevicePostureState
 import dev.vantafyn.core.ui.rememberDevicePosture
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import androidx.compose.foundation.shape.CircleShape
@@ -271,6 +279,11 @@ private fun PlayerSurface(
     var resizeMode by remember(item.streamUrl) { mutableStateOf(PlayerResizeMode.Fit) }
     var selectedAudioIndex by remember(item.streamUrl) { mutableStateOf(item.selectedAudioStreamIndex) }
     var selectedSubtitleIndex by remember(item.streamUrl) { mutableStateOf(item.selectedSubtitleStreamIndex) }
+    var subtitleConfig by remember { mutableStateOf(SubtitleStylePreferences.get(context)) }
+    val observedSubtitleConfig by SubtitleStylePreferences.configFlow.collectAsStateWithLifecycle()
+    LaunchedEffect(observedSubtitleConfig) {
+        subtitleConfig = observedSubtitleConfig
+    }
     val isInPiP = VantafynPipState.isActive
     var upNextState by remember(item.itemId) { mutableStateOf<UpNextState>(UpNextState.Hidden) }
     var upNextCancelled by remember(item.itemId) { mutableStateOf(false) }
@@ -307,26 +320,26 @@ private fun PlayerSurface(
             activity.enterPictureInPictureMode(PictureInPictureParams.Builder().build())
         }
     }
-    val trackSelector = remember(item.streamUrl) { DefaultTrackSelector(context) }
-    val player = remember(item.streamUrl) {
-        VantafynExoPlayerFactory.builder(context, trackSelector)
-            .setSeekBackIncrementMs(10_000L)
-            .setSeekForwardIncrementMs(10_000L)
-            .build()
-            .apply {
-                setAudioAttributes(
-                    AudioAttributes.Builder()
-                        .setUsage(C.USAGE_MEDIA)
-                        .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
-                        .build(),
-                    true,
-                )
-                setMediaItem(item.toMediaItem())
-                prepare()
-                if (item.startPositionMs > 0L) seekTo(item.startPositionMs)
-                playWhenReady = !item.isCastResolved && outputState.activeOutput != PlaybackOutputType.GoogleCast
-            }
+    val trackSelector = remember(item.streamUrl) { VantafynExoPlayerFactory.createTrackSelector(context) }
+    val playerInstance = remember(item.streamUrl) {
+        VantafynExoPlayerFactory.createVideoPlayer(context, trackSelector).apply {
+            player.setSeekBackIncrementMs(10_000L)
+            player.setSeekForwardIncrementMs(10_000L)
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(C.USAGE_MEDIA)
+                    .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                    .build(),
+                true,
+            )
+            player.setMediaItem(item.toMediaItem())
+            player.prepare()
+            if (item.startPositionMs > 0L) player.seekTo(item.startPositionMs)
+            player.playWhenReady = !item.isCastResolved && outputState.activeOutput != PlaybackOutputType.GoogleCast
+        }
     }
+    val player = playerInstance.player
+    val assHandler = playerInstance.assHandler
     val skipSegment: (JellyfinMediaSegment) -> Unit = { segment ->
         val targetMs = (segment.endMs + 1L).coerceAtLeast(0L)
         autoSkippedSegmentIds = autoSkippedSegmentIds + segment.id.toString()
@@ -409,7 +422,7 @@ private fun PlayerSurface(
             onProgress(player.currentPosition, true)
             player.removeListener(listener)
             player.stop()
-            player.release()
+            playerInstance.release()
         }
     }
 
@@ -621,6 +634,7 @@ private fun PlayerSurface(
 
     if (posture.isTabletop && !isCastingThisItem && !isInPiP) {
         FlexTheaterPlayerLayout(
+            posture = posture,
             item = item,
             isPlaying = isPlaying,
             isBuffering = isBuffering,
@@ -673,6 +687,15 @@ private fun PlayerSurface(
             },
             onEnterPiP = enterPiP,
             onSkipSegment = { activeSegment?.let(skipSegment) },
+            onChangeSpeed = { speed ->
+                playbackSpeed = speed
+                player.setPlaybackSpeed(speed)
+            },
+            onCycleResizeMode = {
+                val modes = PlayerResizeMode.entries
+                val nextIndex = (modes.indexOf(resizeMode) + 1) % modes.size
+                resizeMode = modes[nextIndex]
+            },
             topContent = {
                 Box(modifier = Modifier.fillMaxSize()) {
                     AndroidView(
@@ -686,11 +709,20 @@ private fun PlayerSurface(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                     ViewGroup.LayoutParams.MATCH_PARENT,
                                 )
+                                assHandler?.let { handler ->
+                                    subtitleView?.withAssSupport(handler)
+                                }
+                                subtitleView?.let { subView ->
+                                    subtitleConfig.applyTo(subView)
+                                }
                             }
                         },
                         update = {
                             it.player = player
                             it.resizeMode = resizeMode.media3Mode
+                            it.subtitleView?.let { subView ->
+                                subtitleConfig.applyTo(subView)
+                            }
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -781,11 +813,20 @@ private fun PlayerSurface(
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                                 ViewGroup.LayoutParams.MATCH_PARENT,
                             )
+                            assHandler?.let { handler ->
+                                subtitleView?.withAssSupport(handler)
+                            }
+                            subtitleView?.let { subView ->
+                                subtitleConfig.applyTo(subView)
+                            }
                         }
                     },
                     update = {
                         it.player = player
                         it.resizeMode = resizeMode.media3Mode
+                        it.subtitleView?.let { subView ->
+                            subtitleConfig.applyTo(subView)
+                        }
                     },
                     modifier = Modifier.fillMaxSize(),
                 )
@@ -930,6 +971,8 @@ private fun PlayerSurface(
             playbackSpeed = playbackSpeed,
             resizeMode = resizeMode,
             canTryTranscode = canTryTranscode,
+            subtitleConfig = subtitleConfig,
+            onSubtitleConfigChange = { subtitleConfig = it },
             onDismiss = { sheet = null },
             onAudio = { track ->
                 if (player.applyTrackSelection(C.TRACK_TYPE_AUDIO, track.index, item.audioTracks)) {
@@ -1030,6 +1073,7 @@ private fun PlayerImmersiveMode() {
 
 @Composable
 private fun FlexTheaterPlayerLayout(
+    posture: DevicePostureState,
     item: VantafynPlaybackItem,
     isPlaying: Boolean,
     isBuffering: Boolean,
@@ -1051,6 +1095,8 @@ private fun FlexTheaterPlayerLayout(
     onPlayNext: () -> Unit,
     onEnterPiP: () -> Unit,
     onSkipSegment: () -> Unit,
+    onChangeSpeed: (Float) -> Unit,
+    onCycleResizeMode: () -> Unit,
     topContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1069,11 +1115,19 @@ private fun FlexTheaterPlayerLayout(
             .fillMaxSize()
             .background(Color(0xFF07080C)),
     ) {
-        // TOP HALF: Upright Video Stage
-        Box(
-            modifier = Modifier
+        // TOP HALF: Upright Video Stage (respecting physical fold height if known)
+        val topStageModifier = if (posture.topHalfHeightDp > 0.dp) {
+            Modifier
+                .fillMaxWidth()
+                .height(posture.topHalfHeightDp)
+        } else {
+            Modifier
                 .weight(1f)
                 .fillMaxWidth()
+        }
+
+        Box(
+            modifier = topStageModifier
                 .background(Color.Black)
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -1150,19 +1204,22 @@ private fun FlexTheaterPlayerLayout(
             }
         }
 
-        // Hinge Spacer
+        // Hinge Spacer matching physical folding bounds
+        val hingeHeight = if (posture.hingeThicknessDp > 0.dp) posture.hingeThicknessDp.coerceAtLeast(8.dp) else 10.dp
         Spacer(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(10.dp)
+                .height(hingeHeight)
                 .background(Color(0xFF040508)),
         )
 
         // BOTTOM HALF: Flat Control Console
+        val bottomDeckModifier = Modifier
+            .weight(1f)
+            .fillMaxWidth()
+
         Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
+            modifier = bottomDeckModifier
                 .background(
                     Brush.verticalGradient(
                         listOf(
@@ -1221,225 +1278,733 @@ private fun FlexTheaterPlayerLayout(
                         ),
                 )
 
-                Column(
+                if (posture.isWideTabletop) {
+                    FlexTheaterWideDeck(
+                        item = item,
+                        isPlaying = isPlaying,
+                        isBuffering = isBuffering,
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        selectedAudioIndex = selectedAudioIndex,
+                        selectedSubtitleIndex = selectedSubtitleIndex,
+                        playbackSpeed = playbackSpeed,
+                        resizeMode = resizeMode,
+                        onPlayPause = onPlayPause,
+                        onSeekBy = onSeekBy,
+                        onSeekTo = onSeekTo,
+                        onAudio = onAudio,
+                        onSubtitles = onSubtitles,
+                        onMore = onMore,
+                        onPlayPrevious = onPlayPrevious,
+                        onPlayNext = onPlayNext,
+                        onEnterPiP = onEnterPiP,
+                        onChangeSpeed = onChangeSpeed,
+                        onCycleResizeMode = onCycleResizeMode,
+                    )
+                } else {
+                    FlexTheaterCompactDeck(
+                        item = item,
+                        isPlaying = isPlaying,
+                        isBuffering = isBuffering,
+                        positionMs = positionMs,
+                        durationMs = durationMs,
+                        selectedAudioIndex = selectedAudioIndex,
+                        selectedSubtitleIndex = selectedSubtitleIndex,
+                        playbackSpeed = playbackSpeed,
+                        onPlayPause = onPlayPause,
+                        onSeekBy = onSeekBy,
+                        onSeekTo = onSeekTo,
+                        onAudio = onAudio,
+                        onSubtitles = onSubtitles,
+                        onMore = onMore,
+                        onPlayPrevious = onPlayPrevious,
+                        onPlayNext = onPlayNext,
+                        onEnterPiP = onEnterPiP,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FlexTheaterCompactDeck(
+    item: VantafynPlaybackItem,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    selectedAudioIndex: Int?,
+    selectedSubtitleIndex: Int?,
+    playbackSpeed: Float,
+    onPlayPause: () -> Unit,
+    onSeekBy: (Long) -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onAudio: () -> Unit,
+    onSubtitles: () -> Unit,
+    onMore: () -> Unit,
+    onPlayPrevious: () -> Unit,
+    onPlayNext: () -> Unit,
+    onEnterPiP: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        // 1. Rich Media Header (Mini-Poster card + Title/Subtitle + Source Badges + PiP)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val posterThumb = item.posterUrl ?: item.backdropUrl
+                Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    // 1. Rich Media Header (Mini-Poster card + Title/Subtitle + Source Badges + PiP)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            // Mini Poster Card
-                            val posterThumb = item.posterUrl ?: item.backdropUrl
-                            Box(
-                                modifier = Modifier
-                                    .size(width = 46.dp, height = 66.dp)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .border(
-                                        1.dp,
-                                        Brush.linearGradient(
-                                            listOf(
-                                                Color(0xFF31D7FF).copy(alpha = 0.60f),
-                                                Color(0xFFFF5277).copy(alpha = 0.40f),
-                                                Color.White.copy(alpha = 0.15f),
-                                            ),
-                                        ),
-                                        RoundedCornerShape(10.dp),
-                                    )
-                                    .background(Color.White.copy(alpha = 0.08f)),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                if (!posterThumb.isNullOrBlank()) {
-                                    AsyncImage(
-                                        model = posterThumb,
-                                        contentDescription = "Poster",
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize(),
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Rounded.PlayArrow,
-                                        contentDescription = null,
-                                        tint = Color.White.copy(alpha = 0.60f),
-                                        modifier = Modifier.size(24.dp),
-                                    )
-                                }
-                            }
-
-                            // Metadata Column
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(2.dp),
-                            ) {
-                                Text(
-                                    text = item.title,
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.sp,
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                    lineHeight = 19.sp,
-                                )
-                                item.subtitle?.let { sub ->
-                                    Text(
-                                        text = sub,
-                                        color = Color.White.copy(alpha = 0.75f),
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                                item.sourceLabel?.let { source ->
-                                    VantafynGlassSurface(
-                                        variant = VantafynGlassVariant.Chip,
-                                        cornerRadius = 6.dp,
-                                        contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = source,
-                                            color = Color(0xFF31D7FF),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.SemiBold,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        // PiP Button
-                        IconButton(
-                            onClick = onEnterPiP,
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.10f)),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.PictureInPicture,
-                                contentDescription = "PiP",
-                                tint = Color.White.copy(alpha = 0.90f),
-                                modifier = Modifier.size(20.dp),
-                            )
-                        }
-                    }
-
-                    // 2. Scrubber with signature gradient
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        VantafynPlayerProgressSlider(
-                            positionMs = positionMs,
-                            durationMs = durationMs,
-                            onSeekTo = onSeekTo,
+                        .size(width = 46.dp, height = 66.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(
+                            1.dp,
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF31D7FF).copy(alpha = 0.60f),
+                                    Color(0xFFFF5277).copy(alpha = 0.40f),
+                                    Color.White.copy(alpha = 0.15f),
+                                ),
+                            ),
+                            RoundedCornerShape(10.dp),
                         )
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
+                        .background(Color.White.copy(alpha = 0.08f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!posterThumb.isNullOrBlank()) {
+                        AsyncImage(
+                            model = posterThumb,
+                            contentDescription = "Poster",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.60f),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = item.title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        lineHeight = 19.sp,
+                    )
+                    item.subtitle?.let { sub ->
+                        Text(
+                            text = sub,
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    item.sourceLabel?.let { source ->
+                        VantafynGlassSurface(
+                            variant = VantafynGlassVariant.Chip,
+                            cornerRadius = 6.dp,
+                            contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
                         ) {
                             Text(
-                                text = positionMs.formatMs(),
+                                text = source,
                                 color = Color(0xFF31D7FF),
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            if (isBuffering) {
-                                Text(
-                                    text = "Buffering...",
-                                    color = Color(0xFFFFD166),
-                                    fontSize = 11.sp,
-                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
-                                )
-                            }
+                        }
+                    }
+                }
+            }
+
+            IconButton(
+                onClick = onEnterPiP,
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.10f)),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.PictureInPicture,
+                    contentDescription = "PiP",
+                    tint = Color.White.copy(alpha = 0.90f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+
+        // 2. Scrubber with signature gradient
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            VantafynPlayerProgressSlider(
+                positionMs = positionMs,
+                durationMs = durationMs,
+                onSeekTo = onSeekTo,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = positionMs.formatMs(),
+                    color = Color(0xFF31D7FF),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (isBuffering) {
+                    Text(
+                        text = "Buffering...",
+                        color = Color(0xFFFFD166),
+                        fontSize = 11.sp,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    )
+                }
+                Text(
+                    text = "-${(durationMs - positionMs).coerceAtLeast(0L).formatMs()}",
+                    color = Color.White.copy(alpha = 0.70f),
+                    fontSize = 11.sp,
+                )
+            }
+        }
+
+        // 3. Main playback buttons row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (item.previousCandidate != null && !item.isLiveStream) {
+                IconButton(onClick = onPlayPrevious, modifier = Modifier.size(46.dp)) {
+                    Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+            IconButton(onClick = { onSeekBy(-10_000L) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(30.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .size(64.dp)
+                    .shadow(16.dp, CircleShape, spotColor = Color(0xFF00E7FF))
+                    .clip(CircleShape)
+                    .background(Brush.linearGradient(VantafynGradients.AccentColors))
+                    .clickable(onClick = onPlayPause),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = Color.Black,
+                    modifier = Modifier.size(34.dp),
+                )
+            }
+            IconButton(onClick = { onSeekBy(10_000L) }, modifier = Modifier.size(48.dp)) {
+                Icon(Icons.Rounded.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(30.dp))
+            }
+            if (item.upNextCandidate != null && !item.isLiveStream) {
+                IconButton(onClick = onPlayNext, modifier = Modifier.size(46.dp)) {
+                    Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+            }
+        }
+
+        // 4. Lower tool pills
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FlexToolChip(
+                icon = Icons.Rounded.ClosedCaption,
+                label = selectedSubtitleIndex?.let { "CC On" } ?: "CC Off",
+                active = selectedSubtitleIndex != null,
+                onClick = onSubtitles,
+            )
+            FlexToolChip(
+                icon = Icons.Rounded.Audiotrack,
+                label = "Audio",
+                active = selectedAudioIndex != null,
+                onClick = onAudio,
+            )
+            FlexToolChip(
+                icon = Icons.Rounded.Speed,
+                label = "${playbackSpeed}x",
+                active = playbackSpeed != 1f,
+                onClick = onMore,
+            )
+            FlexToolChip(
+                icon = Icons.Rounded.Settings,
+                label = "More",
+                active = false,
+                onClick = onMore,
+            )
+        }
+    }
+}
+
+@Composable
+private fun FlexTheaterWideDeck(
+    item: VantafynPlaybackItem,
+    isPlaying: Boolean,
+    isBuffering: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    selectedAudioIndex: Int?,
+    selectedSubtitleIndex: Int?,
+    playbackSpeed: Float,
+    resizeMode: PlayerResizeMode,
+    onPlayPause: () -> Unit,
+    onSeekBy: (Long) -> Unit,
+    onSeekTo: (Long) -> Unit,
+    onAudio: () -> Unit,
+    onSubtitles: () -> Unit,
+    onMore: () -> Unit,
+    onPlayPrevious: () -> Unit,
+    onPlayNext: () -> Unit,
+    onEnterPiP: () -> Unit,
+    onChangeSpeed: (Float) -> Unit,
+    onCycleResizeMode: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val audioLabel = item.selectedAudioLabel(selectedAudioIndex)
+    val subtitleLabel = item.selectedSubtitleLabel(selectedSubtitleIndex)
+
+    Row(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 20.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // LEFT COLUMN (Transport, Timeline, Media Info)
+        Column(
+            modifier = Modifier
+                .weight(1.15f)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            // Media Header: Poster + Title + Subtitle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                val posterThumb = item.posterUrl ?: item.backdropUrl
+                Box(
+                    modifier = Modifier
+                        .size(width = 44.dp, height = 62.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .border(
+                            1.dp,
+                            Brush.linearGradient(
+                                listOf(
+                                    Color(0xFF31D7FF).copy(alpha = 0.60f),
+                                    Color(0xFFFF5277).copy(alpha = 0.40f),
+                                    Color.White.copy(alpha = 0.15f),
+                                ),
+                            ),
+                            RoundedCornerShape(10.dp),
+                        )
+                        .background(Color.White.copy(alpha = 0.08f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!posterThumb.isNullOrBlank()) {
+                        AsyncImage(
+                            model = posterThumb,
+                            contentDescription = "Poster",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.60f),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    Text(
+                        text = item.title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    item.subtitle?.let { sub ->
+                        Text(
+                            text = sub,
+                            color = Color.White.copy(alpha = 0.75f),
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    item.sourceLabel?.let { source ->
+                        VantafynGlassSurface(
+                            variant = VantafynGlassVariant.Chip,
+                            cornerRadius = 6.dp,
+                            contentPadding = PaddingValues(horizontal = 7.dp, vertical = 2.dp),
+                        ) {
                             Text(
-                                text = "-${(durationMs - positionMs).coerceAtLeast(0L).formatMs()}",
-                                color = Color.White.copy(alpha = 0.70f),
-                                fontSize = 11.sp,
+                                text = source,
+                                color = Color(0xFF31D7FF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
                             )
                         }
                     }
+                }
+            }
 
-                    // 3. Main playback buttons row
+            // Timeline Scrubber
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                VantafynPlayerProgressSlider(
+                    positionMs = positionMs,
+                    durationMs = durationMs,
+                    onSeekTo = onSeekTo,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = positionMs.formatMs(),
+                        color = Color(0xFF31D7FF),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    if (isBuffering) {
+                        Text(
+                            text = "Buffering...",
+                            color = Color(0xFFFFD166),
+                            fontSize = 11.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                    }
+                    Text(
+                        text = "-${(durationMs - positionMs).coerceAtLeast(0L).formatMs()}",
+                        color = Color.White.copy(alpha = 0.70f),
+                        fontSize = 11.sp,
+                    )
+                }
+            }
+
+            // Primary Playback Transport Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (item.previousCandidate != null && !item.isLiveStream) {
+                    IconButton(onClick = onPlayPrevious, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(26.dp))
+                    }
+                }
+                IconButton(onClick = { onSeekBy(-10_000L) }, modifier = Modifier.size(46.dp)) {
+                    Icon(Icons.Rounded.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+                Box(
+                    modifier = Modifier
+                        .size(56.dp)
+                        .shadow(16.dp, CircleShape, spotColor = Color(0xFF00E7FF))
+                        .clip(CircleShape)
+                        .background(Brush.linearGradient(VantafynGradients.AccentColors))
+                        .clickable(onClick = onPlayPause),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = Color.Black,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+                IconButton(onClick = { onSeekBy(10_000L) }, modifier = Modifier.size(46.dp)) {
+                    Icon(Icons.Rounded.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(28.dp))
+                }
+                if (item.upNextCandidate != null && !item.isLiveStream) {
+                    IconButton(onClick = onPlayNext, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(26.dp))
+                    }
+                }
+            }
+        }
+
+        // VERTICAL DIVIDER
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .fillMaxHeight(0.85f)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.05f),
+                            Color(0xFF31D7FF).copy(alpha = 0.30f),
+                            Color(0xFFFF5277).copy(alpha = 0.20f),
+                            Color.White.copy(alpha = 0.05f),
+                        ),
+                    ),
+                ),
+        )
+
+        // RIGHT COLUMN (Quick Track Selection & Streams)
+        Column(
+            modifier = Modifier
+                .weight(0.95f)
+                .fillMaxHeight(),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            // Quick Track Selection Pills (Audio & Subtitles)
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Text(
+                    text = "STREAMS & AUDIO",
+                    color = Color.White.copy(alpha = 0.50f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                )
+                // Audio track pill
+                VantafynGlassSurface(
+                    variant = VantafynGlassVariant.Chip,
+                    cornerRadius = 10.dp,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onAudio),
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        if (item.previousCandidate != null && !item.isLiveStream) {
-                            IconButton(onClick = onPlayPrevious, modifier = Modifier.size(46.dp)) {
-                                Icon(Icons.Rounded.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(28.dp))
-                            }
-                        }
-                        IconButton(onClick = { onSeekBy(-10_000L) }, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Rounded.Replay10, contentDescription = "Rewind 10s", tint = Color.White, modifier = Modifier.size(30.dp))
-                        }
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .shadow(16.dp, CircleShape, spotColor = Color(0xFF00E7FF))
-                                .clip(CircleShape)
-                                .background(Brush.linearGradient(VantafynGradients.AccentColors))
-                                .clickable(onClick = onPlayPause),
-                            contentAlignment = Alignment.Center,
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false),
                         ) {
                             Icon(
-                                imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                                contentDescription = if (isPlaying) "Pause" else "Play",
-                                tint = Color.Black,
-                                modifier = Modifier.size(34.dp),
+                                imageVector = Icons.Rounded.Audiotrack,
+                                contentDescription = null,
+                                tint = Color(0xFF31D7FF),
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                text = audioLabel,
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
                             )
                         }
-                        IconButton(onClick = { onSeekBy(10_000L) }, modifier = Modifier.size(48.dp)) {
-                            Icon(Icons.Rounded.Forward10, contentDescription = "Forward 10s", tint = Color.White, modifier = Modifier.size(30.dp))
-                        }
-                        if (item.upNextCandidate != null && !item.isLiveStream) {
-                            IconButton(onClick = onPlayNext, modifier = Modifier.size(46.dp)) {
-                                Icon(Icons.Rounded.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(28.dp))
-                            }
-                        }
+                        Text("Change", color = Color(0xFF31D7FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
+                }
 
-                    // 4. Lower tool pills
+                // Subtitle track pill
+                VantafynGlassSurface(
+                    variant = if (selectedSubtitleIndex != null) VantafynGlassVariant.Button else VantafynGlassVariant.Chip,
+                    cornerRadius = 10.dp,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onSubtitles),
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        FlexToolChip(
-                            icon = Icons.Rounded.ClosedCaption,
-                            label = selectedSubtitleIndex?.let { "CC On" } ?: "CC Off",
-                            active = selectedSubtitleIndex != null,
-                            onClick = onSubtitles,
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f, fill = false),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ClosedCaption,
+                                contentDescription = null,
+                                tint = if (selectedSubtitleIndex != null) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.60f),
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Text(
+                                text = subtitleLabel,
+                                color = if (selectedSubtitleIndex != null) Color.White else Color.White.copy(alpha = 0.70f),
+                                fontSize = 11.sp,
+                                fontWeight = if (selectedSubtitleIndex != null) FontWeight.SemiBold else FontWeight.Normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text("Change", color = Color(0xFF31D7FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+
+            // Playback Speed Chips
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(
+                    text = "PLAYBACK SPEED",
+                    color = Color.White.copy(alpha = 0.50f),
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    val speedOptions = listOf(0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
+                    speedOptions.forEach { speed ->
+                        val isSelected = playbackSpeed == speed
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isSelected) {
+                                        Brush.linearGradient(listOf(Color(0xFF31D7FF).copy(alpha = 0.35f), Color(0xFFFF5277).copy(alpha = 0.35f)))
+                                    } else {
+                                        Brush.linearGradient(listOf(Color.White.copy(alpha = 0.08f), Color.White.copy(alpha = 0.04f)))
+                                    },
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.12f),
+                                    RoundedCornerShape(8.dp),
+                                )
+                                .clickable { onChangeSpeed(speed) }
+                                .padding(vertical = 4.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "${speed}x",
+                                color = if (isSelected) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.85f),
+                                fontSize = 10.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Bottom action row: Aspect Ratio + PiP + More
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                VantafynGlassSurface(
+                    variant = if (resizeMode != PlayerResizeMode.Fit) VantafynGlassVariant.Button else VantafynGlassVariant.Chip,
+                    cornerRadius = 10.dp,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 5.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(onClick = onCycleResizeMode),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AspectRatio,
+                            contentDescription = null,
+                            tint = if (resizeMode != PlayerResizeMode.Fit) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.70f),
+                            modifier = Modifier.size(13.dp),
                         )
-                        FlexToolChip(
-                            icon = Icons.Rounded.Audiotrack,
-                            label = "Audio",
-                            active = selectedAudioIndex != null,
-                            onClick = onAudio,
-                        )
-                        FlexToolChip(
-                            icon = Icons.Rounded.Speed,
-                            label = "${playbackSpeed}x",
-                            active = playbackSpeed != 1f,
-                            onClick = onMore,
-                        )
-                        FlexToolChip(
-                            icon = Icons.Rounded.Settings,
-                            label = "More",
-                            active = false,
-                            onClick = onMore,
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = resizeMode.label,
+                            color = if (resizeMode != PlayerResizeMode.Fit) Color(0xFF31D7FF) else Color.White.copy(alpha = 0.85f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
                         )
                     }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onEnterPiP,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PictureInPicture,
+                        contentDescription = "PiP",
+                        tint = Color.White.copy(alpha = 0.90f),
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.10f))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onMore,
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MoreHoriz,
+                        contentDescription = "More",
+                        tint = Color.White.copy(alpha = 0.90f),
+                        modifier = Modifier.size(16.dp),
+                    )
                 }
             }
         }
@@ -2120,6 +2685,8 @@ private fun PlayerOptionsSheet(
     playbackSpeed: Float,
     resizeMode: PlayerResizeMode,
     canTryTranscode: Boolean,
+    subtitleConfig: SubtitleStyleConfig,
+    onSubtitleConfigChange: (SubtitleStyleConfig) -> Unit,
     onDismiss: () -> Unit,
     onAudio: (VantafynAudioTrack) -> Unit,
     onSubtitle: (VantafynSubtitleTrack?) -> Unit,
@@ -2187,6 +2754,14 @@ private fun PlayerOptionsSheet(
                             }
                         }
                         PlayerSheet.Subtitles -> {
+                            OptionRow(
+                                icon = Icons.Rounded.Style,
+                                title = "Subtitle style & appearance",
+                                detail = "Customize font size, colors, outlines, and live preview",
+                            ) {
+                                onOpen(PlayerSheet.SubtitleStyling)
+                            }
+                            Spacer(Modifier.height(4.dp))
                             TrackRow("Off", "Disable subtitles", selected = selectedSubtitleIndex == null) { onSubtitle(null) }
                             if (item.subtitleTracks.isEmpty()) {
                                 EmptyOption("No subtitle tracks available")
@@ -2208,6 +2783,7 @@ private fun PlayerOptionsSheet(
                         }
                         PlayerSheet.More -> {
                             OptionRow(Icons.Rounded.ClosedCaption, "Subtitles", item.selectedSubtitleLabel(selectedSubtitleIndex)) { onOpen(PlayerSheet.Subtitles) }
+                            OptionRow(Icons.Rounded.Style, "Subtitle appearance", "Font size, colors, and live preview") { onOpen(PlayerSheet.SubtitleStyling) }
                             if (item.audioTracks.size > 1) {
                                 OptionRow(Icons.Rounded.Audiotrack, "Audio", item.selectedAudioLabel(selectedAudioIndex)) { onOpen(PlayerSheet.Audio) }
                             }
@@ -2243,6 +2819,12 @@ private fun PlayerOptionsSheet(
                                     selected = mode == resizeMode,
                                 ) { onResize(mode) }
                             }
+                        }
+                        PlayerSheet.SubtitleStyling -> {
+                            SubtitleStylingContent(
+                                currentConfig = subtitleConfig,
+                                onConfigChange = onSubtitleConfigChange,
+                            )
                         }
                     }
                     Spacer(Modifier.height(16.dp))
@@ -2412,6 +2994,7 @@ private enum class PlayerSheet(val title: String, val subtitle: String) {
     More("Player Options", "Source, speed, retry, and stop actions."),
     Speed("Playback Speed", "Adjust video speed for this session."),
     Resize("Screen Fit", "Choose how video fills the display."),
+    SubtitleStyling("Subtitle Appearance", "Customize font size, colors, and styling with live preview."),
 }
 
 private fun VantafynSyncPlaybackCommand.isSyncPlayPause(): Boolean =

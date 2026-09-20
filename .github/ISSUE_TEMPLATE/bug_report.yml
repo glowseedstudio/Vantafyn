@@ -26,8 +26,8 @@ body:
     id: app_version
     attributes:
       label: Vantafyn App Version
-      description: Found in Settings or the About screen (e.g. `0.9.17`).
-      placeholder: "e.g. 0.9.17"
+      description: Found in Settings or the About screen (e.g. `0.9.18`).
+      placeholder: "e.g. 0.9.18"
     validations:
       required: true
 

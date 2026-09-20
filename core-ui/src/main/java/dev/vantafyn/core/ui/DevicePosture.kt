@@ -32,7 +32,11 @@ data class DevicePostureState(
     val hingeThicknessDp: Dp = 0.dp,
     val topHalfHeightDp: Dp = 0.dp,
     val bottomHalfHeightDp: Dp = 0.dp,
-)
+    val screenWidthDp: Dp = 0.dp,
+    val screenHeightDp: Dp = 0.dp,
+) {
+    val isWideTabletop: Boolean get() = isTabletop && screenWidthDp >= 600.dp
+}
 
 fun Context.findActivity(): Activity? {
     var context = this
@@ -51,20 +55,35 @@ fun rememberDevicePosture(): DevicePostureState {
     val density = LocalDensity.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var postureState by remember { mutableStateOf(DevicePostureState()) }
+    val initialScreenWidthDp = configuration.screenWidthDp.dp
+    val initialScreenHeightDp = configuration.screenHeightDp.dp
+    var postureState by remember {
+        mutableStateOf(
+            DevicePostureState(
+                screenWidthDp = initialScreenWidthDp,
+                screenHeightDp = initialScreenHeightDp,
+            ),
+        )
+    }
 
     if (activity == null) {
         return postureState
     }
 
-    LaunchedEffect(activity, lifecycleOwner) {
+    LaunchedEffect(activity, lifecycleOwner, configuration) {
         lifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val tracker = WindowInfoTracker.getOrCreate(activity)
             tracker.windowLayoutInfo(activity).collectLatest { layoutInfo ->
                 val foldingFeature = layoutInfo.displayFeatures.filterIsInstance<FoldingFeature>().firstOrNull()
 
+                val screenWidthDp = configuration.screenWidthDp.dp
+                val screenHeightDp = configuration.screenHeightDp.dp
+
                 if (foldingFeature == null) {
-                    postureState = DevicePostureState()
+                    postureState = DevicePostureState(
+                        screenWidthDp = screenWidthDp,
+                        screenHeightDp = screenHeightDp,
+                    )
                     return@collectLatest
                 }
 
@@ -82,7 +101,6 @@ fun rememberDevicePosture(): DevicePostureState {
                 }
 
                 val topHeightDp = with(density) { bounds.top.toDp() }
-                val screenHeightDp = configuration.screenHeightDp.dp
                 val bottomHeightDp = (screenHeightDp - with(density) { bounds.bottom.toDp() }).coerceAtLeast(0.dp)
 
                 postureState = DevicePostureState(
@@ -93,6 +111,8 @@ fun rememberDevicePosture(): DevicePostureState {
                     hingeThicknessDp = thicknessDp,
                     topHalfHeightDp = if (topHeightDp > 0.dp) topHeightDp else screenHeightDp / 2,
                     bottomHalfHeightDp = if (bottomHeightDp > 0.dp) bottomHeightDp else screenHeightDp / 2,
+                    screenWidthDp = screenWidthDp,
+                    screenHeightDp = screenHeightDp,
                 )
             }
         }

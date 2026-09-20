@@ -9,6 +9,10 @@ android {
     defaultConfig {
         minSdk = libs.versions.minSdk.get().toInt()
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {
@@ -23,6 +27,7 @@ dependencies {
     api(libs.androidx.media3.exoplayer.hls)
     api(libs.androidx.media3.session)
     api(libs.androidx.media3.ui)
+    api(libs.ass.media)
     api(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
 }
