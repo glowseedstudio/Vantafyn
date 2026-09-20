@@ -3828,6 +3828,9 @@ private fun MobileShellScreen(
                     onQueueDownload = onQueueMediaDownload,
                     onStartWatchParty = onStartWatchPartyFromDetail,
                     onShareMediaToFriend = onShareMediaToFriend,
+                    onReportMediaIssue = viewModel::reportMediaIssue,
+                    onToggleSocialEnabled = onToggleSocialEnabled,
+                    onRequestChatNotificationsPermission = onRequestChatNotificationsPermission,
                 )
                 MobileDestination.Player -> Box(Modifier.fillMaxSize()) {
                     if (state.videoPlayerPreference == VantafynVideoPlayerPreference.External) {
@@ -19064,6 +19067,9 @@ private fun MediaDetailScreen(
     onQueueDownload: (java.util.UUID) -> Unit,
     onStartWatchParty: (WatchPartyMode) -> Unit,
     onShareMediaToFriend: (dev.vantafyn.core.jellyfin.JellyfinFriend, JellyfinMediaDetail) -> Unit = { _, _ -> },
+    onReportMediaIssue: (JellyfinMediaDetail, List<String>, String?, (Boolean) -> Unit) -> Unit = { _, _, _, _ -> },
+    onToggleSocialEnabled: () -> Unit = {},
+    onRequestChatNotificationsPermission: () -> Unit = {},
 ) {
     val detail = state.mediaDetail
     val detailRevealKey = state.selectedMediaId ?: detail?.id ?: "media-detail"
@@ -19097,6 +19103,8 @@ private fun MediaDetailScreen(
     var showMediaInfo by remember { mutableStateOf(false) }
     var showWatchPartyStart by remember { mutableStateOf(false) }
     var showShareToFriend by remember { mutableStateOf(false) }
+    var showReportMediaIssue by remember { mutableStateOf(false) }
+    var showEnableSocialForReporting by remember { mutableStateOf(false) }
     var detailRevealActive by remember(state.selectedMediaId) { mutableStateOf(true) }
     LaunchedEffect(state.selectedMediaId) {
         detailRevealActive = true
@@ -19277,7 +19285,7 @@ private fun MediaDetailScreen(
         DetailActionSheet(
             detail = detail,
             isAdmin = state.session?.user?.isAdministrator == true,
-            socialEnabled = state.socialEnabled && state.session != null,
+            isSocialAvailable = (state.isSocialAvailable || state.isAchievementsAvailable) && state.session != null,
             onDismiss = { showActions = false },
             onPlay = {
                 showActions = false
@@ -19311,6 +19319,14 @@ private fun MediaDetailScreen(
                 showActions = false
                 showWatchPartyStart = true
             },
+            onReportIssue = {
+                showActions = false
+                if (!state.socialEnabled) {
+                    showEnableSocialForReporting = true
+                } else {
+                    showReportMediaIssue = true
+                }
+            },
         )
     }
     if (detail != null && showShareToFriend) {
@@ -19339,6 +19355,26 @@ private fun MediaDetailScreen(
             detail = detail,
             isAdmin = state.session?.user?.isAdministrator == true,
             onDismiss = { showMediaInfo = false },
+        )
+    }
+    if (detail != null && showEnableSocialForReporting) {
+        EnableSocialForReportingDialog(
+            onDismiss = { showEnableSocialForReporting = false },
+            onEnable = {
+                showEnableSocialForReporting = false
+                onToggleSocialEnabled()
+                onRequestChatNotificationsPermission()
+                showReportMediaIssue = true
+            },
+        )
+    }
+    if (detail != null && showReportMediaIssue) {
+        ReportMediaIssueSheet(
+            detail = detail,
+            onDismiss = { showReportMediaIssue = false },
+            onSubmit = { categories, comment, onComplete ->
+                onReportMediaIssue(detail, categories, comment, onComplete)
+            },
         )
     }
 }
@@ -19813,7 +19849,8 @@ private fun detailChipTone(value: String): Color? {
         value.isStarRating() -> VantafynColors.Gold
         "hdr" in normalized || "dolby vision" in normalized || "dv" == normalized -> Color(0xFFFFD36A)
         "4k" in normalized || "2160" in normalized || "uhd" in normalized -> Color(0xFF8FE7FF)
-        "1080" in normalized || "720" in normalized -> Color(0xFF6FA8FF)
+        "1440" in normalized || "2k" in normalized -> Color(0xFF7DE0EA)
+        "1080" in normalized || "720" in normalized || "480" in normalized || normalized == "sd" -> Color(0xFF6FA8FF)
         "sub" in normalized || "cc" == normalized || "caption" in normalized -> Color(0xFFC892FF)
         "eng" == normalized || "english" in normalized || "audio" in normalized -> Color(0xFF7CE7C8)
         "atmos" in normalized || "dts" in normalized || "aac" in normalized || "flac" in normalized || "truehd" in normalized -> Color(0xFFFF8AD8)
@@ -19939,6 +19976,7 @@ private fun DetailActionSheet(
     detail: JellyfinMediaDetail,
     isAdmin: Boolean,
     socialEnabled: Boolean = false,
+    isSocialAvailable: Boolean = false,
     onDismiss: () -> Unit,
     onPlay: () -> Unit,
     onWatchFromBeginning: () -> Unit,
@@ -19948,6 +19986,7 @@ private fun DetailActionSheet(
     onShareToFriend: () -> Unit = {},
     onMediaInfo: () -> Unit,
     onStartWatchParty: () -> Unit,
+    onReportIssue: () -> Unit = {},
 ) {
     val supportsMyList = detail.itemType.supportsMyListAction()
     AlertDialog(
@@ -19981,9 +20020,13 @@ private fun DetailActionSheet(
                 if (detail.mediaSources.size > 1) {
                     DetailSheetAction("▤", "Versions available in Media info", onMediaInfo)
                 }
-                if (isAdmin) {
-                    DetailSheetAction("↻", "Refresh metadata requires admin tools later", onDismiss, enabled = false)
-                }
+                DetailSheetAction(
+                    icon = "⚠",
+                    label = "Report issue with media",
+                    onClick = onReportIssue,
+                    enabled = isSocialAvailable,
+                    subtitle = if (!isSocialAvailable) "Requires Achievements plugin on server" else null,
+                )
             }
         },
     )
@@ -20241,7 +20284,13 @@ private fun WatchPartyModeChoice(title: String, subtitle: String, onClick: () ->
 }
 
 @Composable
-private fun DetailSheetAction(icon: String, label: String, onClick: () -> Unit, enabled: Boolean = true) {
+private fun DetailSheetAction(
+    icon: String,
+    label: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    subtitle: String? = null,
+) {
     VantafynGlassTile(
         modifier = Modifier.fillMaxWidth(),
         enabled = enabled,
@@ -20251,9 +20300,335 @@ private fun DetailSheetAction(icon: String, label: String, onClick: () -> Unit, 
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(icon, color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.5f))
-            Text(label, color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(label, color = if (enabled) VantafynColors.Ink else VantafynColors.Muted.copy(alpha = 0.6f), fontWeight = FontWeight.SemiBold)
+                if (subtitle != null) {
+                    Text(subtitle, color = VantafynColors.Muted.copy(alpha = 0.65f), style = MaterialTheme.typography.bodySmall)
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun ReportMediaIssueSheet(
+    detail: JellyfinMediaDetail,
+    onDismiss: () -> Unit,
+    onSubmit: (categories: List<String>, comment: String?, onComplete: (Boolean) -> Unit) -> Unit,
+) {
+    val issueCategories = remember {
+        listOf(
+            "Video quality poor / pixelated",
+            "Audio out of sync or distorted",
+            "Missing or desynced subtitles",
+            "Wrong movie / Cut off",
+            "Buffering / Playback error",
+            "Other issue",
+        )
+    }
+    val selectedCategories = remember { mutableStateListOf<String>() }
+    var userComment by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        modifier = Modifier
+            .vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.3.dp)
+            .fillMaxWidth(),
+        onDismissRequest = {
+            if (!isSubmitting) onDismiss()
+        },
+        confirmButton = {},
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF9100).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("⚠", color = Color(0xFFFF9100), fontSize = 18.sp)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Report Media Issue",
+                        color = VantafynColors.Ink,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Sends report to server administrator",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Media Summary Card
+                VantafynGlassTile(
+                    modifier = Modifier.fillMaxWidth(),
+                    cornerRadius = 16.dp,
+                    contentPadding = PaddingValues(12.dp),
+                    onClick = {},
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        detail.imageUrl?.let { imgUrl ->
+                            coil3.compose.AsyncImage(
+                                model = imgUrl,
+                                contentDescription = detail.title,
+                                modifier = Modifier
+                                    .width(44.dp)
+                                    .height(64.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop,
+                            )
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = detail.title,
+                                color = VantafynColors.Ink,
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.bodyLarge,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            val meta = listOfNotNull(
+                                detail.year?.toString(),
+                                detail.itemType ?: "Media",
+                                detail.mediaSources.firstOrNull()?.container?.uppercase(),
+                            ).joinToString(" • ")
+                            Text(
+                                text = meta,
+                                color = VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                }
+
+                Text(
+                    text = "What is the problem?",
+                    color = VantafynColors.Ink,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+
+                // Category Chips using FlowRow
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    issueCategories.forEach { category ->
+                        val isSelected = category in selectedCategories
+                        val chipBorderColor = if (isSelected) Color(0xFFFF9100) else VantafynColors.Border.copy(alpha = 0.5f)
+                        val chipBgColor = if (isSelected) Color(0xFFFF9100).copy(alpha = 0.18f) else VantafynColors.Surface.copy(alpha = 0.45f)
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(chipBgColor)
+                                .border(1.dp, chipBorderColor, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    if (isSelected) {
+                                        selectedCategories.remove(category)
+                                    } else {
+                                        selectedCategories.add(category)
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                if (isSelected) {
+                                    Text("✓", color = Color(0xFFFF9100), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Text(
+                                    text = category,
+                                    color = if (isSelected) VantafynColors.Ink else VantafynColors.Ink.copy(alpha = 0.85f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Optional comment
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        text = "Additional Details (Optional)",
+                        color = VantafynColors.Ink,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    VantafynTextField(
+                        value = userComment,
+                        onValueChange = { if (it.length <= 400) userComment = it },
+                        label = "Notes for admin",
+                        placeholder = "e.g. Subtitles out of sync by 2 seconds...",
+                    )
+                }
+
+                // Technical diagnostic pill
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(VantafynColors.SurfaceHigh.copy(alpha = 0.4f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("ℹ", color = Color(0xFF21D8FF), fontSize = 12.sp)
+                    Text(
+                        text = "Report includes item ID and server details automatically.",
+                        color = VantafynColors.Muted,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+
+                // Action Buttons
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        enabled = !isSubmitting,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Cancel", color = VantafynColors.Muted)
+                    }
+
+                    val canSubmit = selectedCategories.isNotEmpty() || userComment.isNotBlank()
+                    Button(
+                        onClick = {
+                            isSubmitting = true
+                            onSubmit(selectedCategories.toList(), userComment.takeIf { it.isNotBlank() }) { success ->
+                                isSubmitting = false
+                                if (success) {
+                                    onDismiss()
+                                }
+                            }
+                        },
+                        enabled = canSubmit && !isSubmitting,
+                        modifier = Modifier
+                            .weight(1.2f)
+                            .height(44.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFFF9100),
+                            contentColor = Color.Black,
+                            disabledContainerColor = Color(0xFFFF9100).copy(alpha = 0.15f),
+                            disabledContentColor = Color(0xFFFF9100).copy(alpha = 0.45f),
+                        ),
+                    ) {
+                        if (isSubmitting) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = Color.Black,
+                            )
+                        } else {
+                            Text(
+                                text = "Send",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+@Composable
+private fun EnableSocialForReportingDialog(
+    onDismiss: () -> Unit,
+    onEnable: () -> Unit,
+) {
+    AlertDialog(
+        modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 28.dp, strokeWidth = 1.3.dp),
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF00E5FF).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("💬", fontSize = 18.sp)
+                }
+                Text(
+                    text = "Social Features Required",
+                    color = VantafynColors.Ink,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text(
+                    text = "Reporting an issue requires Social & Chat features (powered by the Achievement plugin) to send a direct report to the server administrator's inbox and alerts them via push notifications.\n\nTo proceed, please activate Social features and allow notifications.",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text("Not now", color = VantafynColors.Muted)
+                    }
+                    Button(
+                        onClick = onEnable,
+                        modifier = Modifier.weight(1.6f),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF00E5FF),
+                            contentColor = Color.Black,
+                        ),
+                    ) {
+                        Text("Enable & Continue", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        },
+    )
 }
 
 @Composable
@@ -23090,7 +23465,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.16"
+private const val VANTAFYN_APP_VERSION = "0.9.17"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

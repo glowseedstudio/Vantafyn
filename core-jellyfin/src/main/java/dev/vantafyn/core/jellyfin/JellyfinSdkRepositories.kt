@@ -148,7 +148,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.16",
+            version = "0.9.17",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -5691,10 +5691,11 @@ private fun MediaStream.videoQualityLabel(): String? {
     val width = width ?: 0
     val height = height ?: 0
     return when {
-        width >= 3840 || height >= 2160 -> "4K"
-        width >= 2560 || height >= 1440 -> "1440p"
-        height >= 1080 -> "1080p"
-        height >= 720 -> "720p"
+        width >= 3800 || height >= 2100 -> "4K"
+        width >= 2500 || height >= 1400 -> "1440p"
+        width >= 1900 || height >= 1000 -> "1080p"
+        width >= 1260 || height >= 700 -> "720p"
+        width >= 840 || height >= 480 -> "480p"
         width > 0 || height > 0 -> "SD"
         else -> null
     }

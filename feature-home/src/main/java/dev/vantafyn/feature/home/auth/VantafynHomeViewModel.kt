@@ -5810,6 +5810,107 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun reportMediaIssue(
+        mediaDetail: JellyfinMediaDetail,
+        categories: List<String>,
+        comment: String?,
+        onComplete: (Boolean) -> Unit = {},
+    ) {
+        val session = _state.value.session ?: run {
+            onComplete(false)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                var admins = _state.value.publicUsers.filter { it.isAdministrator }
+                if (admins.isEmpty()) {
+                    val fetched = refreshPublicUsers(session.server)
+                    admins = fetched.filter { it.isAdministrator }
+                }
+
+                if (admins.isEmpty()) {
+                    _state.update {
+                        it.copy(
+                            mobileMessage = "Unable to locate server administrator. Please contact your admin directly.",
+                        )
+                    }
+                    onComplete(false)
+                    return@launch
+                }
+
+                val categoryText = if (categories.isNotEmpty()) categories.joinToString(", ") else "General Issue"
+                val commentText = comment?.trim().takeIf { !it.isNullOrBlank() }?.let { "\n💬 User Note: \"$it\"" } ?: ""
+                val mediaType = mediaDetail.itemType ?: "Media"
+                val yearStr = mediaDetail.year?.let { " ($it)" } ?: ""
+
+                val formattedMessage = buildString {
+                    append("🚨 [MEDIA ISSUE REPORT]\n")
+                    append("🎬 $mediaType: ${mediaDetail.title}$yearStr\n")
+                    append("🆔 Item ID: ${mediaDetail.id}\n")
+                    append("⚠️ Issue: $categoryText")
+                    append(commentText)
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.17")
+                }
+
+                val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
+                val pushSummary = "🚨 Media Issue: ${mediaDetail.title} ($categoryText)"
+
+                var anySuccess = false
+                for (admin in admins) {
+                    val convId = _state.value.socialConversations
+                        .firstOrNull { it.peerUserId == admin.id }?.conversationId ?: admin.id.toString()
+
+                    val sendResult = socialRepository.sendMessage(
+                        session = session,
+                        recipientId = admin.id,
+                        conversationId = convId,
+                        text = formattedMessage,
+                    )
+                    if (sendResult is JellyfinResult.Success) {
+                        anySuccess = true
+                    }
+
+                    try {
+                        pushRepo.notifyChat(
+                            session = session,
+                            recipientUserId = admin.id.toString(),
+                            senderName = session.user.name,
+                            conversationId = convId,
+                            messageText = pushSummary,
+                        )
+                    } catch (pushEx: Exception) {
+                        android.util.Log.w("VantafynHomeViewModel", "Failed to dispatch admin media issue push", pushEx)
+                    }
+                }
+
+                if (anySuccess) {
+                    loadSocialData()
+                    _state.update {
+                        it.copy(
+                            mobileMessage = "Report sent to server administrator. Thank you!",
+                        )
+                    }
+                    onComplete(true)
+                } else {
+                    _state.update {
+                        it.copy(
+                            mobileMessage = "Failed to send report. Please check your network connection.",
+                        )
+                    }
+                    onComplete(false)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("VantafynHomeViewModel", "Error reporting media issue", e)
+                _state.update {
+                    it.copy(
+                        mobileMessage = "Error reporting issue: ${e.localizedMessage ?: "Unknown error"}",
+                    )
+                }
+                onComplete(false)
+            }
+        }
+    }
+
     fun dismissReceivedGift(gift: VantafynCodeGift? = _state.value.pendingReceivedGift) {
         if (gift != null) {
             dismissedGiftIdsInSession.add(gift.id)
