@@ -148,7 +148,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.18",
+            version = "0.9.19",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -5991,9 +5991,16 @@ private fun BaseItemDto.backdropImageUrl(api: ApiClient, maxWidth: Int): String?
 private fun BaseItemDto.logoImageUrl(api: ApiClient, maxWidth: Int): String? {
     val tag = imageTags?.get(ImageType.LOGO)
     if (!tag.isNullOrBlank()) return itemImageUrl(api, id, ImageType.LOGO, tag, maxWidth)
-    val parentId = parentLogoItemId
+    val parentId = parentLogoItemId ?: if (type == BaseItemKind.EPISODE) seriesId else null
     val parentTag = parentLogoImageTag
     if (parentId != null && !parentTag.isNullOrBlank()) return itemImageUrl(api, parentId, ImageType.LOGO, parentTag, maxWidth)
+    val baseUrl = api.baseUrl?.trimEnd('/')?.takeIf { it.isNotBlank() }
+    if (baseUrl != null && parentId != null) {
+        return "$baseUrl/Items/$parentId/Images/Logo?maxWidth=$maxWidth&format=WEBP"
+    }
+    if (baseUrl != null && type == BaseItemKind.MOVIE) {
+        return "$baseUrl/Items/$id/Images/Logo?maxWidth=$maxWidth&format=WEBP"
+    }
     return null
 }
 
@@ -6040,14 +6047,14 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
         maxStaticMusicBitrate = 1_000_000,
         directPlayProfiles = listOf(
             DirectPlayProfile(
-                container = "mp4,m4v,mov,mkv,webm",
-                audioCodec = "aac,mp3,ac3,eac3,opus,vorbis,flac",
-                videoCodec = "h264,hevc,vp8,vp9,av1,mpeg4",
+                container = "mp4,m4v,mov,mkv,webm,ts,m2ts,asf,wmv,avi,ogv,ogm",
+                audioCodec = "aac,mp3,ac3,eac3,ac4,opus,vorbis,flac,truehd,mlp,dts,dca,dtshd,dts-hd,dts-ma,dtse,alac,pcm,pcm_s16le,pcm_s20le,pcm_s24le,pcm_s32le,pcm_s16be,pcm_s24be,pcm_alaw,pcm_mulaw,mp2,aac_latm",
+                videoCodec = "h264,avc,hevc,h265,vp8,vp9,av1,mpeg4,mpeg2video,vc1",
                 type = DlnaProfileType.VIDEO,
             ),
             DirectPlayProfile(
-                container = "mp3,aac,m4a,flac,webma,webm,ogg",
-                audioCodec = "aac,mp3,flac,opus,vorbis",
+                container = "mp3,aac,m4a,m4b,flac,webma,webm,ogg,wav,wma,opus,alac",
+                audioCodec = "aac,mp3,flac,opus,vorbis,alac,ac3,eac3,ac4,truehd,mlp,dts,dca,pcm,pcm_s16le,pcm_s20le,pcm_s24le,pcm_s32le,pcm_s16be,pcm_s24be",
                 videoCodec = null,
                 type = DlnaProfileType.AUDIO,
             ),
@@ -6057,7 +6064,7 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
                 container = "ts",
                 type = DlnaProfileType.VIDEO,
                 videoCodec = "h264,hevc",
-                audioCodec = "aac,mp3,ac3,eac3",
+                audioCodec = "aac,mp3,ac3,eac3,opus,flac",
                 protocol = org.jellyfin.sdk.model.api.MediaStreamProtocol.HLS,
                 estimateContentLength = false,
                 enableMpegtsM2TsMode = false,
@@ -6065,7 +6072,7 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
                 copyTimestamps = false,
                 context = EncodingContext.STREAMING,
                 enableSubtitlesInManifest = true,
-                maxAudioChannels = "6",
+                maxAudioChannels = "8",
                 minSegments = 1,
                 segmentLength = 6,
                 breakOnNonKeyFrames = true,
@@ -6076,7 +6083,7 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
                 container = "ts",
                 type = DlnaProfileType.AUDIO,
                 videoCodec = "",
-                audioCodec = "aac,mp3,ac3,eac3",
+                audioCodec = "aac,mp3,ac3,eac3,opus,flac",
                 protocol = MediaStreamProtocol.HLS,
                 estimateContentLength = false,
                 enableMpegtsM2TsMode = false,
@@ -6095,24 +6102,50 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
         containerProfiles = emptyList(),
         codecProfiles = emptyList(),
         subtitleProfiles = listOf(
+            SubtitleProfile("vtt", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("vtt", SubtitleDeliveryMethod.HLS, null, null, null),
+            SubtitleProfile("vtt", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
+            SubtitleProfile("webvtt", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("webvtt", SubtitleDeliveryMethod.HLS, null, null, null),
+            SubtitleProfile("webvtt", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
+            SubtitleProfile("srt", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("srt", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
+            SubtitleProfile("subrip", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("subrip", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
+            SubtitleProfile("ttml", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("ttml", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
+            SubtitleProfile("ass", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("ass", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
             SubtitleProfile("ass", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("ssa", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("ssa", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
             SubtitleProfile("ssa", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("pgs", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("pgs", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("pgssub", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("pgssub", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("dvdsub", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("dvdsub", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("dvbsub", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("dvbsub", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("idx", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("idx", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("sub", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("sub", SubtitleDeliveryMethod.ENCODE, null, null, null),
+            SubtitleProfile("mov_text", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("mov_text", SubtitleDeliveryMethod.EXTERNAL, null, null, null),
+            SubtitleProfile("cea-608", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("cea-708", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("eia-608", SubtitleDeliveryMethod.EMBED, null, null, null),
+            SubtitleProfile("eia-708", SubtitleDeliveryMethod.EMBED, null, null, null),
         ),
     )
 
 private fun Int?.validVideoStreamingBitrate(): Int? =
     this?.takeIf { it in 1_000_000..DEFAULT_MAX_VIDEO_STREAMING_BITRATE }
 
-private const val DEFAULT_MAX_VIDEO_STREAMING_BITRATE = 120_000_000
-private const val DEFAULT_MAX_VIDEO_STATIC_BITRATE = 160_000_000
+private const val DEFAULT_MAX_VIDEO_STREAMING_BITRATE = 200_000_000
+private const val DEFAULT_MAX_VIDEO_STATIC_BITRATE = 250_000_000
 
 private fun googleCastDeviceProfile(): DeviceProfile =
     DeviceProfile(

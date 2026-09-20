@@ -3635,6 +3635,12 @@ private fun MobileShellScreen(
             showMusicQuickPlayer = true
         }
     }
+    val isMainUiReady = !state.isLoading && !state.isHomeLoading && !state.isLibrariesLoading
+    LaunchedEffect(isMainUiReady, state.session?.profileId, state.mobileDestination) {
+        if (isMainUiReady && (state.mobileDestination == MobileDestination.Home || state.mobileDestination == MobileDestination.Music)) {
+            viewModel.checkAndShowDiscoverPrompt()
+        }
+    }
     fun closeHomeEditor(discard: Boolean) {
         homeEditorTarget = null
         homeEditorAddRowsOpen = false
@@ -3669,6 +3675,7 @@ private fun MobileShellScreen(
     val rootDestination = if (state.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home
     val handlesSystemBack = state.mobileDestination != rootDestination ||
         state.confirmLogout ||
+        state.showDiscoverPrompt ||
         state.mobileMessage != null ||
         showMusicQuickPlayer ||
         homeEditorOpen ||
@@ -3694,6 +3701,7 @@ private fun MobileShellScreen(
         state.pendingReceivedGift != null
     BackHandler(enabled = handlesSystemBack) {
         when {
+            state.showDiscoverPrompt -> viewModel.dismissDiscoverPrompt()
             state.pendingReceivedGift != null -> viewModel.dismissReceivedGift()
             state.showAdminCodeGiftDialog -> viewModel.closeAdminCodeGiftDialog()
             state.middleEarthWatchGuideDialog != null -> viewModel.closeMiddleEarthGuide()
@@ -4997,6 +5005,12 @@ private fun MobileShellScreen(
             onClaim = viewModel::claimReceivedGift,
             onDismiss = viewModel::dismissReceivedGift,
             onDismissAll = viewModel::dismissAllReceivedGifts,
+        )
+    }
+    if (state.showDiscoverPrompt) {
+        DiscoverVantafynPromptModal(
+            onExplore = viewModel::exploreFromDiscoverPrompt,
+            onDismiss = viewModel::dismissDiscoverPrompt,
         )
     }
 }
@@ -6562,6 +6576,7 @@ private fun homeResumeProgressBrush(): Brush = remember {
 
 @Composable
 private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPreference? = null, onClick: () -> Unit = {}, onLongPress: () -> Unit = {}) {
+    val isContinueWatching = preference?.type == HomeSectionType.ContinueWatching
     val wide = preference?.type != HomeSectionType.RecentlyAddedMovies &&
         (item.shape == JellyfinMediaCardShape.Wide || item.shape == JellyfinMediaCardShape.Library || preference?.artworkType != VantafynArtworkType.PrimaryPoster)
     val progress = item.progress
@@ -6569,6 +6584,11 @@ private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPre
     val height = preference?.cardHeight(wide) ?: if (wide) 128.dp else 214.dp
     val corner = preference?.cardCorner() ?: 16.dp
     val artworkUrl = item.resolveArtwork(preference, wide)
+    var logoFailed by remember(item.id, item.logoUrl) { mutableStateOf(false) }
+    val showCenteredLogo = isContinueWatching &&
+        preference.artworkType != VantafynArtworkType.Logo &&
+        !item.logoUrl.isNullOrBlank() &&
+        !logoFailed
     Column(
         modifier = Modifier.width(width),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.xs),
@@ -6590,6 +6610,36 @@ private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPre
                 )
             } else {
                 MissingArtworkFallback(title = item.title, wide = wide)
+            }
+            if (showCenteredLogo) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color.Black.copy(alpha = 0.22f),
+                                    Color.Black.copy(alpha = 0.42f),
+                                ),
+                            ),
+                        ),
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth(0.72f)
+                        .fillMaxHeight(0.56f)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    AsyncImage(
+                        model = item.logoUrl,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Fit,
+                        onError = { logoFailed = true },
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
             }
             if (progress != null && progress > 0f) {
                 Box(
@@ -23465,7 +23515,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.18"
+private const val VANTAFYN_APP_VERSION = "0.9.19"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

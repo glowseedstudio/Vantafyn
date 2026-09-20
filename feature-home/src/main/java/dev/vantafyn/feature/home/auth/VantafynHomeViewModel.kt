@@ -5849,7 +5849,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.18")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.19")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -9509,6 +9509,38 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         appPreferences.edit().putBoolean(KEY_SETUP_COMPLETED, true).apply()
     }
 
+    private fun isDiscoverPromptShown(profileId: String?): Boolean {
+        val profileKey = profileId?.let { "${KEY_DISCOVER_PROMPT_SHOWN}_$it" }
+        return (profileKey?.takeIf { appPreferences.contains(it) }?.let { appPreferences.getBoolean(it, false) } ?: false) ||
+            appPreferences.getBoolean(KEY_DISCOVER_PROMPT_SHOWN, false)
+    }
+
+    fun checkAndShowDiscoverPrompt() {
+        val session = _state.value.session
+        val profileId = session?.profileId ?: _state.value.selectedProfileId
+        if (_state.value.step != VantafynSetupStep.Home) return
+        if (_state.value.isLoading || _state.value.isHomeLoading || _state.value.isLibrariesLoading) return
+        if (_state.value.showDiscoverPrompt) return
+        if (isDiscoverPromptShown(profileId)) return
+
+        _state.update { it.copy(showDiscoverPrompt = true) }
+    }
+
+    fun dismissDiscoverPrompt() {
+        val profileId = _state.value.session?.profileId ?: _state.value.selectedProfileId
+        val editor = appPreferences.edit().putBoolean(KEY_DISCOVER_PROMPT_SHOWN, true)
+        if (profileId != null) {
+            editor.putBoolean("${KEY_DISCOVER_PROMPT_SHOWN}_$profileId", true)
+        }
+        editor.apply()
+        _state.update { it.copy(showDiscoverPrompt = false) }
+    }
+
+    fun exploreFromDiscoverPrompt() {
+        dismissDiscoverPrompt()
+        navigateMobile(MobileDestination.DiscoverVantafyn)
+    }
+
     private suspend fun refreshSavedProfiles() {
         _state.update { it.copy(savedProfiles = authRepository.savedProfiles()) }
     }
@@ -9899,6 +9931,7 @@ data class VantafynHomeUiState(
     val adminGiftUsers: List<JellyfinAdminUser> = emptyList(),
     val isLoadingAdminGiftUsers: Boolean = false,
     val pendingReceivedGift: VantafynCodeGift? = null,
+    val showDiscoverPrompt: Boolean = false,
     val pendingGiftsQueueCount: Int = 0,
     val pendingGiftQueueIndex: Int = 1,
     val libraryViewMode: LibraryViewMode = LibraryViewMode.Poster,
@@ -10816,6 +10849,7 @@ private fun JellyfinLibraryItemFilter.supportsAlphabetRail(): Boolean =
 
 private const val KEY_AUTO_LOGIN_LAST_PROFILE = "auto_login_last_profile"
 private const val KEY_SETUP_COMPLETED = "setup_completed"
+private const val KEY_DISCOVER_PROMPT_SHOWN = "discover_prompt_shown"
 private const val KEY_WATCH_PARTY_ENABLED = "watch_party_enabled"
 private const val KEY_WATCH_PARTY_INVITES_ENABLED = "watch_party_invites_enabled"
 private const val KEY_WATCH_PARTY_INVITE_ANIMATION_ENABLED = "watch_party_invite_animation_enabled"
