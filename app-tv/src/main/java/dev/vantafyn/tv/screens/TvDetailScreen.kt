@@ -473,7 +473,7 @@ private fun TvDetailActions(
     onToggleFavorite: () -> Unit,
     primaryActionFocusRequester: FocusRequester,
 ) {
-    val hasProgress = detail.progress != null && (detail.progress ?: 0f) > 0.05f
+    val hasProgress = !detail.isPlayed && detail.playbackPositionTicks > 0L
     val supportsMyList = detail.itemType.supportsMyListAction()
     Row(
         horizontalArrangement = Arrangement.spacedBy(14.dp),

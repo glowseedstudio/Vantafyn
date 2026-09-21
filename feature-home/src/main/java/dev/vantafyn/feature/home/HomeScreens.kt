@@ -6576,7 +6576,8 @@ private fun homeResumeProgressBrush(): Brush = remember {
 
 @Composable
 private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPreference? = null, onClick: () -> Unit = {}, onLongPress: () -> Unit = {}) {
-    val isContinueWatching = preference?.type == HomeSectionType.ContinueWatching
+    val isLogoOverlaySection = preference?.type == HomeSectionType.ContinueWatching ||
+        preference?.type == HomeSectionType.RecentlyAddedTv
     val wide = preference?.type != HomeSectionType.RecentlyAddedMovies &&
         (item.shape == JellyfinMediaCardShape.Wide || item.shape == JellyfinMediaCardShape.Library || preference?.artworkType != VantafynArtworkType.PrimaryPoster)
     val progress = item.progress
@@ -6585,8 +6586,8 @@ private fun MediaArtworkCard(item: JellyfinMediaCard, preference: HomeSectionPre
     val corner = preference?.cardCorner() ?: 16.dp
     val artworkUrl = item.resolveArtwork(preference, wide)
     var logoFailed by remember(item.id, item.logoUrl) { mutableStateOf(false) }
-    val showCenteredLogo = isContinueWatching &&
-        preference.artworkType != VantafynArtworkType.Logo &&
+    val showCenteredLogo = isLogoOverlaySection &&
+        preference?.artworkType != VantafynArtworkType.Logo &&
         !item.logoUrl.isNullOrBlank() &&
         !logoFailed
     Column(
@@ -19122,7 +19123,7 @@ private fun MediaDetailScreen(
     onRequestChatNotificationsPermission: () -> Unit = {},
 ) {
     val detail = state.mediaDetail
-    val detailRevealKey = state.selectedMediaId ?: detail?.id ?: "media-detail"
+    val detailRevealKey = detail?.id ?: state.selectedMediaId ?: "media-detail"
     val detailHeroKey = "detail-hero-$detailRevealKey"
     val detailListState = rememberLazyListState()
     val density = LocalDensity.current
@@ -19155,11 +19156,13 @@ private fun MediaDetailScreen(
     var showShareToFriend by remember { mutableStateOf(false) }
     var showReportMediaIssue by remember { mutableStateOf(false) }
     var showEnableSocialForReporting by remember { mutableStateOf(false) }
-    var detailRevealActive by remember(state.selectedMediaId) { mutableStateOf(true) }
-    LaunchedEffect(state.selectedMediaId) {
-        detailRevealActive = true
-        delay(1_450L)
-        detailRevealActive = false
+    var detailRevealActive by remember(detail?.id) { mutableStateOf(detail != null) }
+    LaunchedEffect(detail?.id) {
+        if (detail != null) {
+            detailRevealActive = true
+            delay(2_000L)
+            detailRevealActive = false
+        }
     }
     DetailThemeAudio(
         url = detail?.themeSongUrl,
@@ -23487,11 +23490,11 @@ private fun Int.toHourLimitLabel(): String =
     if (this == 1) "1 hour" else "$this hours"
 
 private fun JellyfinMediaDetail.primaryActionLabel(): String {
-    val watchedProgress = progress
+    val hasProgress = !isPlayed && playbackPositionTicks > 0L
     return when {
-        isAudiobookMedia && watchedProgress != null && watchedProgress > 0.05f -> "Resume Audiobook"
+        isAudiobookMedia && hasProgress -> "Resume Audiobook"
         isAudiobookMedia -> "Listen to Audiobook"
-        watchedProgress != null && watchedProgress > 0.05f -> "Resume"
+        hasProgress -> "Resume"
         itemType.equals("Book", ignoreCase = true) || itemType.equals("EBook", ignoreCase = true) -> "Open"
         itemType.equals("AudioBook", ignoreCase = true) || itemType.equals("Audio_Book", ignoreCase = true) -> "Listen"
         itemType.equals("Episode", ignoreCase = true) && subtitle != null -> "Play $subtitle"
@@ -23505,7 +23508,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
         ?.toLong()
         ?.times(60_000L)
         ?: return null
-    val resumeMs = if (!isPlayed && (progress ?: 0f) > 0.05f) {
+    val resumeMs = if (!isPlayed && playbackPositionTicks > 0L) {
         (playbackPositionTicks / 10_000L).coerceIn(0L, runtimeMs)
     } else {
         0L
@@ -23515,7 +23518,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.19"
+private const val VANTAFYN_APP_VERSION = "0.9.20"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

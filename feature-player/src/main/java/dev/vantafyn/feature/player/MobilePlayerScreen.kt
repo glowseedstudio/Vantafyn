@@ -206,7 +206,7 @@ fun MobilePlayerScreen(
                 item = item,
                 canTryTranscode = canTryTranscode,
                 onPosition = { lastPositionMs = it },
-                onBack = { onBack(lastPositionMs) },
+                onBack = onBack,
                 onRetry = onRetry,
                 onTryTranscode = onTryTranscode,
                 onStarted = onStarted,
@@ -245,7 +245,7 @@ private fun PlayerSurface(
     item: VantafynPlaybackItem,
     canTryTranscode: Boolean,
     onPosition: (Long) -> Unit,
-    onBack: () -> Unit,
+    onBack: (Long) -> Unit,
     onRetry: () -> Unit,
     onTryTranscode: () -> Unit,
     onStarted: (Long) -> Unit,
@@ -332,9 +332,9 @@ private fun PlayerSurface(
                     .build(),
                 true,
             )
-            player.setMediaItem(item.toMediaItem())
+            val startPositionMs = if (item.startPositionMs > 0L) item.startPositionMs else C.TIME_UNSET
+            player.setMediaItem(item.toMediaItem(), startPositionMs)
             player.prepare()
-            if (item.startPositionMs > 0L) player.seekTo(item.startPositionMs)
             player.playWhenReady = !item.isCastResolved && outputState.activeOutput != PlaybackOutputType.GoogleCast
         }
     }
@@ -511,7 +511,7 @@ private fun PlayerSurface(
                 command.command.isSyncPlayStopCommand() -> {
                     player.pause()
                     onProgress(player.currentPosition, true)
-                    onBack()
+                    onBack(if (isCastingThisItem) castState.positionMs else player.currentPosition.coerceAtLeast(0L))
                 }
                 command.isSyncPlayPause() -> {
                     player.pause()
@@ -645,7 +645,7 @@ private fun PlayerSurface(
             playbackSpeed = playbackSpeed,
             resizeMode = resizeMode,
             activeSegment = if (activeSegmentBehavior == JellyfinMediaSegmentBehavior.Prompt && activeSegment?.id.toString() !in autoSkippedSegmentIds) activeSegment else null,
-            onBack = onBack,
+            onBack = { onBack(if (isCastingThisItem) castState.positionMs else player.currentPosition.coerceAtLeast(0L)) },
             onPlayPause = {
                 if (player.isPlaying) {
                     player.pause()
@@ -659,11 +659,15 @@ private fun PlayerSurface(
             onSeekBy = { delta ->
                 val target = (player.currentPosition + delta).coerceIn(0L, durationMs.coerceAtLeast(player.currentPosition + delta))
                 player.seekTo(target)
+                positionMs = target
+                onPosition(target)
                 onSyncPlaySeek(target)
                 onProgress(target, !player.isPlaying)
             },
             onSeekTo = { pos ->
                 player.seekTo(pos)
+                positionMs = pos
+                onPosition(pos)
                 onSyncPlaySeek(pos)
                 onProgress(pos, !player.isPlaying)
             },
@@ -790,7 +794,7 @@ private fun PlayerSurface(
                     onStopCasting = {
                         onProgress(castState.positionMs, true)
                         outputCoordinator.disconnect(stopPlayback = true)
-                        onBack()
+                        onBack(castState.positionMs)
                     },
                     onSubtitles = { castSubtitleSheetVisible = true },
                     onPlayHere = {
@@ -851,7 +855,7 @@ private fun PlayerSurface(
                     durationMs = durationMs,
                     selectedAudioIndex = selectedAudioIndex,
                     selectedSubtitleIndex = selectedSubtitleIndex,
-                    onBack = onBack,
+                    onBack = { onBack(if (isCastingThisItem) castState.positionMs else player.currentPosition.coerceAtLeast(0L)) },
                     onPlayPause = {
                         if (player.isPlaying) {
                             player.pause()
@@ -1013,7 +1017,7 @@ private fun PlayerSurface(
             },
             onStop = {
                 sheet = null
-                onBack()
+                onBack(if (isCastingThisItem) castState.positionMs else player.currentPosition.coerceAtLeast(0L))
             },
             onOpen = { sheet = it },
             onEnterPiP = enterPiP,

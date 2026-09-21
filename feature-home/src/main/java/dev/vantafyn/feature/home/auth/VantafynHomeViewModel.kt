@@ -5849,7 +5849,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.19")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.20")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -7483,7 +7483,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 id = episode.id,
                 title = episode.title,
                 subtitle = listOfNotNull(detail?.title, episode.subtitle).joinToString(" · ").ifBlank { null },
-                startTicks = if (fromBeginning) 0L else episode.playbackPositionTicks.takeIf { (episode.progress ?: 0f) > 0.05f && !episode.isPlayed } ?: 0L,
+                startTicks = if (fromBeginning) 0L else episode.playbackPositionTicks.takeIf { !episode.isPlayed && it > 0L } ?: 0L,
                 itemType = "Episode",
                 seriesId = episode.seriesId ?: detail?.id,
                 seasonId = episode.seasonId,
@@ -10461,7 +10461,7 @@ private fun JellyfinMediaDetail.playbackTarget(positionMs: Long? = null): Playba
             title = title,
             subtitle = subtitle,
             startTicks = positionMs?.toTicks()
-                ?: playbackPositionTicks.takeIf { (progress ?: 0f) > 0.05f && !isPlayed }
+                ?: playbackPositionTicks.takeIf { !isPlayed && it > 0L }
                 ?: 0L,
             itemType = itemType,
             seriesId = seriesId,

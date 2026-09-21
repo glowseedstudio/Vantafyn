@@ -148,7 +148,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.19",
+            version = "0.9.20",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -1825,7 +1825,7 @@ class SdkJellyfinPlaybackRepository(
             PlaybackInfoDto(
                 userId = session.user.id,
                 maxStreamingBitrate = maxStreamingBitrate,
-                startTimeTicks = startPositionTicks.takeIf { it > 0L },
+                startTimeTicks = null,
                 audioStreamIndex = audioStreamIndex,
                 subtitleStreamIndex = subtitleStreamIndex,
                 maxAudioChannels = maxAudioChannels,
@@ -1956,7 +1956,7 @@ class SdkJellyfinPlaybackRepository(
         }
         val transcodeUrl = mediaSource.transcodingUrl
             ?.let { absoluteServerUrl(session.server.url, it).withAccessToken(session.accessToken) }
-        val directUrl = directStreamUrl(session, itemId, mediaSource, playSessionId, startPositionTicks)
+        val directUrl = directStreamUrl(session, itemId, mediaSource, playSessionId)
         val streamUrl = when (method) {
             JellyfinPlaybackMethod.DirectPlay -> directUrl
             JellyfinPlaybackMethod.DirectStream,
@@ -1994,14 +1994,12 @@ class SdkJellyfinPlaybackRepository(
         itemId: java.util.UUID,
         source: MediaSourceInfo,
         playSessionId: String?,
-        startPositionTicks: Long,
     ): String {
         val params = buildList {
             add("static=true")
             source.id?.takeIf { it.isNotBlank() }?.let { add("mediaSourceId=${it.urlEncoded()}") }
             add("deviceId=${deviceId.urlEncoded()}")
             playSessionId?.takeIf { it.isNotBlank() }?.let { add("playSessionId=${it.urlEncoded()}") }
-            if (startPositionTicks > 0L) add("startTimeTicks=$startPositionTicks")
         }.joinToString("&")
         return "${session.server.url.trimEnd('/')}/Videos/$itemId/stream?$params".withAccessToken(session.accessToken)
     }
@@ -5995,11 +5993,14 @@ private fun BaseItemDto.logoImageUrl(api: ApiClient, maxWidth: Int): String? {
     val parentTag = parentLogoImageTag
     if (parentId != null && !parentTag.isNullOrBlank()) return itemImageUrl(api, parentId, ImageType.LOGO, parentTag, maxWidth)
     val baseUrl = api.baseUrl?.trimEnd('/')?.takeIf { it.isNotBlank() }
+    val token = api.accessToken?.takeIf { it.isNotBlank() }
     if (baseUrl != null && parentId != null) {
-        return "$baseUrl/Items/$parentId/Images/Logo?maxWidth=$maxWidth&format=WEBP"
+        val raw = "$baseUrl/Items/$parentId/Images/Logo?maxWidth=$maxWidth&format=WEBP"
+        return if (token != null) raw.withAccessToken(token) else raw
     }
-    if (baseUrl != null && type == BaseItemKind.MOVIE) {
-        return "$baseUrl/Items/$id/Images/Logo?maxWidth=$maxWidth&format=WEBP"
+    if (baseUrl != null && (type == BaseItemKind.MOVIE || type == BaseItemKind.SERIES)) {
+        val raw = "$baseUrl/Items/$id/Images/Logo?maxWidth=$maxWidth&format=WEBP"
+        return if (token != null) raw.withAccessToken(token) else raw
     }
     return null
 }
