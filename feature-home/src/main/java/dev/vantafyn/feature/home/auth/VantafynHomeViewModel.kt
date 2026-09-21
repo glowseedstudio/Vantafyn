@@ -3517,6 +3517,57 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun openWatchGuide(franchiseCode: String) {
+        when (franchiseCode.trim().uppercase()) {
+            "MCU" -> openMcuGuide()
+            "SAW", "JIGSAW" -> openSawGuide()
+            "R-EVIL", "REVIL", "RESIDENTEVIL" -> openResidentEvilGuide()
+            "POTTER", "HARRYPOTTER" -> openHarryPotterGuide()
+            "HUNGER", "HUNGERGAMES" -> openHungerGamesGuide()
+            "SCREAM" -> openScreamGuide()
+            "MATRIX", "THEMATRIX" -> openMatrixGuide()
+            "JUMANJI" -> openJumanjiGuide()
+            "JURASSIC", "JURASSICPARK", "JURASSICWORLD" -> openJurassicGuide()
+            "PIRATES", "POTC" -> openPiratesGuide()
+            "POKEMON" -> openPokemonGuide()
+            "SCARY", "SCARYMOVIE" -> openScaryMovieGuide()
+            "TWILIGHT" -> openTwilightGuide()
+            "UNDER", "UNDERWORLD" -> openUnderworldGuide()
+            "X-MEN", "XMEN" -> openXMenGuide()
+            "LOTR", "MIDDLEEARTH", "MIDDLE-EARTH", "MORDOR", "HOBBIT", "ONE-RING", "ONERING" -> openMiddleEarthGuide()
+            else -> submitUnlockCode(franchiseCode)
+        }
+    }
+
+    fun addGuideFromCatalog(franchise: VantafynGiftFranchise) {
+        val session = _state.value.session
+        val recipientId = session?.user?.id ?: java.util.UUID.randomUUID()
+        val recipientName = session?.user?.name ?: "You"
+        val gift = VantafynCodeGift(
+            id = java.util.UUID.randomUUID().toString(),
+            senderId = recipientId,
+            senderName = "Vantafyn Catalog",
+            senderAvatarUrl = null,
+            recipientUserId = recipientId,
+            recipientName = recipientName,
+            franchiseCode = franchise.code,
+            franchiseTitle = franchise.title,
+            franchiseBadge = franchise.badge,
+            franchiseIcon = franchise.icon,
+            accentColorHex = franchise.accentColorHex,
+            note = "Discovered in the Watch Guide Library",
+            timestamp = System.currentTimeMillis(),
+            isClaimed = false,
+            posterUrl = franchise.posterUrl,
+        )
+        _state.update {
+            it.copy(
+                enterCodeDialog = null,
+                pendingReceivedGift = gift,
+            )
+        }
+    }
+
     fun openMcuGuide() {
         _state.update {
             it.copy(
@@ -5849,7 +5900,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.20")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.21")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -9747,7 +9798,28 @@ data class VantafynEnterCodeDialogState(
     val isUnderworldUnlocked: Boolean = false,
     val isXMenUnlocked: Boolean = false,
     val isMiddleEarthUnlocked: Boolean = false,
-)
+) {
+    fun isFranchiseUnlocked(franchiseCode: String): Boolean =
+        when (franchiseCode.trim().uppercase()) {
+            "MCU" -> isMcuUnlocked
+            "SAW", "JIGSAW" -> isSawUnlocked
+            "R-EVIL", "REVIL", "RESIDENTEVIL" -> isResidentEvilUnlocked
+            "POTTER", "HARRYPOTTER" -> isHarryPotterUnlocked
+            "HUNGER", "HUNGERGAMES" -> isHungerGamesUnlocked
+            "SCREAM" -> isScreamUnlocked
+            "MATRIX", "THEMATRIX" -> isMatrixUnlocked
+            "JUMANJI" -> isJumanjiUnlocked
+            "JURASSIC", "JURASSICPARK", "JURASSICWORLD" -> isJurassicUnlocked
+            "PIRATES", "POTC" -> isPiratesUnlocked
+            "POKEMON" -> isPokemonUnlocked
+            "SCARY", "SCARYMOVIE" -> isScaryMovieUnlocked
+            "TWILIGHT" -> isTwilightUnlocked
+            "UNDER", "UNDERWORLD" -> isUnderworldUnlocked
+            "X-MEN", "XMEN" -> isXMenUnlocked
+            "LOTR", "MIDDLEEARTH", "MIDDLE-EARTH", "MORDOR", "HOBBIT", "ONE-RING", "ONERING" -> isMiddleEarthUnlocked
+            else -> false
+        }
+}
 
 data class VantafynMcuWatchGuideDialogState(
     val movies: List<McuWatchItemUi> = emptyList(),

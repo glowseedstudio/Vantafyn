@@ -122,26 +122,47 @@ class SubsonicMusicDataProvider(
     override val providerId: String = "opensubsonic"
     override val providerName: String = "OpenSubsonic"
 
-    private val uuidIdMap = mutableMapOf<UUID, String>()
-    private val stringIdMap = mutableMapOf<String, UUID>()
+    companion object {
+        private val uuidIdMap = java.util.concurrent.ConcurrentHashMap<UUID, String>()
+        private val stringIdMap = java.util.concurrent.ConcurrentHashMap<String, UUID>()
+
+        fun getUuid(stringId: String): UUID {
+            return stringIdMap.computeIfAbsent(stringId) { sid ->
+                val generated = runCatching { UUID.fromString(sid) }.getOrElse {
+                    UUID.nameUUIDFromBytes("subsonic:$sid".toByteArray(Charsets.UTF_8))
+                }
+                uuidIdMap[generated] = sid
+                generated
+            }
+        }
+
+        fun getStringId(uuid: UUID): String =
+            uuidIdMap[uuid] ?: uuid.toString()
+
+        fun registerMapping(uuid: UUID, stringId: String) {
+            uuidIdMap[uuid] = stringId
+            stringIdMap[stringId] = uuid
+        }
+
+        fun resolveStreamUrl(
+            trackId: UUID,
+            creds: SubsonicCredentials,
+            context: Context? = null,
+        ): String {
+            val rawTrackId = getStringId(trackId)
+            val maxBitrate = context?.let { MusicQualityPreferences.resolveCurrentQuality(it).maxBitrateKbps }
+            return SubsonicClient(creds).buildStreamUrl(rawTrackId, maxBitrate)
+        }
+    }
 
     private fun resolveStreamUrl(rawTrackId: String): String {
         val maxBitrate = context?.let { MusicQualityPreferences.resolveCurrentQuality(it).maxBitrateKbps }
         return client.buildStreamUrl(rawTrackId, maxBitrate)
     }
 
-    private fun getUuid(stringId: String): UUID {
-        return stringIdMap.getOrPut(stringId) {
-            val generated = runCatching { UUID.fromString(stringId) }.getOrElse {
-                UUID.nameUUIDFromBytes("subsonic:$stringId".toByteArray(Charsets.UTF_8))
-            }
-            uuidIdMap[generated] = stringId
-            generated
-        }
-    }
+    private fun getUuid(stringId: String): UUID = Companion.getUuid(stringId)
 
-    private fun getStringId(uuid: UUID): String =
-        uuidIdMap[uuid] ?: uuid.toString()
+    private fun getStringId(uuid: UUID): String = Companion.getStringId(uuid)
 
     override suspend fun getMusicHome(): MusicResult<MusicHomeData> = withContext(Dispatchers.IO) {
         runCatching {

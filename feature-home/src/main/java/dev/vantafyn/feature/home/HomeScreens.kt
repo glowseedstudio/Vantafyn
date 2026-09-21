@@ -3909,7 +3909,8 @@ private fun MobileShellScreen(
                                 if (state.experienceMode == ExperienceMode.MusicOnly) {
                                     val searchItem = state.searchResults.firstOrNull { it.id == mediaId }
                                     val creds = getSubsonicCredentials(context)
-                                    if (searchItem?.itemType in listOf("Audio", "MusicTrack", "Song") && creds != null && state.musicBackendType == MusicBackendType.OpenSubsonic) {
+                                    val isMusicSong = searchItem?.itemType in listOf("Audio", "MusicTrack", "Song")
+                                    if (isMusicSong && creds != null && state.musicBackendType == MusicBackendType.OpenSubsonic) {
                                         val controller = dev.vantafyn.core.media.MusicPlaybackController.get(context)
                                         val track = dev.vantafyn.core.media.VantafynMusicTrack(
                                             id = searchItem!!.id,
@@ -3918,7 +3919,23 @@ private fun MobileShellScreen(
                                             album = searchItem.subtitle?.substringAfter(" · ", "")?.ifBlank { null },
                                             albumId = null,
                                             durationMs = null,
-                                            streamUrl = dev.vantafyn.core.subsonic.SubsonicClient(creds).buildStreamUrl(searchItem.id.toString()),
+                                            streamUrl = dev.vantafyn.core.subsonic.SubsonicMusicDataProvider.resolveStreamUrl(searchItem.id, creds, context),
+                                            artworkUrl = searchItem.imageUrl,
+                                            isFavorite = searchItem.isFavorite,
+                                        )
+                                        controller.playQueue(listOf(track), 0)
+                                    } else if (isMusicSong && state.session != null) {
+                                        val session = state.session
+                                        val streamUrl = "${session.server.url.trimEnd('/')}/Audio/${searchItem!!.id}/stream"
+                                        val controller = dev.vantafyn.core.media.MusicPlaybackController.get(context)
+                                        val track = dev.vantafyn.core.media.VantafynMusicTrack(
+                                            id = searchItem.id,
+                                            title = searchItem.title,
+                                            artist = searchItem.subtitle?.substringBefore(" · ").orEmpty().ifBlank { "Unknown Artist" },
+                                            album = searchItem.subtitle?.substringAfter(" · ", "")?.ifBlank { null },
+                                            albumId = null,
+                                            durationMs = null,
+                                            streamUrl = streamUrl,
                                             artworkUrl = searchItem.imageUrl,
                                             isFavorite = searchItem.isFavorite,
                                         )
@@ -3955,7 +3972,7 @@ private fun MobileShellScreen(
                                             album = favItem.subtitle?.substringAfter(" · ", "")?.ifBlank { null },
                                             albumId = null,
                                             durationMs = null,
-                                            streamUrl = dev.vantafyn.core.subsonic.SubsonicClient(creds).buildStreamUrl(favItem.id.toString()),
+                                            streamUrl = dev.vantafyn.core.subsonic.SubsonicMusicDataProvider.resolveStreamUrl(favItem.id, creds, context),
                                             artworkUrl = favItem.imageUrl ?: favItem.backdropUrl,
                                             isFavorite = true,
                                         )
@@ -4403,49 +4420,116 @@ private fun MobileShellScreen(
                     enter = fadeIn(animationSpec = tween(300)) + slideInVertically(animationSpec = tween(300)) { -it / 2 },
                     exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(animationSpec = tween(200)) { -it / 2 },
                 ) {
-                    VantafynGlassCard(
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
+                            .shadow(
+                                elevation = 16.dp,
+                                shape = RoundedCornerShape(20.dp),
+                                spotColor = Color(0xFF00E5FF).copy(alpha = 0.35f),
+                                ambientColor = Color(0xFF9B5CFF).copy(alpha = 0.25f),
+                            )
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF13182B),
+                                        Color(0xFF0C0F1A),
+                                    ),
+                                ),
+                            )
+                            .border(
+                                width = 1.2.dp,
+                                brush = Brush.linearGradient(
+                                    listOf(
+                                        Color(0xFF00E5FF).copy(alpha = 0.60f),
+                                        Color(0xFF5B8CFF).copy(alpha = 0.45f),
+                                        Color(0xFF9B5CFF).copy(alpha = 0.50f),
+                                    ),
+                                ),
+                                shape = RoundedCornerShape(20.dp),
+                            )
                             .clickable { viewModel.reconnectStaleConnection() },
-                        cornerRadius = 20.dp,
                     ) {
-                        RailInteriorAtmosphere(
-                            mode = state.bottomRailAtmosphere,
-                            cornerRadius = 20.dp,
-                            modifier = Modifier.matchParentSize(),
+                        // Atmosphere Nebula wash layer
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            Color(0xFF00E5FF).copy(alpha = 0.26f),
+                                            Color(0xFF5B8CFF).copy(alpha = 0.30f),
+                                            Color(0xFF9B5CFF).copy(alpha = 0.28f),
+                                            Color(0xFF00E5FF).copy(alpha = 0.20f),
+                                        ),
+                                    ),
+                                ),
                         )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Link,
-                                contentDescription = null,
-                                tint = if (state.bottomRailAtmosphere == BottomRailAtmosphereMode.On) VantafynColors.Ink else VantafynColors.Muted,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Connection may be stale",
-                                    color = VantafynColors.Ink,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    "Tap to reconnect",
-                                    color = if (state.bottomRailAtmosphere == BottomRailAtmosphereMode.On) VantafynColors.Ink.copy(alpha = 0.78f) else VantafynColors.Muted,
-                                    style = MaterialTheme.typography.bodySmall,
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.18f))
+                                    .border(
+                                        width = 1.dp,
+                                        brush = Brush.linearGradient(
+                                            listOf(
+                                                Color(0xFF00E5FF).copy(alpha = 0.70f),
+                                                Color(0xFF9B5CFF).copy(alpha = 0.40f),
+                                            ),
+                                        ),
+                                        shape = RoundedCornerShape(12.dp),
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Link,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(20.dp),
                                 )
                             }
-                            Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Reconnect",
-                                tint = if (state.bottomRailAtmosphere == BottomRailAtmosphereMode.On) VantafynColors.Ink else VantafynColors.Muted,
-                                modifier = Modifier.size(18.dp),
-                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Connection may be stale",
+                                    color = Color.White,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = "Tap to reconnect",
+                                    color = Color(0xFF7DD3FC),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .border(
+                                        width = 1.dp,
+                                        color = Color(0xFF00E5FF).copy(alpha = 0.35f),
+                                        shape = CircleShape,
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Refresh,
+                                    contentDescription = "Reconnect",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -4745,6 +4829,8 @@ private fun MobileShellScreen(
             hasUnseenWhatsNew = state.hasUnseenWhatsNew,
             enterCodeState = enterCodeState,
             onSubmitCode = viewModel::submitUnlockCode,
+            onOpenGuide = viewModel::openWatchGuide,
+            onAddGuide = viewModel::addGuideFromCatalog,
             onOpenMcuGuide = viewModel::openMcuGuide,
             onOpenSawGuide = viewModel::openSawGuide,
             onOpenResidentEvilGuide = viewModel::openResidentEvilGuide,
@@ -10072,7 +10158,7 @@ private fun AdminSessionsSection(
     onMessage: (dev.vantafyn.core.jellyfin.JellyfinAdminSession) -> Unit,
 ) {
     val measuredBitrates = sessions.mapNotNull { it.bitrate?.takeIf { bitrate -> bitrate > 0 } }
-    val totalBitrate = measuredBitrates.sum().takeIf { it > 0 }
+    val totalBitrate = measuredBitrates.sumOf { it.toLong() }.takeIf { it > 0L }
     val compatibleMessageTargets = sessions.count { it.supportsDisplayMessage }
     GlassPanel {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -10137,7 +10223,7 @@ private fun AdminSessionsSection(
 
 @Composable
 private fun AdminActiveBitrateSummary(
-    totalBitrate: Int?,
+    totalBitrate: Long?,
     speedLimitMbps: Int?,
     onTap: () -> Unit,
 ) {
@@ -11002,23 +11088,23 @@ private fun AdminSessionCard(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(138.dp)
+                    .heightIn(min = 142.dp)
                     .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)),
             ) {
                 AsyncImage(
                     model = session.nowPlayingBackdropUrl ?: session.nowPlayingImageUrl,
                     contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier.matchParentSize(),
                     contentScale = ContentScale.Crop,
                 )
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .matchParentSize()
                         .background(
                             Brush.verticalGradient(
                                 listOf(
                                     Color.Black.copy(alpha = 0.12f),
-                                    Color.Black.copy(alpha = 0.76f),
+                                    Color.Black.copy(alpha = 0.82f),
                                 ),
                             ),
                         ),
@@ -11027,7 +11113,7 @@ private fun AdminSessionCard(
                     modifier = Modifier
                         .align(Alignment.BottomStart)
                         .fillMaxWidth()
-                        .padding(VantafynSpacing.md),
+                        .padding(horizontal = VantafynSpacing.md, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                     verticalAlignment = Alignment.Bottom,
                 ) {
@@ -11041,7 +11127,7 @@ private fun AdminSessionCard(
                             .background(Color.White.copy(alpha = 0.08f)),
                         contentScale = ContentScale.Crop,
                     )
-                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
                             SoftBadge(
                                 text = if (session.isPaused) "Paused" else "Playing",
@@ -11054,8 +11140,22 @@ private fun AdminSessionCard(
                                 background = playMethodBackground,
                             )
                         }
-                        Text(session.nowPlayingTitle ?: "Unknown title", color = VantafynColors.Ink, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text(listOfNotNull(session.nowPlayingSubtitle, session.nowPlayingType).joinToString(" · "), color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            session.nowPlayingTitle ?: "Unknown title",
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            lineHeight = 20.sp,
+                        )
+                        Text(
+                            listOfNotNull(session.nowPlayingSubtitle, session.nowPlayingType).joinToString(" · "),
+                            color = VantafynColors.Muted,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
                 if (session.supportsDisplayMessage) {
@@ -11175,16 +11275,22 @@ private fun AdminSessionTechnicalLine(session: dev.vantafyn.core.jellyfin.Jellyf
     }
 }
 
-private fun Int.streamBitrateLabel(): String {
-    if (this <= 0) return "0 Mbps"
-    return if (this >= 1_000_000) {
+private fun Long.streamBitrateLabel(): String {
+    if (this <= 0L) return "0 Mbps"
+    return if (this >= 1_000_000L) {
         val mbps = this / 1_000_000.0
-        val text = if (mbps >= 10) "%.0f".format(Locale.US, mbps) else "%.1f".format(Locale.US, mbps)
-        "${text.trimEnd('0').trimEnd('.')} Mbps"
+        val text = if (mbps >= 10.0) {
+            "%.0f".format(Locale.US, mbps)
+        } else {
+            "%.1f".format(Locale.US, mbps).removeSuffix(".0")
+        }
+        "$text Mbps"
     } else {
-        "${this / 1_000} Kbps"
+        "${this / 1_000L} Kbps"
     }
 }
+
+private fun Int.streamBitrateLabel(): String = toLong().streamBitrateLabel()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -14284,7 +14390,9 @@ private fun VantafynHubDialog(
     hasUnseenWhatsNew: Boolean,
     enterCodeState: VantafynEnterCodeDialogState,
     onSubmitCode: (String) -> Unit,
-    onOpenMcuGuide: () -> Unit,
+    onOpenGuide: (String) -> Unit = {},
+    onAddGuide: (VantafynGiftFranchise) -> Unit = {},
+    onOpenMcuGuide: () -> Unit = {},
     onOpenSawGuide: () -> Unit = {},
     onOpenResidentEvilGuide: () -> Unit = {},
     onOpenHarryPotterGuide: () -> Unit = {},
@@ -14304,7 +14412,7 @@ private fun VantafynHubDialog(
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val groupedWhatsNew = remember(whatsNewItems) { groupWhatsNewItems(whatsNewItems) }
-    val tabs = listOf("What's New", "Watch Guides")
+    val tabs = listOf("What's New", "My Guides", "Library")
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -14543,43 +14651,20 @@ private fun VantafynHubDialog(
                         }
                     }
                     1 -> {
-                        // Watch Guides tab
-                        EnterCodeTabContent(
+                        // My Guides shelf tab
+                        MyGuidesTabContent(
+                            enterCodeState = enterCodeState,
+                            onOpenGuide = onOpenGuide,
+                            onNavigateToLibrary = { selectedTab = 2 },
                             onSubmitCode = onSubmitCode,
-                            onOpenMcuGuide = onOpenMcuGuide,
-                            onOpenSawGuide = onOpenSawGuide,
-                            onOpenResidentEvilGuide = onOpenResidentEvilGuide,
-                            onOpenHarryPotterGuide = onOpenHarryPotterGuide,
-                            onOpenHungerGamesGuide = onOpenHungerGamesGuide,
-                            onOpenScreamGuide = onOpenScreamGuide,
-                            onOpenMatrixGuide = onOpenMatrixGuide,
-                            onOpenJumanjiGuide = onOpenJumanjiGuide,
-                            onOpenJurassicGuide = onOpenJurassicGuide,
-                            onOpenPiratesGuide = onOpenPiratesGuide,
-                            onOpenPokemonGuide = onOpenPokemonGuide,
-                            onOpenScaryMovieGuide = onOpenScaryMovieGuide,
-                            onOpenTwilightGuide = onOpenTwilightGuide,
-                            onOpenUnderworldGuide = onOpenUnderworldGuide,
-                            onOpenXMenGuide = onOpenXMenGuide,
-                            onOpenMiddleEarthGuide = onOpenMiddleEarthGuide,
-                            isMcuUnlocked = enterCodeState.isMcuUnlocked,
-                            isSawUnlocked = enterCodeState.isSawUnlocked,
-                            isResidentEvilUnlocked = enterCodeState.isResidentEvilUnlocked,
-                            isHarryPotterUnlocked = enterCodeState.isHarryPotterUnlocked,
-                            isHungerGamesUnlocked = enterCodeState.isHungerGamesUnlocked,
-                            isScreamUnlocked = enterCodeState.isScreamUnlocked,
-                            isMatrixUnlocked = enterCodeState.isMatrixUnlocked,
-                            isJumanjiUnlocked = enterCodeState.isJumanjiUnlocked,
-                            isJurassicUnlocked = enterCodeState.isJurassicUnlocked,
-                            isPiratesUnlocked = enterCodeState.isPiratesUnlocked,
-                            isPokemonUnlocked = enterCodeState.isPokemonUnlocked,
-                            isScaryMovieUnlocked = enterCodeState.isScaryMovieUnlocked,
-                            isTwilightUnlocked = enterCodeState.isTwilightUnlocked,
-                            isUnderworldUnlocked = enterCodeState.isUnderworldUnlocked,
-                            isXMenUnlocked = enterCodeState.isXMenUnlocked,
-                            isMiddleEarthUnlocked = enterCodeState.isMiddleEarthUnlocked,
-                            errorMessage = enterCodeState.errorMessage,
-                            isSubmitting = enterCodeState.isSubmitting,
+                        )
+                    }
+                    2 -> {
+                        // Official Franchise Library tab
+                        GuideLibraryTabContent(
+                            enterCodeState = enterCodeState,
+                            onOpenGuide = onOpenGuide,
+                            onAddGuide = onAddGuide,
                         )
                     }
                 }
@@ -23518,7 +23603,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.20"
+private const val VANTAFYN_APP_VERSION = "0.9.21"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

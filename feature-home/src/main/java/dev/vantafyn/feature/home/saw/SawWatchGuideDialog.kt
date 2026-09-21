@@ -115,7 +115,7 @@ fun SawWatchGuideDialog(
                 val anyServer = movies.firstOrNull {
                     it.isOnServer && !it.serverBackdropUrl.isNullOrBlank()
                 }?.serverBackdropUrl
-                serverJigsaw ?: anyServer ?: "https://image.tmdb.org/t/p/w780/aGBu2BJKXGR3Oa2ncL3uggQVbsb.jpg"
+                serverJigsaw ?: anyServer ?: "https://image.tmdb.org/t/p/w780/uUJp5I4IbzuhdUiEx4R9OAoFpbz.jpg"
             }
 
             Column(

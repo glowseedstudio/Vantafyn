@@ -58,6 +58,7 @@ object VantafynSoundEffects {
             R.raw.friend_request,
             R.raw.achievement_unlocked,
             R.raw.message_sent,
+            R.raw.unlock_guide,
         )
         for (resId in rawSounds) {
             try {
@@ -105,6 +106,13 @@ object VantafynSoundEffects {
                     player.release()
                 } catch (_: Exception) {}
             }
+            mp.setOnErrorListener { player, _, _ ->
+                try {
+                    player.stop()
+                    player.release()
+                } catch (_: Exception) {}
+                true
+            }
             mp.start()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to play sound with MediaPlayer: ${e.message}")
@@ -125,5 +133,9 @@ object VantafynSoundEffects {
 
     fun playMessageSent(context: Context) {
         playRawSound(context, R.raw.message_sent, volume = 0.60f)
+    }
+
+    fun playUnlockGuide(context: Context) {
+        playRawSound(context, R.raw.unlock_guide, volume = 0.80f)
     }
 }

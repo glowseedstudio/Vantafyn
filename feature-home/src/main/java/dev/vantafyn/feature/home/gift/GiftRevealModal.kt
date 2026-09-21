@@ -100,6 +100,11 @@ fun GiftRevealModal(
         unfoldAnim.snapTo(0f)
         glowBurstAnim.snapTo(0f)
 
+        // Play unlock guide sound celebration
+        try {
+            VantafynSoundEffects.playUnlockGuide(context)
+        } catch (_: Exception) {}
+
         // Step 1: Descend from top
         descendAnim.animateTo(
             targetValue = 1f,
@@ -112,10 +117,7 @@ fun GiftRevealModal(
             animationSpec = tween(durationMillis = 450, easing = FastOutSlowInEasing),
         )
 
-        // Step 3: Volumetric glow & audio celebration
-        try {
-            VantafynSoundEffects.preload(context)
-        } catch (_: Exception) {}
+        // Step 3: Volumetric glow & highlight
         glowBurstAnim.animateTo(
             targetValue = 1f,
             animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),

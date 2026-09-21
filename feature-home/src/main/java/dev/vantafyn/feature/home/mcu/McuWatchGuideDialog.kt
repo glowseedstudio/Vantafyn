@@ -32,6 +32,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.Movie
@@ -69,6 +70,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
 import dev.vantafyn.feature.home.gift.VantafynGiftFranchises
+import dev.vantafyn.feature.home.gift.VantafynGiftFranchise
+import dev.vantafyn.feature.home.auth.VantafynEnterCodeDialogState
 import dev.vantafyn.core.ui.VantafynButton
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
@@ -725,6 +728,366 @@ fun EnterCodeTabContent(
                         posterUrl = f?.posterUrl.orEmpty(),
                         accentColor = f?.accentColor ?: Color(0xFFD4AF37),
                         onClick = onOpenMiddleEarthGuide,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MyGuidesTabContent(
+    enterCodeState: VantafynEnterCodeDialogState,
+    onOpenGuide: (String) -> Unit,
+    onNavigateToLibrary: () -> Unit,
+    onSubmitCode: (String) -> Unit,
+) {
+    val unlockedFranchises = remember(enterCodeState) {
+        VantafynGiftFranchises.all.filter { enterCodeState.isFranchiseUnlocked(it.code) }
+    }
+    var codeInput by remember { mutableStateOf("") }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+    var isCodeInputExpanded by remember { mutableStateOf(enterCodeState.errorMessage != null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        if (unlockedFranchises.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color.White.copy(alpha = 0.04f),
+                                Color.White.copy(alpha = 0.01f),
+                            )
+                        )
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(20.dp))
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(54.dp)
+                            .clip(CircleShape)
+                            .background(VantafynColors.Primary.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.AutoAwesome,
+                            contentDescription = null,
+                            tint = VantafynColors.Primary,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                    Text(
+                        text = "Your Collection is Empty",
+                        color = VantafynColors.Ink,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                    )
+                    Text(
+                        text = "Browse the Guide Library to discover and add timeline watch guides for your favorite franchises.",
+                        color = VantafynColors.Muted,
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(horizontal = 8.dp),
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    VantafynButton(
+                        text = "Browse Guide Library →",
+                        onClick = onNavigateToLibrary,
+                    )
+                }
+            }
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "My Unlocked Shelf",
+                    color = VantafynColors.Muted,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    text = "${unlockedFranchises.size} of ${VantafynGiftFranchises.all.size} Unlocked",
+                    color = VantafynColors.Primary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                unlockedFranchises.forEach { franchise ->
+                    UnlockedCollectionCard(
+                        title = franchise.title,
+                        subtitle = "${franchise.movieCount} Films · ${franchise.eraSubtitle}",
+                        posterUrl = franchise.posterUrl,
+                        accentColor = franchise.accentColor,
+                        onClick = { onOpenGuide(franchise.code) },
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(
+            color = Color.White.copy(alpha = 0.08f),
+            modifier = Modifier.padding(vertical = 4.dp),
+        )
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { isCodeInputExpanded = !isCodeInputExpanded }
+                .padding(vertical = 6.dp, horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("🔑", fontSize = 13.sp)
+                Text(
+                    text = "Redeem a Secret Code",
+                    color = VantafynColors.Ink.copy(alpha = 0.88f),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            Text(
+                text = if (isCodeInputExpanded) "▲" else "▼",
+                color = VantafynColors.Muted,
+                fontSize = 11.sp,
+            )
+        }
+
+        AnimatedVisibility(visible = isCodeInputExpanded) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                VantafynTextField(
+                    value = codeInput,
+                    onValueChange = { codeInput = it.uppercase() },
+                    label = "Code (e.g. MCU, SAW, POTTER)",
+                    keyboardOptions = KeyboardOptions(
+                        capitalization = KeyboardCapitalization.Characters,
+                        imeAction = ImeAction.Done,
+                    ),
+                )
+
+                if (enterCodeState.errorMessage != null) {
+                    Text(
+                        text = enterCodeState.errorMessage,
+                        color = Color(0xFFFF8A8A),
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    VantafynButton(
+                        text = if (enterCodeState.isSubmitting) "Unlocking..." else "Unlock",
+                        onClick = {
+                            keyboardController?.hide()
+                            focusManager.clearFocus()
+                            onSubmitCode(codeInput)
+                        },
+                        enabled = codeInput.isNotBlank() && !enterCodeState.isSubmitting,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun GuideLibraryTabContent(
+    enterCodeState: VantafynEnterCodeDialogState,
+    onOpenGuide: (String) -> Unit,
+    onAddGuide: (VantafynGiftFranchise) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Official Franchise Library",
+                color = VantafynColors.Muted,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "${VantafynGiftFranchises.all.size} Guides Available",
+                color = VantafynColors.Ink.copy(alpha = 0.5f),
+                fontSize = 11.sp,
+            )
+        }
+
+        VantafynGiftFranchises.all.forEach { franchise ->
+            val isUnlocked = enterCodeState.isFranchiseUnlocked(franchise.code)
+            LibraryFranchiseCard(
+                franchise = franchise,
+                isUnlocked = isUnlocked,
+                onOpenGuide = { onOpenGuide(franchise.code) },
+                onAddGuide = { onAddGuide(franchise) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun LibraryFranchiseCard(
+    franchise: VantafynGiftFranchise,
+    isUnlocked: Boolean,
+    onOpenGuide: () -> Unit,
+    onAddGuide: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .border(
+                1.dp,
+                if (isUnlocked) franchise.accentColor.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.08f),
+                RoundedCornerShape(14.dp),
+            )
+            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.7f))
+            .clickable {
+                if (isUnlocked) onOpenGuide() else onAddGuide()
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(width = 40.dp, height = 56.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(VantafynColors.SurfaceHigh),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (franchise.posterUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = franchise.posterUrl,
+                        contentDescription = franchise.title,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop,
+                    )
+                } else {
+                    Text(franchise.icon, fontSize = 20.sp)
+                }
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Text(
+                    text = franchise.badge,
+                    color = franchise.accentColor,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.4.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = franchise.title,
+                    color = VantafynColors.Ink,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = "${franchise.movieCount} Films · ${franchise.eraSubtitle}",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(8.dp))
+
+        if (isUnlocked) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(franchise.accentColor.copy(alpha = 0.14f))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = "Added ✓",
+                    color = franchise.accentColor,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp,
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(
+                        Brush.horizontalGradient(
+                            listOf(
+                                franchise.accentColor.copy(alpha = 0.25f),
+                                VantafynColors.Primary.copy(alpha = 0.32f),
+                            )
+                        )
+                    )
+                    .border(
+                        1.dp,
+                        franchise.accentColor.copy(alpha = 0.55f),
+                        RoundedCornerShape(20.dp),
+                    )
+                    .clickable { onAddGuide() }
+                    .padding(horizontal = 11.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("🎁", fontSize = 11.sp)
+                    Text(
+                        text = "Add Guide",
+                        color = VantafynColors.Ink,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
                     )
                 }
             }
