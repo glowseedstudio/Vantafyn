@@ -109,13 +109,13 @@ fun SawWatchGuideDialog(
         ) {
             val maxHeightPx = maxHeight
             val headerArtworkUrl = remember(movies) {
-                val serverJigsaw = movies.firstOrNull {
-                    it.isOnServer && it.movie.id.contains("jigsaw") && !it.serverBackdropUrl.isNullOrBlank()
+                val serverSaw1 = movies.firstOrNull {
+                    it.isOnServer && it.movie.id == "saw_2004" && !it.serverBackdropUrl.isNullOrBlank()
                 }?.serverBackdropUrl
                 val anyServer = movies.firstOrNull {
                     it.isOnServer && !it.serverBackdropUrl.isNullOrBlank()
                 }?.serverBackdropUrl
-                serverJigsaw ?: anyServer ?: "https://image.tmdb.org/t/p/w780/uUJp5I4IbzuhdUiEx4R9OAoFpbz.jpg"
+                serverSaw1 ?: anyServer ?: "https://image.tmdb.org/t/p/w780/ok4ot3YbfDYZcINXf91JUfq3maB.jpg"
             }
 
             Column(

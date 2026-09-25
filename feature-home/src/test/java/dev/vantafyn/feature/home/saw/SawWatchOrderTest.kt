@@ -55,6 +55,11 @@ class SawWatchOrderTest {
         assertEquals("tt0387564", saw.imdbId)
         assertTrue(saw.fallbackPosterUrl.contains("image.tmdb.org"))
 
+        val jigsaw = SawMoviesCatalog.movies.first { it.title == "Jigsaw" }
+        assertEquals(298250, jigsaw.tmdbId)
+        assertEquals("tt4983590", jigsaw.imdbId)
+        assertTrue(jigsaw.fallbackPosterUrl.contains("image.tmdb.org"))
+
         val sawX = SawMoviesCatalog.movies.first { it.title == "Saw X" }
         assertEquals(951491, sawX.tmdbId)
         assertEquals("tt17009710", sawX.imdbId)

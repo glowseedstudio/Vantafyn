@@ -151,9 +151,9 @@ object SawMoviesCatalog {
             timelineOrder = 9,
             timelineSetting = "~2017",
             franchise = "Legacy",
-            tmdbId = 420817,
+            tmdbId = 298250,
             imdbId = "tt4983590",
-            fallbackPosterPath = "/aMFXXDCZsXGUmBgjTPqujThPHAR.jpg",
+            fallbackPosterPath = "/7RwHxhdUNS996JPFNB9a7CJtlwR.jpg",
             overview = "Bodies begin turning up around the city, each having met a gruesome end. With all signs pointing to Jigsaw, detectives must figure out how a dead man is killing again.",
         ),
         SawMovie(

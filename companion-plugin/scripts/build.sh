@@ -5,9 +5,9 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="0.1.2"
+VERSION="0.1.3"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="v0.9.15"
+TAG="v0.9.22"
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -32,7 +32,7 @@ cat > "$OUT_NET9/meta.json" <<JSON
       "targetAbi": "10.11.0.0",
       "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net9.zip",
       "checksum": "",
-      "changelog": "UnifiedPush notifications, chat push endpoint, editable settings config page, and Jellyfin 10.11 baseline."
+      "changelog": "Native emby-checkbox alignment and styling fix, ApiClient fetch compatibility, unified settings and Ombi login toggles."
     }
   ]
 }
@@ -61,7 +61,7 @@ cat > "$OUT_NET10/meta.json" <<JSON
       "targetAbi": "12.0.0.0",
       "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
       "checksum": "",
-      "changelog": "UnifiedPush endpoint registration, stale endpoint cleanup, test notifications, and Jellyfin 12.0 (.NET 10) baseline."
+      "changelog": "Native emby-checkbox alignment and styling fix, ApiClient fetch compatibility, unified settings and Ombi login toggles."
     }
   ]
 }
@@ -91,7 +91,7 @@ cat > "$ROOT/manifest.json" <<JSON
     "versions": [
       {
         "version": "${VERSION}.0",
-        "changelog": "UnifiedPush notifications, chat push endpoint, editable settings config page, and Jellyfin 10.11 baseline.",
+        "changelog": "Native emby-checkbox alignment and styling fix, ApiClient fetch compatibility, unified settings and Ombi login toggles.",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net9.zip",
         "checksum": "${MD5_NET9}",
@@ -99,7 +99,7 @@ cat > "$ROOT/manifest.json" <<JSON
       },
       {
         "version": "${VERSION}.1",
-        "changelog": "UnifiedPush notifications, chat push endpoint, editable settings config page, and Jellyfin 12.0 baseline.",
+        "changelog": "Native emby-checkbox alignment and styling fix, ApiClient fetch compatibility, unified settings and Ombi login toggles.",
         "targetAbi": "12.0.0.0",
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",

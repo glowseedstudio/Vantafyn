@@ -4,7 +4,7 @@
   <title>Vantafyn Companion</title>
 </head>
 <body>
-  <div id="VantafynCompanionConfigPage" data-role="page" class="page type-interior pluginConfigurationPage">
+  <div id="VantafynCompanionConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-select,emby-checkbox">
     <style>
       #VantafynCompanionConfigPage {
         box-sizing: border-box;
@@ -46,35 +46,26 @@
         line-height: 1.45;
       }
       #VantafynCompanionConfigPage .checkboxContainer {
-        display: flex;
-        flex-direction: column;
-        margin: 0.6em 0 1em 0;
+        margin: 0.8em 0 1.2em 0;
       }
       #VantafynCompanionConfigPage .emby-checkbox-label {
-        display: inline-flex !important;
-        align-items: center !important;
-        cursor: pointer !important;
-        user-select: none;
-        font-size: 1.05em;
-        font-weight: 500;
-        color: #ffffff !important;
+        color: #ffffff;
       }
-      #VantafynCompanionConfigPage input[type="checkbox"] {
-        width: 22px !important;
-        height: 22px !important;
-        min-width: 22px !important;
-        min-height: 22px !important;
-        cursor: pointer !important;
-        accent-color: #00e5ff !important;
-        margin: 0 12px 0 0 !important;
-        opacity: 1 !important;
-        position: relative !important;
-        vertical-align: middle;
+      #VantafynCompanionConfigPage .checkboxOutline {
+        border-color: rgba(255, 255, 255, 0.45);
       }
-      #VantafynCompanionConfigPage .checkboxLabel {
-        color: #ffffff !important;
-        font-size: 1em;
-        cursor: pointer;
+      #VantafynCompanionConfigPage .emby-checkbox:checked + span + .checkboxOutline {
+        border-color: #00e5ff !important;
+        background-color: #00e5ff !important;
+      }
+      #VantafynCompanionConfigPage .emby-checkbox:checked + span + .checkboxOutline > .checkboxIcon-checked {
+        color: #050811 !important;
+      }
+      #VantafynCompanionConfigPage .checkboxFieldDescription {
+        font-size: 0.9em;
+        color: #9eabb8;
+        line-height: 1.45;
+        margin-top: 0.35em;
       }
       #VantafynCompanionConfigPage .inputContainer {
         display: flex;
@@ -171,56 +162,56 @@
         <!-- 1. Profile & Settings Sync -->
         <div class="paperList">
           <h2>Profile & Settings Sync</h2>
-          <div class="fieldDescription">
-            Synchronizes custom app settings, themes, home screen layouts, and watch preferences across all Vantafyn client devices.
-          </div>
-          <div class="checkboxContainer">
+          <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input is="emby-checkbox" type="checkbox" id="userSettingsEnabled" class="emby-checkbox" />
-              <span class="checkboxLabel">Enable Profile & Settings Sync</span>
+              <span>Enable Profile & Settings Sync</span>
             </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Synchronizes custom app settings, themes, home screen layouts, and watch preferences across all Vantafyn client devices.
+            </div>
           </div>
         </div>
 
         <!-- 2. Personal Playlists -->
         <div class="paperList">
           <h2>Personal Playlists</h2>
-          <div class="fieldDescription">
-            Enables private, per-user personal playlists stored independently on the server and only visible to the user who created them.
-          </div>
-          <div class="checkboxContainer">
+          <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input is="emby-checkbox" type="checkbox" id="personalPlaylistsEnabled" class="emby-checkbox" />
-              <span class="checkboxLabel">Enable Personal Playlists</span>
+              <span>Enable Personal Playlists</span>
             </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Enables private, per-user personal playlists stored independently on the server and only visible to the user who created them.
+            </div>
           </div>
         </div>
 
         <!-- 3. Watch Parties -->
         <div class="paperList">
           <h2>Watch Parties</h2>
-          <div class="fieldDescription">
-            Enables synchronized group watch sessions, realtime member presence, play/pause synchronization, and in-app party invites.
-          </div>
-          <div class="checkboxContainer">
+          <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input is="emby-checkbox" type="checkbox" id="watchPartiesEnabled" class="emby-checkbox" />
-              <span class="checkboxLabel">Enable Watch Parties</span>
+              <span>Enable Watch Parties</span>
             </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Enables synchronized group watch sessions, realtime member presence, play/pause synchronization, and in-app party invites.
+            </div>
           </div>
         </div>
 
         <!-- 4. Requests / Ombi Integration -->
         <div class="paperList">
           <h2>Requests (Ombi)</h2>
-          <div class="fieldDescription">
-            Connects your Ombi server so Vantafyn users can search, request movies and series, and track approval status directly from inside the app.
-          </div>
-          <div class="checkboxContainer">
+          <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input is="emby-checkbox" type="checkbox" id="requestsEnabled" class="emby-checkbox" />
-              <span class="checkboxLabel">Enable Requests</span>
+              <span>Enable Requests</span>
             </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Connects your Ombi server so Vantafyn users can search, request movies and series, and track approval status directly from inside the app.
+            </div>
           </div>
 
           <div class="inputContainer">
@@ -241,12 +232,14 @@
             <div class="fieldDescription">Request timeout duration (2 to 30 seconds).</div>
           </div>
 
-          <div class="checkboxContainer">
+          <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
               <input is="emby-checkbox" type="checkbox" id="ombiRequireUserLogin" class="emby-checkbox" />
-              <span class="checkboxLabel">Require each Vantafyn profile to sign in with its own Ombi account</span>
+              <span>Require each Vantafyn profile to sign in with its own Ombi account</span>
             </label>
-            <div class="fieldDescription">If unchecked, requests are processed using the server-wide master API key.</div>
+            <div class="fieldDescription checkboxFieldDescription">
+              If unchecked, requests are processed using the server-wide master API key.
+            </div>
           </div>
 
           <button is="emby-button" type="button" class="actionButton secondary" id="testOmbi">Test Ombi Connection</button>
@@ -281,50 +274,72 @@
           return fallback;
         }
 
+        function formatError(err) {
+          if (!err) return 'Unknown error';
+          if (typeof err === 'string') return err;
+          if (err.message) return err.message;
+          if (err.status) return 'HTTP ' + err.status + (err.statusText ? ' ' + err.statusText : '');
+          return String(err);
+        }
+
         async function api(path, options) {
           const url = ApiClient.getUrl(path);
           const method = (options && options.type) || 'GET';
           const postData = options && options.data;
           const contentType = (options && options.contentType) || 'application/json';
 
+          const request = {
+            url: url,
+            type: method,
+            dataType: 'json'
+          };
+          if (postData) {
+            request.data = postData;
+            request.contentType = contentType;
+          }
+
+          let res;
           if (typeof ApiClient.fetch === 'function') {
-            const fetchOpts = {
-              method: method,
-              headers: {}
-            };
-            if (postData) {
-              fetchOpts.headers['Content-Type'] = contentType;
-              fetchOpts.body = postData;
-            }
-            const res = await ApiClient.fetch(url, fetchOpts);
-            if (!res.ok) {
-              const errBody = await res.text().catch(() => '');
-              throw new Error('HTTP ' + res.status + (errBody ? ': ' + errBody : ''));
-            }
-            const txt = await res.text();
-            return txt ? JSON.parse(txt) : {};
+            res = await ApiClient.fetch(request);
           } else if (typeof ApiClient.ajax === 'function') {
-            const res = await ApiClient.ajax(Object.assign({ url: url, type: method, dataType: 'json' }, options || {}));
-            return typeof res === 'string' && res.length ? JSON.parse(res) : res;
+            res = await ApiClient.ajax(request);
           } else {
             const token = typeof ApiClient.accessToken === 'function' ? ApiClient.accessToken() : '';
             const fetchOpts = {
               method: method,
               headers: {
-                'Authorization': 'MediaBrowser Client="Vantafyn", Device="Web", DeviceId="VantafynWeb", Version="1.0.0", Token="' + token + '"'
+                'Authorization': 'MediaBrowser Client="Vantafyn", Device="Web", DeviceId="VantafynWeb", Version="1.0.0", Token="' + token + '"',
+                'Accept': 'application/json'
               }
             };
             if (postData) {
               fetchOpts.headers['Content-Type'] = contentType;
               fetchOpts.body = postData;
             }
-            const res = await fetch(url, fetchOpts);
-            if (!res.ok) {
-              throw new Error('HTTP ' + res.status);
+            const response = await fetch(url, fetchOpts);
+            if (!response.ok) {
+              const errBody = await response.text().catch(() => '');
+              throw new Error('HTTP ' + response.status + (errBody ? ': ' + errBody : ''));
             }
-            const txt = await res.text();
+            const txt = await response.text();
             return txt ? JSON.parse(txt) : {};
           }
+
+          if (res && typeof res.json === 'function') {
+            if (res.ok === false) {
+              const errBody = await res.text().catch(() => '');
+              throw new Error('HTTP ' + res.status + (errBody ? ': ' + errBody : ''));
+            }
+            return await res.json();
+          }
+          if (typeof res === 'string' && res.length) {
+            try {
+              return JSON.parse(res);
+            } catch (e) {
+              return res;
+            }
+          }
+          return res || {};
         }
 
         function setStatus(elementId, text, type) {
@@ -354,7 +369,7 @@
             }
           } catch (err) {
             console.error('[VantafynCompanion] Failed to load configuration:', err);
-            setStatus('saveStatus', 'Failed to load configuration: ' + (err.message || err), 'error');
+            setStatus('saveStatus', 'Failed to load configuration: ' + formatError(err), 'error');
           }
         }
 
@@ -396,7 +411,7 @@
               await load();
             } catch (err) {
               console.error('[VantafynCompanion] Failed to save settings:', err);
-              setStatus('saveStatus', 'Error saving settings: ' + (err.message || err), 'error');
+              setStatus('saveStatus', 'Error saving settings: ' + formatError(err), 'error');
             } finally {
               saveBtn.disabled = false;
             }
@@ -414,7 +429,7 @@
               const msg = (result.message || 'Connection test finished') + (result.version ? ' (Version: ' + result.version + ')' : '');
               setStatus('ombiStatus', msg, result.isSuccess ? 'success' : 'error');
             } catch (err) {
-              setStatus('ombiStatus', 'Ombi connection failed: ' + (err.message || err), 'error');
+              setStatus('ombiStatus', 'Ombi connection failed: ' + formatError(err), 'error');
             } finally {
               testOmbiBtn.disabled = false;
             }
