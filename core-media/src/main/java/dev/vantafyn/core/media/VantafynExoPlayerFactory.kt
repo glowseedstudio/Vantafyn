@@ -91,6 +91,17 @@ object VantafynExoPlayerFactory {
                     // AV1 optional extension not bundled
                 }
             }
+
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioOffload: Boolean,
+            ): androidx.media3.exoplayer.audio.AudioSink? {
+                return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context.applicationContext)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(true)
+                    .build()
+            }
         }.apply {
             setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             setEnableAudioTrackPlaybackParams(true)

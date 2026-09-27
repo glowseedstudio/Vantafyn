@@ -1,6 +1,9 @@
 package dev.vantafyn.feature.home.updater
 
 import android.content.Context
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -8,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -299,26 +303,42 @@ fun AppUpdateDialog(
                         // Downloading progress state
                         if (isDownloading) {
                             val progress = downloadProgress
+                            val targetFraction = (progress?.percent ?: 0f).coerceIn(0f, 1f)
+                            val animatedProgress by animateFloatAsState(
+                                targetValue = targetFraction,
+                                animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                                label = "updateDownloadProgress",
+                            )
+
                             Column(
                                 modifier = Modifier.fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                LinearProgressIndicator(
-                                    progress = { progress?.percent ?: 0f },
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(8.dp)
-                                        .clip(RoundedCornerShape(4.dp)),
-                                    color = VantafynColors.Primary,
-                                    trackColor = Color.White.copy(alpha = 0.12f),
-                                )
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color.White.copy(alpha = 0.12f)),
+                                ) {
+                                    if (animatedProgress > 0f) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth(animatedProgress)
+                                                .fillMaxHeight()
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(VantafynGradients.accentHorizontal()),
+                                        )
+                                    }
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    val percentInt = ((progress?.percent ?: 0f) * 100).toInt()
+                                    val percentInt = (targetFraction * 100).toInt()
                                     Text(
-                                        "$percentInt%",
+                                        if (progress == null) "Connecting..." else "$percentInt%",
                                         color = VantafynColors.Ink,
                                         style = MaterialTheme.typography.bodySmall,
                                         fontWeight = FontWeight.SemiBold,

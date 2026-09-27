@@ -8,6 +8,7 @@ class AppUpdateCheckerTest {
 
     @Test
     fun testVersionComparison_newerVersions() {
+        assertTrue(AppUpdateChecker.isNewerVersion("0.9.25", "0.9.24"))
         assertTrue(AppUpdateChecker.isNewerVersion("0.9.24", "0.9.23"))
         assertTrue(AppUpdateChecker.isNewerVersion("0.9.23", "0.9.22"))
         assertTrue(AppUpdateChecker.isNewerVersion("0.10.0", "0.9.22"))

@@ -73,10 +73,15 @@ import org.jellyfin.sdk.model.api.SeriesInfoRemoteSearchQuery
 import org.jellyfin.sdk.model.api.ChannelType
 import org.jellyfin.sdk.model.api.CreatePlaylistDto
 import org.jellyfin.sdk.model.api.CreateUserByName
+import org.jellyfin.sdk.model.api.CodecProfile
+import org.jellyfin.sdk.model.api.CodecType
 import org.jellyfin.sdk.model.api.DeviceProfile
 import org.jellyfin.sdk.model.api.DirectPlayProfile
 import org.jellyfin.sdk.model.api.DlnaProfileType
 import org.jellyfin.sdk.model.api.EncodingContext
+import org.jellyfin.sdk.model.api.ProfileCondition
+import org.jellyfin.sdk.model.api.ProfileConditionType
+import org.jellyfin.sdk.model.api.ProfileConditionValue
 import org.jellyfin.sdk.model.api.GeneralCommandType
 import org.jellyfin.sdk.model.api.ImageFormat
 import org.jellyfin.sdk.model.api.ImageType
@@ -148,7 +153,7 @@ class JellyfinRepositoryProvider(
         this.context = appContext
         clientInfo = ClientInfo(
             name = if (appContext.packageName.contains("mobile", ignoreCase = true)) "Vantafyn Mobile" else "Vantafyn TV",
-            version = "0.9.24",
+            version = "0.9.25",
         )
         deviceInfo = DeviceInfo(
             id = deviceId,
@@ -6050,7 +6055,7 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
             DirectPlayProfile(
                 container = "mp4,m4v,mov,mkv,webm,ts,m2ts,asf,wmv,avi,ogv,ogm",
                 audioCodec = "aac,mp3,ac3,eac3,ac4,opus,vorbis,flac,truehd,mlp,dts,dca,dtshd,dts-hd,dts-ma,dtse,alac,pcm,pcm_s16le,pcm_s20le,pcm_s24le,pcm_s32le,pcm_s16be,pcm_s24be,pcm_alaw,pcm_mulaw,mp2,aac_latm",
-                videoCodec = "h264,avc,hevc,h265,vp8,vp9,av1,mpeg4,mpeg2video,vc1",
+                videoCodec = "h264,avc,hevc,h265,dovi,dvhe,dvh1,dvav,dva1,vp8,vp9,av1,mpeg4,mpeg2video,vc1",
                 type = DlnaProfileType.VIDEO,
             ),
             DirectPlayProfile(
@@ -6101,7 +6106,23 @@ private fun androidMobileDeviceProfile(maxVideoStreamingBitrate: Int? = null): D
             ),
         ),
         containerProfiles = emptyList(),
-        codecProfiles = emptyList(),
+        codecProfiles = listOf(
+            CodecProfile(
+                type = CodecType.VIDEO,
+                conditions = listOf(
+                    ProfileCondition(
+                        condition = ProfileConditionType.EQUALS_ANY,
+                        property = ProfileConditionValue.VIDEO_RANGE_TYPE,
+                        value = "SDR|HDR10|HLG|DOVI|DOVIWithHDR10|DOVIWithHLG|DOVIWithSDR",
+                        isRequired = false,
+                    ),
+                ),
+                applyConditions = emptyList(),
+                codec = "hevc,h265,dovi,dvhe,dvh1,av1,avc,h264",
+                container = null,
+                subContainer = null,
+            ),
+        ),
         subtitleProfiles = listOf(
             SubtitleProfile("vtt", SubtitleDeliveryMethod.EMBED, null, null, null),
             SubtitleProfile("vtt", SubtitleDeliveryMethod.HLS, null, null, null),
