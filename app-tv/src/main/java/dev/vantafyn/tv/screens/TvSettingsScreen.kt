@@ -65,7 +65,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import dev.vantafyn.core.integrations.updater.AppTarget
+import dev.vantafyn.feature.home.updater.AppUpdateDialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -137,6 +141,8 @@ fun TvSettingsScreen(
     onSetMaxStreamingBitrateMbps: (Int?) -> Unit = {},
     onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit = { _, _ -> },
 ) {
+    var showUpdateDialog by remember { mutableStateOf(false) }
+
     VantafynTvScreenScaffold(modifier = modifier) {
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -199,12 +205,24 @@ fun TvSettingsScreen(
                             onToggleWatchPartyInvitesEnabled = onToggleWatchPartyInvitesEnabled,
                             onToggleWatchPartyInviteAnimationEnabled = onToggleWatchPartyInviteAnimationEnabled,
                             onSetWatchPartyInviteExpirySeconds = onSetWatchPartyInviteExpirySeconds,
+                            onCheckForUpdates = { showUpdateDialog = true },
                         )
-                        TvSettingsCategory.About -> aboutItems(session)
+                        TvSettingsCategory.About -> aboutItems(
+                            session = session,
+                            onCheckForUpdates = { showUpdateDialog = true },
+                        )
                     }
                 }
             }
         }
+    }
+
+    if (showUpdateDialog) {
+        AppUpdateDialog(
+            currentVersion = VANTAFYN_TV_APP_VERSION,
+            target = AppTarget.TV,
+            onDismiss = { showUpdateDialog = false },
+        )
     }
 }
 
@@ -542,6 +560,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.vantafynItems(
     onToggleWatchPartyInvitesEnabled: () -> Unit,
     onToggleWatchPartyInviteAnimationEnabled: () -> Unit,
     onSetWatchPartyInviteExpirySeconds: (Int) -> Unit,
+    onCheckForUpdates: () -> Unit = {},
 ) {
     item {
         Row(
@@ -627,13 +646,22 @@ private fun androidx.compose.foundation.lazy.LazyListScope.vantafynItems(
     }
     item {
         TvSettingsPanel(title = "Vantafyn on TV", icon = Icons.Rounded.Tv) {
+            TvActionRow(
+                icon = Icons.Rounded.CloudDownload,
+                title = "Check for Updates",
+                subtitle = "Version $VANTAFYN_TV_APP_VERSION • Check GitHub for latest release",
+                onClick = onCheckForUpdates,
+            )
             TvInfoRow(Icons.Rounded.Tv, "Discover Vantafyn", "Feature guide is available from the mobile app")
             TvInfoRow(Icons.Rounded.Info, "App version", VANTAFYN_TV_APP_VERSION)
         }
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.aboutItems(session: JellyfinSession?) {
+private fun androidx.compose.foundation.lazy.LazyListScope.aboutItems(
+    session: JellyfinSession?,
+    onCheckForUpdates: () -> Unit = {},
+) {
     item {
         TvSettingsPanel(title = "About Vantafyn TV", icon = Icons.Rounded.Info) {
             Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -643,8 +671,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutItems(session: J
                     Text("Private Jellyfin streaming for the living room.", color = VantafynColors.Muted, fontSize = 15.sp)
                 }
             }
+            TvActionRow(
+                icon = Icons.Rounded.CloudDownload,
+                title = "Check for Updates",
+                subtitle = "Version $VANTAFYN_TV_APP_VERSION • Check GitHub for latest release",
+                onClick = onCheckForUpdates,
+            )
             TvInfoRow(Icons.Rounded.Dns, "Server", session?.server?.url.orEmpty().ifBlank { "Not connected" })
             TvInfoRow(Icons.Rounded.CheckCircle, "Privacy", "No analytics, trackers, or advertising SDKs")
+            TvInfoRow(Icons.Rounded.Info, "App version", VANTAFYN_TV_APP_VERSION)
         }
     }
 }
@@ -978,6 +1013,35 @@ private fun TvInfoRow(icon: ImageVector, title: String, value: String) {
     }
 }
 
+@Composable
+private fun TvActionRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .vantafynTvFocusable(interactionSource, shape = shape, scaleFocused = 1.015f)
+            .clip(shape)
+            .background(Color.White.copy(alpha = 0.055f))
+            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
+            .focusable(interactionSource = interactionSource)
+            .padding(horizontal = 16.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Icon(icon, contentDescription = null, tint = VantafynColors.Primary, modifier = Modifier.size(22.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = VantafynColors.Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(subtitle, color = VantafynColors.Muted, fontSize = 13.sp)
+        }
+    }
+}
+
 private fun VantafynAppBackground.drawableResId(): Int =
     when (this) {
         VantafynAppBackground.Nebula -> CoreUiR.drawable.vantafyn_onboarding_background
@@ -1011,4 +1075,4 @@ private fun String.subtitleModeDisplayLabel(): String =
         else -> this
     }
 
-private const val VANTAFYN_TV_APP_VERSION = "0.9.22"
+private const val VANTAFYN_TV_APP_VERSION = "0.9.23"

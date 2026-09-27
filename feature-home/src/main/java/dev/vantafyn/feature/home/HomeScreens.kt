@@ -144,7 +144,9 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Article
 import androidx.compose.material.icons.rounded.EmojiEvents
 import dev.vantafyn.core.jellyfin.JellyfinAchievementUnlock
+import dev.vantafyn.feature.home.updater.AppUpdateDialog
 import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Close
@@ -458,6 +460,29 @@ fun VantafynAppContent(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val backgroundResId = state.selectedBackground.drawableResId()
+    val context = LocalContext.current
+    var autoUpdateAvailableInfo by remember { mutableStateOf<dev.vantafyn.core.integrations.updater.AppReleaseInfo?>(null) }
+    var showAutoUpdateDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(state.step) {
+        if (state.step == VantafynSetupStep.Home) {
+            val prefs = dev.vantafyn.core.integrations.updater.AppUpdatePreferences(context)
+            if (prefs.shouldAutoCheck()) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val checker = dev.vantafyn.core.integrations.updater.AppUpdateChecker()
+                    val target = if (tv) dev.vantafyn.core.integrations.updater.AppTarget.TV else dev.vantafyn.core.integrations.updater.AppTarget.MOBILE
+                    val res = checker.checkForUpdate(VANTAFYN_APP_VERSION, target)
+                    prefs.recordCheckPerformed()
+                    if (res is dev.vantafyn.core.integrations.updater.UpdateCheckResult.Available) {
+                        if (!prefs.isVersionDismissed(res.releaseInfo.versionName)) {
+                            autoUpdateAvailableInfo = res.releaseInfo
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -662,6 +687,84 @@ fun VantafynAppContent(
                 },
                 onDismiss = viewModel::dismissIncomingFriendRequest,
                 modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+
+        autoUpdateAvailableInfo?.let { release ->
+            AlertDialog(
+                modifier = Modifier.imePadding().vantafynAnimatedModalBorder(),
+                onDismissRequest = {
+                    dev.vantafyn.core.integrations.updater.AppUpdatePreferences(context).dismissVersion(release.versionName)
+                    autoUpdateAvailableInfo = null
+                },
+                containerColor = Color(0xFF131317),
+                shape = RoundedCornerShape(24.dp),
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.CloudDownload,
+                            contentDescription = null,
+                            tint = VantafynColors.Primary,
+                            modifier = Modifier.size(26.dp),
+                        )
+                        Text(
+                            "Update Available",
+                            color = VantafynColors.Ink,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "A newer version of Vantafyn (v${release.versionName}) is available.",
+                            color = VantafynColors.Ink,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        if (release.releaseTitle.isNotBlank()) {
+                            Text(
+                                release.releaseTitle,
+                                color = VantafynColors.Muted,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showAutoUpdateDialog = true
+                            autoUpdateAvailableInfo = null
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = VantafynColors.Primary),
+                    ) {
+                        Text("View Update", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            dev.vantafyn.core.integrations.updater.AppUpdatePreferences(context).dismissVersion(release.versionName)
+                            autoUpdateAvailableInfo = null
+                        },
+                    ) {
+                        Text("Later", color = VantafynColors.Muted)
+                    }
+                },
+            )
+        }
+
+        if (showAutoUpdateDialog) {
+            AppUpdateDialog(
+                currentVersion = VANTAFYN_APP_VERSION,
+                target = if (tv) dev.vantafyn.core.integrations.updater.AppTarget.TV else dev.vantafyn.core.integrations.updater.AppTarget.MOBILE,
+                onDismiss = {
+                    showAutoUpdateDialog = false
+                    autoUpdateAvailableInfo = null
+                },
             )
         }
     }
@@ -13010,6 +13113,7 @@ private fun SettingsScreen(
     var currentSubScreen by rememberSaveable { mutableStateOf(SettingsSubScreen.Main) }
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
+    var showUpdateDialog by remember { mutableStateOf(false) }
     var showSpecialThanksDialog by remember { mutableStateOf(false) }
     var showUnifiedPushDiagnostics by remember { mutableStateOf(false) }
     var showPairTvSheet by remember { mutableStateOf(false) }
@@ -13553,6 +13657,14 @@ private fun SettingsScreen(
                                 items = listOf(
                                     {
                                         SettingsNavigationRow(
+                                            title = "Check for Updates",
+                                            subtitle = "Version $VANTAFYN_APP_VERSION • Check GitHub for latest release",
+                                            icon = Icons.Rounded.CloudDownload,
+                                            onClick = { showUpdateDialog = true },
+                                        )
+                                    },
+                                    {
+                                        SettingsNavigationRow(
                                             title = "App version $VANTAFYN_APP_VERSION",
                                             subtitle = "Vantafyn build and release information",
                                             icon = Icons.Rounded.Info,
@@ -13596,7 +13708,17 @@ private fun SettingsScreen(
         )
     }
     if (showVersionDialog) {
-        AppVersionDialog(onDismiss = { showVersionDialog = false })
+        AppVersionDialog(
+            onDismiss = { showVersionDialog = false },
+            onCheckForUpdates = { showUpdateDialog = true },
+        )
+    }
+    if (showUpdateDialog) {
+        AppUpdateDialog(
+            currentVersion = VANTAFYN_APP_VERSION,
+            target = dev.vantafyn.core.integrations.updater.AppTarget.MOBILE,
+            onDismiss = { showUpdateDialog = false },
+        )
     }
     if (showSpecialThanksDialog) {
         SpecialThanksDialog(onDismiss = { showSpecialThanksDialog = false })
@@ -15444,15 +15566,26 @@ private fun permissionToneText(tone: PermissionTone): Color = when (tone) {
 }
 
 @Composable
-private fun AppVersionDialog(onDismiss: () -> Unit) {
+private fun AppVersionDialog(
+    onDismiss: () -> Unit,
+    onCheckForUpdates: () -> Unit = {},
+) {
     AlertDialog(
         modifier = Modifier
             .imePadding()
             .vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Close")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = {
+                    onDismiss()
+                    onCheckForUpdates()
+                }) {
+                    Text("Check for Updates", color = VantafynColors.Primary, fontWeight = FontWeight.Bold)
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("Close")
+                }
             }
         },
         containerColor = VantafynModalContainerColor,
@@ -23603,7 +23736,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.22"
+private const val VANTAFYN_APP_VERSION = "0.9.23"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable
