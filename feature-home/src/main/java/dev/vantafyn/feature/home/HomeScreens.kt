@@ -12797,8 +12797,9 @@ private fun SettingsSubScreenHeader(
         Text(
             text = title,
             color = VantafynColors.Ink,
-            style = MaterialTheme.typography.headlineMedium,
+            style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
         )
     }
 }
@@ -13216,7 +13217,7 @@ private fun SettingsScreen(
                                         }
                                         add {
                                             SettingsNavigationRow(
-                                                title = "Appearance & Experience",
+                                                title = "Appearance",
                                                 subtitle = "Themes, dynamic backgrounds, rail border animation, mode",
                                                 icon = Icons.Rounded.Palette,
                                                 onClick = {
@@ -13384,7 +13385,7 @@ private fun SettingsScreen(
                     ) {
                         item {
                             SettingsSubScreenHeader(
-                                title = "Appearance & Experience",
+                                title = "Appearance",
                                 onBack = { currentSubScreen = SettingsSubScreen.Main },
                             )
                         }
@@ -23736,7 +23737,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.23"
+private const val VANTAFYN_APP_VERSION = "0.9.24"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable
