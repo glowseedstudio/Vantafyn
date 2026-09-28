@@ -51,7 +51,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -133,8 +137,19 @@ fun AppUpdateDialog(
                 Icon(
                     imageVector = Icons.Rounded.CloudDownload,
                     contentDescription = null,
-                    tint = VantafynColors.Primary,
-                    modifier = Modifier.size(26.dp),
+                    tint = Color.White,
+                    modifier = Modifier
+                        .size(26.dp)
+                        .graphicsLayer {
+                            compositingStrategy = CompositingStrategy.Offscreen
+                        }
+                        .drawWithContent {
+                            drawContent()
+                            drawRect(
+                                brush = VantafynGradients.accentHorizontal(),
+                                blendMode = BlendMode.SrcIn,
+                            )
+                        },
                 )
                 Text(
                     text = when {
@@ -421,15 +436,20 @@ fun AppUpdateDialog(
                                     Text("Grant Permission", color = Color.Black, fontWeight = FontWeight.Bold)
                                 }
                             } else {
+                                val actionShape = RoundedCornerShape(20.dp)
                                 Button(
                                     onClick = {
                                         downloadedApkFile?.let { file ->
                                             AppUpdateInstaller.installApk(context, file)
                                         }
                                     },
-                                    colors = ButtonDefaults.buttonColors(containerColor = VantafynColors.Primary),
+                                    shape = actionShape,
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                    modifier = Modifier
+                                        .clip(actionShape)
+                                        .background(VantafynGradients.accentHorizontal()),
                                 ) {
-                                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Rounded.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                                     Spacer(Modifier.width(6.dp))
                                     Text("Install Now", color = Color.White, fontWeight = FontWeight.Bold)
                                 }
@@ -449,6 +469,7 @@ fun AppUpdateDialog(
                         }
 
                         else -> {
+                            val actionShape = RoundedCornerShape(20.dp)
                             Button(
                                 onClick = {
                                     isDownloading = true
@@ -470,9 +491,13 @@ fun AppUpdateDialog(
                                         }
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = VantafynColors.Primary),
+                                shape = actionShape,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                                modifier = Modifier
+                                    .clip(actionShape)
+                                    .background(VantafynGradients.accentHorizontal()),
                             ) {
-                                Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Rounded.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
                                 Text("Download & Install", color = Color.White, fontWeight = FontWeight.Bold)
                             }
