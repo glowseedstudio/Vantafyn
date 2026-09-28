@@ -19,6 +19,9 @@ public sealed class AdminController(
         return Ok(new
         {
             config.UserSettingsEnabled,
+            config.GamesEnabled,
+            config.CustomGamesPath,
+            config.GameLibraryIds,
             config.RequestsEnabled,
             config.WatchPartiesEnabled,
             config.PersonalPlaylistsEnabled,
@@ -39,6 +42,12 @@ public sealed class AdminController(
         var plugin = Plugin.Instance ?? throw new InvalidOperationException("Plugin instance is unavailable.");
         var config = plugin.Configuration;
         config.UserSettingsEnabled = request.UserSettingsEnabled;
+        config.GamesEnabled = request.GamesEnabled;
+        config.CustomGamesPath = string.IsNullOrWhiteSpace(request.CustomGamesPath) ? null : request.CustomGamesPath.Trim();
+        if (request.GameLibraryIds != null)
+        {
+            config.GameLibraryIds = request.GameLibraryIds;
+        }
         config.RequestsEnabled = request.RequestsEnabled;
         config.WatchPartiesEnabled = request.WatchPartiesEnabled;
         config.PersonalPlaylistsEnabled = request.PersonalPlaylistsEnabled;
@@ -73,6 +82,9 @@ public sealed class AdminController(
     private static object GetConfigurationPayload(PluginConfiguration config) => new
     {
         config.UserSettingsEnabled,
+        config.GamesEnabled,
+        config.CustomGamesPath,
+        config.GameLibraryIds,
         config.RequestsEnabled,
         config.WatchPartiesEnabled,
         config.PersonalPlaylistsEnabled,
@@ -89,6 +101,9 @@ public sealed class AdminController(
 
 public sealed record AdminConfigurationRequest(
     bool UserSettingsEnabled,
+    bool GamesEnabled,
+    string? CustomGamesPath,
+    List<string>? GameLibraryIds,
     bool RequestsEnabled,
     bool WatchPartiesEnabled,
     bool PersonalPlaylistsEnabled,

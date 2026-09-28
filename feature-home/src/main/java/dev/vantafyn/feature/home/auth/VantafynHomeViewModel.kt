@@ -47,6 +47,12 @@ import dev.vantafyn.core.jellyfin.JellyfinGenreItem
 import dev.vantafyn.core.jellyfin.JellyfinLibrary
 import dev.vantafyn.core.jellyfin.JellyfinLibraryItemFilter
 import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
+import dev.vantafyn.core.jellyfin.DefaultJellyfinGamesRepository
+import dev.vantafyn.core.jellyfin.GameDetail
+import dev.vantafyn.core.jellyfin.GameLibrary
+import dev.vantafyn.core.jellyfin.GameSummary
+import dev.vantafyn.core.jellyfin.GameSystem
+import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.LibraryViewMode
 import dev.vantafyn.core.jellyfin.LibrariesViewMode
@@ -187,6 +193,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val achievementRepository: JellyfinAchievementRepository = repositories.achievementRepository
     private val socialRepository: JellyfinSocialRepository = repositories.socialRepository
     private val watchGuideRepository = dev.vantafyn.feature.home.guide.WatchGuideRepository(application)
+    val gamesRepository: JellyfinGamesRepository = DefaultJellyfinGamesRepository()
     private val achievementPrefs = application.getSharedPreferences("vantafyn_achievements", Context.MODE_PRIVATE)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
@@ -1537,6 +1544,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is IntegrationResult.Success -> result.value.requestsReady
                 is IntegrationResult.Failure -> false
             }
+            val gamesReady = gamesRepository.isGamesAvailable(session).getOrDefault(false)
             _state.update {
                 val latestConfig = ombiRepository.config()
                 val latestHasKey = ombiRepository.hasApiKey()
@@ -1546,8 +1554,98 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     ombiRequestsEnabledForUsers = ready || latestConfig.isEnabledForUsers && latestHasKey,
                     ombiRequestsEnabledForAdmins = ready || latestConfig.isEnabledForAdmins && latestHasKey,
                     pendingOmbiAccessRequestCount = ombiRepository.pendingAccessRequestCount(),
+                    isGamesAvailable = gamesReady,
                 )
             }
+            if (gamesReady && _state.value.gameSystems.isEmpty()) {
+                loadGames()
+            }
+        }
+    }
+
+    fun loadGames() {
+        val session = _state.value.session ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingGames = true) }
+            val libraries = gamesRepository.getGameLibraries(session).getOrDefault(emptyList())
+            val library = libraries.firstOrNull()
+            _state.update {
+                it.copy(
+                    gameLibraries = libraries,
+                    selectedGameLibrary = library,
+                )
+            }
+            if (library != null) {
+                val systems = gamesRepository.getGameSystems(session, library.id).getOrDefault(emptyList())
+                _state.update {
+                    it.copy(
+                        gameSystems = systems,
+                        isLoadingGames = false,
+                    )
+                }
+                loadGamesForSystem(null)
+            } else {
+                _state.update { it.copy(isLoadingGames = false) }
+            }
+        }
+    }
+
+    fun selectGameSystem(system: GameSystem?) {
+        _state.update { it.copy(selectedGameSystem = system) }
+        loadGamesForSystem(system)
+    }
+
+    private fun loadGamesForSystem(system: GameSystem?) {
+        val session = _state.value.session ?: return
+        val library = _state.value.selectedGameLibrary ?: return
+        viewModelScope.launch {
+            _state.update { it.copy(isLoadingGames = true) }
+            val systemsToLoad = if (system != null) listOf(system) else _state.value.gameSystems
+            val allGames = mutableListOf<GameSummary>()
+            for (sys in systemsToLoad) {
+                val res = gamesRepository.getGames(session, library.id, sys.id).getOrDefault(emptyList())
+                allGames.addAll(res)
+            }
+            _state.update {
+                it.copy(
+                    gamesList = allGames,
+                    isLoadingGames = false,
+                )
+            }
+        }
+    }
+
+    fun openGameDetail(summary: GameSummary) {
+        val session = _state.value.session ?: return
+        val library = _state.value.selectedGameLibrary ?: return
+        viewModelScope.launch {
+            val detail = gamesRepository.getGameDetail(session, library.id, summary.id).getOrNull()
+            if (detail != null) {
+                _state.update { it.copy(activeGameDetail = detail) }
+            }
+        }
+    }
+
+    fun dismissGameDetail() {
+        _state.update { it.copy(activeGameDetail = null) }
+    }
+
+    fun playGame(game: GameDetail) {
+        _state.update {
+            it.copy(
+                activeGamePlaying = game,
+                activeGameDetail = null,
+                mobileDestination = MobileDestination.GamePlayer,
+            )
+        }
+    }
+
+    fun closeGamePlayer() {
+        _state.update {
+            it.copy(
+                activeGamePlaying = null,
+                mobileDestination = MobileDestination.Games,
+            )
         }
     }
 
@@ -5900,7 +5998,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.25")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.26")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -10169,6 +10267,15 @@ data class VantafynHomeUiState(
     val chatSearchResults: List<dev.vantafyn.core.jellyfin.JellyfinMediaCard> = emptyList(),
     val isChatSearching: Boolean = false,
     val connectionStale: Boolean = false,
+    val isGamesAvailable: Boolean = false,
+    val gameLibraries: List<GameLibrary> = emptyList(),
+    val selectedGameLibrary: GameLibrary? = null,
+    val gameSystems: List<GameSystem> = emptyList(),
+    val selectedGameSystem: GameSystem? = null,
+    val gamesList: List<GameSummary> = emptyList(),
+    val isLoadingGames: Boolean = false,
+    val activeGameDetail: GameDetail? = null,
+    val activeGamePlaying: GameDetail? = null,
 ) {
 
     val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState?
@@ -10441,6 +10548,8 @@ enum class MobileDestination {
     Social,
     Chat,
     TvInput,
+    Games,
+    GamePlayer,
 }
 
 private fun MobileDestination.isRootDestination(experienceMode: ExperienceMode = ExperienceMode.FullMedia): Boolean =
@@ -10453,6 +10562,7 @@ private fun MobileDestination.isRootDestination(experienceMode: ExperienceMode =
         MobileDestination.Requests,
         MobileDestination.WatchParty,
         MobileDestination.Admin,
+        MobileDestination.Games,
         MobileDestination.Profile -> true
         MobileDestination.Downloads -> experienceMode == ExperienceMode.MusicOnly
         MobileDestination.AdminUserSettings,
@@ -10462,6 +10572,7 @@ private fun MobileDestination.isRootDestination(experienceMode: ExperienceMode =
         MobileDestination.LibraryDetail,
         MobileDestination.MediaDetail,
         MobileDestination.Player,
+        MobileDestination.GamePlayer,
         MobileDestination.DiscoverVantafyn,
         MobileDestination.Achievements,
         MobileDestination.Social,

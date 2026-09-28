@@ -201,7 +201,30 @@
           </div>
         </div>
 
-        <!-- 4. Requests / Ombi Integration -->
+        <!-- 4. Retro Games & Cloud Saves -->
+        <div class="paperList">
+          <h2>Retro Games &amp; Cloud Saves</h2>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input is="emby-checkbox" type="checkbox" id="gamesEnabled" class="emby-checkbox" />
+              <span>Enable Retro Games &amp; Cloud Saves</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Scans ROM libraries on this server, categorizes them by console system (NES, SNES, GBA, N64, Genesis, PS1, PSP), fetches official box art automatically, and synchronizes per-user save states and battery saves across Mobile and Android TV.
+            </div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="customGamesPath">Custom ROM Directory Path (Optional)</label>
+            <input is="emby-input" type="text" id="customGamesPath" class="emby-input" placeholder="e.g. /mnt/storage/games or D:\ROMs" />
+            <div class="fieldDescription">
+              Direct folder path on your server containing console subfolders (e.g. <code>NES/</code>, <code>SNES/</code>, <code>GBA/</code>, <code>Genesis/</code>, <code>PSX/</code>).
+              Leave blank to automatically detect from any Jellyfin library named "Games", "ROMs", or "Emulation".
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. Requests / Ombi Integration -->
         <div class="paperList">
           <h2>Requests (Ombi)</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
@@ -355,6 +378,8 @@
             const ombi = config.ombi || config.Ombi || {};
 
             page.querySelector('#userSettingsEnabled').checked = !!getVal(config, 'userSettingsEnabled', 'UserSettingsEnabled', true);
+            page.querySelector('#gamesEnabled').checked = !!getVal(config, 'gamesEnabled', 'GamesEnabled', true);
+            page.querySelector('#customGamesPath').value = getVal(config, 'customGamesPath', 'CustomGamesPath', '') || '';
             page.querySelector('#requestsEnabled').checked = !!getVal(config, 'requestsEnabled', 'RequestsEnabled', true);
             page.querySelector('#watchPartiesEnabled').checked = !!getVal(config, 'watchPartiesEnabled', 'WatchPartiesEnabled', true);
             page.querySelector('#personalPlaylistsEnabled').checked = !!getVal(config, 'personalPlaylistsEnabled', 'PersonalPlaylistsEnabled', true);
@@ -388,6 +413,8 @@
             try {
               const payload = {
                 userSettingsEnabled: page.querySelector('#userSettingsEnabled').checked,
+                gamesEnabled: page.querySelector('#gamesEnabled').checked,
+                customGamesPath: page.querySelector('#customGamesPath').value.trim(),
                 requestsEnabled: page.querySelector('#requestsEnabled').checked,
                 watchPartiesEnabled: page.querySelector('#watchPartiesEnabled').checked,
                 personalPlaylistsEnabled: page.querySelector('#personalPlaylistsEnabled').checked,

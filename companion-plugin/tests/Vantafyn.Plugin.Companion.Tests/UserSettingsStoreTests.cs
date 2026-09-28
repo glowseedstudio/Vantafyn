@@ -48,6 +48,7 @@ public sealed class UserSettingsStoreTests
         public string OmbiSessionsRoot => Directory.CreateDirectory(Path.Combine(_root, "ombi-sessions")).FullName;
         public string SecretsRoot => Directory.CreateDirectory(Path.Combine(_root, "secrets")).FullName;
         public string PushRegistrationsRoot => Directory.CreateDirectory(Path.Combine(_root, "push-registrations")).FullName;
+        public string GameSavesRoot => Directory.CreateDirectory(Path.Combine(_root, "game-saves")).FullName;
         public void Dispose()
         {
             if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

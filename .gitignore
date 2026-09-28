@@ -6,8 +6,7 @@ local.properties
 captures/
 externalNativeBuild/
 .cxx/
-_reference/Wholphin/
-_reference/Findroid/
+_reference/
 companion-plugin/**/bin/
 companion-plugin/**/obj/
 companion-plugin/artifacts/

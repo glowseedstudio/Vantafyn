@@ -7,6 +7,7 @@ using Vantafyn.Plugin.Companion.UserSettings;
 using Vantafyn.Plugin.Companion.WatchParties;
 using Vantafyn.Plugin.Companion.PersonalPlaylists;
 using Vantafyn.Plugin.Companion.Notifications;
+using Vantafyn.Plugin.Companion.Games;
 
 namespace Vantafyn.Plugin.Companion;
 
@@ -25,6 +26,8 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IPushNotificationService, PushNotificationService>();
         serviceCollection.AddSingleton<IOmbiClientFactory, OmbiClientFactory>();
         serviceCollection.AddSingleton<IOmbiUserSessionStore, FileOmbiUserSessionStore>();
+        serviceCollection.AddSingleton<IGamesService, GamesService>();
+        serviceCollection.AddSingleton<IGameSavesService, GameSavesService>();
         serviceCollection.AddHttpClient();
     }
 }

@@ -27,11 +27,15 @@ public sealed class CapabilitiesController(
 
         return Ok(new
         {
-            pluginVersion = "0.1.2",
+            pluginVersion = "0.1.4",
             apiVersion = 1,
             userSettings = new
             {
                 state = config.UserSettingsEnabled ? "ready" : "disabled"
+            },
+            games = new
+            {
+                state = config.GamesEnabled ? "ready" : "disabled"
             },
             requests = new
             {

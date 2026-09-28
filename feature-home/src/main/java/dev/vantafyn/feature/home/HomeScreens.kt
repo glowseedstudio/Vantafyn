@@ -423,6 +423,9 @@ import dev.vantafyn.feature.home.auth.VantafynVideoPlayerPreference
 import dev.vantafyn.feature.requests.RequestsScreen
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
+import dev.vantafyn.feature.home.games.GamesHubScreen
+import dev.vantafyn.feature.home.games.GameDetailModal
+import dev.vantafyn.feature.player.games.GamePlayerScreen
 import dev.vantafyn.feature.home.auth.defaultHomeLayout
 import dev.vantafyn.feature.home.auth.supportedSmartRows
 import dev.vantafyn.feature.music.MusicScreen
@@ -3894,6 +3897,37 @@ private fun MobileShellScreen(
                     }
                 }
                 MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
+                MobileDestination.Games -> {
+                    GamesHubScreen(
+                        systems = state.gameSystems,
+                        games = state.gamesList,
+                        selectedSystem = state.selectedGameSystem,
+                        isLoading = state.isLoadingGames,
+                        onSelectSystem = viewModel::selectGameSystem,
+                        onOpenGame = viewModel::openGameDetail,
+                        onBack = onNavigateBack,
+                    )
+                    GameDetailModal(
+                        game = state.activeGameDetail,
+                        onDismiss = viewModel::dismissGameDetail,
+                        onPlay = viewModel::playGame,
+                    )
+                }
+                MobileDestination.GamePlayer -> {
+                    val gameToPlay = state.activeGamePlaying
+                    val session = state.session
+                    val library = state.selectedGameLibrary
+                    if (gameToPlay != null && session != null && library != null) {
+                        GamePlayerScreen(
+                            game = gameToPlay,
+                            libraryId = library.id,
+                            session = session,
+                            gamesRepository = viewModel.gamesRepository,
+                            isTv = false,
+                            onExit = viewModel::closeGamePlayer,
+                        )
+                    }
+                }
                 MobileDestination.Downloads -> DownloadsScreen(
                     state = state,
                     onBack = onNavigateBack,
@@ -4667,6 +4701,7 @@ private fun MobileShellScreen(
                     accentMode = state.bottomRailAccent,
                     atmosphereMode = state.bottomRailAtmosphere,
                     experienceMode = state.experienceMode,
+                    isGamesAvailable = state.isGamesAvailable,
                     modifier = Modifier.align(Alignment.BottomCenter),
                 )
             val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
@@ -22187,10 +22222,11 @@ private fun MobileBottomNav(
     accentMode: BottomRailAccent = BottomRailAccent.Off,
     atmosphereMode: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Off,
     experienceMode: ExperienceMode = ExperienceMode.FullMedia,
+    isGamesAvailable: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var tapTrigger by remember { mutableIntStateOf(0) }
-    val mainTabs = remember(isAdmin, experienceMode) {
+    val mainTabs = remember(isAdmin, experienceMode, isGamesAvailable) {
         if (experienceMode == ExperienceMode.MusicOnly) {
             buildList {
                 add(MobileDestination.Music)
@@ -22205,6 +22241,7 @@ private fun MobileBottomNav(
                 add(MobileDestination.Search)
                 add(MobileDestination.Music)
                 add(MobileDestination.Favorites)
+                if (isGamesAvailable) add(MobileDestination.Games)
                 add(MobileDestination.Requests)
                 if (isAdmin) add(MobileDestination.Admin)
                 if (!isAdmin) add(MobileDestination.Profile)
@@ -23230,6 +23267,23 @@ private fun MiniNavIcon(destination: MobileDestination, selected: Boolean, activ
                 }
                 drawIconPath(path)
             }
+            MobileDestination.Games -> {
+                drawIconRoundRect(
+                    topLeft = androidx.compose.ui.geometry.Offset(2.5.dp.toPx(), 7.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(18.dp.toPx(), 10.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()),
+                )
+                drawIconLine(
+                    start = androidx.compose.ui.geometry.Offset(5.5.dp.toPx(), 12.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(9.5.dp.toPx(), 12.dp.toPx()),
+                )
+                drawIconLine(
+                    start = androidx.compose.ui.geometry.Offset(7.5.dp.toPx(), 10.dp.toPx()),
+                    end = androidx.compose.ui.geometry.Offset(7.5.dp.toPx(), 14.dp.toPx()),
+                )
+                drawIconCircle(radius = 1.2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(14.5.dp.toPx(), 10.5.dp.toPx()))
+                drawIconCircle(radius = 1.2.dp.toPx(), center = androidx.compose.ui.geometry.Offset(16.5.dp.toPx(), 12.5.dp.toPx()))
+            }
             MobileDestination.Requests -> {
                 drawIconRoundRect(
                     topLeft = androidx.compose.ui.geometry.Offset(3.5.dp.toPx(), 6.dp.toPx()),
@@ -23737,7 +23791,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.25"
+private const val VANTAFYN_APP_VERSION = "0.9.26"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

@@ -9,6 +9,9 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public bool WatchPartiesEnabled { get; set; } = true;
     public bool PersonalPlaylistsEnabled { get; set; } = true;
     public bool NotificationsEnabled { get; set; } = true;
+    public bool GamesEnabled { get; set; } = true;
+    public string? CustomGamesPath { get; set; }
+    public List<string> GameLibraryIds { get; set; } = new();
     public OmbiConfiguration Ombi { get; set; } = new();
 }
 

@@ -83,6 +83,12 @@ import dev.vantafyn.tv.screens.TvMyListScreen
 import dev.vantafyn.tv.screens.TvPlaceholderScreen
 import dev.vantafyn.tv.screens.TvSearchScreen
 import dev.vantafyn.tv.screens.TvSettingsScreen
+import dev.vantafyn.tv.screens.TvGamesScreen
+import dev.vantafyn.feature.player.games.GamePlayerScreen
+import dev.vantafyn.core.jellyfin.DefaultJellyfinGamesRepository
+import dev.vantafyn.core.jellyfin.GameDetail
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import dev.vantafyn.tv.sidebar.VantafynTvSidebar
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -159,12 +165,13 @@ fun TvShellScreen(
     val scaffoldSidebarInset = 80.dp + sidebarExpandedContentOffset
     val fullBleedContentStartPadding = 108.dp + sidebarExpandedContentOffset
 
-    val mainNavItems = remember(state.libraries, state.favorites, isAdmin, hasRequests) {
+    val mainNavItems = remember(state.libraries, state.favorites, isAdmin, hasRequests, state.isGamesAvailable) {
         TvNavigationItem.buildMainItems(
             libraries = state.libraries,
             hasFavorites = state.favorites.isNotEmpty(),
             isAdmin = isAdmin,
             hasRequests = hasRequests,
+            hasGames = state.isGamesAvailable,
         )
     }
 
@@ -265,6 +272,51 @@ fun TvShellScreen(
                                 icon = Icons.Rounded.MusicNote,
                                 modifier = Modifier.padding(start = scaffoldSidebarInset),
                             )
+                        }
+
+                        TvRoute.Games -> {
+                            var tvSelectedGameDetail by remember { mutableStateOf<GameDetail?>(null) }
+                            val scope = rememberCoroutineScope()
+                            val gamesRepo = remember { DefaultJellyfinGamesRepository() }
+                            TvGamesScreen(
+                                state = state.copy(activeGameDetail = tvSelectedGameDetail),
+                                session = session,
+                                onSelectSystem = { _ -> },
+                                onOpenGame = { gameSummary ->
+                                    val lib = state.selectedGameLibrary ?: state.gameLibraries.firstOrNull()
+                                    if (session != null && lib != null) {
+                                        scope.launch {
+                                            val detail = gamesRepo.getGameDetail(session, lib.id, gameSummary.id).getOrNull()
+                                            if (detail != null) {
+                                                tvSelectedGameDetail = detail
+                                            }
+                                        }
+                                    }
+                                },
+                                onPlayGame = { gameDetail ->
+                                    tvSelectedGameDetail = null
+                                    navState.navigateTo(TvRoute.GamePlayer(gameDetail))
+                                },
+                                onDismissGameDetail = {
+                                    tvSelectedGameDetail = null
+                                },
+                                modifier = Modifier.padding(start = scaffoldSidebarInset),
+                            )
+                        }
+
+                        is TvRoute.GamePlayer -> {
+                            val lib = state.selectedGameLibrary ?: state.gameLibraries.firstOrNull()
+                            if (session != null && lib != null) {
+                                GamePlayerScreen(
+                                    game = targetRoute.game,
+                                    libraryId = lib.id,
+                                    session = session,
+                                    gamesRepository = remember { DefaultJellyfinGamesRepository() },
+                                    isTv = true,
+                                    onExit = { navState.navigateBack() },
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
                         }
 
                         TvRoute.Requests -> {

@@ -14,6 +14,7 @@ import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PowerSettingsNew
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.rounded.VideoLibrary
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,6 +34,7 @@ data class TvNavigationItem(
             hasFavorites: Boolean = true,
             isAdmin: Boolean = false,
             hasRequests: Boolean = false,
+            hasGames: Boolean = false,
         ): List<TvNavigationItem> {
             val list = mutableListOf<TvNavigationItem>()
 
@@ -86,6 +88,18 @@ data class TvNavigationItem(
                         route = TvRoute.Music,
                         label = "Music",
                         icon = Icons.Rounded.MusicNote,
+                    )
+                )
+            }
+
+            // Retro Games (Gated by companion plugin capability)
+            if (hasGames) {
+                list.add(
+                    TvNavigationItem(
+                        route = TvRoute.Games,
+                        label = "Retro Games",
+                        icon = Icons.Rounded.SportsEsports,
+                        isVisible = true,
                     )
                 )
             }

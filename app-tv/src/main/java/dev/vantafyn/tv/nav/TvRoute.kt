@@ -14,4 +14,6 @@ sealed class TvRoute {
     data object Notifications : TvRoute()
     data class Details(val itemId: UUID) : TvRoute()
     data class Player(val itemId: UUID) : TvRoute()
+    data object Games : TvRoute()
+    data class GamePlayer(val game: dev.vantafyn.core.jellyfin.GameDetail) : TvRoute()
 }

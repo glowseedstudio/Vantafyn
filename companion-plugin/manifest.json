@@ -3,25 +3,25 @@
     "category": "General",
     "guid": "fd7d0e8a-89a9-45a6-8f2b-1f4c5bb1c8cb",
     "name": "Vantafyn Companion",
-    "description": "Optional server-side companion features for Vantafyn clients: UnifiedPush notification routing, settings sync, watch party foundations, and Ombi requests.",
-    "overview": "UnifiedPush notification support, Ombi request routing, settings sync, and watch party coordination.",
+    "description": "Server-side companion features for Vantafyn: UnifiedPush notifications, retro games, settings sync, and requests.",
+    "overview": "UnifiedPush notifications, retro games, Ombi requests, settings sync, and watch parties.",
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.1.3.0",
-        "changelog": "Native emby-checkbox alignment and styling fix, ApiClient fetch compatibility, unified settings and Ombi login toggles.",
+        "version": "0.1.4.0",
+        "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.22/Vantafyn.Plugin.Companion_0.1.3_net9.zip",
-        "checksum": "bde8195aedc7a15d0757ef43abc482c3",
-        "timestamp": "2026-09-25T11:11:45Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.26/Vantafyn.Plugin.Companion_0.1.4_net9.zip",
+        "checksum": "93d01e93dc2f91a21aa51844b7549dd5",
+        "timestamp": "2026-09-28T08:39:13Z"
       },
       {
-        "version": "0.1.3.1",
-        "changelog": "Native emby-checkbox alignment and styling fix, ApiClient fetch compatibility, unified settings and Ombi login toggles.",
+        "version": "0.1.4.1",
+        "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.22/Vantafyn.Plugin.Companion_0.1.3_net10.zip",
-        "checksum": "efd162fed0209a8eef7c5e432fafd1fd",
-        "timestamp": "2026-09-25T11:11:45Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.26/Vantafyn.Plugin.Companion_0.1.4_net10.zip",
+        "checksum": "2cca480809f1a932e7994814aa465025",
+        "timestamp": "2026-09-28T08:39:13Z"
       }
     ]
   }
