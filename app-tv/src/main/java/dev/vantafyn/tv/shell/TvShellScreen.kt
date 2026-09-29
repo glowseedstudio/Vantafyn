@@ -87,6 +87,7 @@ import dev.vantafyn.tv.screens.TvGamesScreen
 import dev.vantafyn.feature.player.games.GamePlayerScreen
 import dev.vantafyn.core.jellyfin.DefaultJellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.GameDetail
+import dev.vantafyn.core.media.games.GameHubSoundManager
 import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.launch
 import dev.vantafyn.tv.sidebar.VantafynTvSidebar
@@ -294,6 +295,7 @@ fun TvShellScreen(
                                     }
                                 },
                                 onPlayGame = { gameDetail ->
+                                    GameHubSoundManager.stop(instant = true)
                                     tvSelectedGameDetail = null
                                     navState.navigateTo(TvRoute.GamePlayer(gameDetail))
                                 },
@@ -305,6 +307,9 @@ fun TvShellScreen(
                         }
 
                         is TvRoute.GamePlayer -> {
+                            androidx.compose.runtime.LaunchedEffect(Unit) {
+                                GameHubSoundManager.stop(instant = true)
+                            }
                             val lib = state.selectedGameLibrary ?: state.gameLibraries.firstOrNull()
                             if (session != null && lib != null) {
                                 GamePlayerScreen(

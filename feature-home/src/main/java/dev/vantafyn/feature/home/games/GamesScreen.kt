@@ -8,10 +8,16 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
 import dev.vantafyn.core.jellyfin.RecentGameRecord
+import dev.vantafyn.core.media.games.GameHubSoundManager
 
 @Composable
 fun GamesScreen(
@@ -33,6 +39,26 @@ fun GamesScreen(
     onBackToMain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> GameHubSoundManager.resume(context)
+                Lifecycle.Event.ON_PAUSE -> GameHubSoundManager.pause()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        GameHubSoundManager.fadeIn(context)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            GameHubSoundManager.fadeOut()
+        }
+    }
+
     AnimatedContent(
         targetState = activeTab,
         transitionSpec = {

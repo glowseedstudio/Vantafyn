@@ -60,6 +60,7 @@ import dev.vantafyn.core.jellyfin.GamePlayTracker
 import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.media.games.GameHubSoundManager
 import dev.vantafyn.core.ui.VantafynColors
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -83,6 +84,10 @@ fun GamePlayerScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val storageManager = remember { GameStorageManager(context, gamesRepository) }
+
+    LaunchedEffect(Unit) {
+        GameHubSoundManager.stop(instant = true)
+    }
 
     val activity = remember(context) { context.findActivity() }
     DisposableEffect(activity) {

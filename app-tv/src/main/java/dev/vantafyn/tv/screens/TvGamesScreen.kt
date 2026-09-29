@@ -39,10 +39,15 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import dev.vantafyn.core.media.games.GameHubSoundManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -74,6 +79,26 @@ fun TvGamesScreen(
     onDismissGameDetail: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> GameHubSoundManager.resume(context)
+                Lifecycle.Event.ON_PAUSE -> GameHubSoundManager.pause()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        GameHubSoundManager.fadeIn(context)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            GameHubSoundManager.fadeOut()
+        }
+    }
+
     VantafynTvScreenScaffold(modifier = modifier) {
         Column(modifier = Modifier.fillMaxSize()) {
             VantafynTvSectionHeader(

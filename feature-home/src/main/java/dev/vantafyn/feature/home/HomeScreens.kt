@@ -428,6 +428,7 @@ import dev.vantafyn.feature.home.games.GamesScreen
 import dev.vantafyn.feature.home.games.GamesTab
 import dev.vantafyn.feature.home.games.GameDetailModal
 import dev.vantafyn.feature.player.games.GamePlayerScreen
+import dev.vantafyn.core.media.games.GameHubSoundManager
 import dev.vantafyn.feature.home.auth.defaultHomeLayout
 import dev.vantafyn.feature.home.auth.supportedSmartRows
 import dev.vantafyn.feature.music.MusicScreen
@@ -3927,10 +3928,16 @@ private fun MobileShellScreen(
                     GameDetailModal(
                         game = state.activeGameDetail,
                         onDismiss = viewModel::dismissGameDetail,
-                        onPlay = viewModel::playGame,
+                        onPlay = { detail ->
+                            GameHubSoundManager.stop(instant = true)
+                            viewModel.playGame(detail)
+                        },
                     )
                 }
                 MobileDestination.GamePlayer -> {
+                    LaunchedEffect(Unit) {
+                        GameHubSoundManager.stop(instant = true)
+                    }
                     val gameToPlay = state.activeGamePlaying
                     val session = state.session
                     val library = state.selectedGameLibrary
@@ -23879,7 +23886,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.30"
+private const val VANTAFYN_APP_VERSION = "0.9.31"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

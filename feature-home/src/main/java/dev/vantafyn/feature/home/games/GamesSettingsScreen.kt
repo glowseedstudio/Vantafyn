@@ -32,10 +32,12 @@ import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.ImageSearch
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Vibration
+import dev.vantafyn.core.media.games.GameHubSoundManager
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -93,6 +95,9 @@ fun GamesSettingsScreen(
 
     var hapticsEnabled by remember {
         mutableStateOf(prefs.getBoolean("haptics_enabled", true))
+    }
+    var bgmEnabled by remember {
+        mutableStateOf(GameHubSoundManager.isMusicEnabled(context))
     }
     var selectedAspectRatio by remember {
         mutableStateOf(prefs.getString("default_aspect_ratio", "4:3") ?: "4:3")
@@ -284,6 +289,53 @@ fun GamesSettingsScreen(
                         onCheckedChange = { checked ->
                             hapticsEnabled = checked
                             prefs.edit().putBoolean("haptics_enabled", checked).apply()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF00E5FF),
+                            uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
+                            uncheckedTrackColor = Color.White.copy(alpha = 0.15f),
+                        ),
+                    )
+                }
+
+                // Ambient Hub Music
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.MusicNote,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(22.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Ambient Hub Music",
+                            color = VantafynColors.Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Play relaxing soundtrack while in the Game Hub (65% volume)",
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    Switch(
+                        checked = bgmEnabled,
+                        onCheckedChange = { checked ->
+                            bgmEnabled = checked
+                            GameHubSoundManager.setMusicEnabled(context, checked)
                         },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,

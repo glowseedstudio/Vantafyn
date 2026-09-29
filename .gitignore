@@ -11,3 +11,4 @@ companion-plugin/**/bin/
 companion-plugin/**/obj/
 companion-plugin/artifacts/
 .kotlin/
+/gamehub.mp3
