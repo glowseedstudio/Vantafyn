@@ -40,9 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.TextStyle
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradientIcon
 import dev.vantafyn.core.ui.VantafynGradients
 
 @Composable
@@ -103,19 +105,20 @@ fun GameDetailModal(
                                     .background(Color(0x2221D8FF)),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                Icon(
+                                VantafynGradientIcon(
                                     imageVector = Icons.Rounded.SportsEsports,
                                     contentDescription = null,
-                                    tint = VantafynColors.Primary,
                                     modifier = Modifier.size(20.dp),
                                 )
                             }
                             Text(
                                 text = game.systemId.uppercase(),
-                                color = VantafynColors.Primary,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                letterSpacing = 1.sp,
+                                style = TextStyle(
+                                    brush = VantafynGradients.accentHorizontal(),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    letterSpacing = 1.sp,
+                                ),
                             )
                         }
 

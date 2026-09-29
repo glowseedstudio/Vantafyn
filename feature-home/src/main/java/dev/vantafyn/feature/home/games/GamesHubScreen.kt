@@ -20,6 +20,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import android.content.Context
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -71,6 +76,8 @@ fun GamesHubScreen(
     games: List<GameSummary>,
     selectedSystem: GameSystem?,
     isLoading: Boolean,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
     onSelectSystem: (GameSystem?) -> Unit,
     onOpenGame: (GameSummary) -> Unit,
     onBack: () -> Unit,
@@ -179,56 +186,76 @@ fun GamesHubScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Games Grid or Loading State
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 60.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator(
-                    color = VantafynColors.Primary,
-                    modifier = Modifier.size(44.dp),
+        val pullToRefreshState = rememberPullToRefreshState()
+
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            state = pullToRefreshState,
+            onRefresh = onRefresh,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    containerColor = Color(0xFF1E1E28),
+                    color = Color(0xFF00E5FF),
                 )
-            }
-        } else if (filteredGames.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 60.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+            },
+        ) {
+            if (isLoading && !isRefreshing) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(bottom = 60.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SportsEsports,
-                        contentDescription = null,
-                        tint = VantafynColors.Muted,
-                        modifier = Modifier.size(56.dp),
-                    )
-                    Text(
-                        text = if (searchQuery.isNotEmpty()) "No games matching \"$searchQuery\"" else "No games found in this system",
-                        color = VantafynColors.Muted,
-                        fontSize = 15.sp,
+                    CircularProgressIndicator(
+                        color = VantafynColors.Primary,
+                        modifier = Modifier.size(44.dp),
                     )
                 }
-            }
-        } else {
-            LazyVerticalGrid(
-                columns = GridCells.Adaptive(minSize = 160.dp),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(filteredGames, key = { it.id }) { game ->
-                    GameCard(
-                        game = game,
-                        onClick = { onOpenGame(game) },
-                    )
+            } else if (filteredGames.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 60.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.SportsEsports,
+                            contentDescription = null,
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier.size(56.dp),
+                        )
+                        Text(
+                            text = if (searchQuery.isNotEmpty()) "No games matching \"$searchQuery\"" else "No games found in this system",
+                            color = VantafynColors.Muted,
+                            fontSize = 15.sp,
+                        )
+                    }
+                }
+            } else {
+                LazyVerticalGrid(
+                    columns = GridCells.Adaptive(minSize = 160.dp),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    items(filteredGames, key = { it.id }) { game ->
+                        GameCard(
+                            game = game,
+                            onClick = { onOpenGame(game) },
+                        )
+                    }
                 }
             }
         }

@@ -60,6 +60,9 @@ import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.feature.home.CompactBackButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 
 @Composable
 fun GamesHomeScreen(
@@ -69,6 +72,8 @@ fun GamesHomeScreen(
     games: List<GameSummary>,
     recentGames: List<RecentGameRecord>,
     totalPlayTimeMs: Long,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
     onOpenGame: (GameSummary) -> Unit,
     onSelectSystem: (GameSystem) -> Unit,
     onNavigateBack: () -> Unit,
@@ -78,22 +83,54 @@ fun GamesHomeScreen(
         GamePlayTracker.formatPlayTime(totalPlayTimeMs)
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
+    val pullToRefreshState = rememberPullToRefreshState()
+
+    PullToRefreshBox(
+        isRefreshing = isRefreshing,
+        state = pullToRefreshState,
+        onRefresh = onRefresh,
+        modifier = modifier.fillMaxSize(),
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullToRefreshState,
+                isRefreshing = isRefreshing,
+                modifier = Modifier.align(Alignment.TopCenter),
+                containerColor = Color(0xFF1E1E28),
+                color = Color(0xFF00E5FF),
+            )
+        },
     ) {
-        // 1. Top Bar: Back Button
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+        ) {
+        // 1. Top Bar: Back Button & Title
         item {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 CompactBackButton(onClick = onNavigateBack)
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Games Hub",
+                        color = VantafynColors.Ink,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (systems.isNotEmpty()) "${systems.size} systems • ${games.size} games" else "Retro arcade & collection",
+                        color = VantafynColors.Muted,
+                        fontSize = 12.sp,
+                    )
+                }
             }
         }
 
@@ -457,6 +494,7 @@ fun GamesHomeScreen(
             }
         }
     }
+}
 }
 
 @Composable

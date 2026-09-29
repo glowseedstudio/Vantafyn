@@ -133,34 +133,24 @@ fun RetroTouchOverlay(
                             )
                         }
 
-                        // Center: START & Menu
+                        // Right: Menu & R Bumper
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            TouchPillButton(
-                                label = "START",
-                                color = Color(0xFFFF4365),
-                                onPress = { isDown ->
-                                    if (isDown) performHaptic()
-                                    onButtonPress(RetroButton.Start, isDown)
-                                },
-                            )
                             MenuPauseButton(onMenuClick = {
                                 performHaptic()
                                 onMenuClick()
                             })
+                            TouchBumperButton(
+                                label = "R",
+                                width = 68.dp,
+                                onPress = { isDown ->
+                                    if (isDown) performHaptic()
+                                    onButtonPress(RetroButton.R1, isDown)
+                                },
+                            )
                         }
-
-                        // Right: R Bumper
-                        TouchBumperButton(
-                            label = "R",
-                            width = 68.dp,
-                            onPress = { isDown ->
-                                if (isDown) performHaptic()
-                                onButtonPress(RetroButton.R1, isDown)
-                            },
-                        )
                     }
                 }
 
@@ -193,13 +183,15 @@ fun RetroTouchOverlay(
                             )
                         }
 
-                        MenuPauseButton(onMenuClick = {
-                            performHaptic()
-                            onMenuClick()
-                        })
-
-                        // Right: R2 & R1
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        // Right: Menu, R2 & R1
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            MenuPauseButton(onMenuClick = {
+                                performHaptic()
+                                onMenuClick()
+                            })
                             TouchBumperButton(
                                 label = "R2",
                                 width = 58.dp,
@@ -226,8 +218,8 @@ fun RetroTouchOverlay(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .align(Alignment.TopCenter),
-                        contentAlignment = Alignment.Center,
+                            .align(Alignment.TopEnd),
+                        contentAlignment = Alignment.CenterEnd,
                     ) {
                         MenuPauseButton(onMenuClick = {
                             performHaptic()
@@ -253,18 +245,22 @@ fun RetroTouchOverlay(
                             },
                         )
 
-                        MenuPauseButton(onMenuClick = {
-                            performHaptic()
-                            onMenuClick()
-                        })
-
-                        TouchBumperButton(
-                            label = "R",
-                            onPress = { isDown ->
-                                if (isDown) performHaptic()
-                                onButtonPress(RetroButton.R1, isDown)
-                            },
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            MenuPauseButton(onMenuClick = {
+                                performHaptic()
+                                onMenuClick()
+                            })
+                            TouchBumperButton(
+                                label = "R",
+                                onPress = { isDown ->
+                                    if (isDown) performHaptic()
+                                    onButtonPress(RetroButton.R1, isDown)
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -335,14 +331,14 @@ fun RetroTouchOverlay(
                 }
             }
 
-            // ── BOTTOM CENTER: SELECT & START (FOR NON-N64 SYSTEMS) ─────
-            if (layout != RetroControllerLayout.Nintendo64) {
-                Row(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
+            // ── BOTTOM CENTER: SELECT & START ──────────────────────────
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                if (layout != RetroControllerLayout.Nintendo64) {
                     TouchPillButton(
                         label = "SELECT",
                         onPress = { isDown ->
@@ -350,14 +346,15 @@ fun RetroTouchOverlay(
                             onButtonPress(RetroButton.Select, isDown)
                         },
                     )
-                    TouchPillButton(
-                        label = "START",
-                        onPress = { isDown ->
-                            if (isDown) performHaptic()
-                            onButtonPress(RetroButton.Start, isDown)
-                        },
-                    )
                 }
+                TouchPillButton(
+                    label = "START",
+                    color = if (layout == RetroControllerLayout.Nintendo64) Color(0xFFFF4365) else Color.White.copy(alpha = 0.85f),
+                    onPress = { isDown ->
+                        if (isDown) performHaptic()
+                        onButtonPress(RetroButton.Start, isDown)
+                    },
+                )
             }
 
             // ── BOTTOM RIGHT: ACTION BUTTONS ────────────────────────────
@@ -411,9 +408,12 @@ fun RetroTouchOverlay(
 }
 
 @Composable
-private fun MenuPauseButton(onMenuClick: () -> Unit) {
+private fun MenuPauseButton(
+    onMenuClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(44.dp)
             .clip(CircleShape)
             .background(Color(0x66000000))

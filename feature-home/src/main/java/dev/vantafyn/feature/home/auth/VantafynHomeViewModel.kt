@@ -1568,6 +1568,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun refreshGames() {
+        refreshGameTrackerData()
+        loadGames()
+    }
+
     fun loadGames() {
         val session = _state.value.session ?: return
         viewModelScope.launch {
@@ -1582,13 +1587,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             if (library != null) {
                 val systems = gamesRepository.getGameSystems(session, library.id).getOrDefault(emptyList())
+                val currentSelectedSystem = _state.value.selectedGameSystem
+                val activeSys = systems.firstOrNull { it.id == currentSelectedSystem?.id }
                 _state.update {
                     it.copy(
                         gameSystems = systems,
+                        selectedGameSystem = activeSys,
+                    )
+                }
+                val systemsToLoad = if (activeSys != null) listOf(activeSys) else systems
+                val allGames = mutableListOf<GameSummary>()
+                for (sys in systemsToLoad) {
+                    val res = gamesRepository.getGames(session, library.id, sys.id).getOrDefault(emptyList())
+                    allGames.addAll(res)
+                }
+                _state.update {
+                    it.copy(
+                        gamesList = allGames,
                         isLoadingGames = false,
                     )
                 }
-                loadGamesForSystem(null)
             } else {
                 _state.update { it.copy(isLoadingGames = false) }
             }
@@ -6019,7 +6037,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.28")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.29")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()

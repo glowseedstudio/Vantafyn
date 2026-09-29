@@ -135,15 +135,27 @@ class GameStorageManager(
         kind: GameSaveKind = GameSaveKind.State,
     ): ByteArray? = withContext(Dispatchers.IO) {
         val localFile = getLocalSaveFile(gameId, kind)
-        val cloudSave = gamesRepository.getCloudSave(session, gameId, kind).getOrNull()
-
-        if (cloudSave != null && cloudSave.isNotEmpty()) {
-            localFile.writeBytes(cloudSave)
-            return@withContext cloudSave
-        }
-
         if (localFile.exists() && localFile.length() > 0) {
             return@withContext localFile.readBytes()
+        }
+
+        if (kind == GameSaveKind.Sram) {
+            val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val altSrm = File(savesDir, "$safeId.srm")
+            if (altSrm.exists() && altSrm.length() > 0) {
+                return@withContext altSrm.readBytes()
+            }
+            val altSav = File(savesDir, "$safeId.sav")
+            if (altSav.exists() && altSav.length() > 0) {
+                return@withContext altSav.readBytes()
+            }
+        }
+
+        val cloudSave = gamesRepository.getCloudSave(session, gameId, kind).getOrNull()
+        if (cloudSave != null && cloudSave.isNotEmpty()) {
+            localFile.parentFile?.mkdirs()
+            localFile.writeBytes(cloudSave)
+            return@withContext cloudSave
         }
 
         null
@@ -157,8 +169,13 @@ class GameStorageManager(
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val localFile = getLocalSaveFile(gameId, kind)
+            localFile.parentFile?.mkdirs()
             localFile.writeBytes(data)
-            gamesRepository.uploadCloudSave(session, gameId, kind, data).getOrThrow()
+            val cloudRes = gamesRepository.uploadCloudSave(session, gameId, kind, data)
+            if (cloudRes.isFailure) {
+                android.util.Log.w("GameStorageManager", "Cloud save sync error: ${cloudRes.exceptionOrNull()?.message}")
+            }
+            Unit
         }
     }
 

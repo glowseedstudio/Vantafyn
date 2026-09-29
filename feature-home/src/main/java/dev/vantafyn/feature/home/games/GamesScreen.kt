@@ -25,6 +25,8 @@ fun GamesScreen(
     totalPlayTimeMs: Long,
     selectedSystem: GameSystem?,
     isLoadingGames: Boolean,
+    isRefreshing: Boolean = false,
+    onRefresh: () -> Unit = {},
     onSelectTab: (GamesTab) -> Unit,
     onSelectSystem: (GameSystem?) -> Unit,
     onOpenGame: (GameSummary) -> Unit,
@@ -48,6 +50,8 @@ fun GamesScreen(
                     games = games,
                     recentGames = recentGames,
                     totalPlayTimeMs = totalPlayTimeMs,
+                    isRefreshing = isRefreshing,
+                    onRefresh = onRefresh,
                     onOpenGame = onOpenGame,
                     onSelectSystem = { sys ->
                         onSelectSystem(sys)
@@ -62,6 +66,8 @@ fun GamesScreen(
                     games = games,
                     selectedSystem = selectedSystem,
                     isLoading = isLoadingGames,
+                    isRefreshing = isRefreshing,
+                    onRefresh = onRefresh,
                     onSelectSystem = onSelectSystem,
                     onOpenGame = onOpenGame,
                     onBack = {
