@@ -469,6 +469,7 @@ fun VantafynAppContent(
 
     LaunchedEffect(state.step) {
         if (state.step == VantafynSetupStep.Home) {
+            dev.vantafyn.core.integrations.updater.AppUpdateDownloader.cleanOldUpdates(context)
             val prefs = dev.vantafyn.core.integrations.updater.AppUpdatePreferences(context)
             if (prefs.shouldAutoCheck()) {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -3834,6 +3835,7 @@ private fun MobileShellScreen(
             showMusicQuickPlayer -> showMusicQuickPlayer = false
             state.confirmLogout -> onCancelLogout()
             state.mobileMessage != null -> onClearMessage()
+            state.activeGameDetail != null -> viewModel.dismissGameDetail()
             state.mobileDestination == MobileDestination.AdminUserSettings -> onCloseAdminUser()
             else -> onNavigateBack()
         }
@@ -13274,7 +13276,7 @@ private fun SettingsScreen(
                                         }
                                         add {
                                             SettingsNavigationRow(
-                                                title = "Integrations & Advanced",
+                                                title = "System & Tools",
                                                 subtitle = "Achievements, messaging, admin, permissions, version",
                                                 icon = Icons.Rounded.Tune,
                                                 onClick = {
@@ -13282,19 +13284,6 @@ private fun SettingsScreen(
                                                     currentSubScreen = SettingsSubScreen.IntegrationsAndAdvanced
                                                 },
                                             )
-                                        }
-                                        if (state.session?.user?.isAdministrator == true) {
-                                            add {
-                                                SettingsNavigationRow(
-                                                    title = "Code Services & Gift Dispatch",
-                                                    subtitle = "Gift franchise watch guides to server members",
-                                                    icon = Icons.Rounded.CardGiftcard,
-                                                    onClick = {
-                                                        SettingsUsageTracker.recordAction(context, "code_services_gift_dispatch")
-                                                        onOpenAdminCodeGiftDialog()
-                                                    },
-                                                )
-                                            }
                                         }
                                     },
                                 )
@@ -13631,6 +13620,17 @@ private fun SettingsScreen(
                                     onClick = onAdmin,
                                 )
                             }
+                            add {
+                                SettingsNavigationRow(
+                                    title = "Watch Guide Gifts",
+                                    subtitle = "Gift franchise watch guides to server members",
+                                    icon = Icons.Rounded.CardGiftcard,
+                                    onClick = {
+                                        SettingsUsageTracker.recordAction(context, "code_services_gift_dispatch")
+                                        onOpenAdminCodeGiftDialog()
+                                    },
+                                )
+                            }
                         }
                         if (state.session?.user?.isAdministrator == true || state.ombiRequestsEnabledForUsers) {
                             add {
@@ -13670,7 +13670,7 @@ private fun SettingsScreen(
                     ) {
                         item {
                             SettingsSubScreenHeader(
-                                title = "Integrations & Advanced",
+                                title = "System & Tools",
                                 onBack = { currentSubScreen = SettingsSubScreen.Main },
                             )
                         }
@@ -23791,7 +23791,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.26"
+private const val VANTAFYN_APP_VERSION = "0.9.27"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

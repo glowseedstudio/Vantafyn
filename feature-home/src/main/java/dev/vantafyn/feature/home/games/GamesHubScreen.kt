@@ -24,10 +24,14 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
@@ -36,8 +40,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +58,10 @@ import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradientIcon
+import dev.vantafyn.core.ui.VantafynGradients
+import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.feature.home.CompactBackButton
 
 @Composable
 fun GamesHubScreen(
@@ -78,30 +84,26 @@ fun GamesHubScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0C))
-            .padding(top = 16.dp),
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .padding(top = 12.dp),
     ) {
         // Top Bar: Back Button, Title, and Search
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(Color(0x22FFFFFF)),
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Rounded.ArrowBack,
-                    contentDescription = "Back",
-                    tint = VantafynColors.Ink,
-                )
-            }
+            CompactBackButton(
+                onClick = {
+                    if (selectedSystem != null) {
+                        onSelectSystem(null)
+                    } else {
+                        onBack()
+                    }
+                },
+            )
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -122,26 +124,22 @@ fun GamesHubScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            TextField(
+            VantafynTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF16161D))
-                    .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(16.dp)),
-                placeholder = { Text("Search games...", color = VantafynColors.Muted) },
+                label = "Search games...",
+                placeholder = "Search games...",
                 leadingIcon = {
-                    Icon(
+                    VantafynGradientIcon(
                         imageVector = Icons.Rounded.Search,
                         contentDescription = null,
-                        tint = VantafynColors.Primary,
+                        modifier = Modifier.size(20.dp),
                     )
                 },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
+                trailingIcon = if (searchQuery.isNotEmpty()) {
+                    {
                         IconButton(onClick = { searchQuery = "" }) {
                             Icon(
                                 imageVector = Icons.Rounded.Close,
@@ -150,17 +148,7 @@ fun GamesHubScreen(
                             )
                         }
                     }
-                },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent,
-                    cursorColor = VantafynColors.Primary,
-                    focusedTextColor = VantafynColors.Ink,
-                    unfocusedTextColor = VantafynColors.Ink,
-                ),
-                singleLine = true,
+                } else null,
             )
         }
 
@@ -254,13 +242,13 @@ private fun SystemFilterPill(
 ) {
     val bgModifier = if (isSelected) {
         Modifier.background(
-            Brush.horizontalGradient(listOf(VantafynColors.Primary, VantafynColors.Secondary)),
+            VantafynGradients.accentHorizontal(),
             RoundedCornerShape(20.dp),
         )
     } else {
         Modifier
-            .background(Color(0xFF16161D), RoundedCornerShape(20.dp))
-            .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(20.dp))
+            .background(Color(0xFF16161D).copy(alpha = 0.65f), RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
     }
 
     Box(
@@ -278,14 +266,14 @@ private fun SystemFilterPill(
         ) {
             Text(
                 text = label,
-                color = if (isSelected) Color.Black else Color.White,
+                color = if (isSelected) Color.White else VantafynColors.Ink.copy(alpha = 0.85f),
                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                 fontSize = 13.sp,
             )
             if (count > 0) {
                 Text(
                     text = "($count)",
-                    color = if (isSelected) Color.Black.copy(alpha = 0.7f) else VantafynColors.Muted,
+                    color = if (isSelected) Color.White.copy(alpha = 0.85f) else VantafynColors.Muted,
                     fontSize = 11.sp,
                 )
             }
@@ -302,8 +290,8 @@ private fun GameCard(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF14141B))
-            .border(1.dp, Color(0x1EFFFFFF), RoundedCornerShape(16.dp))
+            .background(Color(0xFF14141B).copy(alpha = 0.72f))
+            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(10.dp),
     ) {
@@ -398,17 +386,13 @@ private fun GameCard(
                     modifier = Modifier
                         .size(26.dp)
                         .clip(CircleShape)
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(VantafynColors.Primary, VantafynColors.Secondary)
-                            )
-                        ),
+                        .background(VantafynGradients.accentHorizontal()),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.PlayArrow,
                         contentDescription = "Play",
-                        tint = Color.Black,
+                        tint = Color.White,
                         modifier = Modifier.size(16.dp),
                     )
                 }

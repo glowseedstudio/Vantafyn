@@ -5998,7 +5998,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.26")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.27")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -6205,6 +6205,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         val snapshot = _state.value
         when (snapshot.mobileDestination) {
             MobileDestination.Player -> exitPlayback(0L)
+            MobileDestination.GamePlayer -> closeGamePlayer()
             MobileDestination.MediaDetail -> {
                 if (snapshot.previousMobileDestination == MobileDestination.MediaDetail && snapshot.previousSelectedMediaId != null) {
                     _state.update {
@@ -6249,6 +6250,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Music,
             MobileDestination.Favorites,
             MobileDestination.Requests,
+            MobileDestination.Games,
             MobileDestination.Admin,
             MobileDestination.Achievements,
             MobileDestination.Profile -> navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)

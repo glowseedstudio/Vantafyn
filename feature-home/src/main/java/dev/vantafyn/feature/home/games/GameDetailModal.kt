@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradients
 
 @Composable
 fun GameDetailModal(
@@ -240,11 +241,7 @@ fun GameDetailModal(
                             .fillMaxWidth()
                             .height(52.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(
-                                Brush.horizontalGradient(
-                                    listOf(VantafynColors.Primary, VantafynColors.Secondary)
-                                )
-                            )
+                            .background(VantafynGradients.accentHorizontal())
                             .clickable { onPlay(game) },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -255,12 +252,12 @@ fun GameDetailModal(
                             Icon(
                                 imageVector = Icons.Rounded.PlayArrow,
                                 contentDescription = null,
-                                tint = Color.Black,
+                                tint = Color.White,
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(
                                 text = "PLAY GAME",
-                                color = Color.Black,
+                                color = Color.White,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 15.sp,
                                 letterSpacing = 1.sp,

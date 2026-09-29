@@ -21,6 +21,48 @@ class AppUpdateDownloader(
         private const val TAG = "AppUpdateDownloader"
         private const val BUFFER_SIZE = 16 * 1024
         private const val MAX_REDIRECTS = 5
+
+        /**
+         * Cleans up stale partial downloads and any downloaded update APK whose version
+         * has already been installed on this device, preventing storage bloat.
+         */
+        fun cleanOldUpdates(context: Context) {
+            runCatching {
+                val updatesDir = File(context.cacheDir, "updates")
+                if (!updatesDir.exists()) return@runCatching
+
+                val currentVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                    context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toLong()
+                }
+
+                updatesDir.listFiles()?.forEach { file ->
+                    if (file.name.endsWith(".tmp")) {
+                        file.delete()
+                    } else if (file.name.endsWith(".apk")) {
+                        val archiveInfo = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+                        if (archiveInfo == null) {
+                            file.delete()
+                        } else {
+                            val apkVersionCode = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                                archiveInfo.longVersionCode
+                            } else {
+                                @Suppress("DEPRECATION")
+                                archiveInfo.versionCode.toLong()
+                            }
+                            if (currentVersionCode >= apkVersionCode) {
+                                file.delete()
+                                Log.i(TAG, "Cleaned up old update APK ${file.name} as current app version is already installed ($currentVersionCode >= $apkVersionCode)")
+                            }
+                        }
+                    }
+                }
+            }.onFailure { e ->
+                Log.w(TAG, "Failed to clean old updates: ${e.message}")
+            }
+        }
     }
 
     suspend fun downloadApk(

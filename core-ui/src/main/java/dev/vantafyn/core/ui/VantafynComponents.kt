@@ -71,8 +71,10 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.graphicsLayer
@@ -833,6 +835,31 @@ fun VantafynGradientButton(
 }
 
 @Composable
+fun VantafynGradientIcon(
+    imageVector: ImageVector,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    brush: Brush = VantafynGradients.accentHorizontal(),
+) {
+    Icon(
+        imageVector = imageVector,
+        contentDescription = contentDescription,
+        tint = Color.White,
+        modifier = modifier
+            .graphicsLayer {
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = brush,
+                    blendMode = BlendMode.SrcIn,
+                )
+            },
+    )
+}
+
+@Composable
 fun VantafynTextField(
     value: String,
     onValueChange: (String) -> Unit,
@@ -843,6 +870,7 @@ fun VantafynTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
     tvKeyboardRequiresClick: Boolean = false,
+    leadingIcon: (@Composable () -> Unit)? = null,
     trailingIcon: (@Composable () -> Unit)? = null,
 ) {
     var editing by remember { mutableStateOf(!tvKeyboardRequiresClick) }
@@ -956,6 +984,7 @@ fun VantafynTextField(
                 overflow = TextOverflow.Ellipsis,
             )
         },
+        leadingIcon = leadingIcon,
         trailingIcon = trailingIcon,
         singleLine = true,
         enabled = enabled,
