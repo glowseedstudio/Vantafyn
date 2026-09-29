@@ -85,6 +85,7 @@ class DefaultJellyfinGamesRepository(
                             extensions = extensions,
                             gameCount = obj.optInt("gameCount", 0),
                             icon = obj.optString("icon", obj.getString("id")),
+                            logoUrl = obj.optString("logoUrl", "").ifBlank { null },
                         )
                     )
                 }
@@ -114,15 +115,22 @@ class DefaultJellyfinGamesRepository(
                     } else {
                         "${session.server.url.trimEnd('/')}/${rawBoxart.trimStart('/')}?api_key=${session.accessToken}"
                     }
+                    val id = obj.optString("id", "")
+                    val token = obj.optString("token", id)
+                    val filename = obj.optString("fileName", obj.optString("filename", ""))
+                    val extension = obj.optString("extension", filename.substringAfterLast('.', ""))
+                    val system = obj.optString("system", obj.optString("systemId", systemId))
+                    val size = if (obj.has("sizeBytes")) obj.optLong("sizeBytes", 0L) else obj.optLong("size", 0L)
+
                     list.add(
                         GameSummary(
-                            id = obj.getString("id"),
-                            title = obj.getString("title"),
-                            systemId = obj.optString("systemId", systemId),
-                            filename = obj.optString("filename", ""),
-                            sizeBytes = obj.optLong("size", 0L),
-                            token = obj.optString("token", ""),
-                            extension = obj.optString("extension", ""),
+                            id = id,
+                            title = obj.optString("title", ""),
+                            systemId = system,
+                            filename = filename,
+                            sizeBytes = size,
+                            token = token,
+                            extension = extension,
                             boxartUrl = fullBoxartUrl,
                         )
                     )
@@ -142,9 +150,18 @@ class DefaultJellyfinGamesRepository(
                 checkResponseCode(conn)
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val obj = JSONObject(body)
-                val token = obj.optString("token", "")
-                val relativeUrl = obj.optString("downloadUrl", "Vantafyn/Games/$libraryId/ROM/$token")
+                val id = obj.optString("id", gameId)
+                val token = obj.optString("token", id)
+                val filename = obj.optString("fileName", obj.optString("filename", ""))
+                val extension = obj.optString("extension", filename.substringAfterLast('.', ""))
+                val system = obj.optString("system", obj.optString("systemId", ""))
+                val core = obj.optString("core", "")
+                val size = if (obj.has("sizeBytes")) obj.optLong("sizeBytes", 0L) else obj.optLong("size", 0L)
+
+                val rawRelativeUrl = obj.optString("downloadUrl", "")
+                val relativeUrl = if (rawRelativeUrl.isNotBlank()) rawRelativeUrl else "Vantafyn/Games/$libraryId/ROM/$token"
                 val fullDownloadUrl = "${session.server.url.trimEnd('/')}/${relativeUrl.trimStart('/')}?api_key=${session.accessToken}"
+
                 val rawBoxart = obj.optString("boxartUrl", "")
                 val fullBoxartUrl = if (rawBoxart.isBlank()) {
                     null
@@ -154,16 +171,16 @@ class DefaultJellyfinGamesRepository(
                     "${session.server.url.trimEnd('/')}/${rawBoxart.trimStart('/')}?api_key=${session.accessToken}"
                 }
                 GameDetail(
-                    id = obj.getString("id"),
-                    title = obj.getString("title"),
-                    systemId = obj.optString("systemId", ""),
-                    filename = obj.optString("filename", ""),
-                    sizeBytes = obj.optLong("size", 0L),
+                    id = id,
+                    title = obj.optString("title", ""),
+                    systemId = system,
+                    filename = filename,
+                    sizeBytes = size,
                     token = token,
-                    extension = obj.optString("extension", ""),
-                    core = obj.optString("core", ""),
-                    cleanTitle = obj.optString("cleanTitle", cleanGameTitle(obj.getString("title"))),
-                    region = obj.optString("region", "").ifEmpty { extractGameRegion(obj.getString("title")) },
+                    extension = extension,
+                    core = core,
+                    cleanTitle = obj.optString("cleanTitle", cleanGameTitle(obj.optString("title", ""))),
+                    region = obj.optString("region", "").ifEmpty { extractGameRegion(obj.optString("title", "")) },
                     downloadUrl = fullDownloadUrl,
                     boxartUrl = fullBoxartUrl,
                 )

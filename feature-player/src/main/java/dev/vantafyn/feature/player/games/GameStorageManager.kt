@@ -5,6 +5,7 @@ import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.jellyfin.mediaBrowserAuthHeader
 import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
@@ -39,7 +40,9 @@ class GameStorageManager(
         game: GameDetail,
         onProgress: (Float) -> Unit = {},
     ): File = withContext(Dispatchers.IO) {
-        val target = getCachedRomFile(game.token.ifEmpty { game.id }, game.extension)
+        val token = game.token.ifEmpty { game.id }
+        val ext = game.extension.ifEmpty { game.filename.substringAfterLast('.', "") }
+        val target = getCachedRomFile(token, ext)
         if (target.exists() && target.length() > 0) {
             onProgress(1f)
             return@withContext target
@@ -48,14 +51,52 @@ class GameStorageManager(
         val tempFile = File(romsDir, "${target.name}.tmp")
         if (tempFile.exists()) tempFile.delete()
 
-        val downloadUrl = game.downloadUrl.ifEmpty {
-            gamesRepository.getRomDownloadUrl(session, libraryId, game.token)
+        val downloadUrl = if (game.downloadUrl.isNotBlank() && !game.downloadUrl.contains("/ROM/?")) {
+            game.downloadUrl
+        } else {
+            gamesRepository.getRomDownloadUrl(session, libraryId, token)
         }
 
-        val conn = (URL(downloadUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 15_000
-            readTimeout = 60_000
+        var currentUrl = downloadUrl
+        var conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 30_000
+            readTimeout = 90_000
+            instanceFollowRedirects = true
             setRequestProperty("Accept", "*/*")
+            val authHeader = session.mediaBrowserAuthHeader()
+            setRequestProperty("Authorization", authHeader)
+            setRequestProperty("X-Emby-Token", session.accessToken)
+            setRequestProperty("X-MediaBrowser-Token", session.accessToken)
+            setRequestProperty("X-Emby-Authorization", authHeader)
+        }
+
+        var responseCode = conn.responseCode
+        if (responseCode == HttpURLConnection.HTTP_MOVED_TEMP ||
+            responseCode == HttpURLConnection.HTTP_MOVED_PERM ||
+            responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
+            responseCode == 307 || responseCode == 308) {
+            val redirectUrl = conn.getHeaderField("Location")
+            if (!redirectUrl.isNullOrBlank()) {
+                conn.disconnect()
+                currentUrl = redirectUrl
+                conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 30_000
+                    readTimeout = 90_000
+                    instanceFollowRedirects = true
+                    setRequestProperty("Accept", "*/*")
+                    val authHeader = session.mediaBrowserAuthHeader()
+                    setRequestProperty("Authorization", authHeader)
+                    setRequestProperty("X-Emby-Token", session.accessToken)
+                    setRequestProperty("X-MediaBrowser-Token", session.accessToken)
+                    setRequestProperty("X-Emby-Authorization", authHeader)
+                }
+                responseCode = conn.responseCode
+            }
+        }
+
+        if (responseCode !in 200..299) {
+            val errorMsg = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            throw IllegalStateException("Server returned HTTP $responseCode downloading ROM ($currentUrl). $errorMsg".trim())
         }
 
         val totalLength = conn.contentLengthLong.coerceAtLeast(1L)

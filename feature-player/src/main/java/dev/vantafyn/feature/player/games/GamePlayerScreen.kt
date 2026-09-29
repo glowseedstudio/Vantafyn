@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import dev.vantafyn.core.jellyfin.GameDetail
+import dev.vantafyn.core.jellyfin.GamePlayTracker
 import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
@@ -354,8 +355,15 @@ fun GamePlayerScreen(
         )
     }
 
-    DisposableEffect(Unit) {
+    DisposableEffect(game.id) {
+        val startTime = System.currentTimeMillis()
+        val tracker = GamePlayTracker(context)
+        tracker.recordGameLaunched(game)
         onDispose {
+            val durationMs = System.currentTimeMillis() - startTime
+            if (durationMs > 2000L) {
+                tracker.recordPlaySession(game, durationMs)
+            }
             webViewInstance?.destroy()
             webViewInstance = null
         }
@@ -366,16 +374,17 @@ fun GamePlayerScreen(
  * Generates the self-contained HTML/JS emulator runner that interfaces with the WebAssembly Libretro core.
  */
 private fun generateEmulatorHtml(systemId: String, core: String): String {
-    val systemCoreName = when (systemId.lowercase()) {
-        "nes" -> "nes"
-        "snes" -> "snes"
-        "gb", "gbc" -> "gb"
-        "gba" -> "gba"
-        "sega", "genesis", "megadrive", "segamd" -> "segaMD"
-        "n64" -> "n64"
-        "nds" -> "nds"
-        "psx", "ps1" -> "psx"
-        else -> systemId.lowercase()
+    val key = core.ifBlank { systemId }.lowercase().trim()
+    val systemCoreName = when {
+        key == "gba" || key.contains("advance") -> "gba"
+        key == "gb" || key == "gbc" || key.contains("color") -> "gb"
+        key == "snes" || key.contains("super nintendo") -> "snes"
+        key == "nes" || key.contains("famicom") -> "nes"
+        key == "segamd" || key.contains("genesis") || key.contains("sega") || key.contains("megadrive") -> "segaMD"
+        key == "n64" || key.contains("nintendo 64") -> "n64"
+        key == "nds" || key.contains("ds") -> "nds"
+        key == "psx" || key == "ps1" || key.contains("playstation") -> "psx"
+        else -> key
     }
 
     return """
@@ -388,6 +397,25 @@ private fun generateEmulatorHtml(systemId: String, core: String): String {
                 body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; }
                 #game-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
                 canvas { width: 100% !important; height: 100% !important; object-fit: contain; image-rendering: pixelated; }
+
+                /* Completely hide and disable EmulatorJS built-in virtual touch controls */
+                .ejs_virtualGamepad_parent,
+                .ejs_virtualGamepad_open,
+                [class*="ejs_virtualGamepad"],
+                .ejs_dpad_main,
+                .b_speed_fast,
+                .b_speed_slow,
+                .b_speed_rewind {
+                    display: none !important;
+                    visibility: hidden !important;
+                    opacity: 0 !important;
+                    pointer-events: none !important;
+                    width: 0 !important;
+                    height: 0 !important;
+                    position: absolute !important;
+                    top: -9999px !important;
+                    left: -9999px !important;
+                }
             </style>
         </head>
         <body>
@@ -401,8 +429,36 @@ private fun generateEmulatorHtml(systemId: String, core: String): String {
                 window.EJS_color = '#21D8FF';
                 window.EJS_backgroundColor = '#000000';
                 window.EJS_disableUI = true;
+                window.EJS_defaultOptions = {
+                    'virtual-gamepad': 'disabled',
+                    'menu-bar-button': 'hidden'
+                };
+
+                var cleanUpBuiltinControls = function() {
+                    var elems = document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="ejs_virtualGamepad"], .ejs_dpad_main, .b_speed_fast, .b_speed_slow');
+                    for (var i = 0; i < elems.length; i++) {
+                        elems[i].style.display = 'none';
+                        try { elems[i].remove(); } catch(e) {}
+                    }
+                    if (window.EJS_emulator) {
+                        if (window.EJS_emulator.toggleVirtualGamepad) {
+                            try { window.EJS_emulator.toggleVirtualGamepad(false); } catch(e) {}
+                        }
+                        if (window.EJS_emulator.virtualGamepad) {
+                            window.EJS_emulator.virtualGamepad.style.display = 'none';
+                            try { window.EJS_emulator.virtualGamepad.remove(); } catch(e) {}
+                        }
+                        if (window.EJS_emulator.elements && window.EJS_emulator.elements.menuToggle) {
+                            window.EJS_emulator.elements.menuToggle.style.display = 'none';
+                            try { window.EJS_emulator.elements.menuToggle.remove(); } catch(e) {}
+                        }
+                    }
+                };
+
+                setInterval(cleanUpBuiltinControls, 300);
 
                 window.EJS_onGameStart = function() {
+                    cleanUpBuiltinControls();
                     if (window.VantafynBridge) {
                         window.VantafynBridge.onGameReady();
                     }
@@ -456,8 +512,36 @@ private fun generateEmulatorHtml(systemId: String, core: String): String {
                         }
                     },
                     setButton: function(btn, isDown) {
-                        if (window.EJS_emulator && window.EJS_emulator.pressButton) {
-                            window.EJS_emulator.pressButton(btn, isDown);
+                        var btnMap = {
+                            'b': 0,
+                            'y': 1,
+                            'select': 2,
+                            'start': 3,
+                            'up': 4,
+                            'down': 5,
+                            'left': 6,
+                            'right': 7,
+                            'a': 8,
+                            'x': 9,
+                            'l1': 10,
+                            'l': 10,
+                            'r1': 11,
+                            'r': 11,
+                            'l2': 12,
+                            'r2': 13
+                        };
+                        var idx = btnMap[btn.toLowerCase()];
+                        if (idx !== undefined && window.EJS_emulator) {
+                            var val = isDown ? 1 : 0;
+                            try {
+                                if (window.EJS_emulator.gameManager && typeof window.EJS_emulator.gameManager.simulateInput === 'function') {
+                                    window.EJS_emulator.gameManager.simulateInput(0, idx, val);
+                                } else if (window.EJS_emulator.gameManager && window.EJS_emulator.gameManager.functions && typeof window.EJS_emulator.gameManager.functions.simulateInput === 'function') {
+                                    window.EJS_emulator.gameManager.functions.simulateInput(0, idx, val);
+                                }
+                            } catch(e) {
+                                console.error('Error simulating input:', e);
+                            }
                         }
                     },
                     destroy: function() {

@@ -38,6 +38,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.coil.svg)
     implementation(libs.kotlinx.coroutines.android)
     testImplementation(libs.junit)
     testImplementation("org.json:json:20240303")

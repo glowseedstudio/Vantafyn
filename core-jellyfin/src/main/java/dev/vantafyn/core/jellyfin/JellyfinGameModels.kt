@@ -26,7 +26,68 @@ data class GameSystem(
     val extensions: List<String> = emptyList(),
     val gameCount: Int = 0,
     val icon: String = "",
-) : Serializable
+    val logoUrl: String? = null,
+) : Serializable {
+    val displayName: String
+        get() = resolveSystemDisplayName(id, name)
+
+    val officialLogoUrl: String
+        get() = logoUrl?.takeIf { it.isNotBlank() } ?: resolveSystemLogoUrl(id, core)
+}
+
+fun resolveSystemDisplayName(id: String, rawName: String): String {
+    val key = id.lowercase().trim()
+    return when {
+        key == "gba" || key == "gameboyadvance" -> "Game Boy Advance"
+        key == "snes" || key == "sfc" || key == "supernintendo" -> "Super Nintendo"
+        key == "nes" || key == "famicom" -> "Nintendo Entertainment System"
+        key == "n64" || key == "nintendo64" -> "Nintendo 64"
+        key == "gb" || key == "gameboy" -> "Game Boy"
+        key == "gbc" || key == "gameboycolor" -> "Game Boy Color"
+        key == "nds" || key == "ds" || key == "nintendods" -> "Nintendo DS"
+        key == "psx" || key == "ps1" || key == "playstation" -> "Sony PlayStation"
+        key == "psp" || key == "playstationportable" -> "PlayStation Portable"
+        key == "segamd" || key == "genesis" || key == "megadrive" -> "Sega Genesis"
+        key == "segams" || key == "mastersystem" -> "Sega Master System"
+        key == "segagg" || key == "gamegear" -> "Sega Game Gear"
+        key == "dreamcast" || key == "dc" -> "Sega Dreamcast"
+        key == "atari2600" || key == "a2600" -> "Atari 2600"
+        key == "atari7800" || key == "a7800" -> "Atari 7800"
+        key == "arcade" || key == "mame" || key == "fbneo" -> "Arcade Classics"
+        key == "neogeo" || key == "ngp" || key == "ngpc" -> "SNK Neo Geo"
+        key == "wonderswan" || key == "ws" || key == "wsc" -> "Bandai WonderSwan"
+        key == "pcengine" || key == "pce" || key == "tg16" || key == "turbografx16" -> "PC Engine / TurboGrafx"
+        rawName.isNotBlank() -> rawName
+        else -> id.uppercase()
+    }
+}
+
+fun resolveSystemLogoUrl(id: String, core: String): String {
+    val key = (if (id.isNotBlank()) id else core).lowercase().trim()
+    val themeFolder = when {
+        key.contains("gba") || key.contains("advance") -> "gba"
+        key.contains("snes") || key.contains("sfc") -> "snes"
+        key.contains("nes") || key.contains("famicom") -> "nes"
+        key.contains("n64") -> "n64"
+        key.contains("gbc") -> "gbc"
+        key == "gb" || key.contains("gameboy") -> "gb"
+        key.contains("nds") || key == "ds" -> "nds"
+        key.contains("psx") || key.contains("ps1") || key.contains("playstation") -> "psx"
+        key.contains("psp") -> "psp"
+        key.contains("genesis") || key.contains("megadrive") || key.contains("segamd") -> "genesis"
+        key.contains("mastersystem") || key.contains("segams") -> "mastersystem"
+        key.contains("gamegear") || key.contains("segagg") -> "gamegear"
+        key.contains("dreamcast") -> "dreamcast"
+        key.contains("atari2600") -> "atari2600"
+        key.contains("atari7800") -> "atari7800"
+        key.contains("arcade") || key.contains("mame") || key.contains("fbneo") -> "arcade"
+        key.contains("neogeo") || key.contains("ngp") -> "neogeo"
+        key.contains("wonderswan") || key.contains("ws") -> "wonderswan"
+        key.contains("pcengine") || key.contains("pce") || key.contains("turbo") -> "pcengine"
+        else -> "gba"
+    }
+    return "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/$themeFolder/art/system.svg"
+}
 
 data class GameSummary(
     val id: String,

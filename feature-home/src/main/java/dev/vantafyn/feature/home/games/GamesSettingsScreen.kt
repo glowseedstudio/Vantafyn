@@ -1,0 +1,717 @@
+package dev.vantafyn.feature.home.games
+
+import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.CleaningServices
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.ImageSearch
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Vibration
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
+import dev.vantafyn.core.jellyfin.GameSummary
+import dev.vantafyn.core.jellyfin.GameSystem
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import dev.vantafyn.core.ui.VantafynColors
+import dev.vantafyn.core.ui.VantafynGradients
+import dev.vantafyn.feature.home.CompactBackButton
+import java.io.File
+
+@Composable
+fun GamesSettingsScreen(
+    onBack: () -> Unit,
+    games: List<GameSummary> = emptyList(),
+    systems: List<GameSystem> = emptyList(),
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE) }
+    val coroutineScope = rememberCoroutineScope()
+
+    var isScraping by remember { mutableStateOf(false) }
+    var scrapeProgress by remember { mutableStateOf(0f) }
+    var currentScrapingTitle by remember { mutableStateOf("") }
+    var scrapeMatchedCount by remember { mutableStateOf(0) }
+    var scrapeCompletedMessage by remember { mutableStateOf<String?>(null) }
+
+    var hapticsEnabled by remember {
+        mutableStateOf(prefs.getBoolean("haptics_enabled", true))
+    }
+    var selectedAspectRatio by remember {
+        mutableStateOf(prefs.getString("default_aspect_ratio", "4:3") ?: "4:3")
+    }
+    var fastForwardSpeed by remember {
+        mutableStateOf(prefs.getString("fast_forward_speed", "2x") ?: "2x")
+    }
+    var romCacheSize by remember { mutableLongStateOf(0L) }
+    var romFileCount by remember { mutableStateOf(0) }
+    var cacheClearedMessage by remember { mutableStateOf<String?>(null) }
+
+    fun calculateRomCache() {
+        val romDir = File(context.cacheDir, "retro_roms")
+        if (romDir.exists() && romDir.isDirectory) {
+            val files = romDir.listFiles().orEmpty()
+            romFileCount = files.size
+            romCacheSize = files.sumOf { it.length() }
+        } else {
+            romFileCount = 0
+            romCacheSize = 0L
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        calculateRomCache()
+    }
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+        contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        // 1. Top Bar
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                CompactBackButton(onClick = onBack)
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Retro Settings",
+                        color = VantafynColors.Ink,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Emulation, controls & storage",
+                        color = VantafynColors.Muted,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+        }
+
+        // 2. Display & Aspect Ratio
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "DISPLAY & VIDEO",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.AspectRatio,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text(
+                                text = "Default Aspect Ratio",
+                                color = VantafynColors.Ink,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf("4:3", "16:9", "1:1").forEach { ratio ->
+                                val selected = selectedAspectRatio == ratio
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) VantafynGradients.accentHorizontal()
+                                            else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                        )
+                                        .clickable {
+                                            selectedAspectRatio = ratio
+                                            prefs.edit().putString("default_aspect_ratio", ratio).apply()
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = ratio,
+                                        color = if (selected) Color.White else VantafynColors.Muted,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Controls & Haptics
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "CONTROLS & INPUT",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Vibration,
+                        contentDescription = null,
+                        tint = Color(0xFF9D00FF),
+                        modifier = Modifier.size(22.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Haptic Vibration",
+                            color = VantafynColors.Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Tactile feedback on on-screen button tap",
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    Switch(
+                        checked = hapticsEnabled,
+                        onCheckedChange = { checked ->
+                            hapticsEnabled = checked
+                            prefs.edit().putBoolean("haptics_enabled", checked).apply()
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFF00E5FF),
+                            uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
+                            uncheckedTrackColor = Color.White.copy(alpha = 0.15f),
+                        ),
+                    )
+                }
+
+                // Fast Forward Speed
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Speed,
+                                contentDescription = null,
+                                tint = Color(0xFFFF2A85),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text(
+                                text = "Fast Forward Speed",
+                                color = VantafynColors.Ink,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf("2x", "3x", "4x").forEach { speed ->
+                                val selected = fastForwardSpeed == speed
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) VantafynGradients.accentHorizontal()
+                                            else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                        )
+                                        .clickable {
+                                            fastForwardSpeed = speed
+                                            prefs.edit().putString("fast_forward_speed", speed).apply()
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = speed,
+                                        color = if (selected) Color.White else VantafynColors.Muted,
+                                        fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. ROM Storage & Cache Cleaner
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "STORAGE & ROM CACHE",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.CleaningServices,
+                                contentDescription = null,
+                                tint = Color(0xFF00E676),
+                                modifier = Modifier.size(22.dp),
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Cached Game Files",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                val mb = String.format(java.util.Locale.US, "%.1f MB", romCacheSize / (1024f * 1024f))
+                                Text(
+                                    text = "$romFileCount ROMs stored locally ($mb)",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+
+                        if (cacheClearedMessage != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00E676).copy(alpha = 0.15f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E676),
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = cacheClearedMessage.orEmpty(),
+                                    color = Color(0xFF00E676),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFFFF3366).copy(alpha = 0.12f))
+                                .border(1.dp, Color(0xFFFF3366).copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val romDir = File(context.cacheDir, "retro_roms")
+                                    if (romDir.exists()) {
+                                        romDir.listFiles()?.forEach { it.delete() }
+                                    }
+                                    calculateRomCache()
+                                    cacheClearedMessage = "ROM storage cleared! Cloud saves remain safe."
+                                }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Delete,
+                                    contentDescription = null,
+                                    tint = Color(0xFFFF5277),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = "Clear ROM Cache",
+                                    color = Color(0xFFFF5277),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. Media & Boxart Scraper Card
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "MEDIA & BOXART SCRAPING",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ImageSearch,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(22.dp),
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Scan & Scrape Library",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "${games.size} titles in library across ${systems.size} ${if (systems.size == 1) "system" else "systems"}",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+
+                        if (isScraping) {
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                LinearProgressIndicator(
+                                    progress = { scrapeProgress },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(6.dp)
+                                        .clip(RoundedCornerShape(3.dp)),
+                                    color = Color(0xFF00E5FF),
+                                    trackColor = Color.White.copy(alpha = 0.1f),
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = currentScrapingTitle,
+                                        color = VantafynColors.Ink,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = "${(scrapeProgress * 100).toInt()}%",
+                                        color = Color(0xFF00E5FF),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (scrapeCompletedMessage != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = scrapeCompletedMessage.orEmpty(),
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isScraping) SolidColor(Color.White.copy(alpha = 0.08f))
+                                    else VantafynGradients.accentHorizontal(),
+                                )
+                                .clickable(enabled = !isScraping && games.isNotEmpty()) {
+                                    isScraping = true
+                                    scrapeProgress = 0f
+                                    scrapeMatchedCount = 0
+                                    scrapeCompletedMessage = null
+
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        val total = games.size
+                                        games.forEachIndexed { index, game ->
+                                            withContext(Dispatchers.Main) {
+                                                scrapeProgress = index.toFloat() / total.coerceAtLeast(1)
+                                                currentScrapingTitle = "Scraping: ${game.cleanTitle}"
+                                            }
+
+                                            val platform = when (game.systemId.lowercase().trim()) {
+                                                "gba", "gameboyadvance" -> "Nintendo - Game Boy Advance"
+                                                "snes", "sfc", "supernintendo" -> "Nintendo - Super Nintendo Entertainment System"
+                                                "nes", "famicom" -> "Nintendo - Nintendo Entertainment System"
+                                                "n64", "nintendo64" -> "Nintendo - Nintendo 64"
+                                                "gb", "gameboy" -> "Nintendo - Game Boy"
+                                                "gbc", "gameboycolor" -> "Nintendo - Game Boy Color"
+                                                "nds", "ds", "nintendods" -> "Nintendo - Nintendo DS"
+                                                "psx", "ps1", "playstation" -> "Sony - PlayStation"
+                                                "psp", "playstationportable" -> "Sony - PlayStation Portable"
+                                                "segamd", "genesis", "megadrive" -> "Sega - Mega Drive - Genesis"
+                                                "segams", "mastersystem" -> "Sega - Master System - Mark III"
+                                                "segagg", "gamegear" -> "Sega - Game Gear"
+                                                "atari2600" -> "Atari - 2600"
+                                                "atari7800" -> "Atari - 7800"
+                                                "arcade", "mame", "fbneo" -> "FBNeo - Arcade Games"
+                                                else -> null
+                                            }
+
+                                            if (platform != null) {
+                                                val clean = game.cleanTitle
+                                                val fn = game.filename.substringBeforeLast('.')
+                                                val candidates = linkedSetOf(
+                                                    fn,
+                                                    clean,
+                                                    "$clean (USA)",
+                                                    "$clean (USA, Europe)",
+                                                    "$clean (World)",
+                                                    "$clean (Europe)",
+                                                    "$clean (Japan)",
+                                                )
+
+                                                var matchedUrl: String? = null
+                                                for (cand in candidates) {
+                                                    val encodedPlatform = URLEncoder.encode(platform, "UTF-8").replace("+", "%20")
+                                                    val encodedCandidate = URLEncoder.encode(cand, "UTF-8").replace("+", "%20")
+                                                    val urlStr = "https://thumbnails.libretro.com/$encodedPlatform/Named_Boxarts/$encodedCandidate.png"
+                                                    try {
+                                                        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
+                                                            requestMethod = "HEAD"
+                                                            connectTimeout = 3_000
+                                                            readTimeout = 3_000
+                                                        }
+                                                        if (conn.responseCode == 200) {
+                                                            matchedUrl = urlStr
+                                                            conn.disconnect()
+                                                            break
+                                                        }
+                                                        conn.disconnect()
+                                                    } catch (_: Exception) { }
+                                                }
+
+                                                if (matchedUrl != null) {
+                                                    prefs.edit().putString("boxart_${game.id}", matchedUrl).apply()
+                                                    withContext(Dispatchers.Main) {
+                                                        scrapeMatchedCount++
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        withContext(Dispatchers.Main) {
+                                            isScraping = false
+                                            scrapeProgress = 1f
+                                            scrapeCompletedMessage = "Scan complete! $total scanned • $scrapeMatchedCount covers updated."
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (isScraping) {
+                                    CircularProgressIndicator(
+                                        color = Color.White,
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Text(
+                                        text = "Scanning & Scraping...",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        text = "Start Scan & Scrape",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

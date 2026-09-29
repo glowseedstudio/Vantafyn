@@ -50,9 +50,12 @@ import dev.vantafyn.core.jellyfin.JellyfinLibraryPage
 import dev.vantafyn.core.jellyfin.DefaultJellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameLibrary
+import dev.vantafyn.core.jellyfin.GamePlayTracker
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
+import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
+import dev.vantafyn.feature.home.games.GamesTab
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.LibraryViewMode
 import dev.vantafyn.core.jellyfin.LibrariesViewMode
@@ -1504,9 +1507,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 selectedAdminUserId = if (destination == MobileDestination.AdminUserSettings) it.selectedAdminUserId else null,
                 adminUserDetail = if (destination == MobileDestination.AdminUserSettings) it.adminUserDetail else null,
                 adminUserError = if (destination == MobileDestination.AdminUserSettings) it.adminUserError else null,
+                activeGamesTab = if (destination == MobileDestination.Games) GamesTab.Home else it.activeGamesTab,
                 mobileMessage = null,
             )
         }
+        if (destination == MobileDestination.Games) refreshGameTrackerData()
         if (destination == MobileDestination.Favorites) loadFavorites()
         if (destination == MobileDestination.Admin) loadAdminOverview()
         if (destination == MobileDestination.PlaybackPreferences) loadPlaybackPreferences()
@@ -1641,10 +1646,26 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun closeGamePlayer() {
+        refreshGameTrackerData()
         _state.update {
             it.copy(
                 activeGamePlaying = null,
                 mobileDestination = MobileDestination.Games,
+            )
+        }
+    }
+
+    fun setActiveGamesTab(tab: GamesTab) {
+        _state.update { it.copy(activeGamesTab = tab) }
+        refreshGameTrackerData()
+    }
+
+    fun refreshGameTrackerData() {
+        val tracker = GamePlayTracker(getApplication<Application>())
+        _state.update {
+            it.copy(
+                recentGames = tracker.getRecentGames(10),
+                totalGamePlayTimeMs = tracker.getTotalPlayTimeMs(),
             )
         }
     }
@@ -5998,7 +6019,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.27")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.28")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -6249,8 +6270,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Search,
             MobileDestination.Music,
             MobileDestination.Favorites,
-            MobileDestination.Requests,
-            MobileDestination.Games,
+            MobileDestination.Requests -> navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
+            MobileDestination.Games -> {
+                if (snapshot.selectedGameSystem != null) {
+                    selectGameSystem(null)
+                } else if (snapshot.activeGamesTab != GamesTab.Home) {
+                    setActiveGamesTab(GamesTab.Home)
+                } else {
+                    navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
+                }
+            }
             MobileDestination.Admin,
             MobileDestination.Achievements,
             MobileDestination.Profile -> navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
@@ -10278,6 +10307,9 @@ data class VantafynHomeUiState(
     val isLoadingGames: Boolean = false,
     val activeGameDetail: GameDetail? = null,
     val activeGamePlaying: GameDetail? = null,
+    val activeGamesTab: GamesTab = GamesTab.Home,
+    val recentGames: List<RecentGameRecord> = emptyList(),
+    val totalGamePlayTimeMs: Long = 0L,
 ) {
 
     val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState?

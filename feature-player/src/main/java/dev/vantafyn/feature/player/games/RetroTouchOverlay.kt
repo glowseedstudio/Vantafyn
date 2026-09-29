@@ -6,6 +6,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -137,7 +139,7 @@ fun RetroTouchOverlay(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 20.dp),
+                    .padding(bottom = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 TouchPillButton(
@@ -189,15 +191,20 @@ private fun TouchBumperButton(
             .background(if (isPressed) Color(0x9921D8FF) else Color(0x44000000))
             .border(1.dp, Color(0x66FFFFFF), RoundedCornerShape(12.dp))
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        onPress(true)
-                        tryAwaitRelease()
-                        isPressed = false
-                        onPress(false)
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    onPress(true)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) {
+                            isPressed = false
+                            onPress(false)
+                            break
+                        }
                     }
-                )
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -226,15 +233,20 @@ private fun TouchPillButton(
             .background(if (isPressed) Color(0x88E026FF) else Color(0x44000000))
             .border(1.dp, Color(0x55FFFFFF), RoundedCornerShape(14.dp))
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        onPress(true)
-                        tryAwaitRelease()
-                        isPressed = false
-                        onPress(false)
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    onPress(true)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) {
+                            isPressed = false
+                            onPress(false)
+                            break
+                        }
                     }
-                )
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -263,31 +275,29 @@ private fun TouchDpad(
             .background(Color(0x33000000))
             .border(1.dp, Color(0x44FFFFFF), CircleShape)
             .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        val dir = resolveDirection(offset.x, offset.y, size.width.toFloat(), size.height.toFloat())
-                        if (dir != null) {
-                            activeDirection = dir
-                            onDirectionChange(dir, true)
-                        }
-                    },
-                    onDragEnd = {
-                        activeDirection?.let { onDirectionChange(it, false) }
-                        activeDirection = null
-                    },
-                    onDragCancel = {
-                        activeDirection?.let { onDirectionChange(it, false) }
-                        activeDirection = null
-                    },
-                    onDrag = { change, _ ->
-                        val dir = resolveDirection(change.position.x, change.position.y, size.width.toFloat(), size.height.toFloat())
-                        if (dir != activeDirection) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val dir = resolveDirection(down.position.x, down.position.y, size.width.toFloat(), size.height.toFloat())
+                    if (dir != null) {
+                        activeDirection = dir
+                        onDirectionChange(dir, true)
+                    }
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) {
                             activeDirection?.let { onDirectionChange(it, false) }
-                            activeDirection = dir
-                            if (dir != null) onDirectionChange(dir, true)
+                            activeDirection = null
+                            break
+                        }
+                        val currentDir = resolveDirection(change.position.x, change.position.y, size.width.toFloat(), size.height.toFloat())
+                        if (currentDir != activeDirection) {
+                            activeDirection?.let { onDirectionChange(it, false) }
+                            activeDirection = currentDir
+                            if (currentDir != null) onDirectionChange(currentDir, true)
                         }
                     }
-                )
+                }
             },
         contentAlignment = Alignment.Center,
     ) {
@@ -420,15 +430,20 @@ private fun RetroActionButton(
             .background(if (isPressed) color.copy(alpha = 0.85f) else Color(0x55000000))
             .border(2.dp, color.copy(alpha = 0.7f), CircleShape)
             .pointerInput(button) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        onPress(button, true)
-                        tryAwaitRelease()
-                        isPressed = false
-                        onPress(button, false)
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    isPressed = true
+                    onPress(button, true)
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        val change = event.changes.firstOrNull() ?: break
+                        if (!change.pressed) {
+                            isPressed = false
+                            onPress(button, false)
+                            break
+                        }
                     }
-                )
+                }
             },
         contentAlignment = Alignment.Center,
     ) {

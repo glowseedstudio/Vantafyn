@@ -11,8 +11,8 @@ android {
         applicationId = "dev.vantafyn.mobile"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 36
-        versionName = "0.9.27"
+        versionCode = 37
+        versionName = "0.9.28"
     }
 
     buildTypes {
@@ -59,6 +59,7 @@ dependencies {
 
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    implementation(libs.coil.svg)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

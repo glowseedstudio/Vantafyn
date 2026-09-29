@@ -424,6 +424,8 @@ import dev.vantafyn.feature.requests.RequestsScreen
 import dev.vantafyn.feature.home.auth.VantafynSetupStep
 import dev.vantafyn.feature.player.MobilePlayerScreen
 import dev.vantafyn.feature.home.games.GamesHubScreen
+import dev.vantafyn.feature.home.games.GamesScreen
+import dev.vantafyn.feature.home.games.GamesTab
 import dev.vantafyn.feature.home.games.GameDetailModal
 import dev.vantafyn.feature.player.games.GamePlayerScreen
 import dev.vantafyn.feature.home.auth.defaultHomeLayout
@@ -3900,14 +3902,25 @@ private fun MobileShellScreen(
                 }
                 MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
                 MobileDestination.Games -> {
-                    GamesHubScreen(
+                    val currentUser = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }
+                    val userImageUrl = currentUser?.imageUrl
+                    val userName = state.session?.user?.name?.ifEmpty { "Player" } ?: "Player"
+                    val serverName = state.session?.server?.name?.ifEmpty { "Jellyfin" } ?: "Jellyfin"
+                    GamesScreen(
+                        activeTab = state.activeGamesTab,
+                        userName = userName,
+                        userImageUrl = userImageUrl,
+                        serverName = serverName,
                         systems = state.gameSystems,
                         games = state.gamesList,
+                        recentGames = state.recentGames,
+                        totalPlayTimeMs = state.totalGamePlayTimeMs,
                         selectedSystem = state.selectedGameSystem,
-                        isLoading = state.isLoadingGames,
+                        isLoadingGames = state.isLoadingGames,
+                        onSelectTab = viewModel::setActiveGamesTab,
                         onSelectSystem = viewModel::selectGameSystem,
                         onOpenGame = viewModel::openGameDetail,
-                        onBack = onNavigateBack,
+                        onBackToMain = onNavigateBack,
                     )
                     GameDetailModal(
                         game = state.activeGameDetail,
@@ -4524,7 +4537,7 @@ private fun MobileShellScreen(
                 )
             }
             val hideBottomNavForHarmonia = state.mobileDestination == MobileDestination.Music && isHarmoniaStoryOpen
-            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.Chat && !isCarMode && !hideBottomNavForHarmonia) {
+            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.GamePlayer && state.mobileDestination != MobileDestination.Chat && !isCarMode && !hideBottomNavForHarmonia) {
                 AnimatedVisibility(
                     visible = homeEditorOpen && state.mobileDestination == MobileDestination.Home,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -4547,6 +4560,7 @@ private fun MobileShellScreen(
                 }
                 val railMode = when (state.mobileDestination) {
                     MobileDestination.Social -> NavigationRailMode.Social(state.activeSocialTab)
+                    MobileDestination.Games -> NavigationRailMode.Games(state.activeGamesTab)
                     else -> NavigationRailMode.Main(state.mobileDestination.bottomNavRoot(state.previousMobileDestination))
                 }
 
@@ -4687,6 +4701,7 @@ private fun MobileShellScreen(
                         }
                     },
                     onSocialTabSelected = onSetActiveSocialTab,
+                    onGamesTabSelected = viewModel::setActiveGamesTab,
                     onMusicLongPress = if (state.mobileDestination != MobileDestination.Music) {
                         {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -22087,6 +22102,13 @@ private fun BottomRailAccentBorder(
 sealed interface NavigationRailMode {
     data class Main(val selected: MobileDestination) : NavigationRailMode
     data class Social(val selectedTab: dev.vantafyn.feature.home.SocialTab) : NavigationRailMode
+    data class Games(val selectedTab: dev.vantafyn.feature.home.games.GamesTab) : NavigationRailMode
+}
+
+private enum class BottomNavKind {
+    Main,
+    Social,
+    Games,
 }
 
 @Composable
@@ -22209,10 +22231,30 @@ private fun SocialNavIcon(tab: dev.vantafyn.feature.home.SocialTab, selected: Bo
 }
 
 @Composable
+private fun GamesNavIcon(tab: dev.vantafyn.feature.home.games.GamesTab, selected: Boolean) {
+    if (selected) {
+        dev.vantafyn.core.ui.VantafynGradientIcon(
+            imageVector = tab.icon,
+            contentDescription = tab.label,
+            modifier = Modifier.size(23.dp),
+            brush = VantafynNavSelectedBrush(),
+        )
+    } else {
+        Icon(
+            imageVector = tab.icon,
+            contentDescription = tab.label,
+            tint = Color.White.copy(alpha = 0.78f),
+            modifier = Modifier.size(23.dp),
+        )
+    }
+}
+
+@Composable
 private fun MobileBottomNav(
     mode: NavigationRailMode,
     onSelected: (MobileDestination) -> Unit,
     onSocialTabSelected: (dev.vantafyn.feature.home.SocialTab) -> Unit,
+    onGamesTabSelected: (dev.vantafyn.feature.home.games.GamesTab) -> Unit = {},
     onMusicLongPress: (() -> Unit)?,
     isAdmin: Boolean,
     isMusicPlaying: Boolean,
@@ -22249,6 +22291,13 @@ private fun MobileBottomNav(
         }
     }
     val socialTabs = remember { dev.vantafyn.feature.home.SocialTab.entries }
+    val gamesTabs = remember { dev.vantafyn.feature.home.games.GamesTab.entries }
+
+    val currentNavKind = when (mode) {
+        is NavigationRailMode.Social -> BottomNavKind.Social
+        is NavigationRailMode.Games -> BottomNavKind.Games
+        is NavigationRailMode.Main -> BottomNavKind.Main
+    }
 
     Box(
         modifier = modifier
@@ -22271,7 +22320,7 @@ private fun MobileBottomNav(
                     modifier = Modifier.matchParentSize(),
                 )
                 AnimatedContent(
-                    targetState = mode is NavigationRailMode.Social,
+                    targetState = currentNavKind,
                     transitionSpec = {
                         val enterTransition = fadeIn(animationSpec = tween(200, delayMillis = 30, easing = FastOutSlowInEasing)) +
                             slideInVertically(animationSpec = tween(200, delayMillis = 30, easing = FastOutSlowInEasing)) { it / 5 }
@@ -22281,18 +22330,29 @@ private fun MobileBottomNav(
                     },
                     label = "navigationRailContentMode",
                     modifier = Modifier.fillMaxWidth(),
-                ) { isSocialMode ->
-                    val totalTabs = if (!isSocialMode) mainTabs.size else socialTabs.size
-                    val selectedIndex = if (!isSocialMode) {
-                        val selected = (mode as? NavigationRailMode.Main)?.selected
-                        mainTabs.indexOfFirst { destination ->
-                            selected == destination ||
-                                (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                                (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
-                        }.coerceAtLeast(0)
-                    } else {
-                        val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
-                        socialTabs.indexOfFirst { it == selectedSocialTab }.coerceAtLeast(0)
+                ) { navKind ->
+                    val totalTabs = when (navKind) {
+                        BottomNavKind.Main -> mainTabs.size
+                        BottomNavKind.Social -> socialTabs.size
+                        BottomNavKind.Games -> gamesTabs.size
+                    }
+                    val selectedIndex = when (navKind) {
+                        BottomNavKind.Main -> {
+                            val selected = (mode as? NavigationRailMode.Main)?.selected
+                            mainTabs.indexOfFirst { destination ->
+                                selected == destination ||
+                                    (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
+                                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                            }.coerceAtLeast(0)
+                        }
+                        BottomNavKind.Social -> {
+                            val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
+                            socialTabs.indexOfFirst { it == selectedSocialTab }.coerceAtLeast(0)
+                        }
+                        BottomNavKind.Games -> {
+                            val selectedGamesTab = (mode as? NavigationRailMode.Games)?.selectedTab
+                            gamesTabs.indexOfFirst { it == selectedGamesTab }.coerceAtLeast(0)
+                        }
                     }
 
                     BoxWithConstraints(
@@ -22312,76 +22372,102 @@ private fun MobileBottomNav(
                                 .height(58.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            if (!isSocialMode) {
-                                val selected = (mode as? NavigationRailMode.Main)?.selected
-                                mainTabs.forEach { destination ->
-                                    val tabSelected = selected == destination ||
-                                        (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                                        (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
-                                    val interactionSource = remember { MutableInteractionSource() }
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxSize()
-                                            .combinedClickable(
-                                                interactionSource = interactionSource,
-                                                indication = null,
-                                                onClick = { tapTrigger++; onSelected(destination) },
-                                                onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
-                                            ),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        MiniNavIcon(
-                                            destination = destination,
-                                            selected = tabSelected,
-                                            activePulse = destination == MobileDestination.Music && isMusicPlaying && !tabSelected,
-                                        )
-                                        if (
-                                            pendingOmbiAccessRequestCount > 0 &&
-                                            (destination == MobileDestination.Requests || destination == MobileDestination.Admin)
+                            when (navKind) {
+                                BottomNavKind.Main -> {
+                                    val selected = (mode as? NavigationRailMode.Main)?.selected
+                                    mainTabs.forEach { destination ->
+                                        val tabSelected = selected == destination ||
+                                            (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
+                                            (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                                        val interactionSource = remember { MutableInteractionSource() }
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxSize()
+                                                .combinedClickable(
+                                                    interactionSource = interactionSource,
+                                                    indication = null,
+                                                    onClick = { tapTrigger++; onSelected(destination) },
+                                                    onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
+                                                ),
+                                            contentAlignment = Alignment.Center,
                                         ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(top = 8.dp, end = 10.dp)
-                                                    .size(7.dp)
-                                                    .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                                            MiniNavIcon(
+                                                destination = destination,
+                                                selected = tabSelected,
+                                                activePulse = destination == MobileDestination.Music && isMusicPlaying && !tabSelected,
                                             )
+                                            if (
+                                                pendingOmbiAccessRequestCount > 0 &&
+                                                (destination == MobileDestination.Requests || destination == MobileDestination.Admin)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(top = 8.dp, end = 10.dp)
+                                                        .size(7.dp)
+                                                        .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                                                )
+                                            }
                                         }
                                     }
                                 }
-                            } else {
-                                val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
-                                socialTabs.forEach { tab ->
-                                    val tabSelected = selectedSocialTab == tab
-                                    val interactionSource = remember { MutableInteractionSource() }
-                                    val badgeCount = when (tab) {
-                                        dev.vantafyn.feature.home.SocialTab.Messages -> unreadMessagesCount
-                                        dev.vantafyn.feature.home.SocialTab.Requests -> incomingFriendRequestsCount
-                                        else -> 0
+                                BottomNavKind.Social -> {
+                                    val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
+                                    socialTabs.forEach { tab ->
+                                        val tabSelected = selectedSocialTab == tab
+                                        val interactionSource = remember { MutableInteractionSource() }
+                                        val badgeCount = when (tab) {
+                                            dev.vantafyn.feature.home.SocialTab.Messages -> unreadMessagesCount
+                                            dev.vantafyn.feature.home.SocialTab.Requests -> incomingFriendRequestsCount
+                                            else -> 0
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxSize()
+                                                .combinedClickable(
+                                                    interactionSource = interactionSource,
+                                                    indication = null,
+                                                    onClick = { tapTrigger++; onSocialTabSelected(tab) },
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            SocialNavIcon(
+                                                tab = tab,
+                                                selected = tabSelected,
+                                            )
+                                            if (badgeCount > 0) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .padding(top = 7.dp, end = 12.dp)
+                                                        .size(7.5.dp)
+                                                        .background(Color(0xFFFF3366), RoundedCornerShape(999.dp)),
+                                                )
+                                            }
+                                        }
                                     }
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .fillMaxSize()
-                                            .combinedClickable(
-                                                interactionSource = interactionSource,
-                                                indication = null,
-                                                onClick = { tapTrigger++; onSocialTabSelected(tab) },
-                                            ),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        SocialNavIcon(
-                                            tab = tab,
-                                            selected = tabSelected,
-                                        )
-                                        if (badgeCount > 0) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .align(Alignment.TopEnd)
-                                                    .padding(top = 7.dp, end = 12.dp)
-                                                    .size(7.5.dp)
-                                                    .background(Color(0xFFFF3366), RoundedCornerShape(999.dp)),
+                                }
+                                BottomNavKind.Games -> {
+                                    val selectedGamesTab = (mode as? NavigationRailMode.Games)?.selectedTab
+                                    gamesTabs.forEach { tab ->
+                                        val tabSelected = selectedGamesTab == tab
+                                        val interactionSource = remember { MutableInteractionSource() }
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .fillMaxSize()
+                                                .combinedClickable(
+                                                    interactionSource = interactionSource,
+                                                    indication = null,
+                                                    onClick = { tapTrigger++; onGamesTabSelected(tab) },
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            GamesNavIcon(
+                                                tab = tab,
+                                                selected = tabSelected,
                                             )
                                         }
                                     }
@@ -23791,7 +23877,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.27"
+private const val VANTAFYN_APP_VERSION = "0.9.28"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

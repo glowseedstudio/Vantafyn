@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import android.content.Context
 import coil3.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -167,7 +169,7 @@ fun GamesHubScreen(
             }
             items(systems) { system ->
                 SystemFilterPill(
-                    label = system.name,
+                    label = system.displayName,
                     count = system.gameCount,
                     isSelected = selectedSystem?.id == system.id,
                     onClick = { onSelectSystem(system) },
@@ -217,7 +219,7 @@ fun GamesHubScreen(
         } else {
             LazyVerticalGrid(
                 columns = GridCells.Adaptive(minSize = 160.dp),
-                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 40.dp, top = 8.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
@@ -295,6 +297,12 @@ private fun GameCard(
             .clickable(onClick = onClick)
             .padding(10.dp),
     ) {
+        val context = LocalContext.current
+        val effectiveBoxart = remember(game.id, game.boxartUrl) {
+            context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+                .getString("boxart_${game.id}", null) ?: game.boxartUrl
+        }
+
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             // Boxart Image container or Fallback
             Box(
@@ -305,9 +313,9 @@ private fun GameCard(
                     .background(Color(0xFF0D0F18)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!game.boxartUrl.isNullOrBlank()) {
+                if (!effectiveBoxart.isNullOrBlank()) {
                     AsyncImage(
-                        model = game.boxartUrl,
+                        model = effectiveBoxart,
                         contentDescription = game.cleanTitle,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
