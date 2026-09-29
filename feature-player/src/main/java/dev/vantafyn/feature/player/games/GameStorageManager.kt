@@ -95,8 +95,12 @@ class GameStorageManager(
         }
 
         if (responseCode !in 200..299) {
-            val errorMsg = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
-            throw IllegalStateException("Server returned HTTP $responseCode downloading ROM ($currentUrl). $errorMsg".trim())
+            val safeUrl = currentUrl.substringBefore('?')
+            val rawError = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            val sanitizedError = if (session.accessToken.isNotBlank()) {
+                rawError.replace(session.accessToken, "[REDACTED]")
+            } else rawError
+            throw IllegalStateException("Server returned HTTP $responseCode downloading ROM ($safeUrl). $sanitizedError".trim())
         }
 
         val totalLength = conn.contentLengthLong.coerceAtLeast(1L)

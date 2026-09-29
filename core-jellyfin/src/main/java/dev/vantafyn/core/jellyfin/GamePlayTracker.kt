@@ -114,6 +114,13 @@ class GamePlayTracker(context: Context) {
         }
     }
 
+    private fun stripSensitiveQueryParams(url: String?): String? {
+        if (url.isNullOrBlank()) return url
+        return url.replace(Regex("([?&])(api_key|ApiKey|X-Emby-Token|token)=[^&]+(&)?", RegexOption.IGNORE_CASE)) { matchResult ->
+            if (matchResult.groups[1]?.value == "?" && matchResult.groups[3]?.value == "&") "?" else ""
+        }.trimEnd('?', '&')
+    }
+
     private fun saveRecentGames(records: List<RecentGameRecord>) {
         try {
             val jsonArray = JSONArray()
@@ -126,7 +133,7 @@ class GamePlayTracker(context: Context) {
                     put("sizeBytes", item.sizeBytes)
                     put("token", item.token)
                     put("extension", item.extension)
-                    put("boxartUrl", item.boxartUrl)
+                    put("boxartUrl", stripSensitiveQueryParams(item.boxartUrl))
                     put("lastPlayedMs", item.lastPlayedMs)
                     put("playTimeMs", item.playTimeMs)
                 }
