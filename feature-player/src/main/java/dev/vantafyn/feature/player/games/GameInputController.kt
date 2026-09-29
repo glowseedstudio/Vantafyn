@@ -19,6 +19,11 @@ enum class RetroButton(val id: String) {
     R1("r1"),
     L2("l2"),
     R2("r2"),
+    Z("z"),
+    CUp("c_up"),
+    CDown("c_down"),
+    CLeft("c_left"),
+    CRight("c_right"),
     Start("start"),
     Select("select"),
     Menu("menu");
@@ -27,6 +32,7 @@ enum class RetroButton(val id: String) {
 class GameInputController(
     private val onButtonEvent: (RetroButton, Boolean) -> Unit,
     private val onMenuTriggered: () -> Unit,
+    private val onAxisEvent: ((String, Float) -> Unit)? = null,
 ) {
     private var lastHatX = 0f
     private var lastHatY = 0f
@@ -69,6 +75,9 @@ class GameInputController(
         val stickX = event.getAxisValue(MotionEvent.AXIS_X)
         val stickY = event.getAxisValue(MotionEvent.AXIS_Y)
         val deadzone = 0.35f
+
+        onAxisEvent?.invoke("left_x", stickX)
+        onAxisEvent?.invoke("left_y", stickY)
 
         val normX = when {
             stickX > deadzone -> 1f
@@ -150,6 +159,7 @@ class GameInputController(
 fun rememberGameInputController(
     onButtonEvent: (RetroButton, Boolean) -> Unit,
     onMenuTriggered: () -> Unit,
+    onAxisEvent: ((String, Float) -> Unit)? = null,
 ): GameInputController = remember {
-    GameInputController(onButtonEvent, onMenuTriggered)
+    GameInputController(onButtonEvent, onMenuTriggered, onAxisEvent)
 }

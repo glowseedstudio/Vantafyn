@@ -132,6 +132,10 @@ fun GamePlayerScreen(
                 webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
             }
         },
+        onAxisEvent = { axis, value ->
+            val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
+            webViewInstance?.evaluateJavascript(js, null)
+        },
     )
 
     Box(
@@ -293,8 +297,14 @@ fun GamePlayerScreen(
         if (!isTv && !isDownloading && !isPaused && !hasPhysicalGamepad) {
             RetroTouchOverlay(
                 visible = true,
+                systemId = game.systemId,
+                core = game.core,
                 onButtonPress = { btn, isDown ->
                     val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
+                    webViewInstance?.evaluateJavascript(js, null)
+                },
+                onAxisChange = { axis, value ->
+                    val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
                     webViewInstance?.evaluateJavascript(js, null)
                 },
                 onMenuClick = {
@@ -511,6 +521,36 @@ private fun generateEmulatorHtml(systemId: String, core: String): String {
                             window.EJS_emulator.loadState(bytes.buffer);
                         }
                     },
+                    setAxis: function(axis, value) {
+                        if (!window.EJS_emulator || !window.EJS_emulator.gameManager) return;
+                        var gm = window.EJS_emulator.gameManager;
+                        var fn = (typeof gm.simulateInput === 'function') ? gm.simulateInput.bind(gm) : (gm.functions && typeof gm.functions.simulateInput === 'function' ? gm.functions.simulateInput.bind(gm.functions) : null);
+                        if (!fn) return;
+                        var maxVal = 0x7fff;
+                        if (axis === 'left_x') {
+                            if (value > 0.05) {
+                                fn(0, 16, Math.round(maxVal * value));
+                                fn(0, 17, 0);
+                            } else if (value < -0.05) {
+                                fn(0, 17, Math.round(maxVal * -value));
+                                fn(0, 16, 0);
+                            } else {
+                                fn(0, 16, 0);
+                                fn(0, 17, 0);
+                            }
+                        } else if (axis === 'left_y') {
+                            if (value > 0.05) {
+                                fn(0, 18, Math.round(maxVal * value));
+                                fn(0, 19, 0);
+                            } else if (value < -0.05) {
+                                fn(0, 19, Math.round(maxVal * -value));
+                                fn(0, 18, 0);
+                            } else {
+                                fn(0, 18, 0);
+                                fn(0, 19, 0);
+                            }
+                        }
+                    },
                     setButton: function(btn, isDown) {
                         var btnMap = {
                             'b': 0,
@@ -528,11 +568,19 @@ private fun generateEmulatorHtml(systemId: String, core: String): String {
                             'r1': 11,
                             'r': 11,
                             'l2': 12,
-                            'r2': 13
+                            'r2': 13,
+                            'z': 12,
+                            'c_right': 20,
+                            'c_left': 21,
+                            'c_down': 22,
+                            'c_up': 23,
+                            'thumbl': 14,
+                            'thumbr': 15
                         };
                         var idx = btnMap[btn.toLowerCase()];
                         if (idx !== undefined && window.EJS_emulator) {
-                            var val = isDown ? 1 : 0;
+                            var isSpecial = (idx >= 16 && idx <= 23);
+                            var val = isDown ? (isSpecial ? 0x7fff : 1) : 0;
                             try {
                                 if (window.EJS_emulator.gameManager && typeof window.EJS_emulator.gameManager.simulateInput === 'function') {
                                     window.EJS_emulator.gameManager.simulateInput(0, idx, val);
