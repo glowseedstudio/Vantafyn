@@ -26,6 +26,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import coil3.compose.AsyncImage
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -326,8 +327,9 @@ private fun GameCard(
     ) {
         val context = LocalContext.current
         val effectiveBoxart = remember(game.id, game.boxartUrl) {
-            context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
-                .getString("boxart_${game.id}", null) ?: game.boxartUrl
+            val local = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+                .getString("boxart_${game.id}", null)
+            GameBoxartScraper.convertToCdnUrl(local ?: game.boxartUrl)
         }
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

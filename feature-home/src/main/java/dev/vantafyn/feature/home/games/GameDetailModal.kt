@@ -41,7 +41,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
+import android.content.Context
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradientIcon
@@ -134,7 +138,14 @@ fun GameDetailModal(
                         }
                     }
 
-                    if (!game.boxartUrl.isNullOrBlank()) {
+                    val context = LocalContext.current
+                    val effectiveBoxart = remember(game.id, game.boxartUrl) {
+                        val prefs = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+                        val local = prefs.getString("boxart_${game.id}", null)
+                        GameBoxartScraper.convertToCdnUrl(local ?: game.boxartUrl)
+                    }
+
+                    if (!effectiveBoxart.isNullOrBlank()) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -144,7 +155,7 @@ fun GameDetailModal(
                             contentAlignment = Alignment.Center,
                         ) {
                             AsyncImage(
-                                model = game.boxartUrl,
+                                model = effectiveBoxart,
                                 contentDescription = game.cleanTitle,
                                 contentScale = ContentScale.Fit,
                                 modifier = Modifier.fillMaxSize(),

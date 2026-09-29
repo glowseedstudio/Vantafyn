@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GamePlayTracker
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
@@ -565,8 +566,9 @@ private fun RecentGameCard(
     ) {
         val context = androidx.compose.ui.platform.LocalContext.current
         val effectiveBoxart = remember(record.id, record.boxartUrl) {
-            context.getSharedPreferences("vantafyn_retro_settings", android.content.Context.MODE_PRIVATE)
-                .getString("boxart_${record.id}", null) ?: record.boxartUrl
+            val local = context.getSharedPreferences("vantafyn_retro_settings", android.content.Context.MODE_PRIVATE)
+                .getString("boxart_${record.id}", null)
+            GameBoxartScraper.convertToCdnUrl(local ?: record.boxartUrl)
         }
         Box(
             modifier = Modifier

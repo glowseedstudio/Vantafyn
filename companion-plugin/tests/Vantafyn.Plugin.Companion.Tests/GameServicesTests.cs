@@ -163,7 +163,7 @@ public sealed class GameServicesTests
         var url = GameSystemCoreResolver.GetLibretroBoxartUrl("snes", "Super Mario World (USA).sfc");
         Assert.NotNull(url);
         Assert.Equal(
-            "https://thumbnails.libretro.com/Nintendo%20-%20Super%20Nintendo%20Entertainment%20System/Named_Boxarts/Super%20Mario%20World%20%28USA%29.png",
+            "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Super_Nintendo_Entertainment_System@master/Named_Boxarts/Super%20Mario%20World%20%28USA%29.png",
             url);
     }
 

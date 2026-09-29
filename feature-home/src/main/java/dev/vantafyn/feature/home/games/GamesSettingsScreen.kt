@@ -51,6 +51,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.style.TextOverflow
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
 import kotlinx.coroutines.Dispatchers
@@ -600,66 +601,35 @@ fun GamesSettingsScreen(
 
                                     coroutineScope.launch(Dispatchers.IO) {
                                         val total = games.size
-                                        games.forEachIndexed { index, game ->
+                                        val gamesByPlatform = games.groupBy { GameBoxartScraper.resolvePlatform(it.systemId) }
+                                        var processedCount = 0
+
+                                        for ((platform, platformGames) in gamesByPlatform) {
+                                            if (platform == null) {
+                                                processedCount += platformGames.size
+                                                withContext(Dispatchers.Main) {
+                                                    scrapeProgress = processedCount.toFloat() / total.coerceAtLeast(1)
+                                                }
+                                                continue
+                                            }
+
                                             withContext(Dispatchers.Main) {
-                                                scrapeProgress = index.toFloat() / total.coerceAtLeast(1)
-                                                currentScrapingTitle = "Scraping: ${game.cleanTitle}"
+                                                currentScrapingTitle = "Fetching catalog for ${platform.libretroName}..."
                                             }
 
-                                            val platform = when (game.systemId.lowercase().trim()) {
-                                                "gba", "gameboyadvance" -> "Nintendo - Game Boy Advance"
-                                                "snes", "sfc", "supernintendo" -> "Nintendo - Super Nintendo Entertainment System"
-                                                "nes", "famicom" -> "Nintendo - Nintendo Entertainment System"
-                                                "n64", "nintendo64" -> "Nintendo - Nintendo 64"
-                                                "gb", "gameboy" -> "Nintendo - Game Boy"
-                                                "gbc", "gameboycolor" -> "Nintendo - Game Boy Color"
-                                                "nds", "ds", "nintendods" -> "Nintendo - Nintendo DS"
-                                                "psx", "ps1", "playstation" -> "Sony - PlayStation"
-                                                "psp", "playstationportable" -> "Sony - PlayStation Portable"
-                                                "segamd", "genesis", "megadrive" -> "Sega - Mega Drive - Genesis"
-                                                "segams", "mastersystem" -> "Sega - Master System - Mark III"
-                                                "segagg", "gamegear" -> "Sega - Game Gear"
-                                                "atari2600" -> "Atari - 2600"
-                                                "atari7800" -> "Atari - 7800"
-                                                "arcade", "mame", "fbneo" -> "FBNeo - Arcade Games"
-                                                else -> null
-                                            }
+                                            val catalog = GameBoxartScraper.getSystemIndex(platform)
 
-                                            if (platform != null) {
-                                                val clean = game.cleanTitle
-                                                val fn = game.filename.substringBeforeLast('.')
-                                                val candidates = linkedSetOf(
-                                                    fn,
-                                                    clean,
-                                                    "$clean (USA)",
-                                                    "$clean (USA, Europe)",
-                                                    "$clean (World)",
-                                                    "$clean (Europe)",
-                                                    "$clean (Japan)",
-                                                )
-
-                                                var matchedUrl: String? = null
-                                                for (cand in candidates) {
-                                                    val encodedPlatform = URLEncoder.encode(platform, "UTF-8").replace("+", "%20")
-                                                    val encodedCandidate = URLEncoder.encode(cand, "UTF-8").replace("+", "%20")
-                                                    val urlStr = "https://thumbnails.libretro.com/$encodedPlatform/Named_Boxarts/$encodedCandidate.png"
-                                                    try {
-                                                        val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
-                                                            requestMethod = "HEAD"
-                                                            connectTimeout = 3_000
-                                                            readTimeout = 3_000
-                                                        }
-                                                        if (conn.responseCode == 200) {
-                                                            matchedUrl = urlStr
-                                                            conn.disconnect()
-                                                            break
-                                                        }
-                                                        conn.disconnect()
-                                                    } catch (_: Exception) { }
+                                            for (game in platformGames) {
+                                                processedCount++
+                                                withContext(Dispatchers.Main) {
+                                                    scrapeProgress = processedCount.toFloat() / total.coerceAtLeast(1)
+                                                    currentScrapingTitle = "Matching: ${game.cleanTitle.ifEmpty { game.title }}"
                                                 }
 
-                                                if (matchedUrl != null) {
-                                                    prefs.edit().putString("boxart_${game.id}", matchedUrl).apply()
+                                                val matchedFilename = GameBoxartScraper.matchGame(game.cleanTitle, game.filename, catalog)
+                                                if (matchedFilename != null) {
+                                                    val cdnUrl = GameBoxartScraper.buildCdnUrl(platform, matchedFilename)
+                                                    prefs.edit().putString("boxart_${game.id}", cdnUrl).apply()
                                                     withContext(Dispatchers.Main) {
                                                         scrapeMatchedCount++
                                                     }

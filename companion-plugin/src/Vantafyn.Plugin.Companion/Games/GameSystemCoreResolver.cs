@@ -244,7 +244,8 @@ public static class GameSystemCoreResolver
             return null;
         }
 
-        // Libretro thumbnail repository matches by escaped name without extension
-        return $"https://thumbnails.libretro.com/{Uri.EscapeDataString(platform)}/Named_Boxarts/{Uri.EscapeDataString(nameWithoutExt)}.png";
+        // Libretro thumbnail repository matches by escaped name without extension via fast global CDN
+        var repoName = platform.Replace(" ", "_");
+        return $"https://cdn.jsdelivr.net/gh/libretro-thumbnails/{repoName}@master/Named_Boxarts/{Uri.EscapeDataString(nameWithoutExt)}.png";
     }
 }

@@ -20,8 +20,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import android.content.Context
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -195,6 +198,13 @@ private fun TvGameCard(
         )
     }
 
+    val context = LocalContext.current
+    val effectiveBoxart = remember(game.id, game.boxartUrl) {
+        val local = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+            .getString("boxart_${game.id}", null)
+        GameBoxartScraper.convertToCdnUrl(local ?: game.boxartUrl)
+    }
+
     Box(
         modifier = modifier
             .graphicsLayer {
@@ -212,6 +222,7 @@ private fun TvGameCard(
             )
             .padding(12.dp),
     ) {
+
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             // Boxart Image container or Fallback
             Box(
@@ -222,9 +233,9 @@ private fun TvGameCard(
                     .background(Color(0xFF0D0F18)),
                 contentAlignment = Alignment.Center,
             ) {
-                if (!game.boxartUrl.isNullOrBlank()) {
+                if (!effectiveBoxart.isNullOrBlank()) {
                     AsyncImage(
-                        model = game.boxartUrl,
+                        model = effectiveBoxart,
                         contentDescription = game.cleanTitle,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
