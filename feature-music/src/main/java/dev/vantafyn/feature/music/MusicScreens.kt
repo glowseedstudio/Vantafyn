@@ -2,6 +2,7 @@ package dev.vantafyn.feature.music
 
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import dev.vantafyn.feature.music.audiostream.AudioQualityBadgePill
@@ -314,6 +315,7 @@ fun MusicScreen(
     viewModel: MusicViewModel = viewModel(),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isHarmoniaActive = state.screen is MusicScreenState.HarmoniaRecap
     LaunchedEffect(isHarmoniaActive) {
         onHarmoniaActiveChanged?.invoke(isHarmoniaActive)
@@ -561,7 +563,16 @@ fun MusicScreen(
                     .onGloballyPositioned { coords ->
                         musicListBoundsInWindow = runCatching { coords.boundsInWindow() }.getOrNull()
                     },
-                contentPadding = PaddingValues(start = 8.dp, end = 8.dp, top = 18.dp, bottom = if (state.playback.currentTrack != null) 224.dp else 118.dp),
+                contentPadding = PaddingValues(
+                    start = 8.dp,
+                    end = 8.dp,
+                    top = 18.dp,
+                    bottom = if (isLandscape) {
+                        if (state.playback.currentTrack != null) 100.dp else 24.dp
+                    } else {
+                        if (state.playback.currentTrack != null) 224.dp else 118.dp
+                    },
+                ),
                 verticalArrangement = Arrangement.spacedBy(
                     if (state.screen is MusicScreenState.Songs) 10.dp else VantafynSpacing.lg
                 ),
@@ -1380,7 +1391,7 @@ fun MusicScreen(
                 currentChapterName = state.playback.currentChapter?.name,
                 modifier = Modifier
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom))
-                    .padding(start = 8.dp, end = 8.dp, bottom = 96.dp),
+                    .padding(start = 8.dp, end = 8.dp, bottom = if (isLandscape) 0.dp else 96.dp),
             )
             }
         }
@@ -7187,7 +7198,25 @@ private fun NowPlayingDialog(
                     ),
                 ),
         )
-        LazyColumn(
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (isLandscape) {
+            NowPlayingLandscapeContent(
+                state = state,
+                viewModel = viewModel,
+                track = track,
+                isDownloaded = isDownloaded,
+                onRequestMusicControlsPermission = onRequestMusicControlsPermission,
+                onAudioQualityClick = { showAudioStreamDetailsSheet = true },
+                onStreamingBitrateClick = { showStreamingBitrateSheet = true },
+                onSleepTimerClick = { showSleepTimerSheet = true },
+                onChaptersClick = { showChaptersSheet = true },
+                onNewPlaylistClick = { showPlaylistName = true },
+                onMoreClick = { showMoreSheet = true },
+                onSaveQueueClick = { showSaveQueueDialog = true },
+                onQueueLongPress = { contextQueueIndex = it },
+            )
+        } else {
+            LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 18.dp),
@@ -7491,6 +7520,7 @@ private fun NowPlayingDialog(
                 Spacer(Modifier.height(96.dp))
             }
         }
+        }
         CurrentTrackMoreSheet(
             visible = showMoreSheet,
             track = track,
@@ -7643,6 +7673,312 @@ private fun NowPlayingDialog(
                 onRemoveFromQueue = { viewModel.removeQueueItem(contextQueueIndex) },
                 onGoToAlbum = { },
             )
+        }
+    }
+}
+
+@Composable
+private fun NowPlayingLandscapeContent(
+    state: MusicUiState,
+    viewModel: MusicViewModel,
+    track: VantafynMusicTrack,
+    isDownloaded: Boolean,
+    onRequestMusicControlsPermission: ((() -> Unit) -> Unit),
+    onAudioQualityClick: () -> Unit,
+    onStreamingBitrateClick: () -> Unit,
+    onSleepTimerClick: () -> Unit,
+    onChaptersClick: () -> Unit,
+    onNewPlaylistClick: () -> Unit,
+    onMoreClick: () -> Unit,
+    onSaveQueueClick: () -> Unit,
+    onQueueLongPress: (Int) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top))
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        // Top Bar in landscape
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+        ) {
+            Row(
+                modifier = Modifier.align(Alignment.CenterStart),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                if (!isDownloaded) {
+                    MusicBitrateSettingsIconButton(
+                        onClick = onStreamingBitrateClick,
+                        size = 36,
+                    )
+                }
+                FlatMusicIconButton(
+                    icon = Icons.Rounded.Bedtime,
+                    contentDescription = "Sleep Timer",
+                    onClick = onSleepTimerClick,
+                    selected = state.playback.sleepTimerMode != null,
+                    size = 36,
+                )
+                if (state.playback.sleepTimerMode != null) {
+                    val label = when (state.playback.sleepTimerMode) {
+                        SleepTimerMode.Duration -> {
+                            val secs = state.playback.sleepTimerRemainingSeconds ?: 0L
+                            val mins = (secs + 59) / 60
+                            "${mins}m"
+                        }
+                        SleepTimerMode.EndOfTrack -> "Track"
+                        SleepTimerMode.EndOfQueue -> "End"
+                        null -> ""
+                    }
+                    VantafynGlassSurface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .clickable { onSleepTimerClick() },
+                        variant = VantafynGlassVariant.Chip,
+                        cornerRadius = 999.dp,
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Icon(Icons.Rounded.Bedtime, contentDescription = null, tint = Color(0xFFFFD166), modifier = Modifier.size(12.dp))
+                            Text(label, color = Color(0xFF21D8FF), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
+            Text(
+                "Now Playing",
+                color = VantafynColors.Ink.copy(alpha = 0.90f),
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.align(Alignment.Center),
+            )
+
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                GoogleCastRouteButton(modifier = Modifier.size(36.dp))
+                FlatMusicIconButton(Icons.Rounded.Close, "Close", viewModel::closeNowPlaying, size = 36)
+            }
+        }
+
+        // Split Body
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Left Column: Artwork, Info, Scrubber, Playback Controls, Actions
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                AnimatedContent(
+                    targetState = track,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(durationMillis = 400, easing = LinearOutSlowInEasing)) togetherWith
+                            fadeOut(animationSpec = tween(durationMillis = 350, easing = FastOutLinearInEasing))
+                    },
+                    contentAlignment = Alignment.Center,
+                    label = "NowPlayingAlbumArtLandscape",
+                ) { currentTrack ->
+                    MusicArt(
+                        imageUrl = currentTrack.artworkUrl,
+                        modifier = Modifier
+                            .size(150.dp)
+                            .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(18.dp)),
+                        cornerRadius = 18,
+                        title = currentTrack.title,
+                        subtitle = currentTrack.artist,
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    if (state.playback.isAudiobookMode) {
+                        val currentChapter = state.playback.currentChapter
+                        if (currentChapter != null) {
+                            VantafynGlassSurface(
+                                variant = VantafynGlassVariant.Chip,
+                                cornerRadius = 999.dp,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 3.dp),
+                                modifier = Modifier.clickable { onChaptersClick() },
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.AutoMirrored.Rounded.List,
+                                        contentDescription = null,
+                                        tint = Color(0xFF21D8FF),
+                                        modifier = Modifier.size(12.dp),
+                                    )
+                                    Text(
+                                        text = currentChapter.name,
+                                        color = Color(0xFF21D8FF),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    VantafynMarqueeText(
+                        text = track.title,
+                        style = MaterialTheme.typography.titleMedium.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold),
+                        textAlign = TextAlign.Center,
+                    )
+                    VantafynMarqueeText(
+                        text = listOfNotNull(track.artist, track.album).joinToString(" - "),
+                        style = MaterialTheme.typography.bodySmall.copy(color = VantafynColors.Muted),
+                        textAlign = TextAlign.Center,
+                    )
+                }
+
+                NowPlayingProgressSection(
+                    playbackPositionMs = viewModel.playbackPositionMs,
+                    durationMs = state.playback.durationMs,
+                    isPlaying = state.playback.isPlaying,
+                    audioStreamInfo = state.playback.audioStreamInfo,
+                    track = track,
+                    onSeek = viewModel::seekTo,
+                    onAudioQualityClick = onAudioQualityClick,
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (state.playback.isAudiobookMode) {
+                        AudiobookSkipButton(
+                            seconds = -15,
+                            onClick = { viewModel.seekRelative(-15_000L) },
+                        )
+                        FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous Chapter", viewModel::previous, size = 42)
+                        GradientPlayButton(
+                            if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            if (state.playback.isPlaying) "Pause" else "Play",
+                            {
+                                if (state.playback.isPlaying) {
+                                    viewModel.togglePlayPause()
+                                } else {
+                                    onRequestMusicControlsPermission { viewModel.togglePlayPause() }
+                                }
+                            },
+                            size = 56,
+                        )
+                        FlatMusicIconButton(Icons.Rounded.SkipNext, "Next Chapter", viewModel::next, size = 42)
+                        AudiobookSkipButton(
+                            seconds = 30,
+                            onClick = { viewModel.seekRelative(30_000L) },
+                        )
+                    } else {
+                        FlatMusicIconButton(Icons.Rounded.Shuffle, "Shuffle", viewModel::toggleShuffle, selected = state.playback.shuffleEnabled, size = 36)
+                        FlatMusicIconButton(Icons.Rounded.SkipPrevious, "Previous", viewModel::previous, size = 42)
+                        GradientPlayButton(
+                            if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            if (state.playback.isPlaying) "Pause" else "Play",
+                            {
+                                if (state.playback.isPlaying) {
+                                    viewModel.togglePlayPause()
+                                } else {
+                                    onRequestMusicControlsPermission { viewModel.togglePlayPause() }
+                                }
+                            },
+                            size = 56,
+                        )
+                        FlatMusicIconButton(Icons.Rounded.SkipNext, "Next", viewModel::next, size = 42)
+                        FlatMusicIconButton(
+                            if (state.playback.repeatMode == VantafynMusicRepeatMode.One) Icons.Rounded.RepeatOne else Icons.Rounded.Repeat,
+                            "Repeat",
+                            viewModel::cycleRepeat,
+                            selected = state.playback.repeatMode != VantafynMusicRepeatMode.Off,
+                            size = 36,
+                        )
+                    }
+                }
+
+                if (state.isCasting) {
+                    CastDeviceVolumeBar(
+                        deviceName = state.castReceiverName ?: "Cast device",
+                        volume = state.castVolume,
+                        isMuted = state.isCastMuted,
+                        onVolumeChange = viewModel::setCastVolume,
+                        onToggleMute = viewModel::toggleCastMute,
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (state.playback.isAudiobookMode) {
+                        IconPill(Icons.Rounded.Speed, "${state.playback.playbackSpeed}x Speed") {
+                            val nextSpeed = when (state.playback.playbackSpeed) {
+                                1.0f -> 1.25f
+                                1.25f -> 1.5f
+                                1.5f -> 1.75f
+                                1.75f -> 2.0f
+                                2.0f -> 0.8f
+                                else -> 1.0f
+                            }
+                            viewModel.setPlaybackSpeed(nextSpeed)
+                        }
+                        if (state.playback.activeChapters.isNotEmpty()) {
+                            IconPill(Icons.AutoMirrored.Rounded.List, "Chapters (${state.playback.activeChapters.size})") {
+                                onChaptersClick()
+                            }
+                        }
+                        IconPill(Icons.Rounded.MoreHoriz, "More", onMoreClick)
+                    } else {
+                        IconPill(Icons.Rounded.PlaylistAdd, "New Playlist", onNewPlaylistClick)
+                        IconPill(Icons.Rounded.Subtitles, "Lyrics", viewModel::openLyrics)
+                        IconPill(Icons.Rounded.MoreHoriz, "More", onMoreClick)
+                    }
+                }
+            }
+
+            // Right Column: Up Next Queue Panel
+            Box(
+                modifier = Modifier
+                    .weight(1.2f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(bottom = 16.dp),
+            ) {
+                QueuePanel(
+                    queue = state.playback.queue,
+                    index = state.playback.queueIndex,
+                    onTrack = viewModel::playQueueIndex,
+                    onRemove = viewModel::removeQueueItem,
+                    onReorder = viewModel::moveQueueTrack,
+                    onLongPress = onQueueLongPress,
+                    onSaveQueue = onSaveQueueClick,
+                    onClearUpcoming = viewModel::clearUpcomingQueue,
+                    onClearAll = viewModel::clearAllQueue,
+                )
+            }
         }
     }
 }
@@ -8927,11 +9263,20 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
                 .fillMaxSize()
                 .background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.16f), VantafynColors.Graphite.copy(alpha = 0.92f)))),
         )
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 18.dp)
-                .padding(bottom = 118.dp),
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (isLandscape) {
+            LyricsLandscapeContent(
+                state = state,
+                viewModel = viewModel,
+                track = track,
+                lyricsState = lyricsState,
+            )
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 18.dp)
+                    .padding(bottom = 118.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(
@@ -9022,6 +9367,158 @@ private fun LyricsScreen(state: MusicUiState, viewModel: MusicViewModel) {
                     currentPositionMs = viewModel::currentPlaybackPositionMs,
                     onSeek = viewModel::seekTo,
                 )
+            }
+        }
+        }
+    }
+}
+
+@Composable
+private fun LyricsLandscapeContent(
+    state: MusicUiState,
+    viewModel: MusicViewModel,
+    track: VantafynMusicTrack,
+    lyricsState: LyricsRenderState,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Top))
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+    ) {
+        // Top Bar
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("Lyrics", color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, fontSize = 18.sp)
+                if (lyricsState.lyrics?.source?.contains("Offline") == true) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(VantafynColors.SurfaceHigh.copy(alpha = 0.8f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "Offline",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = VantafynColors.Primary,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+            }
+
+            FlatMusicIconButton(
+                icon = Icons.Rounded.Close,
+                contentDescription = "Close lyrics",
+                onClick = viewModel::closeLyrics,
+                size = 36,
+            )
+        }
+
+        // Split Body
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Left Column: Artwork, Info, Playback controls, Back to Queue pill
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                MusicArt(
+                    imageUrl = track.artworkUrl,
+                    modifier = Modifier
+                        .size(150.dp)
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(18.dp)),
+                    cornerRadius = 18,
+                    title = track.title,
+                    subtitle = track.artist,
+                )
+
+                VantafynMarqueeText(
+                    text = track.title,
+                    style = MaterialTheme.typography.titleMedium.copy(color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold),
+                    textAlign = TextAlign.Center,
+                )
+                VantafynMarqueeText(
+                    text = listOfNotNull(track.artist, track.album).joinToString(" - "),
+                    style = MaterialTheme.typography.bodySmall.copy(color = VantafynColors.Muted),
+                    textAlign = TextAlign.Center,
+                )
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FlatMusicIconButton(
+                        icon = Icons.Rounded.SkipPrevious,
+                        contentDescription = "Previous track",
+                        onClick = viewModel::previous,
+                        size = 38,
+                    )
+                    GradientPlayButton(
+                        if (state.playback.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        if (state.playback.isPlaying) "Pause" else "Play",
+                        viewModel::togglePlayPause,
+                        size = 48,
+                    )
+                    FlatMusicIconButton(
+                        icon = Icons.Rounded.SkipNext,
+                        contentDescription = "Next track",
+                        onClick = viewModel::next,
+                        size = 38,
+                    )
+                }
+
+                IconPill(
+                    icon = Icons.AutoMirrored.Rounded.List,
+                    label = "Up Next Queue",
+                    onClick = viewModel::closeLyrics,
+                )
+            }
+
+            // Right Column: Synced / Plain Lyrics
+            Box(
+                modifier = Modifier
+                    .weight(1.3f)
+                    .fillMaxHeight()
+                    .padding(bottom = 12.dp),
+            ) {
+                AnimatedContent(
+                    targetState = lyricsState,
+                    transitionSpec = {
+                        fadeIn(
+                            animationSpec = tween(durationMillis = 260, delayMillis = 70, easing = FastOutSlowInEasing),
+                        ) togetherWith fadeOut(
+                            animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing),
+                        )
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    label = "lyricsTrackCrossfadeLandscape",
+                ) { renderState ->
+                    LyricsBody(
+                        renderState = renderState,
+                        playbackMs = viewModel.currentPlaybackPositionMs(),
+                        isPlaying = state.playback.isPlaying,
+                        currentPositionMs = viewModel::currentPlaybackPositionMs,
+                        onSeek = viewModel::seekTo,
+                    )
+                }
             }
         }
     }

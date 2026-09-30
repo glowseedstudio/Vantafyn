@@ -3,6 +3,7 @@ package dev.vantafyn.feature.home
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import android.content.res.Configuration
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -14,14 +15,18 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -70,6 +75,8 @@ fun DiscoverVantafynPromptModal(
         }
     }
 
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -78,33 +85,35 @@ fun DiscoverVantafynPromptModal(
             modifier = modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.68f))
-                .padding(horizontal = 24.dp, vertical = 24.dp),
+                .padding(horizontal = if (isLandscape) 12.dp else 24.dp, vertical = if (isLandscape) 10.dp else 24.dp),
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .widthIn(max = 420.dp)
+                    .heightIn(max = if (isLandscape) 300.dp else 600.dp)
                     .graphicsLayer {
                         scaleX = scaleAnim.value
                         scaleY = scaleAnim.value
                         alpha = alphaAnim.value
                     }
-                    .clip(RoundedCornerShape(28.dp))
+                    .clip(RoundedCornerShape(if (isLandscape) 20.dp else 28.dp))
                     .background(VantafynColors.Graphite.copy(alpha = 0.96f))
-                    .vantafynAnimatedModalBorder(cornerRadius = 28.dp)
-                    .padding(horizontal = 24.dp, vertical = 26.dp),
+                    .vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 28.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = if (isLandscape) 18.dp else 24.dp, vertical = if (isLandscape) 14.dp else 26.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
             ) {
                 // Header Logo Tile matching About Vantafyn dialog
                 Box(
                     modifier = Modifier
-                        .size(76.dp)
-                        .clip(RoundedCornerShape(22.dp))
+                        .size(if (isLandscape) 48.dp else 76.dp)
+                        .clip(RoundedCornerShape(if (isLandscape) 14.dp else 22.dp))
                         .background(Color.Black)
-                        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(22.dp))
-                        .padding(12.dp),
+                        .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)), RoundedCornerShape(if (isLandscape) 14.dp else 22.dp))
+                        .padding(if (isLandscape) 8.dp else 12.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Image(

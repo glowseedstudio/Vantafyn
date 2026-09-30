@@ -18,8 +18,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import android.content.Context
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -119,85 +121,158 @@ fun GamesHubScreen(
         else basePool.filter { it.cleanTitle.contains(searchQuery, ignoreCase = true) || it.title.contains(searchQuery, ignoreCase = true) }
     }
 
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .padding(top = 12.dp),
+            .padding(top = if (isLandscape) 4.dp else 12.dp),
     ) {
-        // Top Bar: Back Button, Title, and Search
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            CompactBackButton(
-                onClick = {
-                    if (isOfflineFilterSelected) {
-                        isOfflineFilterSelected = false
-                    } else if (selectedSystem != null) {
-                        onSelectSystem(null)
-                    } else {
-                        onBack()
-                    }
-                },
-            )
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
-                    color = VantafynColors.Ink,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = if (isOfflineFilterSelected) {
-                        "Showing $downloadedCount downloaded offline games"
-                    } else if (selectedSystem != null) {
-                        "Showing ${filteredGames.size} of $totalLibraryGamesCount games"
-                    } else if (searchQuery.isNotBlank()) {
-                        "Found ${filteredGames.size} games matching \"$searchQuery\""
-                    } else {
-                        "$totalLibraryGamesCount games available across ${systems.size} systems"
+        if (isLandscape) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                CompactBackButton(
+                    onClick = {
+                        if (isOfflineFilterSelected) {
+                            isOfflineFilterSelected = false
+                        } else if (selectedSystem != null) {
+                            onSelectSystem(null)
+                        } else {
+                            onBack()
+                        }
                     },
-                    color = VantafynColors.Muted,
-                    fontSize = 12.sp,
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
+                        color = VantafynColors.Ink,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (isOfflineFilterSelected) {
+                            "$downloadedCount downloaded offline"
+                        } else if (selectedSystem != null) {
+                            "${filteredGames.size} of $totalLibraryGamesCount games"
+                        } else if (searchQuery.isNotBlank()) {
+                            "${filteredGames.size} matching \"$searchQuery\""
+                        } else {
+                            "$totalLibraryGamesCount games across ${systems.size} systems"
+                        },
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                    )
+                }
+
+                Box(modifier = Modifier.width(260.dp)) {
+                    VantafynTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        label = "Search games...",
+                        placeholder = "Search games...",
+                        leadingIcon = {
+                            VantafynGradientIcon(
+                                imageVector = Icons.Rounded.Search,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        },
+                        trailingIcon = if (searchQuery.isNotEmpty()) {
+                            {
+                                IconButton(onClick = { searchQuery = "" }) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Close,
+                                        contentDescription = "Clear",
+                                        tint = VantafynColors.Muted,
+                                    )
+                                }
+                            }
+                        } else null,
+                    )
+                }
+            }
+        } else {
+            // Top Bar: Back Button, Title, and Search
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                CompactBackButton(
+                    onClick = {
+                        if (isOfflineFilterSelected) {
+                            isOfflineFilterSelected = false
+                        } else if (selectedSystem != null) {
+                            onSelectSystem(null)
+                        } else {
+                            onBack()
+                        }
+                    },
+                )
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
+                        color = VantafynColors.Ink,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = if (isOfflineFilterSelected) {
+                            "Showing $downloadedCount downloaded offline games"
+                        } else if (selectedSystem != null) {
+                            "Showing ${filteredGames.size} of $totalLibraryGamesCount games"
+                        } else if (searchQuery.isNotBlank()) {
+                            "Found ${filteredGames.size} games matching \"$searchQuery\""
+                        } else {
+                            "$totalLibraryGamesCount games available across ${systems.size} systems"
+                        },
+                        color = VantafynColors.Muted,
+                        fontSize = 12.sp,
+                    )
+                }
+            }
+
+            // Search Field
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                VantafynTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    label = "Search games...",
+                    placeholder = "Search games...",
+                    leadingIcon = {
+                        VantafynGradientIcon(
+                            imageVector = Icons.Rounded.Search,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    },
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Clear",
+                                    tint = VantafynColors.Muted,
+                                )
+                            }
+                        }
+                    } else null,
                 )
             }
-        }
-
-        // Search Field
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp),
-        ) {
-            VantafynTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                label = "Search games...",
-                placeholder = "Search games...",
-                leadingIcon = {
-                    VantafynGradientIcon(
-                        imageVector = Icons.Rounded.Search,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp),
-                    )
-                },
-                trailingIcon = if (searchQuery.isNotEmpty()) {
-                    {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = "Clear",
-                                tint = VantafynColors.Muted,
-                            )
-                        }
-                    }
-                } else null,
-            )
         }
 
         // Systems Carousel
@@ -306,7 +381,7 @@ fun GamesHubScreen(
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 160.dp),
-                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 8.dp),
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = if (isLandscape) 24.dp else 140.dp, top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
@@ -347,7 +422,7 @@ fun GamesHubScreen(
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Adaptive(minSize = 160.dp),
-                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 8.dp),
+                    contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = if (isLandscape) 24.dp else 140.dp, top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),

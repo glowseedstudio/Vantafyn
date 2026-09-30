@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.ImageDecoder
@@ -276,6 +277,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.Popup
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -1278,6 +1280,7 @@ private fun WelcomeScreen(
     showBack: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Box(modifier = modifier.fillMaxSize()) {
         SetupBackScaffold(onBack = onBack, showBack = showBack) {
             CenterPane {
@@ -1288,10 +1291,10 @@ private fun WelcomeScreen(
                         tv = tv,
                     )
                 }
-                Spacer(Modifier.height(if (tv) 44.dp else 36.dp))
+                Spacer(Modifier.height(if (tv) 44.dp else if (isLandscape) 16.dp else 36.dp))
                 SetupMaterialize(delayMillis = 260, modifier = Modifier.fillMaxWidth(),) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
-                        VantafynButton("Continue", onClick = onContinue, modifier = Modifier.fillMaxWidth(if (tv) 0.48f else 0.78f))
+                        VantafynButton("Continue", onClick = onContinue, modifier = Modifier.fillMaxWidth(if (tv) 0.48f else if (isLandscape) 0.62f else 0.78f))
                         if (state.savedProfiles.isNotEmpty()) {
                             Spacer(Modifier.height(VantafynSpacing.lg))
                             Text("Add another Jellyfin profile", color = VantafynColors.Muted)
@@ -1973,13 +1976,14 @@ private fun MobileProfilePickerScreen(
     backgroundResId: Int,
     modifier: Modifier = Modifier,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val revealKey = "mobile-profile-picker-${state.savedProfiles.size}-${state.publicUsers.size}-${showBack}"
     VantafynOnboardingBackground(tv = false, modifier = modifier, backgroundResId = backgroundResId) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = if (isLandscape) 32.dp else 20.dp, vertical = if (isLandscape) 12.dp else 24.dp),
         ) {
             ManageProfilesButton(
                 state = state,
@@ -1996,16 +2000,16 @@ private fun MobileProfilePickerScreen(
                 modifier = Modifier.fillMaxSize(),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Spacer(Modifier.height(52.dp))
+                Spacer(Modifier.height(if (isLandscape) 10.dp else 52.dp))
                 HomeContentReveal(index = 0, animate = true, revealKey = revealKey) {
                     Text(
                         "Who's watching?",
                         color = VantafynColors.Ink,
-                        style = MaterialTheme.typography.headlineMedium,
+                        style = if (isLandscape) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
                         textAlign = TextAlign.Center,
                     )
                 }
-                Spacer(Modifier.height(VantafynSpacing.xl))
+                Spacer(Modifier.height(if (isLandscape) VantafynSpacing.sm else VantafynSpacing.xl))
                 HomeContentReveal(
                     index = 1,
                     animate = true,
@@ -2014,12 +2018,13 @@ private fun MobileProfilePickerScreen(
                         .fillMaxWidth()
                         .weight(1f),
                 ) {
+                    val tileHeight = if (isLandscape) 140.dp else 198.dp
                     LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
+                        columns = if (isLandscape) GridCells.Adaptive(minSize = 140.dp) else GridCells.Fixed(2),
                         modifier = Modifier.fillMaxSize(),
                         horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
-                        contentPadding = PaddingValues(bottom = VantafynSpacing.xl),
+                        contentPadding = PaddingValues(bottom = if (isLandscape) VantafynSpacing.sm else VantafynSpacing.xl),
                     ) {
                         gridItems(state.savedProfiles, key = { it.id }) { profile ->
                             SavedProfileTile(
@@ -2029,7 +2034,7 @@ private fun MobileProfilePickerScreen(
                                 manageMode = state.manageProfiles,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(198.dp),
+                                    .height(tileHeight),
                                 onSelect = { onSelect(profile) },
                                 onRemove = { onRequestRemove(profile) },
                             )
@@ -2039,7 +2044,7 @@ private fun MobileProfilePickerScreen(
                                 user = user,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(198.dp),
+                                    .height(tileHeight),
                                 onSelect = { onSelectPublicUser(user) },
                             )
                         }
@@ -2047,7 +2052,7 @@ private fun MobileProfilePickerScreen(
                             AddProfileTile(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(198.dp),
+                                    .height(tileHeight),
                                 onClick = onAddProfile,
                             )
                         }
@@ -2920,12 +2925,15 @@ private fun ProfileImagePickerDialog(
         customImage?.let { BitmapFactory.decodeByteArray(it.bytes, 0, it.bytes.size) }
     }
     val canConfirm = selectedAvatar != null || customImage != null
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     AlertDialog(
         modifier = Modifier
             .imePadding()
-            .vantafynAnimatedModalBorder(),
+            .vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 28.dp)
+            .widthIn(max = if (isLandscape) 440.dp else 480.dp),
         onDismissRequest = onDismiss,
         containerColor = VantafynModalContainerColor,
+        shape = RoundedCornerShape(if (isLandscape) 20.dp else 28.dp),
         titleContentColor = VantafynColors.Ink,
         textContentColor = VantafynColors.Muted,
         title = { Text("Choose Profile Picture") },
@@ -2933,9 +2941,10 @@ private fun ProfileImagePickerDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(max = 520.dp),
+                    .heightIn(max = if (isLandscape) 220.dp else 520.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else VantafynSpacing.lg),
             ) {
                 Text(
                     "Choose a Vantafyn avatar or use your own.",
@@ -2945,6 +2954,7 @@ private fun ProfileImagePickerDialog(
                 ProfileImageLivePreview(
                     avatar = selectedAvatar,
                     customBitmap = customBitmap,
+                    isLandscape = isLandscape,
                 )
                 if (error != null) {
                     Text(error, color = Color(0xFFFFC2C2), textAlign = TextAlign.Center)
@@ -2955,7 +2965,7 @@ private fun ProfileImagePickerDialog(
                         columns = GridCells.Fixed(columns),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 280.dp),
+                            .heightIn(max = if (isLandscape) 140.dp else 280.dp),
                         contentPadding = PaddingValues(vertical = 2.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -3006,10 +3016,11 @@ private fun ProfileImagePickerDialog(
 private fun ProfileImageLivePreview(
     avatar: BundledProfileAvatar?,
     customBitmap: Bitmap?,
+    isLandscape: Boolean = false,
 ) {
     Box(
         modifier = Modifier
-            .size(136.dp)
+            .size(if (isLandscape) 64.dp else 136.dp)
             .background(Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
             .border(
                 border = BorderStroke(
@@ -3845,12 +3856,25 @@ private fun MobileShellScreen(
             else -> onNavigateBack()
         }
     }
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isImmersive = state.mobileDestination == MobileDestination.Player || state.mobileDestination == MobileDestination.GamePlayer
     VantafynOnboardingBackground(tv = false, modifier = modifier, backgroundResId = state.selectedBackground.drawableResId()) {
         Box(
-            modifier = Modifier
-                .fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
         ) {
-            when (state.mobileDestination) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(
+                        if (isLandscape && !isImmersive) {
+                            WindowInsets.safeDrawing.only(WindowInsetsSides.Start)
+                        } else {
+                            WindowInsets(0, 0, 0, 0)
+                        }
+                    )
+                    .padding(start = if (isLandscape && !isImmersive) 74.dp else 0.dp),
+            ) {
+                when (state.mobileDestination) {
                 MobileDestination.Home -> {
                     if (isCarMode) {
                         dev.vantafyn.feature.home.car.CarDashboardScreen(
@@ -4343,6 +4367,7 @@ private fun MobileShellScreen(
                                     "open_favorites" -> onNavigate(MobileDestination.Favorites)
                                     "open_downloads" -> onNavigate(MobileDestination.Downloads)
                                     "open_requests" -> onNavigate(MobileDestination.Requests)
+                                    "open_games" -> onNavigate(MobileDestination.Games)
                                     "open_watch_guides", "open_enter_code" -> viewModel.openEnterCodeDialog()
                                     else -> Unit
                                 }
@@ -4453,6 +4478,7 @@ private fun MobileShellScreen(
                         else -> Unit
                     }
                 }
+            }
             }
             val currentDraftLayout = draftHomeLayout
             val currentDraftSmartRows = draftSmartRows
@@ -4750,7 +4776,7 @@ private fun MobileShellScreen(
                     atmosphereMode = state.bottomRailAtmosphere,
                     experienceMode = state.experienceMode,
                     isGamesAvailable = state.isGamesAvailable,
-                    modifier = Modifier.align(Alignment.BottomCenter),
+                    modifier = if (isLandscape) Modifier.align(Alignment.CenterStart) else Modifier.align(Alignment.BottomCenter),
                 )
             val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
             val socialDockBottomPadding by animateDpAsState(
@@ -4928,11 +4954,14 @@ private fun MobileShellScreen(
         )
     }
     if (state.confirmLogout) {
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         AlertDialog(
-            modifier = Modifier.vantafynAnimatedModalBorder(),
+            modifier = Modifier
+                .vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 28.dp)
+                .widthIn(max = if (isLandscape) 380.dp else 480.dp),
             onDismissRequest = onCancelLogout,
             containerColor = VantafynModalContainerColor,
-            shape = RoundedCornerShape(28.dp),
+            shape = RoundedCornerShape(if (isLandscape) 20.dp else 28.dp),
             confirmButton = {
                 TextButton(onClick = onLogoutCurrentProfile) { Text("Log Out") }
             },
@@ -5402,7 +5431,7 @@ private fun MobileHomeContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(
                 top = if (homeEditorPreviewActive) 180.dp else 2.dp,
-                bottom = 118.dp,
+                bottom = if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE) 24.dp else 118.dp,
             ),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
@@ -9132,6 +9161,9 @@ private fun AdminScreen(
     onSendBroadcastMessage: (String?, String, Long) -> Unit,
     onClearSessionMessageError: () -> Unit,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val bottomPadding = if (isLandscape) 24.dp else 116.dp
+    val horizontalPadding = if (isLandscape) 24.dp else 8.dp
     val overview = state.adminOverview
     val adminUser = overview?.users?.firstOrNull { it.id == state.session?.user?.id }
     var addUserExpanded by remember { mutableStateOf(false) }
@@ -9193,8 +9225,8 @@ private fun AdminScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding()
-                .padding(horizontal = 8.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 116.dp),
+                .padding(horizontal = horizontalPadding),
+            contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
             verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
         ) {
             item { HomeContentReveal(index = 0, animate = revealActive, revealKey = adminRevealKey) { ScreenTitle("Admin", overview?.serverName ?: state.server?.name ?: "Jellyfin Server") } }
@@ -13188,6 +13220,9 @@ private fun SettingsScreen(
     viewModel: VantafynHomeViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val bottomPadding = if (isLandscape) 24.dp else 108.dp
+    val horizontalPadding = if (isLandscape) 24.dp else 8.dp
     var soundEffectsOn by remember {
         mutableStateOf(dev.vantafyn.core.ui.VantafynSoundEffects.isSoundEffectsEnabled(context))
     }
@@ -13238,8 +13273,8 @@ private fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .imePadding()
-                            .padding(horizontal = 8.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                            .padding(horizontal = horizontalPadding),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
                     ) {
                         item {
@@ -13342,8 +13377,8 @@ private fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .imePadding()
-                            .padding(horizontal = 8.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                            .padding(horizontal = horizontalPadding),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                     ) {
                         item {
@@ -13449,8 +13484,8 @@ private fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .imePadding()
-                            .padding(horizontal = 8.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                            .padding(horizontal = horizontalPadding),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                     ) {
                         item {
@@ -13521,8 +13556,8 @@ private fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .imePadding()
-                            .padding(horizontal = 8.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                            .padding(horizontal = horizontalPadding),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                     ) {
                         item {
@@ -13710,8 +13745,8 @@ private fun SettingsScreen(
                         modifier = Modifier
                             .fillMaxSize()
                             .imePadding()
-                            .padding(horizontal = 8.dp),
-                        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+                            .padding(horizontal = horizontalPadding),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                     ) {
                         item {
@@ -14618,6 +14653,8 @@ private fun VantafynHubDialog(
     val groupedWhatsNew = remember(whatsNewItems) { groupWhatsNewItems(whatsNewItems) }
     val tabs = listOf("What's New", "My Guides", "Library")
 
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false),
@@ -14626,19 +14663,19 @@ private fun VantafynHubDialog(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding()
-                .padding(horizontal = 20.dp, vertical = 24.dp),
+                .padding(horizontal = if (isLandscape) 12.dp else 20.dp, vertical = if (isLandscape) 8.dp else 24.dp),
             contentAlignment = Alignment.Center,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 440.dp)
-                    .heightIn(max = this@BoxWithConstraints.maxHeight * 0.9f)
-                    .clip(RoundedCornerShape(28.dp))
+                    .widthIn(max = if (isLandscape) 460.dp else 440.dp)
+                    .heightIn(max = this@BoxWithConstraints.maxHeight * if (isLandscape) 0.94f else 0.9f)
+                    .clip(RoundedCornerShape(if (isLandscape) 20.dp else 28.dp))
                     .background(VantafynColors.Graphite.copy(alpha = 0.96f))
-                    .vantafynAnimatedModalBorder(cornerRadius = 28.dp)
-                    .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 28.dp)
+                    .padding(if (isLandscape) 14.dp else 22.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 10.dp else 16.dp),
             ) {
                 // Header
                 Row(
@@ -15490,20 +15527,25 @@ private fun PermissionDetailDialog(
             .padding(22.dp),
         contentAlignment = Alignment.Center,
     ) {
+        val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
         VantafynGlassModalPanel(
             modifier = Modifier
                 .widthIn(max = 460.dp)
-                .vantafynAnimatedModalBorder(cornerRadius = 30.dp, strokeWidth = 1.25.dp),
-            cornerRadius = 30.dp,
-            contentPadding = PaddingValues(22.dp),
+                .vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 30.dp, strokeWidth = 1.25.dp),
+            cornerRadius = if (isLandscape) 20.dp else 30.dp,
+            contentPadding = PaddingValues(if (isLandscape) 14.dp else 22.dp),
         ) {
             Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = if (isLandscape) 240.dp else 600.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(15.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else 15.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(62.dp)
+                        .size(if (isLandscape) 44.dp else 62.dp)
                         .clip(RoundedCornerShape(999.dp))
                         .background(Color.White.copy(alpha = 0.08f))
                         .border(BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)), RoundedCornerShape(999.dp)),
@@ -15645,7 +15687,9 @@ private fun AppVersionDialog(
         shape = RoundedCornerShape(28.dp),
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -15719,7 +15763,9 @@ private fun SpecialThanksDialog(onDismiss: () -> Unit) {
         shape = RoundedCornerShape(28.dp),
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -16112,6 +16158,9 @@ private fun PlaybackPreferencesScreen(
     onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit,
 ) {
     val preferences = state.editablePlaybackPreferences
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val bottomPadding = if (isLandscape) 24.dp else 108.dp
+    val horizontalPadding = if (isLandscape) 24.dp else 8.dp
     var screenRevealActive by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         screenRevealActive = true
@@ -16121,8 +16170,8 @@ private fun PlaybackPreferencesScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+            .padding(horizontal = horizontalPadding),
+        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -18020,13 +18069,20 @@ private fun PasswordChangeDialog(
         passwordsMatch &&
         (!requiresCurrent || current.isNotBlank())
     AlertDialog(
-        modifier = Modifier.vantafynAnimatedModalBorder(),
+        modifier = Modifier
+            .imePadding()
+            .vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
         containerColor = VantafynModalContainerColor,
         shape = RoundedCornerShape(28.dp),
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm)) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(VantafynSpacing.sm),
+            ) {
                 if (requiresCurrent) {
                     VantafynTextField(
                         value = current,
@@ -18087,6 +18143,9 @@ private fun AdminUserSettingsScreen(
     onDeleteProfileImage: () -> Unit,
 ) {
     val detail = state.adminUserDetail
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val bottomPadding = if (isLandscape) 24.dp else 108.dp
+    val horizontalPadding = if (isLandscape) 24.dp else 8.dp
     val revealKey = detail?.user?.id ?: "admin-user-settings"
     var resetPasswordExpanded by remember(detail?.user?.id) { mutableStateOf(false) }
     var newPassword by remember(detail?.user?.id) { mutableStateOf("") }
@@ -18102,8 +18161,8 @@ private fun AdminUserSettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+            .padding(horizontal = horizontalPadding),
+        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -18361,6 +18420,9 @@ private fun HomeLayoutScreen(
     val editingPreference = editingTarget?.let { target ->
         state.homeLayout.firstOrNull { it.type == target.type }
     }
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val bottomPadding = if (isLandscape) 24.dp else 108.dp
+    val horizontalPadding = if (isLandscape) 24.dp else 8.dp
     var screenRevealActive by remember { mutableStateOf(true) }
     LaunchedEffect(Unit) {
         screenRevealActive = true
@@ -18370,8 +18432,8 @@ private fun HomeLayoutScreen(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 8.dp),
-        contentPadding = PaddingValues(top = 10.dp, bottom = 108.dp),
+            .padding(horizontal = horizontalPadding),
+        contentPadding = PaddingValues(top = 10.dp, bottom = bottomPadding),
         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.lg),
     ) {
         item {
@@ -18968,7 +19030,13 @@ private fun HomeAddRowsDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+            Column(
+                modifier = Modifier
+                    .heightIn(max = if (isLandscape) 210.dp else 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 6.dp else 9.dp),
+            ) {
                 supportedSmartRows.forEach { row ->
                     val selected = row in draftSelection
                     HomeSmartRowChoiceTile(
@@ -19145,7 +19213,13 @@ private fun HomeLayoutOptionDialog(
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+            Column(
+                modifier = Modifier
+                    .heightIn(max = if (isLandscape) 210.dp else 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 6.dp else 10.dp),
+            ) {
                 when (target.kind) {
                     HomeLayoutOptionKind.Artwork -> enumValues<VantafynArtworkType>().forEach { option ->
                         HomeLayoutChoiceRow(
@@ -22301,6 +22375,27 @@ private fun MobileBottomNav(
         is NavigationRailMode.Main -> BottomNavKind.Main
     }
 
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    if (isLandscape) {
+        MobileLandscapeSideNavRail(
+            mode = mode,
+            currentNavKind = currentNavKind,
+            mainTabs = mainTabs,
+            socialTabs = socialTabs,
+            gamesTabs = gamesTabs,
+            atmosphereMode = atmosphereMode,
+            experienceMode = experienceMode,
+            isMusicPlaying = isMusicPlaying,
+            pendingOmbiAccessRequestCount = pendingOmbiAccessRequestCount,
+            unreadMessagesCount = unreadMessagesCount,
+            incomingFriendRequestsCount = incomingFriendRequestsCount,
+            onSelected = onSelected,
+            onSocialTabSelected = onSocialTabSelected,
+            onGamesTabSelected = onGamesTabSelected,
+            onMusicLongPress = onMusicLongPress,
+            modifier = modifier,
+        )
+    } else {
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -22484,6 +22579,159 @@ private fun MobileBottomNav(
             )
         }
     }
+    }
+}
+
+@Composable
+private fun MobileLandscapeSideNavRail(
+    mode: NavigationRailMode,
+    currentNavKind: BottomNavKind,
+    mainTabs: List<MobileDestination>,
+    socialTabs: List<dev.vantafyn.feature.home.SocialTab>,
+    gamesTabs: List<dev.vantafyn.feature.home.games.GamesTab>,
+    atmosphereMode: BottomRailAtmosphereMode,
+    experienceMode: ExperienceMode,
+    isMusicPlaying: Boolean,
+    pendingOmbiAccessRequestCount: Int,
+    unreadMessagesCount: Int,
+    incomingFriendRequestsCount: Int,
+    onSelected: (MobileDestination) -> Unit,
+    onSocialTabSelected: (dev.vantafyn.feature.home.SocialTab) -> Unit,
+    onGamesTabSelected: (dev.vantafyn.feature.home.games.GamesTab) -> Unit,
+    onMusicLongPress: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    var tapTrigger by remember { mutableIntStateOf(0) }
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start + WindowInsetsSides.Vertical))
+            .padding(start = 6.dp, top = 6.dp, bottom = 6.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        VantafynGlassDock(
+            modifier = Modifier
+                .width(60.dp)
+                .fillMaxHeight(),
+            cornerRadius = 24.dp,
+            contentPadding = PaddingValues(vertical = 10.dp, horizontal = 2.dp),
+        ) {
+            RailInteriorAtmosphere(
+                mode = atmosphereMode,
+                modifier = Modifier.matchParentSize(),
+            )
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                when (currentNavKind) {
+                    BottomNavKind.Main -> {
+                        val selected = (mode as? NavigationRailMode.Main)?.selected
+                        mainTabs.forEach { destination ->
+                            val tabSelected = selected == destination ||
+                                (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
+                                (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                            val interactionSource = remember { MutableInteractionSource() }
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (tabSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                                    .combinedClickable(
+                                        interactionSource = interactionSource,
+                                        indication = null,
+                                        onClick = { tapTrigger++; onSelected(destination) },
+                                        onLongClick = if (destination == MobileDestination.Music) onMusicLongPress else null,
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                MiniNavIcon(
+                                    destination = destination,
+                                    selected = tabSelected,
+                                    activePulse = destination == MobileDestination.Music && isMusicPlaying && !tabSelected,
+                                )
+                                if (
+                                    pendingOmbiAccessRequestCount > 0 &&
+                                    (destination == MobileDestination.Requests || destination == MobileDestination.Admin)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(top = 4.dp, end = 4.dp)
+                                            .size(7.dp)
+                                            .background(Color(0xFF7DDCFF), RoundedCornerShape(999.dp)),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    BottomNavKind.Social -> {
+                        val selectedSocialTab = (mode as? NavigationRailMode.Social)?.selectedTab
+                        socialTabs.forEach { tab ->
+                            val tabSelected = selectedSocialTab == tab
+                            val interactionSource = remember { MutableInteractionSource() }
+                            val badgeCount = when (tab) {
+                                dev.vantafyn.feature.home.SocialTab.Messages -> unreadMessagesCount
+                                dev.vantafyn.feature.home.SocialTab.Requests -> incomingFriendRequestsCount
+                                else -> 0
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (tabSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                                    .combinedClickable(
+                                        interactionSource = interactionSource,
+                                        indication = null,
+                                        onClick = { tapTrigger++; onSocialTabSelected(tab) },
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                SocialNavIcon(
+                                    tab = tab,
+                                    selected = tabSelected,
+                                )
+                                if (badgeCount > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(top = 4.dp, end = 4.dp)
+                                            .size(7.dp)
+                                            .background(Color(0xFFFF3366), RoundedCornerShape(999.dp)),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    BottomNavKind.Games -> {
+                        val selectedGamesTab = (mode as? NavigationRailMode.Games)?.selectedTab
+                        gamesTabs.forEach { tab ->
+                            val tabSelected = selectedGamesTab == tab
+                            val interactionSource = remember { MutableInteractionSource() }
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(if (tabSelected) Color.White.copy(alpha = 0.14f) else Color.Transparent)
+                                    .combinedClickable(
+                                        interactionSource = interactionSource,
+                                        indication = null,
+                                        onClick = { tapTrigger++; onGamesTabSelected(tab) },
+                                    ),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                GamesNavIcon(
+                                    tab = tab,
+                                    selected = tabSelected,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -22536,11 +22784,15 @@ private fun MusicQuickPlayerSheet(
     LaunchedEffect(track?.id) {
         if (track == null) showLyrics = false
     }
+    val isLandscape = androidx.compose.ui.platform.LocalConfiguration.current.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
     Box(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 10.dp, vertical = 82.dp),
+            .padding(
+                horizontal = if (isLandscape) 16.dp else 10.dp,
+                vertical = if (isLandscape) 8.dp else 82.dp,
+            ),
     ) {
         VantafynGlassModalPanel(
             modifier = Modifier
@@ -23505,17 +23757,25 @@ private fun LibraryRow(
 
 @Composable
 internal fun CenterPane(content: @Composable () -> Unit) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .imePadding(),
         contentAlignment = Alignment.Center,
     ) {
-        val widthFraction = if (maxWidth > 700.dp) 0.56f else 0.88f
+        val widthFraction = if (isLandscape) {
+            if (maxWidth > 900.dp) 0.52f else if (maxWidth > 650.dp) 0.65f else 0.85f
+        } else {
+            if (maxWidth > 700.dp) 0.56f else 0.88f
+        }
         Column(
             modifier = Modifier
+                .widthIn(max = 520.dp)
                 .fillMaxWidth(widthFraction)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(vertical = if (isLandscape) 16.dp else 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             content()
@@ -23633,41 +23893,60 @@ private fun MediaContextMenu(
     isAdmin: Boolean = false,
     onIdentify: (() -> Unit)? = null,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val supportsMyList = target.itemType.supportsMyListAction()
     AlertDialog(
-        modifier = Modifier.vantafynAnimatedModalBorder(),
+        modifier = Modifier
+            .vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 28.dp)
+            .widthIn(max = if (isLandscape) 380.dp else 460.dp),
         onDismissRequest = onDismiss,
         confirmButton = {},
         containerColor = VantafynModalContainerColor,
-        shape = RoundedCornerShape(28.dp),
+        shape = RoundedCornerShape(if (isLandscape) 20.dp else 28.dp),
         title = {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(target.title, color = VantafynColors.Ink, fontWeight = FontWeight.SemiBold, maxLines = 3, overflow = TextOverflow.Ellipsis, fontSize = when { target.title.length > 55 -> 17.sp; target.title.length > 35 -> 19.sp; else -> 22.sp })
-                Text(target.subtitle ?: target.itemType?.searchGroupLabel() ?: "Media", color = VantafynColors.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column(verticalArrangement = Arrangement.spacedBy(if (isLandscape) 2.dp else 4.dp)) {
+                Text(
+                    target.title,
+                    color = VantafynColors.Ink,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = if (isLandscape) 1 else 3,
+                    overflow = TextOverflow.Ellipsis,
+                    fontSize = if (isLandscape) 16.sp else when { target.title.length > 55 -> 17.sp; target.title.length > 35 -> 19.sp; else -> 22.sp },
+                )
+                Text(
+                    target.subtitle ?: target.itemType?.searchGroupLabel() ?: "Media",
+                    color = VantafynColors.Muted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontSize = if (isLandscape) 12.sp else 14.sp,
+                )
             }
         },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                modifier = if (isLandscape) Modifier.heightIn(max = 200.dp).verticalScroll(rememberScrollState()) else Modifier,
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 6.dp else 8.dp),
+            ) {
                 onCustomizeHome?.let { action ->
-                    ContextAction("✦", "Customize Home", action)
+                    ContextAction("✦", "Customize Home", action, isLandscape = isLandscape)
                 }
-                ContextAction("ⓘ", "View details", onViewDetails)
+                ContextAction("ⓘ", "View details", onViewDetails, isLandscape = isLandscape)
                 if (supportsMyList) {
                     if (target.inMyList) {
-                        ContextAction("♡", "Remove from My List", onRemoveFromMyList)
+                        ContextAction("♡", "Remove from My List", onRemoveFromMyList, isLandscape = isLandscape)
                     } else {
-                        ContextAction("＋", "Add to My List", onAddToMyList)
+                        ContextAction("＋", "Add to My List", onAddToMyList, isLandscape = isLandscape)
                     }
                 }
                 if (target.itemType?.contains("Episode", ignoreCase = true) == true || target.itemType?.contains("Movie", ignoreCase = true) == true) {
-                    ContextAction("✓", "Mark watched", onMarkWatched)
-                    ContextAction("↺", "Mark unwatched", onMarkUnwatched)
+                    ContextAction("✓", "Mark watched", onMarkWatched, isLandscape = isLandscape)
+                    ContextAction("↺", "Mark unwatched", onMarkUnwatched, isLandscape = isLandscape)
                 }
                 if (target.allowDownload) {
-                    ContextAction("↓", "Save offline", onDownload)
+                    ContextAction("↓", "Save offline", onDownload, isLandscape = isLandscape)
                 }
                 if (isAdmin && target.itemType.supportsIdentify() && onIdentify != null) {
-                    ContextAction("🔍", "Identify", onIdentify)
+                    ContextAction("🔍", "Identify", onIdentify, isLandscape = isLandscape)
                 }
             }
         },
@@ -23675,15 +23954,15 @@ private fun MediaContextMenu(
 }
 
 @Composable
-private fun ContextAction(icon: String, label: String, onClick: () -> Unit, enabled: Boolean = true) {
+private fun ContextAction(icon: String, label: String, onClick: () -> Unit, enabled: Boolean = true, isLandscape: Boolean = false) {
     VantafynGlassSurface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(enabled = enabled, onClick = onClick),
         variant = VantafynGlassVariant.Card,
         enabled = enabled,
-        cornerRadius = 18.dp,
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+        cornerRadius = if (isLandscape) 14.dp else 18.dp,
+        contentPadding = PaddingValues(horizontal = if (isLandscape) 10.dp else 14.dp, vertical = if (isLandscape) 8.dp else 12.dp),
     ) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -23879,7 +24158,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.31"
+private const val VANTAFYN_APP_VERSION = "0.9.33"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

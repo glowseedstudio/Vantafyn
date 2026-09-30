@@ -3,6 +3,7 @@ package dev.vantafyn.feature.home.games
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,9 +15,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -47,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
 import android.content.Context
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
@@ -68,6 +74,8 @@ fun GameDetailModal(
     onDeleteOffline: ((GameDetail) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     AnimatedVisibility(
         visible = game != null,
         enter = fadeIn(),
@@ -85,21 +93,23 @@ fun GameDetailModal(
         ) {
             Box(
                 modifier = Modifier
-                    .width(420.dp)
-                    .clip(RoundedCornerShape(28.dp))
+                    .widthIn(max = if (isLandscape) 480.dp else 420.dp)
+                    .heightIn(max = if (isLandscape) 330.dp else 700.dp)
+                    .clip(RoundedCornerShape(if (isLandscape) 20.dp else 28.dp))
                     .background(Color(0xFF131317))
                     .border(
                         width = 1.dp,
                         brush = Brush.horizontalGradient(
                             listOf(VantafynColors.Primary, VantafynColors.Secondary)
                         ),
-                        shape = RoundedCornerShape(28.dp),
+                        shape = RoundedCornerShape(if (isLandscape) 20.dp else 28.dp),
                     )
                     .clickable(enabled = false) {}
-                    .padding(24.dp),
+                    .padding(if (isLandscape) 14.dp else 24.dp),
             ) {
                 Column(
-                    verticalArrangement = Arrangement.spacedBy(18.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(if (isLandscape) 10.dp else 18.dp),
                 ) {
                     // Top Bar with Close Button
                     Row(
@@ -158,7 +168,7 @@ fun GameDetailModal(
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(160.dp)
+                                .height(if (isLandscape) 80.dp else 160.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .background(Color(0xFF0D0F18)),
                             contentAlignment = Alignment.Center,
@@ -178,7 +188,7 @@ fun GameDetailModal(
                             text = game.cleanTitle.ifEmpty { game.title },
                             color = VantafynColors.Ink,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 22.sp,
+                            fontSize = if (isLandscape) 17.sp else 22.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -376,7 +386,7 @@ fun GameDetailModal(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(52.dp)
+                            .height(if (isLandscape) 44.dp else 52.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(VantafynGradients.accentHorizontal())
                             .clickable { onPlay(game) },

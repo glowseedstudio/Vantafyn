@@ -1,6 +1,8 @@
 package dev.vantafyn.feature.home
 
+import android.content.res.Configuration
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -64,6 +66,7 @@ fun ExperienceSelectionScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Box(modifier = modifier.fillMaxSize()) {
         SetupBackScaffold(onBack = onBack, showBack = true) {
             CenterPane {
@@ -74,10 +77,10 @@ fun ExperienceSelectionScreen(
                         tv = tv,
                     )
                 }
-                Spacer(Modifier.height(VantafynSpacing.xl))
+                Spacer(Modifier.height(if (isLandscape) VantafynSpacing.md else VantafynSpacing.xl))
                 SetupMaterialize(delayMillis = 180, modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(0.92f),
+                        modifier = Modifier.fillMaxWidth(if (isLandscape) 1f else 0.92f),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
@@ -111,6 +114,7 @@ fun MusicBackendSelectionScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     Box(modifier = modifier.fillMaxSize()) {
         SetupBackScaffold(onBack = onBack, showBack = true) {
             CenterPane {
@@ -121,10 +125,10 @@ fun MusicBackendSelectionScreen(
                         tv = tv,
                     )
                 }
-                Spacer(Modifier.height(VantafynSpacing.xl))
+                Spacer(Modifier.height(if (isLandscape) VantafynSpacing.md else VantafynSpacing.xl))
                 SetupMaterialize(delayMillis = 180, modifier = Modifier.fillMaxWidth()) {
                     Column(
-                        modifier = Modifier.fillMaxWidth(0.92f),
+                        modifier = Modifier.fillMaxWidth(if (isLandscape) 1f else 0.92f),
                         verticalArrangement = Arrangement.spacedBy(VantafynSpacing.md),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {

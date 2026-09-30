@@ -29,6 +29,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -915,25 +920,29 @@ private fun AchievementDetailDialog(
         resolveAchievementIcon(achievement.iconName, achievement.name, achievement.category)
     }
 
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = 24.dp),
+        modifier = Modifier.vantafynAnimatedModalBorder(cornerRadius = if (isLandscape) 20.dp else 24.dp),
         containerColor = VantafynColors.Graphite.copy(alpha = 0.96f),
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(if (isLandscape) 20.dp else 24.dp),
         title = null,
         text = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(max = if (isLandscape) 220.dp else 450.dp)
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(if (isLandscape) 8.dp else 14.dp),
             ) {
                 // Large Badge Icon
                 Box(
                     modifier = Modifier
-                        .size(76.dp)
-                        .clip(RoundedCornerShape(20.dp))
+                        .size(if (isLandscape) 48.dp else 76.dp)
+                        .clip(RoundedCornerShape(if (isLandscape) 14.dp else 20.dp))
                         .background(
                             if (achievement.isUnlocked) rarityColor.copy(alpha = 0.18f)
                             else VantafynColors.Surface.copy(alpha = 0.8f),

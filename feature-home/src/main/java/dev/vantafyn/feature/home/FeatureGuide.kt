@@ -10,6 +10,7 @@ import androidx.compose.material.icons.rounded.Bolt
 import androidx.compose.material.icons.rounded.CardGiftcard
 import androidx.compose.material.icons.rounded.Category
 import androidx.compose.material.icons.rounded.Cast
+import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CollectionsBookmark
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.DirectionsCar
@@ -39,10 +40,12 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Radio
 import androidx.compose.material.icons.rounded.Recommend
+import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.Swipe
 import androidx.compose.material.icons.rounded.TouchApp
@@ -69,11 +72,12 @@ enum class DiscoverCategory(val label: String, val order: Int) {
     LivingRoomTv("TV & Living Room", 1),
     Social("Social & Friends", 2),
     Achievements("Achievements", 3),
-    Watching("Watching", 4),
-    Music("Music", 5),
-    YourLibrary("Your library", 6),
-    Requests("Requests", 7),
-    AdminTools("Admin tools", 8),
+    Games("Retro Games", 4),
+    Watching("Watching", 5),
+    Music("Music", 6),
+    YourLibrary("Your library", 7),
+    Requests("Requests", 8),
+    AdminTools("Admin tools", 9),
 }
 
 fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
@@ -323,6 +327,91 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         isNew = true,
         detailedDescription = "Level up from Rookie to Grandmaster. View the server-wide leaderboard, earn tier badges, and showcase your achievements on your profile.",
         deepLinkAction = "open_achievements",
+    ),
+
+    // ----------------------------------------------------
+    // Retro Games
+    // ----------------------------------------------------
+    DiscoverFeature(
+        id = "retro_games_hub",
+        title = "Retro Games Hub",
+        shortDescription = "Play classic retro games directly inside Vantafyn across 18+ emulated consoles.",
+        category = DiscoverCategory.Games,
+        icon = Icons.Rounded.SportsEsports,
+        isNew = true,
+        detailedDescription = "Stream and play retro games from your Jellyfin server directly on your mobile device, tablet, or TV. Features a full retro launcher UI with games organized by systems, automatic artwork scraping, and per-game details.",
+        steps = listOf(
+            "Configure a Games library on your Jellyfin server with ROMs",
+            "Open the Games tab from the navigation rail or dock",
+            "Browse systems, recent games, or search your entire collection",
+            "Tap any game to view metadata, boxart, and launch into play",
+        ),
+        deepLinkAction = "open_games",
+    ),
+    DiscoverFeature(
+        id = "game_systems_library",
+        title = "18+ Classic Systems",
+        shortDescription = "Support for Nintendo, PlayStation, Sega, Atari, Arcade, and handhelds.",
+        category = DiscoverCategory.Games,
+        icon = Icons.Rounded.Category,
+        isNew = true,
+        detailedDescription = "Vantafyn emulates NES, SNES, N64, Game Boy, Game Boy Color, Game Boy Advance, Nintendo DS, Sega Genesis/Mega Drive, Sega Master System, Game Gear, Sony PlayStation (PS1), Atari 2600, 7800, Lynx, Neo Geo Pocket, and Arcade titles with high-performance WebAssembly emulation.",
+        deepLinkAction = "open_games",
+    ),
+    DiscoverFeature(
+        id = "game_save_states_cloud",
+        title = "Cloud Save States",
+        shortDescription = "Instant save states synced to your Jellyfin server with auto-save support.",
+        category = DiscoverCategory.Games,
+        icon = Icons.Rounded.CloudDone,
+        isNew = true,
+        detailedDescription = "Never lose your game progress again. Vantafyn automatically captures save states and synchronizes them directly with your server. View all your slot saves, timestamps, and screenshots in the dedicated Saves tab, allowing you to resume on any device seamlessly.",
+        steps = listOf(
+            "Play any game and open the pause menu with the controller hotkey or back button",
+            "Save state to a slot or let automatic periodic saves capture progress",
+            "Browse and manage your save states anytime from the Saves tab in Games",
+        ),
+        deepLinkAction = "open_games",
+    ),
+    DiscoverFeature(
+        id = "game_controllers",
+        title = "Gamepads & On-Screen Touch Controls",
+        shortDescription = "Bluetooth & USB controller support, custom keybindings, and dynamic virtual gamepads.",
+        category = DiscoverCategory.Games,
+        icon = Icons.Rounded.SportsEsports,
+        isNew = true,
+        detailedDescription = "Connect physical Bluetooth or USB gamepads (Xbox, PlayStation, 8BitDo, Switch Pro) for responsive console-quality controls with automatic button detection. When playing on touchscreen devices without a gamepad, custom on-screen virtual gamepads provide intuitive tactile retro control.",
+        steps = listOf(
+            "Pair any Bluetooth controller with your device or connect via USB-C",
+            "Launch any game — controls are instantly mapped and responsive",
+            "Adjust vibration feedback, fast-forward, and hotkeys in Game Settings",
+        ),
+        deepLinkAction = "open_games",
+    ),
+    DiscoverFeature(
+        id = "game_playtime_stats",
+        title = "Playtime & Recent Games",
+        shortDescription = "Track your total play duration and jump back into recent favorites in one tap.",
+        category = DiscoverCategory.Games,
+        icon = Icons.Rounded.Schedule,
+        isNew = true,
+        detailedDescription = "Keep tabs on your retro adventures. The Games Home tab displays your overall total gameplay time, system breakdowns, and a dedicated carousel of recently played titles for rapid resume.",
+        deepLinkAction = "open_games",
+    ),
+    DiscoverFeature(
+        id = "offline_game_downloads",
+        title = "Offline Game Downloads",
+        shortDescription = "Download ROMs and artwork to play retro classics completely offline.",
+        category = DiscoverCategory.Games,
+        icon = Icons.Rounded.Download,
+        isNew = true,
+        detailedDescription = "Traveling or offline? Download your favorite retro games to local storage with one tap in the Game Detail modal. Downloaded games display offline ready badges and can be launched anywhere without Wi-Fi.",
+        steps = listOf(
+            "Open any game detail modal while connected to your server",
+            "Tap Download Game to store the ROM and artwork locally",
+            "Launch and play offline anytime without network connectivity",
+        ),
+        deepLinkAction = "open_games",
     ),
 
     // ----------------------------------------------------
@@ -651,7 +740,7 @@ fun discoverFeatureGuide(): List<DiscoverFeature> = listOf(
         shortDescription = "Long-press the Music icon on any screen for a quick player popup.",
         category = DiscoverCategory.Music,
         icon = Icons.Rounded.QueueMusic,
-        detailedDescription = "On any screen except Music, long-press the Music icon in the bottom navigation bar. A quick player sheet pops up showing the current track with playback controls. Tap the icon normally to go to the full Music screen.",
+        detailedDescription = "On any screen except Music, long-press the Music icon in the navigation bar (bottom bar in portrait, left side rail in landscape). A sleek quick player sheet pops up showing the current track with playback controls and lyrics. In landscape, it rests cleanly at the bottom of the screen. Tap the icon normally to navigate to the full Music screen.",
         deepLinkAction = "open_music",
     ),
     DiscoverFeature(
