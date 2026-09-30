@@ -80,6 +80,18 @@ public sealed record PokemonConnectionTestResult
     [JsonPropertyName("providerVersion")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ProviderVersion { get; init; }
+
+    [JsonPropertyName("pkhexVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PkhexVersion { get; init; }
+
+    [JsonPropertyName("canUploadSaves")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanUploadSaves { get; init; }
+
+    [JsonPropertyName("canCreateBackup")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? CanCreateBackup { get; init; }
 }
 
 /// <summary>

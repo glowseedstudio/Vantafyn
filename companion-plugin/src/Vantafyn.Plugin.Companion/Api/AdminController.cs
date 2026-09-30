@@ -97,10 +97,39 @@ public sealed class AdminController(
     }
 
     [HttpPost("Pokemon/TestConnection")]
-    public async Task<IActionResult> TestPokemonConnection(CancellationToken cancellationToken)
+    public async Task<IActionResult> TestPokemonConnection(
+        [FromBody] PokemonTestConnectionRequest? request = null,
+        CancellationToken cancellationToken = default)
     {
         var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
-        var provider = pokemonProviderFactory.Create(config.Pokemon);
+        var isEnabled = request?.Enabled ?? config.Pokemon.Enabled;
+        if (!isEnabled)
+        {
+            return Ok(new PokemonConnectionTestResult
+            {
+                IsSuccess = false,
+                Message = "Pokémon Vault integration is disabled. Please enable it before testing.",
+                LatencyMs = 0
+            });
+        }
+
+        var baseUrl = !string.IsNullOrWhiteSpace(request?.BaseUrl)
+            ? request.BaseUrl
+            : config.Pokemon.PkVaultBaseUrl;
+
+        var timeout = request?.TimeoutSeconds ?? config.Pokemon.TimeoutSeconds;
+
+        var testConfig = new PokemonConfiguration
+        {
+            Enabled = true,
+            PkVaultBaseUrl = baseUrl,
+            TimeoutSeconds = timeout,
+            AllowTransfers = config.Pokemon.AllowTransfers,
+            AllowCrossGenerationTransfers = config.Pokemon.AllowCrossGenerationTransfers,
+            AutoBackups = config.Pokemon.AutoBackups
+        };
+
+        var provider = pokemonProviderFactory.Create(testConfig);
         var result = await provider.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
         return Ok(result);
     }
@@ -197,3 +226,8 @@ public sealed record AdminConfigurationRequest(
     bool? PokemonAllowTrading = null,
     bool? PokemonAllowEditing = null,
     bool? PokemonAutoBackups = null);
+
+public sealed record PokemonTestConnectionRequest(
+    string? BaseUrl = null,
+    bool? Enabled = null,
+    int? TimeoutSeconds = null);

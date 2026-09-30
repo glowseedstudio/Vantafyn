@@ -284,7 +284,7 @@
 
           <div class="inputContainer">
             <label class="inputLabel" for="pokemonPkVaultBaseUrl">PKVault Service Base URL</label>
-            <input is="emby-input" type="text" id="pokemonPkVaultBaseUrl" class="emby-input" placeholder="http://localhost:5000 or http://pkvault:5000" />
+            <input is="emby-input" type="text" id="pokemonPkVaultBaseUrl" class="emby-input" placeholder="http://127.0.0.1:3000 or http://localhost:3000" />
             <div class="fieldDescription">Base URL where your external PKVault container or instance is reachable by this Jellyfin server.</div>
           </div>
 
@@ -543,11 +543,49 @@
             testPokemonBtn.disabled = true;
             setStatus('pokemonStatus', 'Testing PKVault connection...', 'info');
             try {
-              const result = await api('Vantafyn/Admin/Pokemon/TestConnection', { type: 'POST' });
-              const msg = (result.message || 'Connection test finished') + (result.latencyMs ? ' (' + result.latencyMs + 'ms)' : '');
-              setStatus('pokemonStatus', msg, result.isSuccess ? 'success' : 'error');
+              const isEnabled = page.querySelector('#pokemonEnabled').checked;
+              if (!isEnabled) {
+                setStatus('pokemonStatus', 'Pokémon Vault integration is disabled. Please check "Enable Pokémon Vault Integration" first.', 'error');
+                testPokemonBtn.disabled = false;
+                return;
+              }
+
+              const baseUrl = (page.querySelector('#pokemonPkVaultBaseUrl').value || '').trim();
+              if (!baseUrl) {
+                setStatus('pokemonStatus', 'Please specify a PKVault Service Base URL before testing.', 'error');
+                testPokemonBtn.disabled = false;
+                return;
+              }
+
+              const timeoutVal = parseInt(page.querySelector('#pokemonTimeoutSeconds').value, 10) || 5;
+
+              const result = await api('Vantafyn/Admin/Pokemon/TestConnection', {
+                type: 'POST',
+                data: JSON.stringify({
+                  baseUrl: baseUrl,
+                  enabled: isEnabled,
+                  timeoutSeconds: timeoutVal
+                }),
+                contentType: 'application/json'
+              });
+
+              if (result.isSuccess) {
+                let details = 'Connected: PKVault';
+                if (result.providerVersion) {
+                  details += ' v' + result.providerVersion;
+                }
+                if (result.pkhexVersion) {
+                  details += ' (PKHeX ' + result.pkhexVersion + ')';
+                }
+                if (result.latencyMs) {
+                  details += ' - ' + result.latencyMs + 'ms';
+                }
+                setStatus('pokemonStatus', '✓ ' + details, 'success');
+              } else {
+                setStatus('pokemonStatus', '✗ ' + (result.message || 'Connection failed'), 'error');
+              }
             } catch (err) {
-              setStatus('pokemonStatus', 'PKVault connection failed: ' + formatError(err), 'error');
+              setStatus('pokemonStatus', '✗ PKVault connection failed: ' + formatError(err), 'error');
             } finally {
               testPokemonBtn.disabled = false;
             }

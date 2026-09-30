@@ -11,59 +11,124 @@ public sealed class PokemonSaveReaderTests
     [Fact]
     public async Task ParseSaveAsync_ValidPayload_ParsesTrainerPartyAndBoxes()
     {
-        var jsonResponse = """
+        var saveInfosResponse = """
         {
-            "trainerName": "Red",
-            "trainerId": "01337",
-            "money": 99999,
-            "pokedexSeen": 150,
-            "pokedexCaught": 149,
-            "party": [
-                {
-                    "species": "Pikachu",
-                    "speciesId": 25,
-                    "nickname": "Sparky",
-                    "level": 50,
-                    "gender": "M",
-                    "isShiny": true,
-                    "nature": "Timid",
-                    "ability": "Static",
-                    "heldItem": "Light Ball",
-                    "originalTrainer": "Red",
-                    "originalTrainerId": "01337",
-                    "originGame": "Pokémon FireRed",
-                    "moves": ["Thunderbolt", "Quick Attack", "Iron Tail", "Volt Tackle"],
-                    "legalityStatus": "valid"
+            "saveInfos": {
+                "firered.sav": {
+                    "id": 42,
+                    "path": "/pkvault/saves/firered.sav",
+                    "trainerName": "Red",
+                    "tid": 1337,
+                    "sid": 0,
+                    "generation": 3,
+                    "dexSeenCount": 150,
+                    "dexCaughtCount": 149,
+                    "partyCount": 1,
+                    "boxCount": 1,
+                    "boxSlotCount": 30
                 }
-            ],
-            "boxes": [
-                {
-                    "boxIndex": 1,
-                    "name": "Box 1",
-                    "capacity": 30,
-                    "pokemon": [
-                        {
-                            "species": "Charizard",
-                            "speciesId": 6,
-                            "nickname": "Flame",
-                            "level": 85,
-                            "gender": "M",
-                            "isShiny": false,
-                            "nature": "Adamant",
-                            "ability": "Blaze",
-                            "slotIndex": 1,
-                            "legalityStatus": "valid"
-                        }
-                    ]
-                }
-            ]
+            }
         }
         """;
 
-        var handler = new MockHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        var boxesResponse = """
+        [
+            {
+                "id": "box_0",
+                "type": 0,
+                "name": "Box 1",
+                "slotCount": 30,
+                "order": 0,
+                "idInt": 0
+            }
+        ]
+        """;
+
+        var pkmResponse = """
+        [
+            {
+                "id": "sparky_party_1",
+                "saveId": 42,
+                "party": 0,
+                "boxId": 0,
+                "boxSlot": 0,
+                "species": 25,
+                "nickname": "Sparky",
+                "isNicknamed": true,
+                "level": 50,
+                "gender": 0,
+                "isShiny": true,
+                "nature": 10,
+                "ability": 9,
+                "heldItem": 236,
+                "moves": [85, 98, 231, 344],
+                "originTrainerName": "Red",
+                "tid": 1337
+            },
+            {
+                "id": "flame_box_1",
+                "saveId": 42,
+                "party": -1,
+                "boxId": 0,
+                "boxSlot": 0,
+                "species": 6,
+                "nickname": "Charizard",
+                "isNicknamed": false,
+                "level": 85,
+                "gender": 0,
+                "isShiny": false,
+                "nature": 3,
+                "ability": 65,
+                "heldItem": 0,
+                "moves": [],
+                "originTrainerName": "Red",
+                "tid": 1337
+            }
+        ]
+        """;
+
+        var cleanupCalled = false;
+        var handler = new MockHttpMessageHandler(req =>
         {
-            Content = new StringContent(jsonResponse)
+            var path = req.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path == "/api/save-infos")
+            {
+                if (req.Method == HttpMethod.Post)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(saveInfosResponse)
+                    };
+                }
+                if (req.Method == HttpMethod.Delete)
+                {
+                    cleanupCalled = true;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{}")
+                    };
+                }
+            }
+
+            if (path == "/api/storage/box")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(boxesResponse)
+                };
+            }
+
+            if (path == "/api/storage/save/42/pkm")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(pkmResponse)
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
         });
+
         var factory = new TestHttpClientFactory(handler);
         var config = new PokemonConfiguration
         {
@@ -76,9 +141,9 @@ public sealed class PokemonSaveReaderTests
         var result = await provider.ParseSaveAsync(dummySaveBytes, "firered", "gba", 3, CancellationToken.None);
 
         Assert.True(result.IsSuccess);
+        Assert.True(cleanupCalled);
         Assert.Equal("Red", result.TrainerName);
-        Assert.Equal("01337", result.TrainerId);
-        Assert.Equal(99999, result.Money);
+        Assert.Equal("1337", result.TrainerId);
         Assert.Equal(150, result.PokedexSeen);
         Assert.Equal(149, result.PokedexCaught);
 
@@ -194,6 +259,331 @@ public sealed class PokemonSaveReaderTests
 
         Assert.False(result.IsSuccess);
         Assert.NotNull(result.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task ParseSaveAsync_WhenPkmFetchFails_CleansUpStagedSaveFile()
+    {
+        var saveInfosResponse = """
+        {
+            "saveInfos": {
+                "test.sav": {
+                    "id": 99,
+                    "path": "/pkvault/saves/test.sav",
+                    "trainerName": "Blue",
+                    "tid": 54321
+                }
+            }
+        }
+        """;
+
+        var cleanupCalled = false;
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            var path = req.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path == "/api/save-infos")
+            {
+                if (req.Method == HttpMethod.Post)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(saveInfosResponse)
+                    };
+                }
+                if (req.Method == HttpMethod.Delete)
+                {
+                    cleanupCalled = true;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("{}")
+                    };
+                }
+            }
+
+            if (path == "/api/storage/box")
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("[]")
+                };
+            }
+
+            if (path == "/api/storage/save/99/pkm")
+            {
+                return new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                {
+                    Content = new StringContent("Internal server error")
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var factory = new TestHttpClientFactory(handler);
+        var config = new PokemonConfiguration
+        {
+            Enabled = true,
+            PkVaultBaseUrl = "http://localhost:5000"
+        };
+        var provider = new PkVaultPokemonProvider(factory, config, NullLogger<PkVaultPokemonProvider>.Instance);
+
+        var result = await provider.ParseSaveAsync(new byte[512], "firered", "gba", 3, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("failed fetching Pokémon", result.ErrorMessage);
+        Assert.True(cleanupCalled, "Expected DELETE /api/save-infos cleanup to be executed even on partial failure");
+    }
+
+    [Fact]
+    public async Task ExtractPokemonFromSaveAsync_ValidRequest_PerformsDeleteCommitDownloadAndCleanup()
+    {
+        var saveInfosResponse = """
+        {
+            "saveInfos": {
+                "test.sav": {
+                    "id": 101,
+                    "path": "/pkvault/saves/extract_101.sav",
+                    "trainerName": "Red",
+                    "tid": 1337
+                }
+            }
+        }
+        """;
+
+        var pkmResponse = """
+        [
+            {
+                "id": "pkm_pikachu_42",
+                "saveId": 101,
+                "party": 0,
+                "boxId": 0,
+                "boxSlot": 0,
+                "species": 25,
+                "nickname": "Sparky",
+                "isNicknamed": true,
+                "level": 50,
+                "gender": 0,
+                "isShiny": true,
+                "nature": 10,
+                "ability": 9,
+                "heldItem": 236,
+                "moves": [85, 98],
+                "originTrainerName": "Red",
+                "tid": 1337
+            }
+        ]
+        """;
+
+        var deleteCalled = false;
+        var commitCalled = false;
+        var downloadCalled = false;
+        var cleanupCalled = false;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            var path = req.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path == "/api/save-infos")
+            {
+                if (req.Method == HttpMethod.Post)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(saveInfosResponse)
+                    };
+                }
+                if (req.Method == HttpMethod.Delete)
+                {
+                    cleanupCalled = true;
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+                }
+            }
+
+            if (path == "/api/storage/save/101/pkm")
+            {
+                if (req.Method == HttpMethod.Get)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(pkmResponse)
+                    };
+                }
+                if (req.Method == HttpMethod.Delete)
+                {
+                    deleteCalled = true;
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+                }
+            }
+
+            if (path == "/api/storage/action/save" && req.Method == HttpMethod.Post)
+            {
+                commitCalled = true;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+
+            if (path == "/api/save-infos/101/download" && req.Method == HttpMethod.Get)
+            {
+                downloadCalled = true;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([0xDE, 0xAD, 0xBE, 0xEF])
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var factory = new TestHttpClientFactory(handler);
+        var config = new PokemonConfiguration
+        {
+            Enabled = true,
+            PkVaultBaseUrl = "http://localhost:5000"
+        };
+        var provider = new PkVaultPokemonProvider(factory, config, NullLogger<PkVaultPokemonProvider>.Instance);
+
+        var result = await provider.ExtractPokemonFromSaveAsync(
+            saveBytes: new byte[512],
+            pokemonGameId: "firered",
+            platform: "gba",
+            generation: 3,
+            pokemonId: "pkm_pikachu_42",
+            isInParty: true,
+            boxIndex: null,
+            slotIndex: 1,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(deleteCalled, "Expected DELETE /api/storage/save/101/pkm");
+        Assert.True(commitCalled, "Expected POST /api/storage/action/save");
+        Assert.True(downloadCalled, "Expected GET /api/save-infos/101/download");
+        Assert.True(cleanupCalled, "Expected DELETE /api/save-infos?path=...");
+        Assert.NotNull(result.UpdatedSaveBytes);
+        Assert.Equal(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }, result.UpdatedSaveBytes);
+        Assert.NotNull(result.ExtractedPokemon);
+        Assert.Equal("Pikachu", result.ExtractedPokemon.Summary.Species);
+        Assert.Equal("Sparky", result.ExtractedPokemon.Summary.Nickname);
+    }
+
+    [Fact]
+    public async Task InjectPokemonIntoSaveAsync_ValidRequest_PerformsMoveCommitDownloadAndCleanup()
+    {
+        var saveInfosResponse = """
+        {
+            "saveInfos": {
+                "test.sav": {
+                    "id": 202,
+                    "path": "/pkvault/saves/inject_202.sav",
+                    "trainerName": "Red",
+                    "tid": 1337
+                }
+            }
+        }
+        """;
+
+        var boxesResponse = """
+        [
+            {
+                "id": "box_guid_1",
+                "type": 0,
+                "name": "Box 1",
+                "slotCount": 30,
+                "order": 0,
+                "idInt": 0
+            }
+        ]
+        """;
+
+        var moveCalled = false;
+        var commitCalled = false;
+        var downloadCalled = false;
+        var cleanupCalled = false;
+
+        var handler = new MockHttpMessageHandler(req =>
+        {
+            var path = req.RequestUri?.AbsolutePath ?? string.Empty;
+            if (path == "/api/save-infos")
+            {
+                if (req.Method == HttpMethod.Post)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent(saveInfosResponse)
+                    };
+                }
+                if (req.Method == HttpMethod.Delete)
+                {
+                    cleanupCalled = true;
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+                }
+            }
+
+            if (path == "/api/storage/box" && req.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(boxesResponse)
+                };
+            }
+
+            if (path == "/api/storage/move/pkm" && req.Method == HttpMethod.Put)
+            {
+                moveCalled = true;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+
+            if (path == "/api/storage/action/save" && req.Method == HttpMethod.Post)
+            {
+                commitCalled = true;
+                return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+
+            if (path == "/api/save-infos/202/download" && req.Method == HttpMethod.Get)
+            {
+                downloadCalled = true;
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent([0xCA, 0xFE, 0xBA, 0xBE])
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
+        });
+
+        var factory = new TestHttpClientFactory(handler);
+        var config = new PokemonConfiguration
+        {
+            Enabled = true,
+            PkVaultBaseUrl = "http://localhost:5000"
+        };
+        var provider = new PkVaultPokemonProvider(factory, config, NullLogger<PkVaultPokemonProvider>.Instance);
+
+        var vaultEntry = new PokemonVaultEntry
+        {
+            Id = "vault_pikachu_1",
+            Species = "Pikachu",
+            SpeciesId = 25,
+            Nickname = "Sparky",
+            RawData = "pkm_raw_variant_id"
+        };
+
+        var result = await provider.InjectPokemonIntoSaveAsync(
+            saveBytes: new byte[512],
+            pokemonGameId: "firered",
+            platform: "gba",
+            generation: 3,
+            entry: vaultEntry,
+            targetBoxIndex: 1,
+            targetSlotIndex: 1,
+            targetParty: false,
+            cancellationToken: CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.True(moveCalled, "Expected PUT /api/storage/move/pkm");
+        Assert.True(commitCalled, "Expected POST /api/storage/action/save");
+        Assert.True(downloadCalled, "Expected GET /api/save-infos/202/download");
+        Assert.True(cleanupCalled, "Expected DELETE /api/save-infos?path=...");
+        Assert.NotNull(result.UpdatedSaveBytes);
+        Assert.Equal(new byte[] { 0xCA, 0xFE, 0xBA, 0xBE }, result.UpdatedSaveBytes);
+        Assert.Contains("Box 1 Slot 1", result.AssignedLocation);
     }
 
     private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory

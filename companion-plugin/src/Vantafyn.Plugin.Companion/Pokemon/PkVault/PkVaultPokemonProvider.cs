@@ -14,6 +14,9 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly PokemonConfiguration _config;
     private readonly ILogger<PkVaultPokemonProvider> _logger;
+    private readonly PkVaultStaticCatalog _catalog = new();
+    private volatile bool _staticDataLoaded;
+    private readonly SemaphoreSlim _staticDataLock = new(1, 1);
 
     public string ProviderName => "pkvault";
 
@@ -29,6 +32,16 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
 
     public async Task<PokemonConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken)
     {
+        if (!_config.Enabled)
+        {
+            return new PokemonConnectionTestResult
+            {
+                IsSuccess = false,
+                Message = "Pokémon Vault integration is disabled in configuration.",
+                LatencyMs = 0
+            };
+        }
+
         var validationError = ValidateBaseUrl(_config.PkVaultBaseUrl);
         if (validationError != null)
         {
@@ -40,8 +53,12 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             };
         }
 
-        var uri = new Uri(_config.PkVaultBaseUrl!.Trim());
-        var timeout = TimeSpan.FromSeconds(Math.Clamp(_config.TimeoutSeconds, 2, 30));
+        var baseAddress = _config.PkVaultBaseUrl!.Trim().TrimEnd('/') + "/";
+        var baseUri = new Uri(baseAddress);
+        var requestUri = new Uri(baseUri, "api/settings");
+        var timeoutSeconds = Math.Clamp(_config.TimeoutSeconds > 0 ? _config.TimeoutSeconds : 5, 2, 15);
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
 
@@ -49,66 +66,101 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         try
         {
             var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
-            client.BaseAddress = uri;
+            client.BaseAddress = baseUri;
             client.Timeout = timeout;
 
-            // Attempt probing /api/health or fallback to /health or root /
             HttpResponseMessage response;
             try
             {
-                response = await client.GetAsync("/api/health", cts.Token).ConfigureAwait(false);
+                response = await client.GetAsync(requestUri, cts.Token).ConfigureAwait(false);
             }
-            catch (HttpRequestException)
+            catch (HttpRequestException ex)
             {
-                response = await client.GetAsync("/health", cts.Token).ConfigureAwait(false);
+                stopwatch.Stop();
+                _logger.LogWarning("Failed to connect to PKVault at {RequestUri}: {Message}", requestUri, ex.Message);
+                return new PokemonConnectionTestResult
+                {
+                    IsSuccess = false,
+                    Message = $"Could not connect to PKVault at {baseAddress.TrimEnd('/')}: {ex.Message}",
+                    LatencyMs = stopwatch.ElapsedMilliseconds
+                };
             }
 
             stopwatch.Stop();
 
             if (response.IsSuccessStatusCode)
             {
-                string? version = null;
+                PkVaultSettingsResponse? settings = null;
                 try
                 {
-                    var healthJson = await response.Content.ReadFromJsonAsync<PkVaultHealthPayload>(cancellationToken: cts.Token).ConfigureAwait(false);
-                    version = healthJson?.Version;
+                    settings = await response.Content.ReadFromJsonAsync<PkVaultSettingsResponse>(cancellationToken: cts.Token).ConfigureAwait(false);
                 }
-                catch
+                catch (System.Text.Json.JsonException jsonEx)
                 {
-                    // Body might be plain text or custom JSON; success status code is sufficient
+                    _logger.LogWarning(
+                        "PKVault at {RequestUri} returned HTTP {StatusCode}, but response body was not valid settings JSON: {Error}",
+                        requestUri, (int)response.StatusCode, jsonEx.Message);
                 }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        "Error reading settings response from PKVault at {RequestUri}: {Error}",
+                        requestUri, ex.Message);
+                }
+
+                var version = settings?.Version;
+                var pkhexVersion = settings?.PkhexVersion;
+                var canUploadSaves = settings?.CanUploadSaves;
+                var canCreateBackup = settings?.CanCreateBackup;
+
+                _logger.LogInformation(
+                    "Successfully connected to PKVault at {RequestUri} (HTTP {StatusCode}, version: {Version}, pkhexVersion: {PkhexVersion}) in {LatencyMs}ms.",
+                    requestUri, (int)response.StatusCode, version ?? "unknown", pkhexVersion ?? "unknown", stopwatch.ElapsedMilliseconds);
+
+                var msg = !string.IsNullOrWhiteSpace(version)
+                    ? (!string.IsNullOrWhiteSpace(pkhexVersion)
+                        ? $"Connected to PKVault v{version} (PKHeX {pkhexVersion})"
+                        : $"Connected to PKVault v{version}")
+                    : "Connected to PKVault";
 
                 return new PokemonConnectionTestResult
                 {
                     IsSuccess = true,
-                    Message = $"Successfully connected to PKVault ({response.StatusCode}).",
+                    Message = msg,
                     LatencyMs = stopwatch.ElapsedMilliseconds,
-                    ProviderVersion = version
+                    ProviderVersion = version,
+                    PkhexVersion = pkhexVersion,
+                    CanUploadSaves = canUploadSaves,
+                    CanCreateBackup = canCreateBackup
                 };
             }
+
+            _logger.LogWarning(
+                "PKVault connection check to {RequestUri} failed with HTTP {StatusCode} ({ReasonPhrase}).",
+                requestUri, (int)response.StatusCode, response.ReasonPhrase);
 
             return new PokemonConnectionTestResult
             {
                 IsSuccess = false,
-                Message = $"PKVault responded with HTTP {(int)response.StatusCode} ({response.ReasonPhrase}).",
+                Message = $"PKVault returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) for {requestUri.AbsolutePath}.",
                 LatencyMs = stopwatch.ElapsedMilliseconds
             };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             stopwatch.Stop();
-            _logger.LogWarning("Connection to PKVault at {BaseUrl} timed out after {TimeoutSeconds}s.", _config.PkVaultBaseUrl, _config.TimeoutSeconds);
+            _logger.LogWarning("Connection to PKVault at {RequestUri} timed out after {TimeoutSeconds}s.", requestUri, timeoutSeconds);
             return new PokemonConnectionTestResult
             {
                 IsSuccess = false,
-                Message = $"Connection timed out after {_config.TimeoutSeconds}s.",
+                Message = $"Connection to PKVault timed out after {timeoutSeconds}s.",
                 LatencyMs = stopwatch.ElapsedMilliseconds
             };
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            _logger.LogError(ex, "Failed to connect to PKVault at {BaseUrl}.", _config.PkVaultBaseUrl);
+            _logger.LogWarning(ex, "Unexpected error connecting to PKVault at {RequestUri}.", requestUri);
             return new PokemonConnectionTestResult
             {
                 IsSuccess = false,
@@ -197,92 +249,161 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
 
+        var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
+        client.BaseAddress = uri;
+        client.Timeout = timeout;
+
+        // Best effort: warm up static data catalog if reachable
+        _ = EnsureStaticDataLoadedAsync(client, cts.Token);
+
+        string? stagedPath = null;
         try
         {
-            var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
-            client.BaseAddress = uri;
-            client.Timeout = timeout;
-
+            // 1. Upload ephemeral save via POST /api/save-infos?saveFilesNames={name}&overwrite=true
+            var ephemeralFileName = $"vantafyn_{Guid.NewGuid():N}_{pokemonGameId}.sav";
             using var formData = new MultipartFormDataContent();
             var fileContent = new ByteArrayContent(saveBytes);
-            formData.Add(fileContent, "file", $"{pokemonGameId}.sav");
-            formData.Add(new StringContent(pokemonGameId), "gameId");
-            formData.Add(new StringContent(platform), "platform");
-            formData.Add(new StringContent(generation.ToString()), "generation");
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            formData.Add(fileContent, "saveFiles", ephemeralFileName);
 
-            var response = await client.PostAsync("/api/save/parse", formData, cts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            var uploadUri = $"/api/save-infos?saveFilesNames={Uri.EscapeDataString(ephemeralFileName)}&overwrite=true";
+            var uploadResponse = await client.PostAsync(uploadUri, formData, cts.Token).ConfigureAwait(false);
+            if (!uploadResponse.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-                _logger.LogWarning("PKVault returned {StatusCode} parsing save for {GameId}: {Error}", response.StatusCode, pokemonGameId, errorBody);
+                var errorBody = await uploadResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault returned {StatusCode} uploading save for {GameId}: {Error}", uploadResponse.StatusCode, pokemonGameId, errorBody);
                 return new PokemonSaveParseResult
                 {
                     IsSuccess = false,
-                    ErrorMessage = $"PKVault rejected save data (HTTP {(int)response.StatusCode})."
+                    ErrorMessage = $"PKVault rejected save data (HTTP {(int)uploadResponse.StatusCode})."
                 };
             }
 
-            var parseResponse = await response.Content.ReadFromJsonAsync<PkVaultSaveParseResponse>(cancellationToken: cts.Token).ConfigureAwait(false);
-            if (parseResponse == null)
+            var dataDto = await uploadResponse.Content.ReadFromJsonAsync<PkVaultDataDto>(cancellationToken: cts.Token).ConfigureAwait(false);
+            var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
+            if (saveInfo == null)
             {
                 return new PokemonSaveParseResult
                 {
                     IsSuccess = false,
-                    ErrorMessage = "PKVault returned an empty response."
+                    ErrorMessage = "PKVault could not identify save information."
                 };
             }
+
+            var saveId = saveInfo.Id;
+            stagedPath = saveInfo.Path;
+
+            // 2. Fetch PC box layouts via GET /api/storage/box?saveId={saveId}
+            var boxResponse = await client.GetAsync($"/api/storage/box?saveId={saveId}", cts.Token).ConfigureAwait(false);
+            List<PkVaultBoxItemDto>? boxesList = null;
+            if (boxResponse.IsSuccessStatusCode)
+            {
+                boxesList = await boxResponse.Content.ReadFromJsonAsync<List<PkVaultBoxItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false);
+            }
+
+            var pcBoxes = boxesList?.Where(b => b.Type == 0).OrderBy(b => b.Order).ToList();
+            if (pcBoxes == null || pcBoxes.Count == 0)
+            {
+                pcBoxes = boxesList?.OrderBy(b => b.Order).ToList() ?? [];
+            }
+
+            // 3. Fetch all Pokémon in save via GET /api/storage/save/{saveId}/pkm
+            var pkmResponse = await client.GetAsync($"/api/storage/save/{saveId}/pkm", cts.Token).ConfigureAwait(false);
+            if (!pkmResponse.IsSuccessStatusCode)
+            {
+                var errorBody = await pkmResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault returned {StatusCode} fetching Pokémon for save {SaveId}: {Error}", pkmResponse.StatusCode, saveId, errorBody);
+                return new PokemonSaveParseResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault failed fetching Pokémon (HTTP {(int)pkmResponse.StatusCode})."
+                };
+            }
+
+            var pkmList = await pkmResponse.Content.ReadFromJsonAsync<List<PkVaultPkmSaveItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false) ?? [];
 
             var result = new PokemonSaveParseResult
             {
                 IsSuccess = true,
-                TrainerName = parseResponse.TrainerName,
-                TrainerId = parseResponse.TrainerId,
-                Money = parseResponse.Money,
-                PokedexSeen = parseResponse.PokedexSeen,
-                PokedexCaught = parseResponse.PokedexCaught
+                TrainerName = saveInfo.TrainerName,
+                TrainerId = saveInfo.Tid > 0 ? saveInfo.Tid.ToString() : null,
+                PokedexSeen = saveInfo.DexSeenCount,
+                PokedexCaught = saveInfo.DexCaughtCount
             };
 
-            // Map Party
-            if (parseResponse.Party != null)
+            // 4. Map Party Pokémon (Party >= 0)
+            var partyPkms = pkmList.Where(p => p.Party >= 0).OrderBy(p => p.Party).ToList();
+            for (var i = 0; i < partyPkms.Count; i++)
             {
-                for (var i = 0; i < parseResponse.Party.Count; i++)
-                {
-                    var p = parseResponse.Party[i];
-                    p.IsInParty = true;
-                    p.SlotIndex = i + 1;
-                    var summary = MapToSummary(p, pokemonGameId, $"party_{i + 1}");
-                    result.Party.Add(summary);
-                    result.Details[summary.Id] = MapToDetails(p, summary);
-                }
+                var p = partyPkms[i];
+                var slotIndex = p.Party >= 0 ? p.Party + 1 : i + 1;
+                var summary = MapToSummary(p, pokemonGameId, isInParty: true, boxIndex: null, slotIndex: slotIndex);
+                result.Party.Add(summary);
+                result.Details[summary.Id] = MapToDetails(p, summary);
             }
 
-            // Map Boxes
-            if (parseResponse.Boxes != null)
+            // 5. Map Box Pokémon (Party < 0)
+            var boxPkms = pkmList.Where(p => p.Party < 0).ToList();
+            var boxGroups = boxPkms.GroupBy(p => p.BoxId).ToDictionary(g => g.Key, g => g.OrderBy(p => p.BoxSlot).ToList());
+
+            if (pcBoxes.Count > 0)
             {
-                foreach (var b in parseResponse.Boxes)
+                for (var bIdx = 0; bIdx < pcBoxes.Count; bIdx++)
                 {
-                    var boxEntries = new List<PokemonSummaryDto>();
-                    if (b.Pokemon != null)
+                    var boxMeta = pcBoxes[bIdx];
+                    var boxNumber = bIdx + 1;
+                    boxGroups.TryGetValue(boxMeta.IdInt, out var monsInBox);
+                    monsInBox ??= (boxGroups.TryGetValue(bIdx, out var m2) ? m2 : []);
+
+                    var entries = new List<PokemonSummaryDto>();
+                    if (monsInBox != null)
                     {
-                        for (var i = 0; i < b.Pokemon.Count; i++)
+                        for (var i = 0; i < monsInBox.Count; i++)
                         {
-                            var p = b.Pokemon[i];
-                            p.IsInParty = false;
-                            p.BoxIndex = b.BoxIndex;
-                            if (p.SlotIndex <= 0) p.SlotIndex = i + 1;
-                            var summary = MapToSummary(p, pokemonGameId, $"box_{b.BoxIndex}_{p.SlotIndex}");
-                            boxEntries.Add(summary);
+                            var p = monsInBox[i];
+                            var slotIndex = p.BoxSlot >= 0 ? p.BoxSlot + 1 : i + 1;
+                            var summary = MapToSummary(p, pokemonGameId, isInParty: false, boxIndex: boxNumber, slotIndex: slotIndex);
+                            entries.Add(summary);
                             result.Details[summary.Id] = MapToDetails(p, summary);
                         }
                     }
 
                     result.Boxes.Add(new PokemonBoxDto
                     {
-                        BoxIndex = b.BoxIndex,
-                        Name = string.IsNullOrWhiteSpace(b.Name) ? $"Box {b.BoxIndex}" : b.Name,
-                        Capacity = b.Capacity > 0 ? b.Capacity : 30,
-                        OccupiedCount = boxEntries.Count,
-                        Entries = boxEntries
+                        BoxIndex = boxNumber,
+                        Name = string.IsNullOrWhiteSpace(boxMeta.Name) ? $"Box {boxNumber}" : boxMeta.Name,
+                        Capacity = boxMeta.SlotCount > 0 ? boxMeta.SlotCount : 30,
+                        OccupiedCount = entries.Count,
+                        Entries = entries
+                    });
+                }
+            }
+            else
+            {
+                var boxKeys = boxGroups.Keys.OrderBy(k => k).ToList();
+                if (boxKeys.Count == 0) boxKeys.Add(0);
+
+                foreach (var bKey in boxKeys)
+                {
+                    var boxNumber = bKey + 1;
+                    var monsInBox = boxGroups.TryGetValue(bKey, out var m) ? m : [];
+                    var entries = new List<PokemonSummaryDto>();
+                    for (var i = 0; i < monsInBox.Count; i++)
+                    {
+                        var p = monsInBox[i];
+                        var slotIndex = p.BoxSlot >= 0 ? p.BoxSlot + 1 : i + 1;
+                        var summary = MapToSummary(p, pokemonGameId, isInParty: false, boxIndex: boxNumber, slotIndex: slotIndex);
+                        entries.Add(summary);
+                        result.Details[summary.Id] = MapToDetails(p, summary);
+                    }
+
+                    result.Boxes.Add(new PokemonBoxDto
+                    {
+                        BoxIndex = boxNumber,
+                        Name = $"Box {boxNumber}",
+                        Capacity = 30,
+                        OccupiedCount = entries.Count,
+                        Entries = entries
                     });
                 }
             }
@@ -316,52 +437,153 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 ErrorMessage = $"Save parsing failed: {ex.Message}"
             };
         }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(stagedPath))
+            {
+                try
+                {
+                    await client.DeleteAsync($"/api/save-infos?path={Uri.EscapeDataString(stagedPath)}", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogDebug(cleanupEx, "Failed to clean up staged save at {StagedPath} on PKVault", stagedPath);
+                }
+            }
+        }
     }
 
-    private static PokemonSummaryDto MapToSummary(PkVaultPokemonDto p, string gameId, string fallbackId)
+    private async Task EnsureStaticDataLoadedAsync(HttpClient client, CancellationToken ct)
     {
+        if (_staticDataLoaded) return;
+        await _staticDataLock.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            if (_staticDataLoaded) return;
+            var response = await client.GetAsync("/api/static-data", ct).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                var staticData = await response.Content.ReadFromJsonAsync<PkVaultStaticDataDto>(cancellationToken: ct).ConfigureAwait(false);
+                if (staticData != null)
+                {
+                    _catalog.PopulateFromStaticData(staticData);
+                }
+            }
+            _staticDataLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not load PKVault static data catalog; using built-in fallbacks.");
+        }
+        finally
+        {
+            _staticDataLock.Release();
+        }
+    }
+
+    private PokemonSummaryDto MapToSummary(
+        PkVaultPkmSaveItemDto p,
+        string gameId,
+        bool isInParty,
+        int? boxIndex,
+        int slotIndex)
+    {
+        var id = !string.IsNullOrWhiteSpace(p.Id)
+            ? p.Id
+            : (isInParty ? $"party_{slotIndex}" : $"box_{boxIndex ?? 1}_{slotIndex}");
+
+        var speciesName = _catalog.ResolveSpeciesName(p.Species, p.Nickname, p.IsNicknamed);
+        var nickname = !string.IsNullOrWhiteSpace(p.Nickname) ? p.Nickname : speciesName;
+
         return new PokemonSummaryDto
         {
-            Id = string.IsNullOrWhiteSpace(p.Id) ? fallbackId : p.Id,
-            Species = p.Species,
-            SpeciesId = p.SpeciesId,
-            Form = p.Form,
-            Nickname = string.IsNullOrWhiteSpace(p.Nickname) ? p.Species : p.Nickname,
+            Id = id,
+            SpeciesId = p.Species,
+            Species = speciesName,
+            Form = p.Form > 0 ? p.Form.ToString() : null,
+            Nickname = nickname,
             Level = Math.Clamp(p.Level, 1, 100),
-            Gender = p.Gender,
+            Gender = FormatGender(p.Gender),
             IsShiny = p.IsShiny,
-            OriginalTrainer = p.OriginalTrainer,
-            OriginalTrainerId = p.OriginalTrainerId,
-            OriginGame = p.OriginGame,
+            OriginalTrainer = p.OriginTrainerName,
+            OriginalTrainerId = p.Tid > 0 ? p.Tid.ToString() : null,
             CurrentGame = gameId,
-            CurrentLocation = p.IsInParty
-                ? $"Party (Slot {p.SlotIndex})"
-                : $"Box {p.BoxIndex ?? 1} (Slot {p.SlotIndex})",
-            BoxIndex = p.BoxIndex,
-            SlotIndex = p.SlotIndex,
-            IsInParty = p.IsInParty,
-            LegalityStatus = string.IsNullOrWhiteSpace(p.LegalityStatus) ? "valid" : p.LegalityStatus
+            CurrentLocation = isInParty
+                ? $"Party (Slot {slotIndex})"
+                : $"Box {boxIndex ?? 1} (Slot {slotIndex})",
+            BoxIndex = isInParty ? null : boxIndex,
+            SlotIndex = slotIndex,
+            IsInParty = isInParty,
+            LegalityStatus = "valid"
         };
     }
 
-    private static PokemonDetailsDto MapToDetails(PkVaultPokemonDto p, PokemonSummaryDto summary)
+    private PokemonDetailsDto MapToDetails(PkVaultPkmSaveItemDto p, PokemonSummaryDto summary)
     {
+        var natureName = _catalog.ResolveNatureName(p.Nature);
+        var abilityName = _catalog.ResolveAbilityName(p.Ability);
+        var heldItemName = _catalog.ResolveItemName(p.HeldItem);
+        var moveNames = (p.Moves ?? []).Select(m => _catalog.ResolveMoveName(m)).ToList();
+
+        PokemonStatsDto? ivs = null;
+        if (p.IVs != null && p.IVs.Length >= 6)
+        {
+            ivs = new PokemonStatsDto
+            {
+                Hp = p.IVs[0],
+                Attack = p.IVs[1],
+                Defense = p.IVs[2],
+                Speed = p.IVs[3],
+                SpecialAttack = p.IVs[4],
+                SpecialDefense = p.IVs[5]
+            };
+        }
+
+        PokemonStatsDto? evs = null;
+        if (p.EVs != null && p.EVs.Length >= 6)
+        {
+            evs = new PokemonStatsDto
+            {
+                Hp = p.EVs[0],
+                Attack = p.EVs[1],
+                Defense = p.EVs[2],
+                Speed = p.EVs[3],
+                SpecialAttack = p.EVs[4],
+                SpecialDefense = p.EVs[5]
+            };
+        }
+
+        int? currentHp = null;
+        int? maxHp = null;
+        if (p.Stats != null && p.Stats.Length > 0)
+        {
+            currentHp = p.Stats[0];
+            maxHp = p.Stats[0];
+        }
+
         return new PokemonDetailsDto
         {
             Summary = summary,
-            Nature = p.Nature,
-            Ability = p.Ability,
-            HeldItem = p.HeldItem,
-            Moves = p.Moves ?? [],
-            Iv = p.Iv,
-            Ev = p.Ev,
-            CurrentHp = p.CurrentHp,
-            MaxHp = p.MaxHp,
-            Friendship = p.Friendship,
-            Pokeball = p.Pokeball,
-            RawData = p.RawData
+            Nature = natureName,
+            Ability = abilityName,
+            HeldItem = heldItemName,
+            Moves = moveNames,
+            Iv = ivs,
+            Ev = evs,
+            CurrentHp = currentHp,
+            MaxHp = maxHp,
+            Friendship = p.Friendship > 0 ? p.Friendship : null,
+            Pokeball = p.Ball > 0 ? p.Ball.ToString() : null,
+            RawData = p.DynamicChecksum
         };
     }
+
+    private static string? FormatGender(int gender) => gender switch
+    {
+        0 => "M",
+        1 => "F",
+        _ => null
+    };
 
     public async Task<PokemonExtractResult> ExtractPokemonFromSaveAsync(
         byte[] saveBytes,
@@ -390,48 +612,132 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
 
+        var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
+        client.BaseAddress = uri;
+        client.Timeout = timeout;
+
+        string? stagedPath = null;
         try
         {
-            var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
-            client.BaseAddress = uri;
-            client.Timeout = timeout;
-
+            // 1. Upload temporary save via POST /api/save-infos?saveFilesNames={name}&overwrite=true
+            var ephemeralFileName = $"extract_{Guid.NewGuid():N}_{pokemonGameId}.sav";
             using var formData = new MultipartFormDataContent();
-            formData.Add(new ByteArrayContent(saveBytes), "file", $"{pokemonGameId}.sav");
-            formData.Add(new StringContent(pokemonGameId), "gameId");
-            formData.Add(new StringContent(platform), "platform");
-            formData.Add(new StringContent(generation.ToString()), "generation");
-            formData.Add(new StringContent(pokemonId), "pokemonId");
-            formData.Add(new StringContent(isInParty.ToString()), "isInParty");
-            if (boxIndex.HasValue) formData.Add(new StringContent(boxIndex.Value.ToString()), "boxIndex");
-            formData.Add(new StringContent(slotIndex.ToString()), "slotIndex");
+            var fileContent = new ByteArrayContent(saveBytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            formData.Add(fileContent, "saveFiles", ephemeralFileName);
 
-            var response = await client.PostAsync("/api/save/extract", formData, cts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            var uploadUri = $"/api/save-infos?saveFilesNames={Uri.EscapeDataString(ephemeralFileName)}&overwrite=true";
+            var uploadResponse = await client.PostAsync(uploadUri, formData, cts.Token).ConfigureAwait(false);
+            if (!uploadResponse.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-                _logger.LogWarning("PKVault returned {StatusCode} extracting Pokemon: {Error}", response.StatusCode, errorBody);
+                var errorBody = await uploadResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault upload failed during extraction for {GameId}: {Error}", pokemonGameId, errorBody);
                 return new PokemonExtractResult
                 {
                     IsSuccess = false,
-                    ErrorMessage = $"PKVault could not extract Pokémon (HTTP {(int)response.StatusCode})."
+                    ErrorMessage = $"PKVault rejected save data (HTTP {(int)uploadResponse.StatusCode})."
                 };
             }
 
-            var extractResponse = await response.Content.ReadFromJsonAsync<PkVaultExtractResponse>(cancellationToken: cts.Token).ConfigureAwait(false);
-            if (extractResponse == null || extractResponse.Pokemon == null)
+            var dataDto = await uploadResponse.Content.ReadFromJsonAsync<PkVaultDataDto>(cancellationToken: cts.Token).ConfigureAwait(false);
+            var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
+            if (saveInfo == null)
             {
-                return new PokemonExtractResult { IsSuccess = false, ErrorMessage = "PKVault returned an empty extraction response." };
+                return new PokemonExtractResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = "PKVault could not identify save information."
+                };
             }
 
-            byte[]? updatedBytes = null;
-            if (!string.IsNullOrWhiteSpace(extractResponse.UpdatedSaveBase64))
+            var saveId = saveInfo.Id;
+            stagedPath = saveInfo.Path;
+
+            // 2. Locate the Pokémon to extract via GET /api/storage/save/{saveId}/pkm
+            var pkmResponse = await client.GetAsync($"/api/storage/save/{saveId}/pkm", cts.Token).ConfigureAwait(false);
+            if (!pkmResponse.IsSuccessStatusCode)
             {
-                updatedBytes = Convert.FromBase64String(extractResponse.UpdatedSaveBase64);
+                return new PokemonExtractResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault failed fetching Pokémon (HTTP {(int)pkmResponse.StatusCode})."
+                };
             }
 
-            var summary = MapToSummary(extractResponse.Pokemon, pokemonGameId, pokemonId);
-            var details = MapToDetails(extractResponse.Pokemon, summary);
+            var pkmList = await pkmResponse.Content.ReadFromJsonAsync<List<PkVaultPkmSaveItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false) ?? [];
+
+            // Match Pokémon by ID, party slot, or box slot
+            PkVaultPkmSaveItemDto? targetPkm = null;
+            if (!string.IsNullOrWhiteSpace(pokemonId))
+            {
+                targetPkm = pkmList.FirstOrDefault(p => string.Equals(p.Id, pokemonId, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (targetPkm == null)
+            {
+                if (isInParty)
+                {
+                    targetPkm = pkmList.FirstOrDefault(p => p.Party >= 0 && (p.Party == slotIndex - 1 || p.Party == slotIndex));
+                }
+                else
+                {
+                    targetPkm = pkmList.FirstOrDefault(p => p.Party < 0 &&
+                        (boxIndex == null || p.BoxId == boxIndex.Value - 1 || p.BoxId == boxIndex.Value) &&
+                        (p.BoxSlot == slotIndex - 1 || p.BoxSlot == slotIndex));
+                }
+            }
+
+            if (targetPkm == null)
+            {
+                return new PokemonExtractResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = "Target Pokémon was not found in save."
+                };
+            }
+
+            var summary = MapToSummary(targetPkm, pokemonGameId, isInParty, boxIndex, slotIndex);
+            var details = MapToDetails(targetPkm, summary);
+
+            // 3. Delete Pokémon from save via DELETE /api/storage/save/{saveId}/pkm?pkmIds={pkmId}
+            var deleteUri = $"/api/storage/save/{saveId}/pkm?pkmIds={Uri.EscapeDataString(targetPkm.Id)}";
+            var deleteResponse = await client.DeleteAsync(deleteUri, cts.Token).ConfigureAwait(false);
+            if (!deleteResponse.IsSuccessStatusCode)
+            {
+                var errorBody = await deleteResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault failed deleting Pokémon {PkmId} from save {SaveId}: {Error}", targetPkm.Id, saveId, errorBody);
+                return new PokemonExtractResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault could not remove Pokémon from save (HTTP {(int)deleteResponse.StatusCode})."
+                };
+            }
+
+            // 4. Commit changes to save via POST /api/storage/action/save
+            var commitResponse = await client.PostAsync("/api/storage/action/save", null, cts.Token).ConfigureAwait(false);
+            if (!commitResponse.IsSuccessStatusCode)
+            {
+                var errorBody = await commitResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault failed committing save {SaveId}: {Error}", saveId, errorBody);
+                return new PokemonExtractResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault could not commit save changes (HTTP {(int)commitResponse.StatusCode})."
+                };
+            }
+
+            // 5. Download updated save bytes via GET /api/save-infos/{saveId}/download
+            var downloadResponse = await client.GetAsync($"/api/save-infos/{saveId}/download", cts.Token).ConfigureAwait(false);
+            if (!downloadResponse.IsSuccessStatusCode)
+            {
+                return new PokemonExtractResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault could not download updated save (HTTP {(int)downloadResponse.StatusCode})."
+                };
+            }
+
+            var updatedBytes = await downloadResponse.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
 
             return new PokemonExtractResult
             {
@@ -440,10 +746,33 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 ExtractedPokemon = details
             };
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new PokemonExtractResult { IsSuccess = false, ErrorMessage = "PKVault extraction timed out." };
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to connect to PKVault for save extraction of {GameId}.", pokemonGameId);
+            return new PokemonExtractResult { IsSuccess = false, ErrorMessage = "PKVault service is unreachable." };
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to extract Pokémon {PokemonId} from {GameId}", pokemonId, pokemonGameId);
             return new PokemonExtractResult { IsSuccess = false, ErrorMessage = $"Extraction failed: {ex.Message}" };
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(stagedPath))
+            {
+                try
+                {
+                    await client.DeleteAsync($"/api/save-infos?path={Uri.EscapeDataString(stagedPath)}", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogDebug(cleanupEx, "Failed to clean up staged save at {StagedPath} on PKVault", stagedPath);
+                }
+            }
         }
     }
 
@@ -474,199 +803,303 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         cts.CancelAfter(timeout);
 
+        var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
+        client.BaseAddress = uri;
+        client.Timeout = timeout;
+
+        string? stagedPath = null;
         try
         {
-            var client = _httpClientFactory.CreateClient("Vantafyn.Pokemon.PkVault");
-            client.BaseAddress = uri;
-            client.Timeout = timeout;
-
+            // 1. Upload temporary save via POST /api/save-infos?saveFilesNames={name}&overwrite=true
+            var ephemeralFileName = $"inject_{Guid.NewGuid():N}_{pokemonGameId}.sav";
             using var formData = new MultipartFormDataContent();
-            formData.Add(new ByteArrayContent(saveBytes), "file", $"{pokemonGameId}.sav");
-            formData.Add(new StringContent(pokemonGameId), "gameId");
-            formData.Add(new StringContent(platform), "platform");
-            formData.Add(new StringContent(generation.ToString()), "generation");
-            if (targetBoxIndex.HasValue) formData.Add(new StringContent(targetBoxIndex.Value.ToString()), "targetBoxIndex");
-            if (targetSlotIndex.HasValue) formData.Add(new StringContent(targetSlotIndex.Value.ToString()), "targetSlotIndex");
-            formData.Add(new StringContent(targetParty.ToString()), "targetParty");
-            formData.Add(new StringContent(System.Text.Json.JsonSerializer.Serialize(entry)), "pokemonJson");
+            var fileContent = new ByteArrayContent(saveBytes);
+            fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+            formData.Add(fileContent, "saveFiles", ephemeralFileName);
 
-            var response = await client.PostAsync("/api/save/inject", formData, cts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            var uploadUri = $"/api/save-infos?saveFilesNames={Uri.EscapeDataString(ephemeralFileName)}&overwrite=true";
+            var uploadResponse = await client.PostAsync(uploadUri, formData, cts.Token).ConfigureAwait(false);
+            if (!uploadResponse.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
-                _logger.LogWarning("PKVault returned {StatusCode} injecting Pokemon: {Error}", response.StatusCode, errorBody);
+                var errorBody = await uploadResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault upload failed during injection for {GameId}: {Error}", pokemonGameId, errorBody);
                 return new PokemonInjectResult
                 {
                     IsSuccess = false,
-                    ErrorMessage = $"PKVault could not inject Pokémon (HTTP {(int)response.StatusCode})."
+                    ErrorMessage = $"PKVault rejected save data (HTTP {(int)uploadResponse.StatusCode})."
                 };
             }
 
-            var injectResponse = await response.Content.ReadFromJsonAsync<PkVaultInjectResponse>(cancellationToken: cts.Token).ConfigureAwait(false);
-            if (injectResponse == null)
+            var dataDto = await uploadResponse.Content.ReadFromJsonAsync<PkVaultDataDto>(cancellationToken: cts.Token).ConfigureAwait(false);
+            var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
+            if (saveInfo == null)
             {
-                return new PokemonInjectResult { IsSuccess = false, ErrorMessage = "PKVault returned an empty injection response." };
+                return new PokemonInjectResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = "PKVault could not identify save information."
+                };
             }
 
-            byte[]? updatedBytes = null;
-            if (!string.IsNullOrWhiteSpace(injectResponse.UpdatedSaveBase64))
+            var saveId = saveInfo.Id;
+            stagedPath = saveInfo.Path;
+
+            // 2. Find target box via GET /api/storage/box?saveId={saveId}
+            var boxResponse = await client.GetAsync($"/api/storage/box?saveId={saveId}", cts.Token).ConfigureAwait(false);
+            List<PkVaultBoxItemDto>? boxesList = null;
+            if (boxResponse.IsSuccessStatusCode)
             {
-                updatedBytes = Convert.FromBase64String(injectResponse.UpdatedSaveBase64);
+                boxesList = await boxResponse.Content.ReadFromJsonAsync<List<PkVaultBoxItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false);
             }
+
+            PkVaultBoxItemDto? targetBox = null;
+            if (targetParty)
+            {
+                targetBox = boxesList?.FirstOrDefault(b => b.Type == 14);
+            }
+            else if (targetBoxIndex.HasValue)
+            {
+                targetBox = boxesList?.FirstOrDefault(b => b.Type == 0 && (b.Order == targetBoxIndex.Value - 1 || b.IdInt == targetBoxIndex.Value - 1));
+            }
+
+            targetBox ??= boxesList?.FirstOrDefault(b => b.Type == 0) ?? boxesList?.FirstOrDefault();
+            var targetBoxId = targetBox?.Id ?? "0";
+            var targetSlot = Math.Max(0, (targetSlotIndex ?? 1) - 1);
+            var pkmId = !string.IsNullOrWhiteSpace(entry.RawData) ? entry.RawData : entry.Id;
+
+            // 3. Move/Inject Pokémon into save via PUT /api/storage/move/pkm
+            var moveUri = $"/api/storage/move/pkm?pkmIds={Uri.EscapeDataString(pkmId)}&sourceSaveId=&targetSaveId={saveId}&targetBoxId={Uri.EscapeDataString(targetBoxId)}&targetBoxSlots={targetSlot}&attached=false";
+            var moveResponse = await client.PutAsync(moveUri, null, cts.Token).ConfigureAwait(false);
+            if (!moveResponse.IsSuccessStatusCode)
+            {
+                var errorBody = await moveResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault move failed for {PkmId} to save {SaveId}: {Error}", pkmId, saveId, errorBody);
+                return new PokemonInjectResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault could not inject Pokémon into save (HTTP {(int)moveResponse.StatusCode})."
+                };
+            }
+
+            // 4. Commit changes to save via POST /api/storage/action/save
+            var commitResponse = await client.PostAsync("/api/storage/action/save", null, cts.Token).ConfigureAwait(false);
+            if (!commitResponse.IsSuccessStatusCode)
+            {
+                var errorBody = await commitResponse.Content.ReadAsStringAsync(cts.Token).ConfigureAwait(false);
+                _logger.LogWarning("PKVault failed committing injected save {SaveId}: {Error}", saveId, errorBody);
+                return new PokemonInjectResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault could not commit save changes (HTTP {(int)commitResponse.StatusCode})."
+                };
+            }
+
+            // 5. Download updated save bytes via GET /api/save-infos/{saveId}/download
+            var downloadResponse = await client.GetAsync($"/api/save-infos/{saveId}/download", cts.Token).ConfigureAwait(false);
+            if (!downloadResponse.IsSuccessStatusCode)
+            {
+                return new PokemonInjectResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"PKVault could not download updated save (HTTP {(int)downloadResponse.StatusCode})."
+                };
+            }
+
+            var updatedBytes = await downloadResponse.Content.ReadAsByteArrayAsync(cts.Token).ConfigureAwait(false);
+            var locationDescription = targetParty
+                ? $"Party Slot {targetSlot + 1}"
+                : $"Box {targetBoxIndex ?? 1} Slot {targetSlot + 1}";
 
             return new PokemonInjectResult
             {
                 IsSuccess = true,
                 UpdatedSaveBytes = updatedBytes,
-                AssignedLocation = injectResponse.AssignedLocation
+                AssignedLocation = locationDescription
             };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new PokemonInjectResult { IsSuccess = false, ErrorMessage = "PKVault injection timed out." };
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to connect to PKVault for save injection of {GameId}.", pokemonGameId);
+            return new PokemonInjectResult { IsSuccess = false, ErrorMessage = "PKVault service is unreachable." };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to inject Pokémon {Species} into {GameId}", entry.Species, pokemonGameId);
             return new PokemonInjectResult { IsSuccess = false, ErrorMessage = $"Injection failed: {ex.Message}" };
         }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(stagedPath))
+            {
+                try
+                {
+                    await client.DeleteAsync($"/api/save-infos?path={Uri.EscapeDataString(stagedPath)}", CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception cleanupEx)
+                {
+                    _logger.LogDebug(cleanupEx, "Failed to clean up staged save at {StagedPath} on PKVault", stagedPath);
+                }
+            }
+        }
     }
 
-    private sealed record PkVaultHealthPayload(
-        [property: JsonPropertyName("version")] string? Version,
-        [property: JsonPropertyName("status")] string? Status);
-
-    private sealed class PkVaultSaveParseResponse
+    private sealed class PkVaultSettingsResponse
     {
+        [JsonPropertyName("version")]
+        public string? Version { get; set; }
+
+        [JsonPropertyName("pkhexVersion")]
+        public string? PkhexVersion { get; set; }
+
+        [JsonPropertyName("canUploadSaves")]
+        public bool? CanUploadSaves { get; set; }
+
+        [JsonPropertyName("canCreateBackup")]
+        public bool? CanCreateBackup { get; set; }
+    }
+
+    private sealed class PkVaultDataDto
+    {
+        [JsonPropertyName("saveInfos")]
+        public Dictionary<string, PkVaultSaveInfoDto>? SaveInfos { get; set; }
+    }
+
+    private sealed class PkVaultSaveInfoDto
+    {
+        [JsonPropertyName("id")]
+        public int Id { get; set; }
+
+        [JsonPropertyName("path")]
+        public string Path { get; set; } = string.Empty;
+
         [JsonPropertyName("trainerName")]
         public string? TrainerName { get; set; }
 
-        [JsonPropertyName("trainerId")]
-        public string? TrainerId { get; set; }
+        [JsonPropertyName("tid")]
+        public uint Tid { get; set; }
 
-        [JsonPropertyName("money")]
-        public int? Money { get; set; }
+        [JsonPropertyName("sid")]
+        public uint Sid { get; set; }
 
-        [JsonPropertyName("pokedexSeen")]
-        public int? PokedexSeen { get; set; }
+        [JsonPropertyName("generation")]
+        public int Generation { get; set; }
 
-        [JsonPropertyName("pokedexCaught")]
-        public int? PokedexCaught { get; set; }
+        [JsonPropertyName("dexSeenCount")]
+        public int DexSeenCount { get; set; }
 
-        [JsonPropertyName("party")]
-        public List<PkVaultPokemonDto>? Party { get; set; }
+        [JsonPropertyName("dexCaughtCount")]
+        public int DexCaughtCount { get; set; }
 
-        [JsonPropertyName("boxes")]
-        public List<PkVaultBoxDto>? Boxes { get; set; }
+        [JsonPropertyName("partyCount")]
+        public int PartyCount { get; set; }
+
+        [JsonPropertyName("boxCount")]
+        public int BoxCount { get; set; }
+
+        [JsonPropertyName("boxSlotCount")]
+        public int BoxSlotCount { get; set; }
     }
 
-    private sealed class PkVaultBoxDto
+    private sealed class PkVaultBoxItemDto
     {
-        [JsonPropertyName("boxIndex")]
-        public int BoxIndex { get; set; } = 1;
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("type")]
+        public int Type { get; set; }
 
         [JsonPropertyName("name")]
         public string Name { get; set; } = string.Empty;
 
-        [JsonPropertyName("capacity")]
-        public int Capacity { get; set; } = 30;
+        [JsonPropertyName("slotCount")]
+        public int SlotCount { get; set; } = 30;
 
-        [JsonPropertyName("pokemon")]
-        public List<PkVaultPokemonDto>? Pokemon { get; set; }
+        [JsonPropertyName("order")]
+        public int Order { get; set; }
+
+        [JsonPropertyName("idInt")]
+        public int IdInt { get; set; }
     }
 
-    private sealed class PkVaultPokemonDto
+    private sealed class PkVaultPkmSaveItemDto
     {
         [JsonPropertyName("id")]
-        public string? Id { get; set; }
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("idBase")]
+        public string? IdBase { get; set; }
+
+        [JsonPropertyName("saveId")]
+        public int SaveId { get; set; }
+
+        [JsonPropertyName("party")]
+        public int Party { get; set; } = -1;
+
+        [JsonPropertyName("boxId")]
+        public int BoxId { get; set; }
+
+        [JsonPropertyName("boxSlot")]
+        public int BoxSlot { get; set; }
 
         [JsonPropertyName("species")]
-        public string Species { get; set; } = string.Empty;
-
-        [JsonPropertyName("speciesId")]
-        public int SpeciesId { get; set; }
+        public int Species { get; set; }
 
         [JsonPropertyName("form")]
-        public string? Form { get; set; }
+        public int Form { get; set; }
 
         [JsonPropertyName("nickname")]
-        public string Nickname { get; set; } = string.Empty;
+        public string? Nickname { get; set; }
+
+        [JsonPropertyName("isNicknamed")]
+        public bool IsNicknamed { get; set; }
 
         [JsonPropertyName("level")]
         public int Level { get; set; } = 1;
 
         [JsonPropertyName("gender")]
-        public string? Gender { get; set; }
+        public int Gender { get; set; }
 
         [JsonPropertyName("isShiny")]
         public bool IsShiny { get; set; }
 
         [JsonPropertyName("nature")]
-        public string? Nature { get; set; }
+        public int Nature { get; set; }
 
         [JsonPropertyName("ability")]
-        public string? Ability { get; set; }
+        public int Ability { get; set; }
 
         [JsonPropertyName("heldItem")]
-        public string? HeldItem { get; set; }
-
-        [JsonPropertyName("originalTrainer")]
-        public string? OriginalTrainer { get; set; }
-
-        [JsonPropertyName("originalTrainerId")]
-        public string? OriginalTrainerId { get; set; }
-
-        [JsonPropertyName("originGame")]
-        public string? OriginGame { get; set; }
-
-        [JsonPropertyName("slotIndex")]
-        public int SlotIndex { get; set; } = 1;
-
-        [JsonPropertyName("boxIndex")]
-        public int? BoxIndex { get; set; }
-
-        [JsonPropertyName("isInParty")]
-        public bool IsInParty { get; set; }
-
-        [JsonPropertyName("legalityStatus")]
-        public string LegalityStatus { get; set; } = "valid";
+        public int HeldItem { get; set; }
 
         [JsonPropertyName("moves")]
-        public List<string>? Moves { get; set; }
+        public List<int>? Moves { get; set; }
 
-        [JsonPropertyName("iv")]
-        public PokemonStatsDto? Iv { get; set; }
+        [JsonPropertyName("iVs")]
+        public int[]? IVs { get; set; }
 
-        [JsonPropertyName("ev")]
-        public PokemonStatsDto? Ev { get; set; }
+        [JsonPropertyName("eVs")]
+        public int[]? EVs { get; set; }
 
-        [JsonPropertyName("currentHp")]
-        public int? CurrentHp { get; set; }
-
-        [JsonPropertyName("maxHp")]
-        public int? MaxHp { get; set; }
+        [JsonPropertyName("stats")]
+        public int[]? Stats { get; set; }
 
         [JsonPropertyName("friendship")]
-        public int? Friendship { get; set; }
+        public int Friendship { get; set; }
 
-        [JsonPropertyName("pokeball")]
-        public string? Pokeball { get; set; }
+        [JsonPropertyName("ball")]
+        public int Ball { get; set; }
 
-        [JsonPropertyName("rawData")]
-        public string? RawData { get; set; }
-    }
+        [JsonPropertyName("originTrainerName")]
+        public string? OriginTrainerName { get; set; }
 
-    private sealed class PkVaultExtractResponse
-    {
-        [JsonPropertyName("pokemon")]
-        public PkVaultPokemonDto? Pokemon { get; set; }
+        [JsonPropertyName("tid")]
+        public uint Tid { get; set; }
 
-        [JsonPropertyName("updatedSaveBase64")]
-        public string? UpdatedSaveBase64 { get; set; }
-    }
-
-    private sealed class PkVaultInjectResponse
-    {
-        [JsonPropertyName("updatedSaveBase64")]
-        public string? UpdatedSaveBase64 { get; set; }
-
-        [JsonPropertyName("assignedLocation")]
-        public string? AssignedLocation { get; set; }
+        [JsonPropertyName("dynamicChecksum")]
+        public string? DynamicChecksum { get; set; }
     }
 }

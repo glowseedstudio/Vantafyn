@@ -50,11 +50,13 @@ public sealed class PokemonFoundationTests
     [Fact]
     public async Task TestConnection_ReturnsSuccess_WhenEndpointResponds200()
     {
+        string? requestedPath = null;
         var handler = new MockHttpMessageHandler((req) =>
         {
+            requestedPath = req.RequestUri?.AbsolutePath;
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"version\":\"1.0.4\",\"status\":\"healthy\"}")
+                Content = new StringContent("{\"version\":\"2.3.4\",\"pkhexVersion\":\"26.8.26\",\"canUploadSaves\":true,\"canCreateBackup\":true}")
             };
         });
 
@@ -69,8 +71,13 @@ public sealed class PokemonFoundationTests
         var result = await provider.TestConnectionAsync(CancellationToken.None);
 
         Assert.True(result.IsSuccess);
-        Assert.Contains("Successfully connected", result.Message);
-        Assert.Equal("1.0.4", result.ProviderVersion);
+        Assert.Equal("/api/settings", requestedPath);
+        Assert.Contains("Connected to PKVault v2.3.4", result.Message);
+        Assert.Contains("PKHeX 26.8.26", result.Message);
+        Assert.Equal("2.3.4", result.ProviderVersion);
+        Assert.Equal("26.8.26", result.PkhexVersion);
+        Assert.True(result.CanUploadSaves);
+        Assert.True(result.CanCreateBackup);
     }
 
     [Fact]
@@ -114,7 +121,51 @@ public sealed class PokemonFoundationTests
         var result = await provider.TestConnectionAsync(CancellationToken.None);
 
         Assert.False(result.IsSuccess);
-        Assert.Contains("Connection failed", result.Message);
+        Assert.Contains("Could not connect to PKVault", result.Message);
+    }
+
+    [Fact]
+    public async Task TestConnection_ReturnsFailure_WhenDisabledInConfiguration()
+    {
+        var handler = new MockHttpMessageHandler((req) => new HttpResponseMessage(HttpStatusCode.OK));
+        var factory = new TestHttpClientFactory(handler);
+        var config = new PokemonConfiguration
+        {
+            Enabled = false,
+            PkVaultBaseUrl = "http://localhost:5000"
+        };
+        var provider = new PkVaultPokemonProvider(factory, config, NullLogger<PkVaultPokemonProvider>.Instance);
+
+        var result = await provider.TestConnectionAsync(CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Contains("disabled", result.Message);
+    }
+
+    [Fact]
+    public async Task TestConnection_HandlesMalformedJson_WithoutCrashing()
+    {
+        var handler = new MockHttpMessageHandler((req) =>
+        {
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("not-valid-json")
+            };
+        });
+
+        var factory = new TestHttpClientFactory(handler);
+        var config = new PokemonConfiguration
+        {
+            Enabled = true,
+            PkVaultBaseUrl = "http://localhost:5000"
+        };
+        var provider = new PkVaultPokemonProvider(factory, config, NullLogger<PkVaultPokemonProvider>.Instance);
+
+        var result = await provider.TestConnectionAsync(CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("Connected to PKVault", result.Message);
+        Assert.Null(result.ProviderVersion);
     }
 
     [Fact]

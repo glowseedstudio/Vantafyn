@@ -497,12 +497,12 @@ public sealed class PokemonController : ControllerBase
                     Success = true,
                     TransactionId = context.TransactionId,
                     Operation = "Deposit",
-                    Message = $"Successfully deposited {addedEntry.Nickname} into Vault Box {addedEntry.BoxIndex} Slot {addedEntry.SlotIndex}.",
+                    Message = $"Successfully deposited {addedEntry?.Nickname ?? "Pokémon"} into Vault Box {addedEntry?.BoxIndex ?? request.TargetVaultBoxIndex} Slot {addedEntry?.SlotIndex ?? targetSlot}.",
                     SourceLocation = request.IsInParty ? $"Party Slot {request.SlotIndex}" : $"Box {request.BoxIndex ?? 1} Slot {request.SlotIndex}",
-                    DestinationLocation = $"Vault Box {addedEntry.BoxIndex} Slot {addedEntry.SlotIndex}",
+                    DestinationLocation = $"Vault Box {addedEntry?.BoxIndex ?? request.TargetVaultBoxIndex} Slot {addedEntry?.SlotIndex ?? targetSlot}",
                     BackupId = context.BackupIds.FirstOrDefault(),
                     VaultEntry = addedEntry,
-                    Pokemon = addedEntry.ToSummaryDto()
+                    Pokemon = addedEntry?.ToSummaryDto()
                 };
             },
             cancellationToken).ConfigureAwait(false);
