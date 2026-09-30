@@ -5,9 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="0.1.4"
+VERSION="${1:-0.2.1}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="v0.9.26"
+TAG="${2:-v0.9.34}"
+CHANGELOG="Pokémon Vault & PKVault Integration: Full multi-user 30-box cloud storage system, cross-generation direct transfers, era migrations, National Pokédex, live trading, and ironclad save backups."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -32,7 +33,7 @@ cat > "$OUT_NET9/meta.json" <<JSON
       "targetAbi": "10.11.0.0",
       "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net9.zip",
       "checksum": "",
-      "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states."
+      "changelog": "${CHANGELOG}"
     }
   ]
 }
@@ -61,7 +62,7 @@ cat > "$OUT_NET10/meta.json" <<JSON
       "targetAbi": "12.0.0.0",
       "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
       "checksum": "",
-      "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states."
+      "changelog": "${CHANGELOG}"
     }
   ]
 }
@@ -91,7 +92,7 @@ cat > "$ROOT/manifest.json" <<JSON
     "versions": [
       {
         "version": "${VERSION}.0",
-        "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states.",
+        "changelog": "${CHANGELOG}",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net9.zip",
         "checksum": "${MD5_NET9}",
@@ -99,11 +100,27 @@ cat > "$ROOT/manifest.json" <<JSON
       },
       {
         "version": "${VERSION}.1",
-        "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states.",
+        "changelog": "${CHANGELOG}",
         "targetAbi": "12.0.0.0",
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.1.4.0",
+        "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.26/Vantafyn.Plugin.Companion_0.1.4_net9.zip",
+        "checksum": "93d01e93dc2f91a21aa51844b7549dd5",
+        "timestamp": "2026-09-28T08:39:13Z"
+      },
+      {
+        "version": "0.1.4.1",
+        "changelog": "Retro Gaming support: ROM library discovery, console system resolver, range-supported ROM streaming, and cloud save states.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.26/Vantafyn.Plugin.Companion_0.1.4_net10.zip",
+        "checksum": "2cca480809f1a932e7994814aa465025",
+        "timestamp": "2026-09-28T08:39:13Z"
       }
     ]
   }
