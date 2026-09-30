@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -1695,3 +1696,88 @@ fun rememberLifecycleAwareMarquee(
         Modifier
     }
 }
+
+@Composable
+fun VantafynPremiumSwitchVisual(
+    checked: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .width(52.dp)
+            .height(30.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .then(
+                if (checked) {
+                    Modifier.background(VantafynGradients.accentHorizontal())
+                } else {
+                    Modifier.background(Color.White.copy(alpha = 0.12f))
+                },
+            )
+            .padding(4.dp),
+        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = 0.94f)),
+        )
+    }
+}
+
+@Composable
+fun VantafynSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val clickableModifier = if (onCheckedChange != null && enabled) {
+        modifier.clickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = { onCheckedChange(!checked) },
+        )
+    } else modifier
+
+    VantafynPremiumSwitchVisual(
+        checked = checked,
+        modifier = clickableModifier,
+    )
+}
+
+@Composable
+fun VantafynGradientProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier,
+    height: Dp = 6.dp,
+    trackColor: Color = Color.White.copy(alpha = 0.12f),
+    brush: Brush = VantafynGradients.accentHorizontal(),
+) {
+    val clampedProgress = progress.coerceIn(0f, 1f)
+    val animatedProgress by animateFloatAsState(
+        targetValue = clampedProgress,
+        animationSpec = tween(durationMillis = 200, easing = LinearEasing),
+        label = "VantafynGradientProgress",
+    )
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(height / 2))
+            .background(trackColor),
+    ) {
+        if (animatedProgress > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(animatedProgress)
+                    .fillMaxHeight()
+                    .clip(RoundedCornerShape(height / 2))
+                    .background(brush),
+            )
+        }
+    }
+}
+
+

@@ -380,6 +380,8 @@ import dev.vantafyn.core.ui.VantafynSkeletonBlock
 import dev.vantafyn.core.ui.VantafynSkeletonBrush
 import dev.vantafyn.core.ui.VantafynSpacing
 import dev.vantafyn.core.ui.VantafynTextField
+import dev.vantafyn.core.ui.VantafynPremiumSwitchVisual
+import dev.vantafyn.core.ui.VantafynSwitch
 import dev.vantafyn.core.ui.VantafynThemePreset
 import dev.vantafyn.core.ui.tokensFor
 import dev.vantafyn.core.ui.rememberLifecycleAwareMarquee
@@ -3914,24 +3916,44 @@ private fun MobileShellScreen(
                         serverName = serverName,
                         systems = state.gameSystems,
                         games = state.gamesList,
+                        allGames = state.allGamesList,
                         recentGames = state.recentGames,
                         totalPlayTimeMs = state.totalGamePlayTimeMs,
                         selectedSystem = state.selectedGameSystem,
                         isLoadingGames = state.isLoadingGames,
                         isRefreshing = state.isLoadingGames,
+                        downloadedGameKeys = state.downloadedGameKeys,
+                        session = state.session,
+                        gamesRepository = viewModel.gamesRepository,
                         onRefresh = viewModel::refreshGames,
                         onSelectTab = viewModel::setActiveGamesTab,
                         onSelectSystem = viewModel::selectGameSystem,
                         onOpenGame = viewModel::openGameDetail,
                         onBackToMain = onNavigateBack,
                     )
+
+                    val activeDetail = state.activeGameDetail
+                    val isGameDownloaded = if (activeDetail != null) {
+                        val safeId = activeDetail.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                        val safeToken = activeDetail.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                        state.downloadedGameKeys.contains(activeDetail.id) ||
+                            state.downloadedGameKeys.contains(safeId) ||
+                            (activeDetail.token.isNotBlank() && (state.downloadedGameKeys.contains(activeDetail.token) || state.downloadedGameKeys.contains(safeToken)))
+                    } else false
+                    val isGameDownloading = activeDetail != null && activeDetail.id == state.downloadingGameId
+
                     GameDetailModal(
                         game = state.activeGameDetail,
+                        isDownloaded = isGameDownloaded,
+                        isDownloading = isGameDownloading,
+                        downloadProgress = state.downloadingGameProgress,
                         onDismiss = viewModel::dismissGameDetail,
                         onPlay = { detail ->
                             GameHubSoundManager.stop(instant = true)
                             viewModel.playGame(detail)
                         },
+                        onDownloadOffline = viewModel::downloadGameForOffline,
+                        onDeleteOffline = viewModel::deleteOfflineGame,
                     )
                 }
                 MobileDestination.GamePlayer -> {
@@ -3941,10 +3963,10 @@ private fun MobileShellScreen(
                     val gameToPlay = state.activeGamePlaying
                     val session = state.session
                     val library = state.selectedGameLibrary
-                    if (gameToPlay != null && session != null && library != null) {
+                    if (gameToPlay != null) {
                         GamePlayerScreen(
                             game = gameToPlay,
-                            libraryId = library.id,
+                            libraryId = library?.id.orEmpty(),
                             session = session,
                             gamesRepository = viewModel.gamesRepository,
                             isTv = false,
@@ -15302,35 +15324,6 @@ private fun ThemeMusicSettings(
             selected = selected,
             enabled = checked,
             onSelect = onSelect,
-        )
-    }
-}
-
-@Composable
-private fun VantafynPremiumSwitchVisual(
-    checked: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        modifier = modifier
-            .width(52.dp)
-            .height(30.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .then(
-                if (checked) {
-                    Modifier.background(VantafynGradients.accentHorizontal())
-                } else {
-                    Modifier.background(Color.White.copy(alpha = 0.12f))
-                },
-            )
-            .padding(4.dp),
-        contentAlignment = if (checked) Alignment.CenterEnd else Alignment.CenterStart,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(22.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.White.copy(alpha = 0.94f)),
         )
     }
 }

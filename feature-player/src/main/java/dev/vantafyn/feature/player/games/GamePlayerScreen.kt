@@ -65,6 +65,9 @@ import dev.vantafyn.core.ui.VantafynColors
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -75,7 +78,7 @@ import kotlinx.coroutines.withContext
 fun GamePlayerScreen(
     game: GameDetail,
     libraryId: String,
-    session: JellyfinSession,
+    session: JellyfinSession?,
     gamesRepository: JellyfinGamesRepository,
     isTv: Boolean,
     onExit: () -> Unit,
@@ -121,9 +124,14 @@ fun GamePlayerScreen(
     var saveStateSuccess by remember { mutableStateOf(false) }
     var aspectRatio by remember { mutableStateOf(GameAspectRatio.Standard) }
     var fastForwardSpeed by remember { mutableFloatStateOf(1f) }
+    var isMuted by remember { mutableStateOf(false) }
+    var videoFilter by remember { mutableStateOf(GameVideoFilter.Crisp) }
+    var showTouchControls by remember { mutableStateOf(true) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
     var initialSramBase64 by remember { mutableStateOf<String?>(null) }
+    var pendingConflict by remember { mutableStateOf<SaveSyncInfo?>(null) }
+    var pendingDownloadedRom by remember { mutableStateOf<File?>(null) }
 
     // Intercept hardware Back press to flush saves and toggle Pause HUD
     BackHandler(enabled = true) {
@@ -145,18 +153,36 @@ fun GamePlayerScreen(
                 downloadProgress = progress
                 statusMessage = "Downloading ROM: ${(progress * 100).toInt()}%"
             }
-            // Pre-load existing in-game battery save (SRAM) from storage or cloud
-            val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
-            if (sramBytes != null && sramBytes.isNotEmpty()) {
-                initialSramBase64 = Base64.encodeToString(sramBytes, Base64.NO_WRAP)
-                android.util.Log.i("GamePlayerScreen", "Found existing in-game SRAM save (${sramBytes.size} bytes) for ${game.id}")
+
+            // Check save synchronization between cloud and local
+            val syncInfo = storageManager.checkSaveSync(session, game.id, GameSaveKind.Sram)
+            if (syncInfo.status == SaveSyncStatus.CLOUD_NEWER || syncInfo.status == SaveSyncStatus.CONFLICT) {
+                pendingDownloadedRom = file
+                pendingConflict = syncInfo
+                isDownloading = false
+                statusMessage = "Save conflict detected"
             } else {
-                initialSramBase64 = null
-                android.util.Log.i("GamePlayerScreen", "No existing SRAM found for ${game.id}, starting clean.")
+                if (syncInfo.status == SaveSyncStatus.LOCAL_NEWER && session != null) {
+                    android.util.Log.i("GamePlayerScreen", "Syncing newer offline SRAM save to cloud for ${game.id}")
+                    storageManager.replaceCloudWithLocalSave(session, game.id, GameSaveKind.Sram)
+                } else if (syncInfo.status == SaveSyncStatus.CLOUD_ONLY && session != null) {
+                    android.util.Log.i("GamePlayerScreen", "Downloading cloud SRAM save for ${game.id}")
+                    storageManager.replaceLocalWithCloudSave(session, game.id, GameSaveKind.Sram, syncInfo.cachedCloudData)
+                }
+
+                // Pre-load existing in-game battery save (SRAM) from storage or cloud
+                val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
+                if (sramBytes != null && sramBytes.isNotEmpty()) {
+                    initialSramBase64 = Base64.encodeToString(sramBytes, Base64.NO_WRAP)
+                    android.util.Log.i("GamePlayerScreen", "Found existing in-game SRAM save (${sramBytes.size} bytes) for ${game.id}")
+                } else {
+                    initialSramBase64 = null
+                    android.util.Log.i("GamePlayerScreen", "No existing SRAM found for ${game.id}, starting clean.")
+                }
+                romFile = file
+                statusMessage = "Starting emulation core..."
+                isDownloading = false
             }
-            romFile = file
-            statusMessage = "Starting emulation core..."
-            isDownloading = false
         } catch (e: Exception) {
             statusMessage = "Error loading game: ${e.message}"
         }
@@ -229,6 +255,8 @@ fun GamePlayerScreen(
                                     mediaPlaybackRequiresUserGesture = false
                                     allowFileAccess = true
                                     allowContentAccess = true
+                                    allowFileAccessFromFileURLs = true
+                                    allowUniversalAccessFromFileURLs = true
                                     useWideViewPort = true
                                     loadWithOverviewMode = true
                                 }
@@ -293,19 +321,92 @@ fun GamePlayerScreen(
                                 val ext = game.extension.ifEmpty { romFile?.extension ?: "rom" }.removePrefix(".")
                                 val friendlyRomFileName = "$cleanGameName.$ext"
 
+                                val corsHeaders = mapOf(
+                                    "Access-Control-Allow-Origin" to "*",
+                                    "Access-Control-Allow-Methods" to "GET, POST, OPTIONS, HEAD",
+                                    "Access-Control-Allow-Headers" to "*",
+                                )
+
                                 webViewClient = object : WebViewClient() {
                                     override fun shouldInterceptRequest(
                                         view: WebView?,
                                         request: WebResourceRequest?,
                                     ): WebResourceResponse? {
                                         val url = request?.url?.toString() ?: return null
+                                        val method = request.method ?: "GET"
+
+                                        if (method.equals("OPTIONS", ignoreCase = true)) {
+                                            return WebResourceResponse(
+                                                "text/plain",
+                                                "UTF-8",
+                                                200,
+                                                "OK",
+                                                corsHeaders,
+                                                ByteArrayInputStream(ByteArray(0)),
+                                            )
+                                        }
+
                                         if (url.startsWith("https://vantafyn.emulator/rom/") || url.endsWith("current_game.rom")) {
                                             val currentRom = romFile ?: return null
                                             return WebResourceResponse(
                                                 "application/octet-stream",
                                                 "UTF-8",
+                                                200,
+                                                "OK",
+                                                corsHeaders,
                                                 FileInputStream(currentRom),
                                             )
+                                        }
+                                        if (url.startsWith("https://cdn.emulatorjs.org/stable/data/")) {
+                                            val relPath = url.removePrefix("https://cdn.emulatorjs.org/stable/data/").substringBefore('?')
+                                            val cachedFile = File(storageManager.emulatorCacheDir, relPath)
+                                            val mime = when {
+                                                url.endsWith(".js") -> "application/javascript"
+                                                url.endsWith(".css") -> "text/css"
+                                                url.endsWith(".wasm") -> "application/wasm"
+                                                url.endsWith(".json") -> "application/json"
+                                                url.endsWith(".png") -> "image/png"
+                                                url.endsWith(".svg") -> "image/svg+xml"
+                                                else -> "application/octet-stream"
+                                            }
+                                            if (cachedFile.exists() && cachedFile.length() > 0) {
+                                                return WebResourceResponse(
+                                                    mime,
+                                                    "UTF-8",
+                                                    200,
+                                                    "OK",
+                                                    corsHeaders,
+                                                    FileInputStream(cachedFile),
+                                                )
+                                            }
+                                            // Transparently fetch and cache locally if connected
+                                            try {
+                                                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                                                    connectTimeout = 12_000
+                                                    readTimeout = 25_000
+                                                    instanceFollowRedirects = true
+                                                }
+                                                if (conn.responseCode in 200..299) {
+                                                    cachedFile.parentFile?.mkdirs()
+                                                    val tmp = File(cachedFile.parentFile, "${cachedFile.name}.tmp")
+                                                    conn.inputStream.use { input ->
+                                                        FileOutputStream(tmp).use { output ->
+                                                            input.copyTo(output)
+                                                        }
+                                                    }
+                                                    tmp.renameTo(cachedFile)
+                                                    return WebResourceResponse(
+                                                        mime,
+                                                        "UTF-8",
+                                                        200,
+                                                        "OK",
+                                                        corsHeaders,
+                                                        FileInputStream(cachedFile),
+                                                    )
+                                                }
+                                            } catch (e: Exception) {
+                                                android.util.Log.w("GamePlayerScreen", "Offline fetch failed for $url: ${e.message}")
+                                            }
                                         }
                                         return super.shouldInterceptRequest(view, request)
                                     }
@@ -367,8 +468,8 @@ fun GamePlayerScreen(
             }
         }
 
-        // On-Screen Virtual Touchpad (Mobile/Tablet only, and hidden when physical gamepad is connected or when paused)
-        if (!isTv && !isDownloading && !isPaused && !hasPhysicalGamepad) {
+        // On-Screen Virtual Touchpad (Mobile/Tablet only, and hidden when physical gamepad is connected, when paused, or when disabled)
+        if (!isTv && !isDownloading && !isPaused && !hasPhysicalGamepad && showTouchControls) {
             RetroTouchOverlay(
                 visible = true,
                 systemId = game.systemId,
@@ -396,6 +497,25 @@ fun GamePlayerScreen(
             fastForwardSpeed = fastForwardSpeed,
             isSavingState = isSavingState,
             saveStateSuccess = saveStateSuccess,
+            isMuted = isMuted,
+            onToggleMute = {
+                isMuted = !isMuted
+                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setMute($isMuted);", null)
+            },
+            videoFilter = videoFilter,
+            onCycleVideoFilter = {
+                videoFilter = when (videoFilter) {
+                    GameVideoFilter.Crisp -> GameVideoFilter.Crt
+                    GameVideoFilter.Crt -> GameVideoFilter.Smooth
+                    GameVideoFilter.Smooth -> GameVideoFilter.Crisp
+                }
+                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVideoFilter('${videoFilter.id}');", null)
+            },
+            showTouchControls = showTouchControls,
+            onToggleTouchControls = {
+                showTouchControls = !showTouchControls
+            },
+            isTv = isTv,
             onResume = {
                 isPaused = false
                 webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
@@ -435,11 +555,58 @@ fun GamePlayerScreen(
                 isPaused = false
             },
             onExit = {
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
+                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.destroy();", null)
                 scope.launch {
-                    delay(350)
+                    delay(200)
                     onExit()
                 }
+            },
+        )
+    }
+
+    if (pendingConflict != null) {
+        SaveConflictDialog(
+            gameTitle = game.cleanTitle.ifEmpty { game.title },
+            conflict = pendingConflict!!,
+            onUseCloud = {
+                val conflict = pendingConflict
+                val rom = pendingDownloadedRom
+                scope.launch(Dispatchers.IO) {
+                    if (session != null && conflict != null) {
+                        storageManager.replaceLocalWithCloudSave(session, game.id, GameSaveKind.Sram, conflict.cachedCloudData)
+                    }
+                    val sramBytes = conflict?.cachedCloudData ?: storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
+                    val base64 = sramBytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+                    withContext(Dispatchers.Main) {
+                        initialSramBase64 = base64
+                        romFile = rom
+                        pendingConflict = null
+                        pendingDownloadedRom = null
+                        statusMessage = "Starting emulation core..."
+                    }
+                }
+            },
+            onUseLocal = {
+                val rom = pendingDownloadedRom
+                scope.launch(Dispatchers.IO) {
+                    if (session != null) {
+                        storageManager.replaceCloudWithLocalSave(session, game.id, GameSaveKind.Sram)
+                    }
+                    val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
+                    val base64 = sramBytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
+                    withContext(Dispatchers.Main) {
+                        initialSramBase64 = base64
+                        romFile = rom
+                        pendingConflict = null
+                        pendingDownloadedRom = null
+                        statusMessage = "Starting emulation core..."
+                    }
+                }
+            },
+            onDismiss = {
+                pendingConflict = null
+                pendingDownloadedRom = null
+                onExit()
             },
         )
     }
@@ -453,16 +620,21 @@ fun GamePlayerScreen(
             if (durationMs > 2000L) {
                 tracker.recordPlaySession(game, durationMs)
             }
-            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
             val wv = webViewInstance
             webViewInstance = null
+            wv?.evaluateJavascript("window.VantafynEmulator?.destroy();", null)
+            wv?.pauseTimers()
+            wv?.stopLoading()
             wv?.postDelayed({
                 try {
+                    wv.loadUrl("about:blank")
+                    wv.clearHistory()
+                    wv.removeAllViews()
                     wv.destroy()
                 } catch (e: Exception) {
                     android.util.Log.w("GamePlayerScreen", "Error destroying webView", e)
                 }
-            }, 1000L)
+            }, 300L)
         }
     }
 }
@@ -507,14 +679,27 @@ private fun generateEmulatorHtml(
                 #game-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
                 canvas { width: 100% !important; height: 100% !important; object-fit: contain; image-rendering: pixelated; }
 
-                /* Completely hide and disable EmulatorJS built-in virtual touch controls */
+                /* Completely hide and disable EmulatorJS built-in menus, settings dialogs, popups and touch controls */
                 .ejs_virtualGamepad_parent,
                 .ejs_virtualGamepad_open,
                 [class*="ejs_virtualGamepad"],
                 .ejs_dpad_main,
                 .b_speed_fast,
                 .b_speed_slow,
-                .b_speed_rewind {
+                .b_speed_rewind,
+                .ejs_menu,
+                #ejs_menu,
+                .ejs_menu_bar,
+                #ejs_menu_bar,
+                .ejs_menu_button,
+                .ejs_modal,
+                [class*="ejs_modal"],
+                .ejs_settings,
+                .ejs_dialog,
+                .ejs_popup,
+                .ejs_overlay,
+                #ejs_overlay,
+                .ejs_controls_btn {
                     display: none !important;
                     visibility: hidden !important;
                     opacity: 0 !important;
@@ -552,12 +737,18 @@ private fun generateEmulatorHtml(
                 window._lastSramHash = window.VantafynInitialSram;
 
                 var cleanUpBuiltinControls = function() {
-                    var elems = document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="ejs_virtualGamepad"], .ejs_dpad_main, .b_speed_fast, .b_speed_slow');
+                    var elems = document.querySelectorAll('.ejs_virtualGamepad_parent, .ejs_virtualGamepad_open, [class*="ejs_virtualGamepad"], .ejs_dpad_main, .b_speed_fast, .b_speed_slow, .ejs_menu, #ejs_menu, .ejs_modal, [class*="ejs_modal"], .ejs_settings, .ejs_popup, .ejs_dialog, .ejs_overlay, #ejs_overlay, .ejs_menu_bar, #ejs_menu_bar');
                     for (var i = 0; i < elems.length; i++) {
                         elems[i].style.display = 'none';
                         try { elems[i].remove(); } catch(e) {}
                     }
                     if (window.EJS_emulator) {
+                        if (window.EJS_emulator.closeMenu) {
+                            try { window.EJS_emulator.closeMenu(); } catch(e) {}
+                        }
+                        if (window.EJS_emulator.closeModal) {
+                            try { window.EJS_emulator.closeModal(); } catch(e) {}
+                        }
                         if (window.EJS_emulator.toggleVirtualGamepad) {
                             try { window.EJS_emulator.toggleVirtualGamepad(false); } catch(e) {}
                         }
@@ -572,7 +763,7 @@ private fun generateEmulatorHtml(
                     }
                 };
 
-                setInterval(cleanUpBuiltinControls, 300);
+                var cleanUpInterval = setInterval(cleanUpBuiltinControls, 400);
 
                 function uint8ToBase64(bytes) {
                     var binary = '';
@@ -753,8 +944,8 @@ private fun generateEmulatorHtml(
                     }
                 };
 
-                // Periodic SRAM persistence checker (every 1.2s)
-                setInterval(function() {
+                // Periodic SRAM persistence checker (every 1.5s)
+                var sramCheckInterval = setInterval(function() {
                     if (window.EJS_emulator && window.EJS_emulator.gameManager && window.EJS_emulator.started) {
                         try {
                             var gm = window.EJS_emulator.gameManager;
@@ -773,9 +964,44 @@ private fun generateEmulatorHtml(
                             console.warn("Vantafyn: periodic SRAM check error", e);
                         }
                     }
-                }, 1200);
+                }, 1500);
 
                 window.VantafynEmulator = {
+                    setMute: function(muted) {
+                        try {
+                            if (window.EJS_emulator && typeof window.EJS_emulator.setVolume === 'function') {
+                                window.EJS_emulator.setVolume(muted ? 0 : 1);
+                            }
+                            if (window.EJS_emulator && typeof window.EJS_emulator.muted !== 'undefined') {
+                                window.EJS_emulator.muted = muted;
+                            }
+                            var audios = document.querySelectorAll('audio');
+                            for (var i = 0; i < audios.length; i++) {
+                                audios[i].muted = muted;
+                            }
+                        } catch(e) {
+                            console.warn("Vantafyn: setMute error", e);
+                        }
+                    },
+                    setVideoFilter: function(filterId) {
+                        try {
+                            var cv = document.querySelector('canvas');
+                            if (!cv) return;
+                            if (filterId === 'crt') {
+                                cv.style.filter = 'contrast(1.08) brightness(1.03)';
+                                cv.style.imageRendering = 'pixelated';
+                            } else if (filterId === 'smooth') {
+                                cv.style.filter = 'none';
+                                cv.style.imageRendering = 'auto';
+                            } else {
+                                // crisp pixel
+                                cv.style.filter = 'none';
+                                cv.style.imageRendering = 'pixelated';
+                            }
+                        } catch(e) {
+                            console.warn("Vantafyn: setVideoFilter error", e);
+                        }
+                    },
                     pause: function() {
                         if (window.EJS_emulator && window.EJS_emulator.pause) {
                             window.EJS_emulator.pause();
@@ -907,13 +1133,7 @@ private fun generateEmulatorHtml(
                             }
                         }
                     },
-                    destroy: function() {
-                        try {
-                            if (window.VantafynEmulator && window.VantafynEmulator.flushAllSaves) {
-                                window.VantafynEmulator.flushAllSaves();
-                            }
-                        } catch(e) {}
-                    },
+
                     setAxis: function(axis, value) {
                         if (!window.EJS_emulator || !window.EJS_emulator.gameManager) return;
                         var gm = window.EJS_emulator.gameManager;
@@ -986,9 +1206,20 @@ private fun generateEmulatorHtml(
                         }
                     },
                     destroy: function() {
-                        if (window.EJS_emulator && window.EJS_emulator.stop) {
-                            window.EJS_emulator.stop();
-                        }
+                        try {
+                            if (typeof cleanUpInterval !== 'undefined') clearInterval(cleanUpInterval);
+                            if (typeof sramCheckInterval !== 'undefined') clearInterval(sramCheckInterval);
+                        } catch(e) {}
+                        try {
+                            if (window.VantafynEmulator && window.VantafynEmulator.flushAllSaves) {
+                                window.VantafynEmulator.flushAllSaves();
+                            }
+                        } catch(e) {}
+                        try {
+                            if (window.EJS_emulator && window.EJS_emulator.stop) {
+                                window.EJS_emulator.stop();
+                            }
+                        } catch(e) {}
                     }
                 };
 

@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.SportsEsports
@@ -75,7 +76,9 @@ import dev.vantafyn.feature.home.CompactBackButton
 fun GamesHubScreen(
     systems: List<GameSystem>,
     games: List<GameSummary>,
+    allGames: List<GameSummary> = games,
     selectedSystem: GameSystem?,
+    downloadedGameKeys: Set<String> = emptySet(),
     isLoading: Boolean,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
@@ -85,10 +88,35 @@ fun GamesHubScreen(
     modifier: Modifier = Modifier,
 ) {
     var searchQuery by remember { mutableStateOf("") }
+    var isOfflineFilterSelected by remember { mutableStateOf(false) }
 
-    val filteredGames = remember(games, searchQuery) {
-        if (searchQuery.isBlank()) games
-        else games.filter { it.cleanTitle.contains(searchQuery, ignoreCase = true) || it.title.contains(searchQuery, ignoreCase = true) }
+    val basePool = if (isOfflineFilterSelected) {
+        allGames.filter { g ->
+            val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val safeToken = g.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            downloadedGameKeys.contains(safeId) || (safeToken.isNotBlank() && downloadedGameKeys.contains(safeToken))
+        }
+    } else {
+        games
+    }
+
+    val totalLibraryGamesCount = remember(allGames, games, systems) {
+        if (allGames.isNotEmpty()) allGames.size
+        else if (games.isNotEmpty()) games.size
+        else systems.sumOf { it.gameCount }
+    }
+
+    val downloadedCount = remember(allGames, downloadedGameKeys) {
+        allGames.count { g ->
+            val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            val safeToken = g.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+            downloadedGameKeys.contains(safeId) || (safeToken.isNotBlank() && downloadedGameKeys.contains(safeToken))
+        }
+    }
+
+    val filteredGames = remember(basePool, searchQuery) {
+        if (searchQuery.isBlank()) basePool
+        else basePool.filter { it.cleanTitle.contains(searchQuery, ignoreCase = true) || it.title.contains(searchQuery, ignoreCase = true) }
     }
 
     Column(
@@ -107,7 +135,9 @@ fun GamesHubScreen(
         ) {
             CompactBackButton(
                 onClick = {
-                    if (selectedSystem != null) {
+                    if (isOfflineFilterSelected) {
+                        isOfflineFilterSelected = false
+                    } else if (selectedSystem != null) {
                         onSelectSystem(null)
                     } else {
                         onBack()
@@ -117,13 +147,21 @@ fun GamesHubScreen(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Retro Games",
+                    text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
                     color = VantafynColors.Ink,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "${filteredGames.size} games available",
+                    text = if (isOfflineFilterSelected) {
+                        "Showing $downloadedCount downloaded offline games"
+                    } else if (selectedSystem != null) {
+                        "Showing ${filteredGames.size} of $totalLibraryGamesCount games"
+                    } else if (searchQuery.isNotBlank()) {
+                        "Found ${filteredGames.size} games matching \"$searchQuery\""
+                    } else {
+                        "$totalLibraryGamesCount games available across ${systems.size} systems"
+                    },
                     color = VantafynColors.Muted,
                     fontSize = 12.sp,
                 )
@@ -170,17 +208,36 @@ fun GamesHubScreen(
             item {
                 SystemFilterPill(
                     label = "All Systems",
-                    count = systems.sumOf { it.gameCount },
-                    isSelected = selectedSystem == null,
-                    onClick = { onSelectSystem(null) },
+                    count = totalLibraryGamesCount,
+                    isSelected = selectedSystem == null && !isOfflineFilterSelected,
+                    onClick = {
+                        isOfflineFilterSelected = false
+                        onSelectSystem(null)
+                    },
                 )
+            }
+            if (downloadedCount > 0) {
+                item {
+                    SystemFilterPill(
+                        label = "Downloaded",
+                        count = downloadedCount,
+                        isSelected = isOfflineFilterSelected,
+                        onClick = {
+                            isOfflineFilterSelected = true
+                            onSelectSystem(null)
+                        },
+                    )
+                }
             }
             items(systems) { system ->
                 SystemFilterPill(
                     label = system.displayName,
                     count = system.gameCount,
-                    isSelected = selectedSystem?.id == system.id,
-                    onClick = { onSelectSystem(system) },
+                    isSelected = selectedSystem?.id == system.id && !isOfflineFilterSelected,
+                    onClick = {
+                        isOfflineFilterSelected = false
+                        onSelectSystem(system)
+                    },
                 )
             }
         }
@@ -206,6 +263,8 @@ fun GamesHubScreen(
                 )
             },
         ) {
+            val isBrowsingConsoles = selectedSystem == null && !isOfflineFilterSelected && searchQuery.isBlank()
+
             if (isLoading && !isRefreshing) {
                 Box(
                     modifier = Modifier
@@ -217,6 +276,48 @@ fun GamesHubScreen(
                         color = VantafynColors.Primary,
                         modifier = Modifier.size(44.dp),
                     )
+                }
+            } else if (isBrowsingConsoles) {
+                if (systems.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(bottom = 60.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.SportsEsports,
+                                contentDescription = null,
+                                tint = VantafynColors.Muted,
+                                modifier = Modifier.size(56.dp),
+                            )
+                            Text(
+                                text = "No consoles found",
+                                color = VantafynColors.Muted,
+                                fontSize = 15.sp,
+                            )
+                        }
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 160.dp),
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 140.dp, top = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(systems, key = { it.id }) { system ->
+                            SystemQuickCard(
+                                system = system,
+                                onClick = { onSelectSystem(system) },
+                            )
+                        }
+                    }
                 }
             } else if (filteredGames.isEmpty()) {
                 Box(
@@ -252,8 +353,15 @@ fun GamesHubScreen(
                     modifier = Modifier.fillMaxSize(),
                 ) {
                     items(filteredGames, key = { it.id }) { game ->
+                        val safeId = remember(game.id) { game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_") }
+                        val safeToken = remember(game.token) { game.token.replace(Regex("[^a-zA-Z0-9_-]"), "_") }
+                        val isDownloaded = downloadedGameKeys.contains(game.id) ||
+                            downloadedGameKeys.contains(safeId) ||
+                            (game.token.isNotBlank() && (downloadedGameKeys.contains(game.token) || downloadedGameKeys.contains(safeToken)))
+
                         GameCard(
                             game = game,
+                            isDownloaded = isDownloaded,
                             onClick = { onOpenGame(game) },
                         )
                     }
@@ -314,6 +422,7 @@ private fun SystemFilterPill(
 @Composable
 private fun GameCard(
     game: GameSummary,
+    isDownloaded: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -392,6 +501,36 @@ private fun GameCard(
                             fontWeight = FontWeight.Bold,
                             fontSize = 9.sp,
                         )
+                    }
+                }
+
+                if (isDownloaded) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(6.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xEE0A121A))
+                            .border(0.5.dp, Color(0xFF10B981).copy(alpha = 0.8f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.DownloadDone,
+                                contentDescription = "Downloaded for Offline Play",
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(11.dp),
+                            )
+                            Text(
+                                text = "OFFLINE",
+                                color = Color(0xFF10B981),
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 9.sp,
+                            )
+                        }
                     }
                 }
             }

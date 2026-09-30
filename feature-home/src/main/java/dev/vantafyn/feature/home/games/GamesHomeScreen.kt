@@ -71,6 +71,7 @@ fun GamesHomeScreen(
     userImageUrl: String?,
     systems: List<GameSystem>,
     games: List<GameSummary>,
+    allGames: List<GameSummary> = games,
     recentGames: List<RecentGameRecord>,
     totalPlayTimeMs: Long,
     isRefreshing: Boolean = false,
@@ -80,6 +81,12 @@ fun GamesHomeScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val totalGamesCount = remember(allGames, games, systems) {
+        if (allGames.isNotEmpty()) allGames.size
+        else if (games.isNotEmpty()) games.size
+        else systems.sumOf { it.gameCount }
+    }
+
     val formattedPlaytime = remember(totalPlayTimeMs) {
         GamePlayTracker.formatPlayTime(totalPlayTimeMs)
     }
@@ -127,7 +134,7 @@ fun GamesHomeScreen(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = if (systems.isNotEmpty()) "${systems.size} systems • ${games.size} games" else "Retro arcade & collection",
+                        text = if (systems.isNotEmpty()) "${systems.size} systems • $totalGamesCount games" else "Retro arcade & collection",
                         color = VantafynColors.Muted,
                         fontSize = 12.sp,
                     )
@@ -248,7 +255,7 @@ fun GamesHomeScreen(
                     )
                     GamerStatCard(
                         title = "GAMES",
-                        value = "${games.size}",
+                        value = "$totalGamesCount",
                         icon = Icons.Rounded.SportsEsports,
                         accentColor = Color(0xFF9D00FF),
                         modifier = Modifier.weight(1f),
@@ -663,7 +670,7 @@ private fun RecentGameCard(
 }
 
 @Composable
-private fun SystemQuickCard(
+internal fun SystemQuickCard(
     system: GameSystem,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -675,22 +682,35 @@ private fun SystemQuickCard(
             .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
             .clickable(onClick = onClick)
             .padding(14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp),
-            contentAlignment = Alignment.CenterStart,
+                .height(44.dp),
+            contentAlignment = Alignment.Center,
         ) {
-            AsyncImage(
-                model = system.officialLogoUrl,
-                contentDescription = system.displayName,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .fillMaxHeight()
-                    .widthIn(max = 140.dp),
-            )
+            if (system.officialLogoUrl.isNotBlank()) {
+                AsyncImage(
+                    model = system.officialLogoUrl,
+                    contentDescription = system.displayName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .fillMaxWidth(),
+                )
+            } else {
+                Text(
+                    text = system.displayName,
+                    color = VantafynColors.Ink,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
 
         Text(
@@ -698,6 +718,7 @@ private fun SystemQuickCard(
             color = VantafynColors.Muted,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
         )
     }
 }

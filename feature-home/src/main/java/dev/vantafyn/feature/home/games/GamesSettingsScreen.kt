@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,8 +43,8 @@ import dev.vantafyn.core.media.games.GameHubSoundManager
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
+import dev.vantafyn.core.ui.VantafynSwitch
+import dev.vantafyn.core.ui.VantafynGradientProgressBar
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -80,12 +82,22 @@ import java.io.File
 fun GamesSettingsScreen(
     onBack: () -> Unit,
     games: List<GameSummary> = emptyList(),
+    allGames: List<GameSummary> = games,
     systems: List<GameSystem> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE) }
     val coroutineScope = rememberCoroutineScope()
+
+    val fullGamesList = remember(allGames, games) {
+        if (allGames.isNotEmpty()) allGames else games
+    }
+    var selectedScrapeSystemId by remember { mutableStateOf<String?>(null) }
+    val targetGames = remember(fullGamesList, selectedScrapeSystemId) {
+        if (selectedScrapeSystemId == null) fullGamesList
+        else fullGamesList.filter { it.systemId == selectedScrapeSystemId }
+    }
 
     var isScraping by remember { mutableStateOf(false) }
     var scrapeProgress by remember { mutableStateOf(0f) }
@@ -155,6 +167,269 @@ fun GamesSettingsScreen(
                         color = VantafynColors.Muted,
                         fontSize = 12.sp,
                     )
+                }
+            }
+        }
+
+        // 1. Media & Boxart Scraper Card (Placed at the top)
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "MEDIA & BOXART SCRAPING",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ImageSearch,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(22.dp),
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Scan & Scrape Library",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "${fullGamesList.size} titles in library across ${systems.size} ${if (systems.size == 1) "system" else "systems"}",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+
+                        if (systems.size > 1) {
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                item {
+                                    val isSelected = selectedScrapeSystemId == null
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(
+                                                if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.2f)
+                                                else Color.White.copy(alpha = 0.06f)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.12f),
+                                                RoundedCornerShape(999.dp)
+                                            )
+                                            .clickable { selectedScrapeSystemId = null }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    ) {
+                                        Text(
+                                            text = "All Systems (${fullGamesList.size})",
+                                            color = if (isSelected) Color(0xFF00E5FF) else VantafynColors.Muted,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    }
+                                }
+                                items(systems) { sys ->
+                                    val isSelected = selectedScrapeSystemId == sys.id
+                                    val sysCount = fullGamesList.count { it.systemId == sys.id }.takeIf { it > 0 } ?: sys.gameCount
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(999.dp))
+                                            .background(
+                                                if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.2f)
+                                                else Color.White.copy(alpha = 0.06f)
+                                            )
+                                            .border(
+                                                1.dp,
+                                                if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.12f),
+                                                RoundedCornerShape(999.dp)
+                                            )
+                                            .clickable { selectedScrapeSystemId = sys.id }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    ) {
+                                        Text(
+                                            text = "${sys.displayName} ($sysCount)",
+                                            color = if (isSelected) Color(0xFF00E5FF) else VantafynColors.Muted,
+                                            fontSize = 11.sp,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        if (isScraping) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                VantafynGradientProgressBar(
+                                    progress = scrapeProgress,
+                                    height = 7.dp,
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text(
+                                        text = currentScrapingTitle,
+                                        color = VantafynColors.Ink,
+                                        fontSize = 12.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    Text(
+                                        text = "${(scrapeProgress * 100).toInt()}%",
+                                        color = Color(0xFF00E5FF),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+
+                        if (scrapeCompletedMessage != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Check,
+                                    contentDescription = null,
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Text(
+                                    text = scrapeCompletedMessage.orEmpty(),
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(
+                                    if (isScraping) SolidColor(Color.White.copy(alpha = 0.08f))
+                                    else VantafynGradients.accentHorizontal(),
+                                )
+                                .clickable(enabled = !isScraping && targetGames.isNotEmpty()) {
+                                    isScraping = true
+                                    scrapeProgress = 0f
+                                    scrapeMatchedCount = 0
+                                    scrapeCompletedMessage = null
+
+                                    coroutineScope.launch(Dispatchers.IO) {
+                                        val total = targetGames.size
+                                        val gamesByPlatform = targetGames.groupBy { GameBoxartScraper.resolvePlatform(it.systemId) }
+                                        var processedCount = 0
+
+                                        for ((platform, platformGames) in gamesByPlatform) {
+                                            if (platform == null) {
+                                                processedCount += platformGames.size
+                                                withContext(Dispatchers.Main) {
+                                                    scrapeProgress = processedCount.toFloat() / total.coerceAtLeast(1)
+                                                }
+                                                continue
+                                            }
+
+                                            withContext(Dispatchers.Main) {
+                                                currentScrapingTitle = "Fetching catalog for ${platform.libretroName}..."
+                                            }
+
+                                            val catalog = GameBoxartScraper.getSystemIndex(platform)
+
+                                            for (game in platformGames) {
+                                                processedCount++
+                                                withContext(Dispatchers.Main) {
+                                                    scrapeProgress = processedCount.toFloat() / total.coerceAtLeast(1)
+                                                    currentScrapingTitle = "Matching: ${game.cleanTitle.ifEmpty { game.title }}"
+                                                }
+
+                                                val matchedFilename = GameBoxartScraper.matchGame(game.cleanTitle, game.filename, catalog)
+                                                if (matchedFilename != null) {
+                                                    val cdnUrl = GameBoxartScraper.buildCdnUrl(platform, matchedFilename)
+                                                    prefs.edit().putString("boxart_${game.id}", cdnUrl).apply()
+                                                    withContext(Dispatchers.Main) {
+                                                        scrapeMatchedCount++
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        withContext(Dispatchers.Main) {
+                                            isScraping = false
+                                            scrapeProgress = 1f
+                                            scrapeCompletedMessage = "Scan complete! $total scanned • $scrapeMatchedCount covers updated."
+                                        }
+                                    }
+                                }
+                                .padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                if (isScraping) {
+                                    CircularProgressIndicator(
+                                        color = Color.White,
+                                        modifier = Modifier.size(16.dp),
+                                        strokeWidth = 2.dp,
+                                    )
+                                    Text(
+                                        text = "Scanning & Scraping...",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Search,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Text(
+                                        text = if (selectedScrapeSystemId == null) "Start Scan & Scrape (${targetGames.size} titles)" else "Scrape ${systems.firstOrNull { it.id == selectedScrapeSystemId }?.displayName ?: "Selected System"} (${targetGames.size})",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -259,6 +534,11 @@ fun GamesSettingsScreen(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color.White.copy(alpha = 0.04f))
                         .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val newVal = !hapticsEnabled
+                            hapticsEnabled = newVal
+                            prefs.edit().putBoolean("haptics_enabled", newVal).apply()
+                        }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -284,18 +564,12 @@ fun GamesSettingsScreen(
                         )
                     }
 
-                    Switch(
+                    VantafynSwitch(
                         checked = hapticsEnabled,
                         onCheckedChange = { checked ->
                             hapticsEnabled = checked
                             prefs.edit().putBoolean("haptics_enabled", checked).apply()
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF00E5FF),
-                            uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                            uncheckedTrackColor = Color.White.copy(alpha = 0.15f),
-                        ),
                     )
                 }
 
@@ -306,6 +580,11 @@ fun GamesSettingsScreen(
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color.White.copy(alpha = 0.04f))
                         .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val newVal = !bgmEnabled
+                            bgmEnabled = newVal
+                            GameHubSoundManager.setMusicEnabled(context, newVal)
+                        }
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -331,18 +610,12 @@ fun GamesSettingsScreen(
                         )
                     }
 
-                    Switch(
+                    VantafynSwitch(
                         checked = bgmEnabled,
                         onCheckedChange = { checked ->
                             bgmEnabled = checked
                             GameHubSoundManager.setMusicEnabled(context, checked)
                         },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF00E5FF),
-                            uncheckedThumbColor = Color.White.copy(alpha = 0.6f),
-                            uncheckedTrackColor = Color.White.copy(alpha = 0.15f),
-                        ),
                     )
                 }
 
@@ -527,213 +800,6 @@ fun GamesSettingsScreen(
             }
         }
 
-        // 5. Media & Boxart Scraper Card
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Text(
-                    text = "MEDIA & BOXART SCRAPING",
-                    color = VantafynColors.Muted,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                )
-
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.White.copy(alpha = 0.04f))
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
-                        .padding(14.dp),
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ImageSearch,
-                                contentDescription = null,
-                                tint = Color(0xFF00E5FF),
-                                modifier = Modifier.size(22.dp),
-                            )
-
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Scan & Scrape Library",
-                                    color = VantafynColors.Ink,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    text = "${games.size} titles in library across ${systems.size} ${if (systems.size == 1) "system" else "systems"}",
-                                    color = VantafynColors.Muted,
-                                    fontSize = 12.sp,
-                                )
-                            }
-                        }
-
-                        if (isScraping) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                LinearProgressIndicator(
-                                    progress = { scrapeProgress },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(6.dp)
-                                        .clip(RoundedCornerShape(3.dp)),
-                                    color = Color(0xFF00E5FF),
-                                    trackColor = Color.White.copy(alpha = 0.1f),
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Text(
-                                        text = currentScrapingTitle,
-                                        color = VantafynColors.Ink,
-                                        fontSize = 12.sp,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
-                                    )
-                                    Text(
-                                        text = "${(scrapeProgress * 100).toInt()}%",
-                                        color = Color(0xFF00E5FF),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        }
-
-                        if (scrapeCompletedMessage != null) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Check,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Text(
-                                    text = scrapeCompletedMessage.orEmpty(),
-                                    color = Color(0xFF00E5FF),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(
-                                    if (isScraping) SolidColor(Color.White.copy(alpha = 0.08f))
-                                    else VantafynGradients.accentHorizontal(),
-                                )
-                                .clickable(enabled = !isScraping && games.isNotEmpty()) {
-                                    isScraping = true
-                                    scrapeProgress = 0f
-                                    scrapeMatchedCount = 0
-                                    scrapeCompletedMessage = null
-
-                                    coroutineScope.launch(Dispatchers.IO) {
-                                        val total = games.size
-                                        val gamesByPlatform = games.groupBy { GameBoxartScraper.resolvePlatform(it.systemId) }
-                                        var processedCount = 0
-
-                                        for ((platform, platformGames) in gamesByPlatform) {
-                                            if (platform == null) {
-                                                processedCount += platformGames.size
-                                                withContext(Dispatchers.Main) {
-                                                    scrapeProgress = processedCount.toFloat() / total.coerceAtLeast(1)
-                                                }
-                                                continue
-                                            }
-
-                                            withContext(Dispatchers.Main) {
-                                                currentScrapingTitle = "Fetching catalog for ${platform.libretroName}..."
-                                            }
-
-                                            val catalog = GameBoxartScraper.getSystemIndex(platform)
-
-                                            for (game in platformGames) {
-                                                processedCount++
-                                                withContext(Dispatchers.Main) {
-                                                    scrapeProgress = processedCount.toFloat() / total.coerceAtLeast(1)
-                                                    currentScrapingTitle = "Matching: ${game.cleanTitle.ifEmpty { game.title }}"
-                                                }
-
-                                                val matchedFilename = GameBoxartScraper.matchGame(game.cleanTitle, game.filename, catalog)
-                                                if (matchedFilename != null) {
-                                                    val cdnUrl = GameBoxartScraper.buildCdnUrl(platform, matchedFilename)
-                                                    prefs.edit().putString("boxart_${game.id}", cdnUrl).apply()
-                                                    withContext(Dispatchers.Main) {
-                                                        scrapeMatchedCount++
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        withContext(Dispatchers.Main) {
-                                            isScraping = false
-                                            scrapeProgress = 1f
-                                            scrapeCompletedMessage = "Scan complete! $total scanned • $scrapeMatchedCount covers updated."
-                                        }
-                                    }
-                                }
-                                .padding(vertical = 12.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                if (isScraping) {
-                                    CircularProgressIndicator(
-                                        color = Color.White,
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                    )
-                                    Text(
-                                        text = "Scanning & Scraping...",
-                                        color = Color.White,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                } else {
-                                    Icon(
-                                        imageVector = Icons.Rounded.Search,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Text(
-                                        text = "Start Scan & Scrape",
-                                        color = Color.White,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
 }
+

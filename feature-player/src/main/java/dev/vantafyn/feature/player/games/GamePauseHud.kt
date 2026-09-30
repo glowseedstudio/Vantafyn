@@ -35,6 +35,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.automirrored.rounded.VolumeMute
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -49,6 +55,12 @@ enum class GameAspectRatio(val label: String, val cssValue: String) {
     Square("1:1 Pixel", "1 / 1"),
 }
 
+enum class GameVideoFilter(val label: String, val id: String) {
+    Crisp("Crisp Pixels", "crisp"),
+    Crt("CRT Scanlines", "crt"),
+    Smooth("Smooth Filter", "smooth"),
+}
+
 @Composable
 fun GamePauseHud(
     visible: Boolean,
@@ -57,6 +69,13 @@ fun GamePauseHud(
     fastForwardSpeed: Float,
     isSavingState: Boolean,
     saveStateSuccess: Boolean,
+    isMuted: Boolean,
+    onToggleMute: () -> Unit,
+    videoFilter: GameVideoFilter,
+    onCycleVideoFilter: () -> Unit,
+    showTouchControls: Boolean,
+    onToggleTouchControls: () -> Unit,
+    isTv: Boolean,
     onResume: () -> Unit,
     onQuickSave: () -> Unit,
     onQuickLoad: () -> Unit,
@@ -96,7 +115,8 @@ fun GamePauseHud(
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                 ) {
                     // Header: Title & System
                     Column(
@@ -137,7 +157,7 @@ fun GamePauseHud(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(2.dp))
 
                     // Main Action Buttons Grid
                     Column(
@@ -188,6 +208,34 @@ fun GamePauseHud(
                                 icon = Icons.Rounded.AspectRatio,
                                 onClick = onCycleAspectRatio,
                                 modifier = Modifier.weight(1f),
+                            )
+                        }
+
+                        // Sound & Video Filter Row
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            HudMenuButton(
+                                label = if (isMuted) "Audio: Muted" else "Audio: On",
+                                icon = if (isMuted) Icons.AutoMirrored.Rounded.VolumeMute else Icons.AutoMirrored.Rounded.VolumeUp,
+                                onClick = onToggleMute,
+                                modifier = Modifier.weight(1f),
+                            )
+                            HudMenuButton(
+                                label = videoFilter.label,
+                                icon = Icons.Rounded.Tv,
+                                onClick = onCycleVideoFilter,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+
+                        // Touch Controls Toggle (mobile/tablet only)
+                        if (!isTv) {
+                            HudMenuButton(
+                                label = if (showTouchControls) "Touch Controls: Visible" else "Touch Controls: Hidden",
+                                icon = Icons.Rounded.TouchApp,
+                                onClick = onToggleTouchControls,
                             )
                         }
 

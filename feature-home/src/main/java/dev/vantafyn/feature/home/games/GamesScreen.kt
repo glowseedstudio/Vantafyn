@@ -16,6 +16,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
+import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
+import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.media.games.GameHubSoundManager
 
@@ -27,11 +29,15 @@ fun GamesScreen(
     serverName: String,
     systems: List<GameSystem>,
     games: List<GameSummary>,
+    allGames: List<GameSummary> = games,
     recentGames: List<RecentGameRecord>,
     totalPlayTimeMs: Long,
     selectedSystem: GameSystem?,
     isLoadingGames: Boolean,
     isRefreshing: Boolean = false,
+    downloadedGameKeys: Set<String> = emptySet(),
+    session: JellyfinSession? = null,
+    gamesRepository: JellyfinGamesRepository? = null,
     onRefresh: () -> Unit = {},
     onSelectTab: (GamesTab) -> Unit,
     onSelectSystem: (GameSystem?) -> Unit,
@@ -74,6 +80,7 @@ fun GamesScreen(
                     userImageUrl = userImageUrl,
                     systems = systems,
                     games = games,
+                    allGames = allGames,
                     recentGames = recentGames,
                     totalPlayTimeMs = totalPlayTimeMs,
                     isRefreshing = isRefreshing,
@@ -90,9 +97,11 @@ fun GamesScreen(
                 GamesHubScreen(
                     systems = systems,
                     games = games,
+                    allGames = allGames,
                     selectedSystem = selectedSystem,
                     isLoading = isLoadingGames,
                     isRefreshing = isRefreshing,
+                    downloadedGameKeys = downloadedGameKeys,
                     onRefresh = onRefresh,
                     onSelectSystem = onSelectSystem,
                     onOpenGame = onOpenGame,
@@ -108,12 +117,17 @@ fun GamesScreen(
             GamesTab.Saves -> {
                 GamesSavesScreen(
                     serverName = serverName,
+                    games = allGames,
+                    systems = systems,
+                    session = session,
+                    gamesRepository = gamesRepository,
                     onBack = { onSelectTab(GamesTab.Home) },
                 )
             }
             GamesTab.Settings -> {
                 GamesSettingsScreen(
                     games = games,
+                    allGames = allGames,
                     systems = systems,
                     onBack = { onSelectTab(GamesTab.Home) },
                 )

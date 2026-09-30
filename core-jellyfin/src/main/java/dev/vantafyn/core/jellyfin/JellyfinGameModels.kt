@@ -13,6 +13,12 @@ enum class GameSaveKind(val value: String) {
     }
 }
 
+data class CloudSaveEntry(
+    val data: ByteArray,
+    val lastModifiedMs: Long = 0L,
+    val sizeBytes: Long = 0L,
+) : Serializable
+
 data class GameLibrary(
     val id: String,
     val name: String,

@@ -56,6 +56,7 @@ import dev.vantafyn.core.jellyfin.GameSystem
 import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.feature.home.games.GamesTab
+import dev.vantafyn.feature.player.games.GameStorageManager
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.LibraryViewMode
 import dev.vantafyn.core.jellyfin.LibrariesViewMode
@@ -170,9 +171,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.withContext
 
 class VantafynHomeViewModel(application: Application) : AndroidViewModel(application) {
     private val repositories = JellyfinRepositoryProvider(application)
@@ -197,6 +200,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val socialRepository: JellyfinSocialRepository = repositories.socialRepository
     private val watchGuideRepository = dev.vantafyn.feature.home.guide.WatchGuideRepository(application)
     val gamesRepository: JellyfinGamesRepository = DefaultJellyfinGamesRepository()
+    val gameStorageManager = GameStorageManager(application, gamesRepository)
     private val achievementPrefs = application.getSharedPreferences("vantafyn_achievements", Context.MODE_PRIVATE)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
     private val appPreferences = application.getSharedPreferences("vantafyn_app_preferences", Context.MODE_PRIVATE)
@@ -305,6 +309,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         refreshSocialAvailability()
         loadDownloads()
         startObservingDownloads()
+        refreshDownloadedGameKeys()
+        if (gameStorageManager.listDownloadedGameKeys().isNotEmpty()) {
+            loadCachedOfflineGames()
+        }
         // Watch guide unlocked codes are managed by watchGuideRepository (SQLite database)
         val appLifecycleObserver = LifecycleEventObserver { _, event ->
             when (event) {
@@ -1511,7 +1519,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 mobileMessage = null,
             )
         }
-        if (destination == MobileDestination.Games) refreshGameTrackerData()
+        if (destination == MobileDestination.Games) {
+            refreshGameTrackerData()
+            refreshDownloadedGameKeys()
+            if (_state.value.allGamesList.isEmpty()) {
+                loadGames()
+            }
+        }
         if (destination == MobileDestination.Favorites) loadFavorites()
         if (destination == MobileDestination.Admin) loadAdminOverview()
         if (destination == MobileDestination.PlaybackPreferences) loadPlaybackPreferences()
@@ -1570,11 +1584,173 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun refreshGames() {
         refreshGameTrackerData()
+        refreshDownloadedGameKeys()
         loadGames()
     }
 
+    fun refreshDownloadedGameKeys() {
+        val keys = gameStorageManager.listDownloadedGameKeys()
+        _state.update {
+            it.copy(
+                downloadedGameKeys = keys,
+                isGamesAvailable = if (keys.isNotEmpty()) true else it.isGamesAvailable,
+            )
+        }
+    }
+
+    private fun saveGamesCatalogCache(
+        libraries: List<GameLibrary>,
+        systems: List<GameSystem>,
+        games: List<GameSummary>,
+    ) {
+        try {
+            val root = org.json.JSONObject()
+            val libsArr = org.json.JSONArray()
+            for (lib in libraries) {
+                val obj = org.json.JSONObject()
+                obj.put("id", lib.id)
+                obj.put("name", lib.name)
+                obj.put("path", lib.path)
+                libsArr.put(obj)
+            }
+            root.put("libraries", libsArr)
+
+            val sysArr = org.json.JSONArray()
+            for (sys in systems) {
+                val obj = org.json.JSONObject()
+                obj.put("id", sys.id)
+                obj.put("name", sys.name)
+                obj.put("core", sys.core)
+                obj.put("gameCount", sys.gameCount)
+                val extArr = org.json.JSONArray()
+                sys.extensions.forEach { extArr.put(it) }
+                obj.put("extensions", extArr)
+                obj.put("icon", sys.icon)
+                obj.put("logoUrl", sys.logoUrl ?: "")
+                sysArr.put(obj)
+            }
+            root.put("systems", sysArr)
+
+            val gamesArr = org.json.JSONArray()
+            for (g in games) {
+                val obj = org.json.JSONObject()
+                obj.put("id", g.id)
+                obj.put("title", g.title)
+                obj.put("systemId", g.systemId)
+                obj.put("filename", g.filename)
+                obj.put("sizeBytes", g.sizeBytes)
+                obj.put("token", g.token)
+                obj.put("extension", g.extension)
+                obj.put("boxartUrl", g.boxartUrl ?: "")
+                gamesArr.put(obj)
+            }
+            root.put("games", gamesArr)
+
+            val target = File(getApplication<Application>().filesDir, "games/cached_catalog.json")
+            target.parentFile?.mkdirs()
+            target.writeText(root.toString())
+        } catch (e: Exception) {
+            android.util.Log.w("VantafynHomeViewModel", "Failed to cache games catalog: ${e.message}")
+        }
+    }
+
+    private fun loadCachedOfflineGames() {
+        try {
+            val file = File(getApplication<Application>().filesDir, "games/cached_catalog.json")
+            if (!file.exists()) {
+                _state.update { it.copy(isLoadingGames = false) }
+                return
+            }
+            val text = file.readText()
+            val root = org.json.JSONObject(text)
+
+            val libsArr = root.optJSONArray("libraries") ?: org.json.JSONArray()
+            val libraries = mutableListOf<GameLibrary>()
+            for (i in 0 until libsArr.length()) {
+                val obj = libsArr.getJSONObject(i)
+                libraries.add(
+                    GameLibrary(
+                        id = obj.optString("id"),
+                        name = obj.optString("name"),
+                        path = obj.optString("path", ""),
+                    )
+                )
+            }
+
+            val sysArr = root.optJSONArray("systems") ?: org.json.JSONArray()
+            val systems = mutableListOf<GameSystem>()
+            for (i in 0 until sysArr.length()) {
+                val obj = sysArr.getJSONObject(i)
+                val extArr = obj.optJSONArray("extensions") ?: org.json.JSONArray()
+                val exts = mutableListOf<String>()
+                for (j in 0 until extArr.length()) {
+                    exts.add(extArr.getString(j))
+                }
+                systems.add(
+                    GameSystem(
+                        id = obj.optString("id"),
+                        name = obj.optString("name"),
+                        core = obj.optString("core"),
+                        extensions = exts,
+                        gameCount = obj.optInt("gameCount", 0),
+                        icon = obj.optString("icon", ""),
+                        logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
+                    )
+                )
+            }
+
+            val gamesArr = root.optJSONArray("games") ?: org.json.JSONArray()
+            val games = mutableListOf<GameSummary>()
+            for (i in 0 until gamesArr.length()) {
+                val obj = gamesArr.getJSONObject(i)
+                games.add(
+                    GameSummary(
+                        id = obj.optString("id"),
+                        title = obj.optString("title"),
+                        systemId = obj.optString("systemId"),
+                        filename = obj.optString("filename"),
+                        sizeBytes = obj.optLong("sizeBytes", 0L),
+                        token = obj.optString("token", ""),
+                        extension = obj.optString("extension", ""),
+                        boxartUrl = obj.optString("boxartUrl").takeIf { it.isNotBlank() },
+                    )
+                )
+            }
+
+            val library = libraries.firstOrNull()
+            val currentSelectedSystem = _state.value.selectedGameSystem
+            val activeSys = systems.firstOrNull { it.id == currentSelectedSystem?.id }
+            val filteredGames = if (activeSys != null) {
+                games.filter { it.systemId == activeSys.id }
+            } else {
+                games
+            }
+
+            _state.update {
+                it.copy(
+                    gameLibraries = libraries,
+                    selectedGameLibrary = library,
+                    gameSystems = systems,
+                    selectedGameSystem = activeSys,
+                    allGamesList = games,
+                    gamesList = filteredGames,
+                    isLoadingGames = false,
+                    isGamesAvailable = games.isNotEmpty(),
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("VantafynHomeViewModel", "Failed to load cached games: ${e.message}")
+            _state.update { it.copy(isLoadingGames = false) }
+        }
+    }
+
     fun loadGames() {
-        val session = _state.value.session ?: return
+        refreshDownloadedGameKeys()
+        val session = _state.value.session
+        if (session == null) {
+            loadCachedOfflineGames()
+            return
+        }
         viewModelScope.launch {
             _state.update { it.copy(isLoadingGames = true) }
             val libraries = gamesRepository.getGameLibraries(session).getOrDefault(emptyList())
@@ -1595,57 +1771,118 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         selectedGameSystem = activeSys,
                     )
                 }
-                val systemsToLoad = if (activeSys != null) listOf(activeSys) else systems
                 val allGames = mutableListOf<GameSummary>()
-                for (sys in systemsToLoad) {
+                for (sys in systems) {
                     val res = gamesRepository.getGames(session, library.id, sys.id).getOrDefault(emptyList())
                     allGames.addAll(res)
                 }
+                val filteredGames = if (activeSys != null) {
+                    allGames.filter { it.systemId == activeSys.id }
+                } else {
+                    allGames
+                }
                 _state.update {
                     it.copy(
-                        gamesList = allGames,
+                        allGamesList = allGames,
+                        gamesList = filteredGames,
                         isLoadingGames = false,
+                        isGamesAvailable = true,
                     )
                 }
+                saveGamesCatalogCache(libraries, systems, allGames)
             } else {
+                loadCachedOfflineGames()
                 _state.update { it.copy(isLoadingGames = false) }
             }
         }
     }
 
     fun selectGameSystem(system: GameSystem?) {
-        _state.update { it.copy(selectedGameSystem = system) }
-        loadGamesForSystem(system)
-    }
-
-    private fun loadGamesForSystem(system: GameSystem?) {
-        val session = _state.value.session ?: return
-        val library = _state.value.selectedGameLibrary ?: return
-        viewModelScope.launch {
-            _state.update { it.copy(isLoadingGames = true) }
-            val systemsToLoad = if (system != null) listOf(system) else _state.value.gameSystems
-            val allGames = mutableListOf<GameSummary>()
-            for (sys in systemsToLoad) {
-                val res = gamesRepository.getGames(session, library.id, sys.id).getOrDefault(emptyList())
-                allGames.addAll(res)
-            }
-            _state.update {
-                it.copy(
-                    gamesList = allGames,
-                    isLoadingGames = false,
-                )
-            }
+        val currentAllGames = _state.value.allGamesList
+        if (currentAllGames.isEmpty()) {
+            _state.update { it.copy(selectedGameSystem = system) }
+            loadGames()
+            return
+        }
+        val filtered = if (system != null) {
+            currentAllGames.filter { it.systemId == system.id }
+        } else {
+            currentAllGames
+        }
+        _state.update {
+            it.copy(
+                selectedGameSystem = system,
+                gamesList = filtered,
+            )
         }
     }
 
     fun openGameDetail(summary: GameSummary) {
-        val session = _state.value.session ?: return
-        val library = _state.value.selectedGameLibrary ?: return
+        refreshDownloadedGameKeys()
+        val session = _state.value.session
+        val library = _state.value.selectedGameLibrary
+        val sys = _state.value.gameSystems.firstOrNull { it.id == summary.systemId }
+        val fallback = GameDetail(
+            id = summary.id,
+            title = summary.title,
+            systemId = summary.systemId,
+            filename = summary.filename,
+            sizeBytes = summary.sizeBytes,
+            token = summary.token,
+            extension = summary.extension,
+            core = sys?.core ?: summary.systemId,
+            cleanTitle = summary.cleanTitle,
+            region = summary.region,
+            downloadUrl = "",
+            boxartUrl = summary.boxartUrl,
+        )
+        if (session == null || library == null) {
+            _state.update { it.copy(activeGameDetail = fallback) }
+            return
+        }
         viewModelScope.launch {
             val detail = gamesRepository.getGameDetail(session, library.id, summary.id).getOrNull()
-            if (detail != null) {
-                _state.update { it.copy(activeGameDetail = detail) }
+            _state.update { it.copy(activeGameDetail = detail ?: fallback) }
+        }
+    }
+
+    fun downloadGameForOffline(game: GameDetail) {
+        val session = _state.value.session ?: return
+        val libraryId = _state.value.selectedGameLibrary?.id ?: "games"
+        viewModelScope.launch {
+            try {
+                _state.update {
+                    it.copy(
+                        downloadingGameId = game.id,
+                        downloadingGameProgress = 0.05f,
+                    )
+                }
+                gameStorageManager.downloadRomForOffline(
+                    session = session,
+                    libraryId = libraryId,
+                    game = game,
+                    onProgress = { progress ->
+                        _state.update { it.copy(downloadingGameProgress = progress) }
+                    },
+                )
+                refreshDownloadedGameKeys()
+            } catch (e: Exception) {
+                android.util.Log.e("VantafynHomeViewModel", "Failed to download ROM for offline: ${e.message}", e)
+            } finally {
+                _state.update {
+                    it.copy(
+                        downloadingGameId = null,
+                        downloadingGameProgress = 0f,
+                    )
+                }
             }
+        }
+    }
+
+    fun deleteOfflineGame(game: GameDetail) {
+        viewModelScope.launch(Dispatchers.IO) {
+            gameStorageManager.deleteOfflineGame(game.id, game.token, game.extension)
+            refreshDownloadedGameKeys()
         }
     }
 
@@ -10321,6 +10558,7 @@ data class VantafynHomeUiState(
     val selectedGameLibrary: GameLibrary? = null,
     val gameSystems: List<GameSystem> = emptyList(),
     val selectedGameSystem: GameSystem? = null,
+    val allGamesList: List<GameSummary> = emptyList(),
     val gamesList: List<GameSummary> = emptyList(),
     val isLoadingGames: Boolean = false,
     val activeGameDetail: GameDetail? = null,
@@ -10328,6 +10566,9 @@ data class VantafynHomeUiState(
     val activeGamesTab: GamesTab = GamesTab.Home,
     val recentGames: List<RecentGameRecord> = emptyList(),
     val totalGamePlayTimeMs: Long = 0L,
+    val downloadedGameKeys: Set<String> = emptySet(),
+    val downloadingGameId: String? = null,
+    val downloadingGameProgress: Float = 0f,
 ) {
 
     val mcuWatchGuideDialog: VantafynMcuWatchGuideDialogState?

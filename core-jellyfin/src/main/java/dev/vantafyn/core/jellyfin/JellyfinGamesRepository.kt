@@ -17,6 +17,7 @@ interface JellyfinGamesRepository {
     suspend fun getGameDetail(session: JellyfinSession, libraryId: String, gameId: String): Result<GameDetail>
     fun getRomDownloadUrl(session: JellyfinSession, libraryId: String, token: String): String
     suspend fun getCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State): Result<ByteArray?>
+    suspend fun getCloudSaveWithMetadata(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State): Result<CloudSaveEntry?>
     suspend fun uploadCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State, data: ByteArray): Result<Unit>
     suspend fun deleteCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State): Result<Unit>
 }
@@ -196,6 +197,13 @@ class DefaultJellyfinGamesRepository(
         gameId: String,
         kind: GameSaveKind,
     ): Result<ByteArray?> =
+        getCloudSaveWithMetadata(session, gameId, kind).map { it?.data }
+
+    override suspend fun getCloudSaveWithMetadata(
+        session: JellyfinSession,
+        gameId: String,
+        kind: GameSaveKind,
+    ): Result<CloudSaveEntry?> =
         withContext(ioDispatcher) {
             runCatching {
                 val conn = session.openAuthenticatedConnection("Vantafyn/Games/Saves/$gameId?kind=${kind.value}")
@@ -203,7 +211,13 @@ class DefaultJellyfinGamesRepository(
                     return@runCatching null
                 }
                 checkResponseCode(conn)
-                conn.inputStream.use { it.readBytes() }
+                val lastModified = if (conn.lastModified > 0) conn.lastModified else conn.date
+                val data = conn.inputStream.use { it.readBytes() }
+                CloudSaveEntry(
+                    data = data,
+                    lastModifiedMs = lastModified,
+                    sizeBytes = if (conn.contentLengthLong > 0) conn.contentLengthLong else data.size.toLong(),
+                )
             }
         }
 
