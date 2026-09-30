@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CatchingPokemon
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -81,6 +82,8 @@ fun GamesHubScreen(
     allGames: List<GameSummary> = games,
     selectedSystem: GameSystem?,
     downloadedGameKeys: Set<String> = emptySet(),
+    isPokemonVaultAvailable: Boolean = false,
+    onOpenPokemonVault: () -> Unit = {},
     isLoading: Boolean,
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
@@ -291,6 +294,13 @@ fun GamesHubScreen(
                     },
                 )
             }
+            if (isPokemonVaultAvailable) {
+                item {
+                    PokemonVaultFilterPill(
+                        onClick = onOpenPokemonVault,
+                    )
+                }
+            }
             if (downloadedCount > 0) {
                 item {
                     SystemFilterPill(
@@ -490,6 +500,44 @@ private fun SystemFilterPill(
                     fontSize = 11.sp,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun PokemonVaultFilterPill(
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .height(36.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(Color(0xFF16161D).copy(alpha = 0.85f), RoundedCornerShape(20.dp))
+            .border(
+                width = 1.dp,
+                brush = VantafynGradients.accentHorizontal(),
+                shape = RoundedCornerShape(20.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.CatchingPokemon,
+                contentDescription = null,
+                tint = Color(0xFF00E5FF),
+                modifier = Modifier.size(16.dp),
+            )
+            Text(
+                text = "Pokémon Vault",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp,
+            )
         }
     }
 }

@@ -13,6 +13,7 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public string? CustomGamesPath { get; set; }
     public List<string> GameLibraryIds { get; set; } = new();
     public OmbiConfiguration Ombi { get; set; } = new();
+    public Pokemon.PokemonConfiguration Pokemon { get; set; } = new();
 }
 
 public sealed class OmbiConfiguration

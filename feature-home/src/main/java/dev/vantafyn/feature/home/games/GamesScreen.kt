@@ -21,6 +21,11 @@ import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.media.games.GameHubSoundManager
 
+import dev.vantafyn.core.jellyfin.DefaultJellyfinPokemonRepository
+import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
+import dev.vantafyn.feature.home.games.pokemon.PokemonVaultScreen
+import androidx.compose.runtime.remember
+
 @Composable
 fun GamesScreen(
     activeTab: GamesTab,
@@ -38,6 +43,8 @@ fun GamesScreen(
     downloadedGameKeys: Set<String> = emptySet(),
     session: JellyfinSession? = null,
     gamesRepository: JellyfinGamesRepository? = null,
+    pokemonRepository: JellyfinPokemonRepository? = null,
+    isPokemonVaultAvailable: Boolean = false,
     onRefresh: () -> Unit = {},
     onSelectTab: (GamesTab) -> Unit,
     onSelectSystem: (GameSystem?) -> Unit,
@@ -102,6 +109,8 @@ fun GamesScreen(
                     isLoading = isLoadingGames,
                     isRefreshing = isRefreshing,
                     downloadedGameKeys = downloadedGameKeys,
+                    isPokemonVaultAvailable = isPokemonVaultAvailable,
+                    onOpenPokemonVault = { onSelectTab(GamesTab.Vault) },
                     onRefresh = onRefresh,
                     onSelectSystem = onSelectSystem,
                     onOpenGame = onOpenGame,
@@ -112,6 +121,13 @@ fun GamesScreen(
                             onSelectTab(GamesTab.Home)
                         }
                     },
+                )
+            }
+            GamesTab.Vault -> {
+                PokemonVaultScreen(
+                    session = session,
+                    pokemonRepository = pokemonRepository ?: remember { DefaultJellyfinPokemonRepository() },
+                    onBack = { onSelectTab(GamesTab.Home) },
                 )
             }
             GamesTab.Saves -> {

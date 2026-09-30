@@ -58,6 +58,10 @@ public class GameSummary
     [JsonPropertyName("boxartUrl")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? BoxartUrl { get; set; }
+
+    [JsonPropertyName("pokemon")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Pokemon.GamePokemonMetadata? Pokemon { get; set; }
 }
 
 /// <summary>Full detail for a game, including archive or BIOS details.</summary>

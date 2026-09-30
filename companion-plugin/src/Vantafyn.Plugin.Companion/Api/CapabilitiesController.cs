@@ -57,6 +57,16 @@ public sealed class CapabilitiesController(
             {
                 liveSession = config.NotificationsEnabled,
                 backgroundPush = config.NotificationsEnabled
+            },
+            pokemon = new
+            {
+                state = !config.Pokemon.Enabled ? "disabled" : (!string.IsNullOrWhiteSpace(config.Pokemon.PkVaultBaseUrl) ? "ready" : "unconfigured"),
+                provider = config.Pokemon.ProviderType,
+                serverConfigured = !string.IsNullOrWhiteSpace(config.Pokemon.PkVaultBaseUrl),
+                vaultAvailable = config.Pokemon.Enabled && !string.IsNullOrWhiteSpace(config.Pokemon.PkVaultBaseUrl),
+                transfersAvailable = config.Pokemon.Enabled && !string.IsNullOrWhiteSpace(config.Pokemon.PkVaultBaseUrl) && config.Pokemon.AllowTransfers,
+                crossGenerationTransfersAvailable = config.Pokemon.Enabled && !string.IsNullOrWhiteSpace(config.Pokemon.PkVaultBaseUrl) && config.Pokemon.AllowCrossGenerationTransfers,
+                tradingAvailable = config.Pokemon.Enabled && !string.IsNullOrWhiteSpace(config.Pokemon.PkVaultBaseUrl) && config.Pokemon.AllowTrading
             }
         });
     }

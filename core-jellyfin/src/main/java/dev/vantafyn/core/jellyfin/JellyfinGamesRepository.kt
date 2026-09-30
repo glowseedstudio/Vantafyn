@@ -133,6 +133,7 @@ class DefaultJellyfinGamesRepository(
                             token = token,
                             extension = extension,
                             boxartUrl = fullBoxartUrl,
+                            pokemon = parsePokemonMetadata(obj),
                         )
                     )
                 }
@@ -184,9 +185,25 @@ class DefaultJellyfinGamesRepository(
                     region = obj.optString("region", "").ifEmpty { extractGameRegion(obj.optString("title", "")) },
                     downloadUrl = fullDownloadUrl,
                     boxartUrl = fullBoxartUrl,
+                    pokemon = parsePokemonMetadata(obj),
                 )
             }
         }
+
+    private fun parsePokemonMetadata(obj: JSONObject): GamePokemonMetadata? {
+        val pObj = obj.optJSONObject("pokemon") ?: return null
+        return GamePokemonMetadata(
+            isPokemonGame = pObj.optBoolean("isPokemonGame", true),
+            pokemonGameId = pObj.optString("pokemonGameId", ""),
+            canonicalTitle = pObj.optString("canonicalTitle", ""),
+            generation = pObj.optInt("generation", 0),
+            platform = pObj.optString("platform", ""),
+            saveType = pObj.optString("saveType", "sram"),
+            hasSave = pObj.optBoolean("hasSave", false),
+            vaultSupported = pObj.optBoolean("vaultSupported", true),
+            detectionConfidence = pObj.optString("detectionConfidence", "high"),
+        )
+    }
 
     override fun getRomDownloadUrl(session: JellyfinSession, libraryId: String, token: String): String {
         return "${session.server.url.trimEnd('/')}/Vantafyn/Games/$libraryId/ROM/$token?api_key=${session.accessToken}"

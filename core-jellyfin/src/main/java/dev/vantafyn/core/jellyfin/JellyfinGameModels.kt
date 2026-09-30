@@ -104,6 +104,7 @@ data class GameSummary(
     val token: String = "",
     val extension: String = "",
     val boxartUrl: String? = null,
+    val pokemon: GamePokemonMetadata? = null,
 ) : Serializable {
     val cleanTitle: String
         get() = cleanGameTitle(title)
@@ -125,6 +126,19 @@ data class GameDetail(
     val region: String? = null,
     val downloadUrl: String = "",
     val boxartUrl: String? = null,
+    val pokemon: GamePokemonMetadata? = null,
+) : Serializable
+
+data class GamePokemonMetadata(
+    val isPokemonGame: Boolean = true,
+    val pokemonGameId: String = "",
+    val canonicalTitle: String = "",
+    val generation: Int = 0,
+    val platform: String = "",
+    val saveType: String = "sram",
+    val hasSave: Boolean = false,
+    val vaultSupported: Boolean = true,
+    val detectionConfidence: String = "high",
 ) : Serializable
 
 data class GameSaveMetadata(
@@ -157,3 +171,75 @@ fun extractGameRegion(rawTitle: String): String? {
         .find(rawTitle)
     return match?.groupValues?.getOrNull(1)?.uppercase()
 }
+
+data class PokemonSummaryDto(
+    val id: String = "",
+    val species: String = "",
+    val speciesId: Int = 0,
+    val form: String? = null,
+    val nickname: String = "",
+    val level: Int = 1,
+    val gender: String? = null,
+    val isShiny: Boolean = false,
+    val originalTrainer: String? = null,
+    val originalTrainerId: String? = null,
+    val originGame: String? = null,
+    val currentGame: String? = null,
+    val currentLocation: String = "",
+    val boxIndex: Int? = null,
+    val slotIndex: Int = 1,
+    val isInParty: Boolean = false,
+    val legalityStatus: String = "valid",
+) : Serializable
+
+data class PokemonBoxDto(
+    val boxIndex: Int = 1,
+    val name: String = "",
+    val capacity: Int = 30,
+    val occupiedCount: Int = 0,
+    val entries: List<PokemonSummaryDto> = emptyList(),
+) : Serializable
+
+data class PokemonGameSaveDto(
+    val gameId: String = "",
+    val title: String = "",
+    val platform: String = "",
+    val generation: Int = 0,
+    val trainerName: String? = null,
+    val trainerId: String? = null,
+    val money: Int? = null,
+    val pokedexSeen: Int? = null,
+    val pokedexCaught: Int? = null,
+    val saveFound: Boolean = false,
+    val providerAvailable: Boolean = false,
+    val errorMessage: String? = null,
+    val party: List<PokemonSummaryDto> = emptyList(),
+    val boxes: List<PokemonBoxDto> = emptyList(),
+    val totalPokemonCount: Int = 0,
+    val shinyCount: Int = 0,
+) : Serializable
+
+data class PokemonStatsDto(
+    val hp: Int = 0,
+    val attack: Int = 0,
+    val defense: Int = 0,
+    val specialAttack: Int = 0,
+    val specialDefense: Int = 0,
+    val speed: Int = 0,
+) : Serializable
+
+data class PokemonDetailsDto(
+    val summary: PokemonSummaryDto = PokemonSummaryDto(),
+    val nature: String? = null,
+    val ability: String? = null,
+    val heldItem: String? = null,
+    val moves: List<String> = emptyList(),
+    val iv: PokemonStatsDto? = null,
+    val ev: PokemonStatsDto? = null,
+    val currentHp: Int? = null,
+    val maxHp: Int? = null,
+    val friendship: Int? = null,
+    val pokeball: String? = null,
+    val rawData: String? = null,
+) : Serializable
+

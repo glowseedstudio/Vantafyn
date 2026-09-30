@@ -18,4 +18,17 @@ internal static class ControllerUserExtensions
 
     public static Guid CurrentUserId(this ControllerBase controller, IAuthorizationContext authorizationContext) =>
         controller.CurrentUserIdAsync(authorizationContext).GetAwaiter().GetResult();
+
+    public static async Task<string> CurrentUserNameAsync(this ControllerBase controller, IAuthorizationContext authorizationContext)
+    {
+        try
+        {
+            var auth = await authorizationContext.GetAuthorizationInfo(controller.Request).ConfigureAwait(false);
+            return auth.User?.Username ?? "Trainer";
+        }
+        catch
+        {
+            return "Trainer";
+        }
+    }
 }

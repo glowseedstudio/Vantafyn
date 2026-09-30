@@ -269,7 +269,66 @@
           <div id="ombiStatus" class="statusBox"></div>
         </div>
 
-        <!-- 5. Diagnostics -->
+        <!-- 6. Pokémon Vault Integration -->
+        <div class="paperList">
+          <h2>Pokémon Vault (PKVault)</h2>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input is="emby-checkbox" type="checkbox" id="pokemonEnabled" class="emby-checkbox" />
+              <span>Enable Pokémon Vault Integration</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Connects to a private, self-hosted PKVault service to let users inspect cartridge saves, deposit Pokémon into a personal cloud Vault, and manage their collections across retro games.
+            </div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonPkVaultBaseUrl">PKVault Service Base URL</label>
+            <input is="emby-input" type="text" id="pokemonPkVaultBaseUrl" class="emby-input" placeholder="http://localhost:5000 or http://pkvault:5000" />
+            <div class="fieldDescription">Base URL where your external PKVault container or instance is reachable by this Jellyfin server.</div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonTimeoutSeconds">Timeout (Seconds)</label>
+            <input is="emby-input" type="number" id="pokemonTimeoutSeconds" class="emby-input" min="2" max="30" value="5" />
+            <div class="fieldDescription">Provider communication timeout (2 to 30 seconds).</div>
+          </div>
+
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input is="emby-checkbox" type="checkbox" id="pokemonAllowTransfers" class="emby-checkbox" />
+              <span>Allow Pokémon Transfers (Vault Deposit &amp; Withdraw)</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Permits users to deposit Pokémon from game saves into their personal Vault and withdraw them back to compatible games.
+            </div>
+          </div>
+
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input is="emby-checkbox" type="checkbox" id="pokemonAllowCrossGenerationTransfers" class="emby-checkbox" />
+              <span>Allow Cross-Generation Transfers (e.g. Gen 3 ➔ Gen 4)</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Enables moving Pokémon across generations via PKVault conversion. Note: Transferred Pokémon cannot be returned to older generations once upgraded.
+            </div>
+          </div>
+
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input is="emby-checkbox" type="checkbox" id="pokemonAutoBackups" class="emby-checkbox" />
+              <span>Mandatory Pre-Mutation Save Backups</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Automatically creates a verified timestamped backup of the battery save (.sram) before any mutation begins. Recommended: keep enabled.
+            </div>
+          </div>
+
+          <button is="emby-button" type="button" class="actionButton secondary" id="testPokemon">Test PKVault Connection</button>
+          <div id="pokemonStatus" class="statusBox"></div>
+        </div>
+
+        <!-- 7. Companion Diagnostics -->
         <div class="paperList">
           <h2>Companion Diagnostics</h2>
           <div class="fieldDescription">Server diagnostic snapshot and registered UnifiedPush client status.</div>
@@ -376,6 +435,7 @@
           try {
             const config = await api('Vantafyn/Admin/Configuration');
             const ombi = config.ombi || config.Ombi || {};
+            const pokemon = config.pokemon || config.Pokemon || {};
 
             page.querySelector('#userSettingsEnabled').checked = !!getVal(config, 'userSettingsEnabled', 'UserSettingsEnabled', true);
             page.querySelector('#gamesEnabled').checked = !!getVal(config, 'gamesEnabled', 'GamesEnabled', true);
@@ -387,6 +447,13 @@
             page.querySelector('#ombiBaseUrl').value = getVal(ombi, 'baseUrl', 'BaseUrl', '') || '';
             page.querySelector('#ombiTimeoutSeconds').value = getVal(ombi, 'timeoutSeconds', 'TimeoutSeconds', 5);
             page.querySelector('#ombiRequireUserLogin').checked = !!getVal(ombi, 'requireUserLogin', 'RequireUserLogin', true);
+
+            page.querySelector('#pokemonEnabled').checked = !!getVal(pokemon, 'enabled', 'Enabled', false);
+            page.querySelector('#pokemonPkVaultBaseUrl').value = getVal(pokemon, 'pkVaultBaseUrl', 'PkVaultBaseUrl', '') || '';
+            page.querySelector('#pokemonTimeoutSeconds').value = getVal(pokemon, 'timeoutSeconds', 'TimeoutSeconds', 5);
+            page.querySelector('#pokemonAllowTransfers').checked = !!getVal(pokemon, 'allowTransfers', 'AllowTransfers', true);
+            page.querySelector('#pokemonAllowCrossGenerationTransfers').checked = !!getVal(pokemon, 'allowCrossGenerationTransfers', 'AllowCrossGenerationTransfers', false);
+            page.querySelector('#pokemonAutoBackups').checked = !!getVal(pokemon, 'autoBackups', 'AutoBackups', true);
 
             const diagnostics = await api('Vantafyn/Admin/Diagnostics').catch(() => null);
             if (diagnostics) {
@@ -422,7 +489,13 @@
                 ombiBaseUrl: page.querySelector('#ombiBaseUrl').value.trim(),
                 ombiApiKey: page.querySelector('#ombiApiKey').value.trim(),
                 ombiTimeoutSeconds: parseInt(page.querySelector('#ombiTimeoutSeconds').value || '5', 10),
-                ombiRequireUserLogin: page.querySelector('#ombiRequireUserLogin').checked
+                ombiRequireUserLogin: page.querySelector('#ombiRequireUserLogin').checked,
+                pokemonEnabled: page.querySelector('#pokemonEnabled').checked,
+                pokemonPkVaultBaseUrl: page.querySelector('#pokemonPkVaultBaseUrl').value.trim(),
+                pokemonTimeoutSeconds: parseInt(page.querySelector('#pokemonTimeoutSeconds').value || '5', 10),
+                pokemonAllowTransfers: page.querySelector('#pokemonAllowTransfers').checked,
+                pokemonAllowCrossGenerationTransfers: page.querySelector('#pokemonAllowCrossGenerationTransfers').checked,
+                pokemonAutoBackups: page.querySelector('#pokemonAutoBackups').checked
               };
 
               await api('Vantafyn/Admin/Configuration', {
@@ -459,6 +532,24 @@
               setStatus('ombiStatus', 'Ombi connection failed: ' + formatError(err), 'error');
             } finally {
               testOmbiBtn.disabled = false;
+            }
+          });
+        }
+
+        // Test PKVault Connection
+        const testPokemonBtn = page.querySelector('#testPokemon');
+        if (testPokemonBtn) {
+          testPokemonBtn.addEventListener('click', async () => {
+            testPokemonBtn.disabled = true;
+            setStatus('pokemonStatus', 'Testing PKVault connection...', 'info');
+            try {
+              const result = await api('Vantafyn/Admin/Pokemon/TestConnection', { type: 'POST' });
+              const msg = (result.message || 'Connection test finished') + (result.latencyMs ? ' (' + result.latencyMs + 'ms)' : '');
+              setStatus('pokemonStatus', msg, result.isSuccess ? 'success' : 'error');
+            } catch (err) {
+              setStatus('pokemonStatus', 'PKVault connection failed: ' + formatError(err), 'error');
+            } finally {
+              testPokemonBtn.disabled = false;
             }
           });
         }

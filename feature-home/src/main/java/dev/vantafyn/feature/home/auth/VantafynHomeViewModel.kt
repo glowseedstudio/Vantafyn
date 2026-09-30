@@ -200,6 +200,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     private val socialRepository: JellyfinSocialRepository = repositories.socialRepository
     private val watchGuideRepository = dev.vantafyn.feature.home.guide.WatchGuideRepository(application)
     val gamesRepository: JellyfinGamesRepository = DefaultJellyfinGamesRepository()
+    val pokemonRepository: dev.vantafyn.core.jellyfin.JellyfinPokemonRepository = dev.vantafyn.core.jellyfin.DefaultJellyfinPokemonRepository()
     val gameStorageManager = GameStorageManager(application, gamesRepository)
     private val achievementPrefs = application.getSharedPreferences("vantafyn_achievements", Context.MODE_PRIVATE)
     private val homeLayoutStorage = application.getSharedPreferences("vantafyn_home_layout", Context.MODE_PRIVATE)
@@ -1564,6 +1565,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is IntegrationResult.Failure -> false
             }
             val gamesReady = gamesRepository.isGamesAvailable(session).getOrDefault(false)
+            val pokemonReady = pokemonRepository.isPokemonAvailable(session).getOrDefault(false)
             _state.update {
                 val latestConfig = ombiRepository.config()
                 val latestHasKey = ombiRepository.hasApiKey()
@@ -1574,6 +1576,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     ombiRequestsEnabledForAdmins = ready || latestConfig.isEnabledForAdmins && latestHasKey,
                     pendingOmbiAccessRequestCount = ombiRepository.pendingAccessRequestCount(),
                     isGamesAvailable = gamesReady,
+                    isPokemonVaultAvailable = pokemonReady,
                 )
             }
             if (gamesReady && _state.value.gameSystems.isEmpty()) {
@@ -6274,7 +6277,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.33")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.34")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -10554,6 +10557,7 @@ data class VantafynHomeUiState(
     val isChatSearching: Boolean = false,
     val connectionStale: Boolean = false,
     val isGamesAvailable: Boolean = false,
+    val isPokemonVaultAvailable: Boolean = false,
     val gameLibraries: List<GameLibrary> = emptyList(),
     val selectedGameLibrary: GameLibrary? = null,
     val gameSystems: List<GameSystem> = emptyList(),

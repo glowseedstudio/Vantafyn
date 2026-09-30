@@ -204,6 +204,7 @@ public sealed class GameServicesTests
         public string SecretsRoot => Directory.CreateDirectory(Path.Combine(_root, "secrets")).FullName;
         public string PushRegistrationsRoot => Directory.CreateDirectory(Path.Combine(_root, "push-registrations")).FullName;
         public string GameSavesRoot => Directory.CreateDirectory(Path.Combine(_root, "game-saves")).FullName;
+        public string PokemonRoot => Directory.CreateDirectory(Path.Combine(_root, "pokemon")).FullName;
 
         public void Dispose()
         {

@@ -9,6 +9,7 @@ public interface ICompanionPaths
     string SecretsRoot { get; }
     string PushRegistrationsRoot { get; }
     string GameSavesRoot { get; }
+    string PokemonRoot { get; }
 }
 
 public sealed class CompanionPaths : ICompanionPaths
@@ -27,6 +28,8 @@ public sealed class CompanionPaths : ICompanionPaths
     public string PushRegistrationsRoot => Ensure(Path.Combine(DataRoot, "push-registrations"));
 
     public string GameSavesRoot => Ensure(Path.Combine(DataRoot, "game-saves"));
+
+    public string PokemonRoot => Ensure(Path.Combine(DataRoot, "pokemon"));
 
     private static string Ensure(string path)
     {

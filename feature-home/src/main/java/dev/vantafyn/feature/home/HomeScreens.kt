@@ -3949,6 +3949,8 @@ private fun MobileShellScreen(
                         downloadedGameKeys = state.downloadedGameKeys,
                         session = state.session,
                         gamesRepository = viewModel.gamesRepository,
+                        pokemonRepository = viewModel.pokemonRepository,
+                        isPokemonVaultAvailable = state.isPokemonVaultAvailable,
                         onRefresh = viewModel::refreshGames,
                         onSelectTab = viewModel::setActiveGamesTab,
                         onSelectSystem = viewModel::selectGameSystem,
@@ -4776,6 +4778,7 @@ private fun MobileShellScreen(
                     atmosphereMode = state.bottomRailAtmosphere,
                     experienceMode = state.experienceMode,
                     isGamesAvailable = state.isGamesAvailable,
+                    isPokemonVaultAvailable = state.isPokemonVaultAvailable,
                     modifier = if (isLandscape) Modifier.align(Alignment.CenterStart) else Modifier.align(Alignment.BottomCenter),
                 )
             val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
@@ -22341,6 +22344,7 @@ private fun MobileBottomNav(
     atmosphereMode: BottomRailAtmosphereMode = BottomRailAtmosphereMode.Off,
     experienceMode: ExperienceMode = ExperienceMode.FullMedia,
     isGamesAvailable: Boolean = false,
+    isPokemonVaultAvailable: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var tapTrigger by remember { mutableIntStateOf(0) }
@@ -22367,7 +22371,13 @@ private fun MobileBottomNav(
         }
     }
     val socialTabs = remember { dev.vantafyn.feature.home.SocialTab.entries }
-    val gamesTabs = remember { dev.vantafyn.feature.home.games.GamesTab.entries }
+    val gamesTabs = remember(isPokemonVaultAvailable) {
+        if (isPokemonVaultAvailable) {
+            dev.vantafyn.feature.home.games.GamesTab.entries
+        } else {
+            dev.vantafyn.feature.home.games.GamesTab.entries.filter { it != dev.vantafyn.feature.home.games.GamesTab.Vault }
+        }
+    }
 
     val currentNavKind = when (mode) {
         is NavigationRailMode.Social -> BottomNavKind.Social
@@ -24158,7 +24168,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.33"
+private const val VANTAFYN_APP_VERSION = "0.9.34"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable
