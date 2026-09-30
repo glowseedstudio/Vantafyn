@@ -26,12 +26,17 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
@@ -52,6 +57,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.coerceAtLeast
+import androidx.compose.ui.unit.coerceAtMost
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -104,9 +111,28 @@ fun GamePlayerScreen(
 
             window.decorView.keepScreenOn = true
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            controller.hide(WindowInsetsCompat.Type.statusBars())
+            // Only hide status bar in landscape mode so portrait has safe room for front camera cutouts
+            val orientation = context.resources.configuration.orientation
+            if (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE) {
+                controller.hide(WindowInsetsCompat.Type.statusBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.statusBars())
+            }
+
+            var previousRefreshRate = 0f
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                previousRefreshRate = window.attributes.preferredRefreshRate
+                val params = window.attributes
+                params.preferredRefreshRate = 60f
+                window.attributes = params
+            }
 
             onDispose {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                    val params = window.attributes
+                    params.preferredRefreshRate = previousRefreshRate
+                    window.attributes = params
+                }
                 window.decorView.keepScreenOn = previousKeepScreenOn
                 controller.show(WindowInsetsCompat.Type.statusBars())
                 controller.systemBarsBehavior = previousBehavior
@@ -208,35 +234,48 @@ fun GamePlayerScreen(
         },
     )
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black)
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .focusable()
             .onKeyEvent { event ->
                 inputController.handleKeyEvent(event.nativeKeyEvent)
             },
         contentAlignment = Alignment.Center,
     ) {
+        val totalWidth = maxWidth
+        val totalHeight = maxHeight
+        val isPortraitLayout = totalHeight > (totalWidth * 1.1f) && !isTv
+        val ratioFloat = when (aspectRatio) {
+            GameAspectRatio.Standard -> 4f / 3f
+            GameAspectRatio.Widescreen -> 16f / 9f
+            GameAspectRatio.Square -> 1f
+        }
+        val gameHeight = if (isPortraitLayout) (totalWidth / ratioFloat).coerceAtMost(totalHeight * 0.65f) else totalHeight
+        val controlsHeight = if (isPortraitLayout) (totalHeight - gameHeight).coerceAtLeast(0.dp) else totalHeight
+
         // Emulator View
         if (romFile != null) {
-            val ratioFloat = when (aspectRatio) {
-                GameAspectRatio.Standard -> 4f / 3f
-                GameAspectRatio.Widescreen -> 16f / 9f
-                GameAspectRatio.Square -> 1f
+            val gameContainerModifier = if (isPortraitLayout) {
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .height(gameHeight)
+            } else {
+                Modifier
+                    .align(Alignment.Center)
+                    .fillMaxSize()
+                    .aspectRatio(ratioFloat, matchHeightConstraintsFirst = true)
             }
 
             Box(
-                modifier = Modifier
-                    .fillMaxSize(),
+                modifier = gameContainerModifier,
                 contentAlignment = Alignment.Center,
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .aspectRatio(ratioFloat, matchHeightConstraintsFirst = true),
-                ) {
-                    AndroidView(
+                AndroidView(
                         factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(
@@ -247,6 +286,7 @@ fun GamePlayerScreen(
                                 isFocusable = true
                                 isFocusableInTouchMode = true
                                 setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                                resumeTimers()
 
                                 settings.apply {
                                     javaScriptEnabled = true
@@ -270,26 +310,32 @@ fun GamePlayerScreen(
 
                                         @JavascriptInterface
                                         fun onStateSaved(base64Data: String) {
-                                            scope.launch(Dispatchers.IO) {
+                                            isSavingState = true
+                                            GameStorageManager.saveScope.launch {
                                                 try {
-                                                    isSavingState = true
                                                     val bytes = Base64.decode(base64Data, Base64.DEFAULT)
                                                     android.util.Log.i("GamePlayerScreen", "Writing State save (${bytes.size} bytes) for ${game.id}")
                                                     val result = storageManager.saveState(session, game.id, bytes, GameSaveKind.State)
-                                                    isSavingState = false
-                                                    saveStateSuccess = result.isSuccess
+                                                    withContext(Dispatchers.Main) {
+                                                        isSavingState = false
+                                                        saveStateSuccess = result.isSuccess
+                                                    }
                                                     delay(2500)
-                                                    saveStateSuccess = false
+                                                    withContext(Dispatchers.Main) {
+                                                        saveStateSuccess = false
+                                                    }
                                                 } catch (e: Exception) {
                                                     android.util.Log.e("GamePlayerScreen", "Error saving State for ${game.id}", e)
-                                                    isSavingState = false
+                                                    withContext(Dispatchers.Main) {
+                                                        isSavingState = false
+                                                    }
                                                 }
                                             }
                                         }
 
                                         @JavascriptInterface
                                         fun onSramSaved(base64Data: String) {
-                                            scope.launch(Dispatchers.IO) {
+                                            GameStorageManager.saveScope.launch {
                                                 try {
                                                     val bytes = Base64.decode(base64Data, Base64.DEFAULT)
                                                     android.util.Log.i("GamePlayerScreen", "Persisting in-game SRAM save (${bytes.size} bytes) for ${game.id}")
@@ -429,7 +475,6 @@ fun GamePlayerScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
-            }
         }
 
         // Loading Screen
@@ -468,25 +513,59 @@ fun GamePlayerScreen(
             }
         }
 
+        // Divider line between screen and controls in portrait mode
+        if (isPortraitLayout) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = gameHeight)
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .background(Color(0x33FFFFFF)),
+            )
+        }
+
         // On-Screen Virtual Touchpad (Mobile/Tablet only, and hidden when physical gamepad is connected, when paused, or when disabled)
         if (!isTv && !isDownloading && !isPaused && !hasPhysicalGamepad && showTouchControls) {
-            RetroTouchOverlay(
-                visible = true,
-                systemId = game.systemId,
-                core = game.core,
-                onButtonPress = { btn, isDown ->
-                    val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
-                    webViewInstance?.evaluateJavascript(js, null)
-                },
-                onAxisChange = { axis, value ->
-                    val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
-                    webViewInstance?.evaluateJavascript(js, null)
-                },
-                onMenuClick = {
-                    isPaused = true
-                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
-                },
-            )
+            val controlsContainerModifier = if (isPortraitLayout) {
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(controlsHeight)
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF13131C),
+                                Color(0xFF0A0A10),
+                            )
+                        )
+                    )
+            } else {
+                Modifier.fillMaxSize()
+            }
+
+            Box(
+                modifier = controlsContainerModifier,
+            ) {
+                RetroTouchOverlay(
+                    visible = true,
+                    systemId = game.systemId,
+                    core = game.core,
+                    isPortrait = isPortraitLayout,
+                    onButtonPress = { btn, isDown ->
+                        val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
+                        webViewInstance?.evaluateJavascript(js, null)
+                    },
+                    onAxisChange = { axis, value ->
+                        val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
+                        webViewInstance?.evaluateJavascript(js, null)
+                    },
+                    onMenuClick = {
+                        isPaused = true
+                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                    },
+                )
+            }
         }
 
         // In-game Pause HUD Modal
@@ -549,6 +628,12 @@ fun GamePlayerScreen(
                     GameAspectRatio.Widescreen -> GameAspectRatio.Square
                     GameAspectRatio.Square -> GameAspectRatio.Standard
                 }
+                val mode = when (aspectRatio) {
+                    GameAspectRatio.Widescreen -> "widescreen"
+                    GameAspectRatio.Square -> "square"
+                    GameAspectRatio.Standard -> "standard"
+                }
+                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setAspectRatio('$mode');", null)
             },
             onReset = {
                 webViewInstance?.evaluateJavascript("window.VantafynEmulator?.reset();", null)
@@ -623,7 +708,6 @@ fun GamePlayerScreen(
             val wv = webViewInstance
             webViewInstance = null
             wv?.evaluateJavascript("window.VantafynEmulator?.destroy();", null)
-            wv?.pauseTimers()
             wv?.stopLoading()
             wv?.postDelayed({
                 try {
@@ -650,15 +734,16 @@ private fun generateEmulatorHtml(
     initialSramBase64: String?,
 ): String {
     val key = core.ifBlank { systemId }.lowercase().trim()
+    val ext = romFileName.substringAfterLast('.', "").lowercase().trim()
     val systemCoreName = when {
-        key == "gba" || key.contains("advance") -> "gba"
-        key == "gb" || key == "gbc" || key.contains("color") -> "gb"
-        key == "snes" || key.contains("super nintendo") -> "snes"
-        key == "nes" || key.contains("famicom") -> "nes"
-        key == "segamd" || key.contains("genesis") || key.contains("sega") || key.contains("megadrive") -> "segaMD"
-        key == "n64" || key.contains("nintendo 64") -> "n64"
-        key == "nds" || key.contains("ds") -> "nds"
-        key == "psx" || key == "ps1" || key.contains("playstation") -> "psx"
+        key == "gba" || key.contains("advance") || ext == "gba" || ext == "agb" -> "gba"
+        key == "gb" || key == "gbc" || key.contains("color") || key.contains("gameboy") || key.contains("game boy") || ext == "gb" || ext == "gbc" -> "gb"
+        key == "snes" || key.contains("super nintendo") || key == "sfc" || ext == "sfc" || ext == "smc" -> "snes"
+        key == "nes" || key.contains("famicom") || ext == "nes" -> "nes"
+        key == "segamd" || key.contains("genesis") || key.contains("sega") || key.contains("megadrive") || ext == "gen" || ext == "smd" || ext == "md" -> "segaMD"
+        key == "n64" || key.contains("nintendo 64") || ext == "z64" || ext == "n64" || ext == "v64" -> "n64"
+        key == "nds" || key.contains("ds") || ext == "nds" -> "nds"
+        key == "psx" || key == "ps1" || key.contains("playstation") || ext == "chd" || ext == "pbp" || ext == "cue" -> "psx"
         else -> key
     }
 
@@ -678,6 +763,7 @@ private fun generateEmulatorHtml(
                 body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; }
                 #game-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
                 canvas { width: 100% !important; height: 100% !important; object-fit: contain; image-rendering: pixelated; }
+                canvas.widescreen-fill { object-fit: fill !important; }
 
                 /* Completely hide and disable EmulatorJS built-in menus, settings dialogs, popups and touch controls */
                 .ejs_virtualGamepad_parent,
@@ -730,8 +816,16 @@ private fun generateEmulatorHtml(
                     'virtual-gamepad': 'disabled',
                     'menu-bar-button': 'hidden',
                     'save-save-interval': '1',
-                    'save-state-location': 'browser'
+                    'save-state-location': 'browser',
+                    'fps-limit': '60'
                 };
+
+                // Keep WebView compositor and VSync active even when no touch input occurs
+                setInterval(function() {
+                    if (window.requestAnimationFrame) {
+                        window.requestAnimationFrame(function() {});
+                    }
+                }, 250);
 
                 window.VantafynInitialSram = ${if (initialSramBase64 != null) "\"$initialSramBase64\"" else "null"};
                 window._lastSramHash = window.VantafynInitialSram;
@@ -761,6 +855,15 @@ private fun generateEmulatorHtml(
                             try { window.EJS_emulator.elements.menuToggle.remove(); } catch(e) {}
                         }
                     }
+                    try {
+                        var cv = document.querySelector('canvas');
+                        if (cv && window._currentAspectRatioMode === 'widescreen') {
+                            if (!cv.classList.contains('widescreen-fill')) {
+                                cv.classList.add('widescreen-fill');
+                                cv.style.setProperty('object-fit', 'fill', 'important');
+                            }
+                        }
+                    } catch(e) {}
                 };
 
                 var cleanUpInterval = setInterval(cleanUpBuiltinControls, 400);
@@ -1002,6 +1105,22 @@ private fun generateEmulatorHtml(
                             console.warn("Vantafyn: setVideoFilter error", e);
                         }
                     },
+                    setAspectRatio: function(mode) {
+                        try {
+                            window._currentAspectRatioMode = mode;
+                            var cv = document.querySelector('canvas');
+                            if (!cv) return;
+                            if (mode === 'widescreen') {
+                                cv.classList.add('widescreen-fill');
+                                cv.style.setProperty('object-fit', 'fill', 'important');
+                            } else {
+                                cv.classList.remove('widescreen-fill');
+                                cv.style.setProperty('object-fit', 'contain', 'important');
+                            }
+                        } catch(e) {
+                            console.warn("Vantafyn: setAspectRatio error", e);
+                        }
+                    },
                     pause: function() {
                         if (window.EJS_emulator && window.EJS_emulator.pause) {
                             window.EJS_emulator.pause();
@@ -1090,10 +1209,6 @@ private fun generateEmulatorHtml(
                     loadState: function(base64) {
                         var emu = window.EJS_emulator;
                         var gm = emu && emu.gameManager;
-                        if (!gm || typeof gm.loadState !== 'function') {
-                            console.error("Vantafyn: GameManager not ready for loadState");
-                            return;
-                        }
                         try {
                             var binary_string = atob(base64);
                             var len = binary_string.length;
@@ -1101,7 +1216,18 @@ private fun generateEmulatorHtml(
                             for (var i = 0; i < len; i++) {
                                 bytes[i] = binary_string.charCodeAt(i);
                             }
-                            gm.loadState(bytes);
+                            if (gm && typeof gm.loadState === 'function') {
+                                gm.loadState(bytes);
+                                console.log("Vantafyn: Loaded state via gm.loadState (" + len + " bytes)");
+                            } else if (emu && typeof emu.loadState === 'function') {
+                                emu.loadState(bytes);
+                                console.log("Vantafyn: Loaded state via emu.loadState (" + len + " bytes)");
+                            } else if (gm && gm.functions && typeof gm.functions.loadState === 'function') {
+                                gm.functions.loadState(bytes);
+                                console.log("Vantafyn: Loaded state via gm.functions.loadState (" + len + " bytes)");
+                            } else {
+                                console.error("Vantafyn: No suitable loadState function found on emulator/gameManager");
+                            }
                         } catch(e) {
                             console.error("Vantafyn: Failed to load state", e);
                         }
@@ -1165,8 +1291,10 @@ private fun generateEmulatorHtml(
                         }
                     },
                     setButton: function(btn, isDown) {
+                        var btnLower = btn.toLowerCase();
+                        var isN64 = '$systemCoreName' === 'n64';
                         var btnMap = {
-                            'b': 0,
+                            'b': isN64 ? 1 : 0,
                             'y': 1,
                             'select': 2,
                             'start': 3,
@@ -1174,7 +1302,7 @@ private fun generateEmulatorHtml(
                             'down': 5,
                             'left': 6,
                             'right': 7,
-                            'a': 8,
+                            'a': isN64 ? 0 : 8,
                             'x': 9,
                             'l1': 10,
                             'l': 10,
@@ -1190,7 +1318,7 @@ private fun generateEmulatorHtml(
                             'thumbl': 14,
                             'thumbr': 15
                         };
-                        var idx = btnMap[btn.toLowerCase()];
+                        var idx = btnMap[btnLower];
                         if (idx !== undefined && window.EJS_emulator) {
                             var isSpecial = (idx >= 16 && idx <= 23);
                             var val = isDown ? (isSpecial ? 0x7fff : 1) : 0;

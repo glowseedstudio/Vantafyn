@@ -467,39 +467,50 @@ private fun GameCard(
                     )
                 }
 
-                // System Tag overlay on top-left of boxart
+                // System Tag in top right (matches media card watched/unwatched badge style)
+                val glassShape = RoundedCornerShape(6.dp)
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopStart)
+                        .align(Alignment.TopEnd)
                         .padding(6.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xDD0A0E1A))
-                        .border(0.5.dp, Color(0x4421D8FF), RoundedCornerShape(6.dp))
+                        .clip(glassShape)
+                        .border(
+                            width = 1.dp,
+                            brush = Brush.linearGradient(VantafynGradients.AccentColors),
+                            shape = glassShape,
+                        )
+                        .background(VantafynColors.Graphite.copy(alpha = 0.92f))
                         .padding(horizontal = 6.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = game.systemId.uppercase(),
-                        color = VantafynColors.Primary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 9.sp,
                     )
                 }
 
                 if (game.region != null) {
                     Box(
                         modifier = Modifier
-                            .align(Alignment.TopEnd)
+                            .align(Alignment.TopStart)
                             .padding(6.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xDD0A0E1A))
-                            .border(0.5.dp, Color(0x44E026FF), RoundedCornerShape(6.dp))
+                            .clip(glassShape)
+                            .border(
+                                width = 1.dp,
+                                brush = Brush.linearGradient(listOf(Color(0xFF21D8FF).copy(alpha = 0.6f), Color(0xFFE026FF).copy(alpha = 0.6f))),
+                                shape = glassShape,
+                            )
+                            .background(VantafynColors.Graphite.copy(alpha = 0.92f))
                             .padding(horizontal = 6.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = game.region.orEmpty(),
-                            color = VantafynColors.Secondary,
+                            color = Color.White.copy(alpha = 0.9f),
                             fontWeight = FontWeight.Bold,
-                            fontSize = 9.sp,
+                            fontSize = 8.5.sp,
                         )
                     }
                 }

@@ -604,7 +604,7 @@ fun GamesSettingsScreen(
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = "Play relaxing soundtrack while in the Game Hub (65% volume)",
+                            text = "Play relaxing soundtrack while in the Game Hub (40% volume)",
                             color = VantafynColors.Muted,
                             fontSize = 12.sp,
                         )

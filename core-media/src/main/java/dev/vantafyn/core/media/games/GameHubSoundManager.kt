@@ -13,6 +13,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 import java.io.FileOutputStream
 
+import dev.vantafyn.core.media.MusicPlaybackController
+
 /**
  * Ambient background audio manager for Vantafyn Game Hub.
  *
@@ -23,7 +25,7 @@ import java.io.FileOutputStream
 object GameHubSoundManager {
 
     private const val TAG = "GameHubSoundManager"
-    const val DEFAULT_VOLUME = 0.65f
+    const val DEFAULT_VOLUME = 0.40f
     private const val ASSET_NAME = "gamehub.mp3"
     private const val PREFS_NAME = "vantafyn_retro_settings"
     private const val KEY_BGM_ENABLED = "gamehub_bgm_enabled"
@@ -31,12 +33,22 @@ object GameHubSoundManager {
 
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var fadeJob: Job? = null
+    private var musicObserverJob: Job? = null
 
     private var mediaPlayer: MediaPlayer? = null
     @Volatile
     private var currentVolume = 0.0f
     @Volatile
     private var isPlayingOrFadingIn = false
+
+    /**
+     * Checks if standard music playback is currently active in Vantafyn.
+     */
+    fun isMusicPlaying(context: Context): Boolean {
+        return runCatching {
+            MusicPlaybackController.get(context).state.value.isPlaying
+        }.getOrDefault(false)
+    }
 
     fun isMusicEnabled(context: Context): Boolean {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -55,7 +67,8 @@ object GameHubSoundManager {
 
     fun getTargetVolume(context: Context): Float {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return prefs.getFloat(KEY_BGM_VOLUME, DEFAULT_VOLUME).coerceIn(0.0f, 1.0f)
+        val saved = prefs.getFloat(KEY_BGM_VOLUME, DEFAULT_VOLUME)
+        return if (saved >= 0.64f && saved <= 0.66f) DEFAULT_VOLUME else saved.coerceIn(0.0f, 1.0f)
     }
 
     fun setTargetVolume(context: Context, volume: Float) {
@@ -82,6 +95,12 @@ object GameHubSoundManager {
             return
         }
 
+        if (isMusicPlaying(appContext)) {
+            Log.d(TAG, "Music playback is active; suppressing Game Hub ambient music.")
+            isPlayingOrFadingIn = false
+            return
+        }
+
         val target = (targetVolume ?: getTargetVolume(appContext)).coerceIn(0.0f, 1.0f)
         isPlayingOrFadingIn = true
 
@@ -101,6 +120,18 @@ object GameHubSoundManager {
             Log.w(TAG, "Error starting MediaPlayer: ${e.message}")
             resetPlayer()
             return
+        }
+
+        musicObserverJob?.cancel()
+        musicObserverJob = scope.launch {
+            try {
+                MusicPlaybackController.get(appContext).state.collect { state ->
+                    if (state.isPlaying && isPlayingOrFadingIn) {
+                        Log.d(TAG, "Music playback started; fading out Game Hub audio.")
+                        fadeOut(durationMs = 400L)
+                    }
+                }
+            } catch (_: Exception) { }
         }
 
         fadeJob?.cancel()
@@ -132,6 +163,8 @@ object GameHubSoundManager {
     @Synchronized
     fun fadeOut(durationMs: Long = 600L, onComplete: (() -> Unit)? = null) {
         isPlayingOrFadingIn = false
+        musicObserverJob?.cancel()
+        musicObserverJob = null
         val player = mediaPlayer ?: return
 
         fadeJob?.cancel()
@@ -169,6 +202,8 @@ object GameHubSoundManager {
     @Synchronized
     fun stop(instant: Boolean = true) {
         isPlayingOrFadingIn = false
+        musicObserverJob?.cancel()
+        musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
 
@@ -198,6 +233,8 @@ object GameHubSoundManager {
      */
     @Synchronized
     fun pause() {
+        musicObserverJob?.cancel()
+        musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
         try {
@@ -210,9 +247,13 @@ object GameHubSoundManager {
     }
 
     /**
-     * Resumes playback with a smooth fade in if it was active.
+     * Resumes playback with a smooth fade in if it was active and music is not playing.
      */
     fun resume(context: Context) {
+        if (isMusicPlaying(context)) {
+            Log.d(TAG, "Music playback is active; suppressing Game Hub ambient resume.")
+            return
+        }
         if (isPlayingOrFadingIn) {
             fadeIn(context, durationMs = 500L)
         }
@@ -224,6 +265,8 @@ object GameHubSoundManager {
     @Synchronized
     fun release() {
         isPlayingOrFadingIn = false
+        musicObserverJob?.cancel()
+        musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
         try {

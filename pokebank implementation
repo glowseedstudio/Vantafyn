@@ -1,0 +1,1580 @@
+You are working on the existing Vantafyn ecosystem.
+
+This task is to add a new optional Pokémon management integration to the EXISTING Vantafyn Companion Jellyfin plugin and the existing Vantafyn Games Hub.
+
+DO NOT rewrite or replace the existing Games architecture.
+
+DO NOT refactor unrelated systems.
+
+DO NOT remove, regress, rename, or redesign existing functionality unless absolutely necessary.
+
+DO NOT attempt to implement everything in one pass.
+
+You must work PHASE BY PHASE.
+
+At the end of every phase:
+
+1. Stop implementation.
+2. Build/compile/test what you changed.
+3. Report exactly which files were added or modified.
+4. Explain the new architecture introduced in that phase.
+5. List any assumptions you had to make.
+6. List any unresolved issues.
+7. Confirm that existing Games functionality and existing Companion functionality remain intact.
+8. Wait for explicit approval before starting the next phase.
+
+Do not silently continue into the next phase.
+
+---
+
+PROJECT CONTEXT
+
+Vantafyn is an Android Jellyfin client with an existing Games Hub.
+
+The Games system already allows games stored on the Jellyfin server to be surfaced and launched through Vantafyn using libretro/emulation infrastructure.
+
+Pokémon games are already playable through this system.
+
+The Vantafyn Companion plugin already provides server-side functionality for Vantafyn, including functionality related to the Games library.
+
+We now want to add an OPTIONAL Pokémon integration that behaves conceptually like a private self-hosted Pokémon HOME / Pokémon Bank.
+
+The administrator should be able to install and configure PKVault separately.
+
+Vantafyn Companion will integrate with PKVault.
+
+The final architecture should conceptually be:
+
+Vantafyn Android / TV
+|
+| existing Jellyfin authentication/token
+|
+v
+Jellyfin Server
+|
+v
+Vantafyn Companion Plugin
+|
+|-- Games Library
+|-- Pokémon integration
+|-- Jellyfin user identity
+|-- permissions
+|-- per-user ownership
+|-- save mapping
+|-- save locks
+|-- transaction safety
+|-- backups
+|-- transfer history
+|-- Pokédex aggregation
+|
+v
+PKVault
+|
+| Pokémon save parsing/manipulation
+| cross-generation conversion
+| legality checks
+|
+v
+Libretro / emulator save files
+
+The central architectural rule is:
+
+JELLYFIN HANDLES IDENTITY.
+
+VANTAFYN COMPANION HANDLES SECURITY, OWNERSHIP AND ORCHESTRATION.
+
+PKVAULT HANDLES POKÉMON-SPECIFIC SAVE MANIPULATION.
+
+LIBRETRO HANDLES THE ACTUAL GAMES.
+
+VANTAFYN PROVIDES THE USER INTERFACE.
+
+---
+
+IMPORTANT LICENSING BOUNDARY
+
+PKVault is a separate GPLv3 application and relies on PKHeX-related Pokémon manipulation functionality.
+
+DO NOT copy PKVault source code into Vantafyn Companion.
+
+DO NOT copy PKHeX source code into Vantafyn Companion.
+
+DO NOT directly embed GPL Pokémon manipulation code into the existing Companion plugin as part of this task.
+
+Treat PKVault as an independently installed external service.
+
+Communication between Vantafyn Companion and PKVault should occur through a clean service/API boundary.
+
+Architect this as:
+
+Vantafyn Companion
+|
+| HTTP/private service integration
+|
+v
+PKVault
+
+The goal is:
+
+"Vantafyn supports PKVault."
+
+NOT:
+
+"Vantafyn contains PKVault."
+
+Any new integration code in Companion should therefore be adapter/orchestration code rather than copied Pokémon implementation code.
+
+---
+
+SECURITY MODEL
+
+PKVault must NOT be considered the authentication authority.
+
+Do not expose PKVault directly to Vantafyn clients.
+
+Do not require Vantafyn users to have PKVault accounts.
+
+Do not expose PKVault publicly through the normal Vantafyn/Jellyfin domain as part of this architecture.
+
+PKVault should ideally remain reachable only by the Jellyfin/Companion host through localhost, LAN, Docker networking, or another private server-side route.
+
+All client-facing Pokémon API calls must go through Vantafyn Companion.
+
+Vantafyn should continue using the existing Jellyfin authentication/token it already uses.
+
+Every Companion Pokémon endpoint must identify the current Jellyfin user from the authenticated Jellyfin request.
+
+Never trust a client-supplied Jellyfin user ID for authorization.
+
+For example, do NOT accept:
+
+POST /pokemon/transfer
+{
+"userId": "some-other-user"
+}
+
+and trust it.
+
+The authenticated user must come from the Jellyfin server-side request context.
+
+Admin-only actions must use the existing Jellyfin administrator/authorization mechanisms already appropriate to this plugin.
+
+---
+
+MULTI-USER MODEL
+
+The purpose of placing this integration in Companion is to provide proper Jellyfin-based multi-user support even if PKVault itself does not natively provide the user model we need.
+
+Every Pokémon-related Vantafyn resource must be associated with the authenticated Jellyfin user's immutable ID.
+
+Conceptually:
+
+Jellyfin User A
+|
+|-- Pokémon game save mappings
+|-- Vault
+|-- Boxes
+|-- Pokémon records
+|-- transfer history
+|-- Pokédex progress
+|-- Pokémon preferences
+
+Jellyfin User B
+|
+|-- separate save mappings
+|-- separate Vault
+|-- separate boxes
+|-- separate Pokémon records
+|-- separate history
+
+Users must never see, withdraw, alter, transfer, or enumerate another user's private Pokémon data unless a future explicitly enabled sharing/trading mechanism allows a very specific operation.
+
+Do not use names/display names as ownership identifiers.
+
+Use Jellyfin's stable user ID.
+
+---
+
+EXISTING GAMES SYSTEM
+
+Inspect the current Games implementation before making changes.
+
+Reuse existing models, IDs, services, repositories, configuration mechanisms, controllers and abstractions wherever sensible.
+
+Do not duplicate a second Games database or second game identity system.
+
+A Pokémon title should remain an existing Vantafyn Game with OPTIONAL additional Pokémon metadata.
+
+Conceptually an existing game may gain:
+
+- isPokemonGame
+- pokemonGameId
+- pokemonGeneration
+- pokemonSaveType
+- savePath or save mapping reference
+- pokemonVaultSupported
+- pokemonCapabilities
+
+Do not hardcode this blindly if the existing architecture already has a better metadata-extension mechanism.
+
+Follow the project's current patterns.
+
+---
+
+FEATURE END STATE
+
+The eventual user experience should make all Pokémon games on the server feel like one connected Pokémon ecosystem.
+
+Example desired flow:
+
+1. User launches Pokémon Emerald through Vantafyn.
+2. User catches a Pokémon.
+3. User saves and exits.
+4. Vantafyn Games Hub exposes Pokémon Vault.
+5. The user opens Pokémon Vault.
+6. Their Emerald Pokémon are visible.
+7. They deposit a Pokémon into their personal Vantafyn Vault.
+8. They later select Pokémon Platinum.
+9. They transfer or withdraw that Pokémon into Platinum if conversion is supported.
+10. Companion records the history of that Pokémon travelling between games.
+
+The final feature should support concepts such as:
+
+- My Pokémon
+- My Games
+- Vault
+- Boxes
+- Pokédex
+- Pokémon details
+- source game
+- original trainer
+- level
+- species
+- form
+- shiny status
+- legality/conversion warnings
+- deposit
+- withdraw
+- cross-game transfer
+- transfer history
+- backup/restore
+- future server trading
+- future achievements
+
+However these must be implemented incrementally.
+
+---
+
+USER-FACING GAMES HUB CONCEPT
+
+Eventually the Games Hub may expose:
+
+Games Hub
+|
+|-- normal games
+|
+|-- Pokémon Vault
+|
+|-- My Pokémon
+|-- Games
+|-- Vault
+|-- Pokédex
+|-- History
+|-- Trades     [future phase]
+
+Example Pokémon game card state:
+
+Pokémon Emerald
+Trainer: Shaun
+Generation III
+Save detected
+143 Pokémon
+Vault supported
+
+[Play]
+[Manage Pokémon]
+
+Example Pokémon detail:
+
+Blaziken
+Level 63
+Origin: Pokémon Emerald
+OT: Shaun
+Nature: Adamant
+Ability: Blaze
+Shiny: No
+Legality: Valid
+
+Possible destination:
+
+- Vantafyn Vault
+- Pokémon Platinum
+- Pokémon HeartGold
+- Pokémon Black
+
+Do NOT build all of this immediately.
+
+This defines the desired direction so that early architecture does not prevent it later.
+
+---
+
+ADMIN CONFIGURATION
+
+Eventually Companion should support an admin configuration area approximately equivalent to:
+
+Pokémon Integration
+
+Enable Pokémon Vault:
+ON/OFF
+
+Provider:
+PKVault
+
+PKVault Base URL:
+http://pkvault:PORT
+
+Connection status:
+Connected / Failed
+
+Save integration:
+Configured path/mapping
+
+Allow Pokémon transfers:
+ON/OFF
+
+Allow cross-generation transfer:
+ON/OFF
+
+Allow trading between users:
+ON/OFF
+
+Allow Pokémon editing:
+OFF by default
+
+Automatic backups:
+ON by default
+
+The exact UI should follow existing Companion/Jellyfin plugin configuration patterns.
+
+If Pokémon integration is disabled or not configured, existing Games behaviour must remain unchanged.
+
+The client should simply receive a capability indicating that Pokémon Vault is unavailable.
+
+---
+
+CLIENT CAPABILITY MODEL
+
+Avoid having the Android client infer server configuration.
+
+The Companion plugin should expose explicit capabilities.
+
+Conceptually:
+
+{
+"pokemonIntegration": {
+"enabled": true,
+"provider": "pkvault",
+"readAvailable": true,
+"vaultAvailable": true,
+"transfersAvailable": false,
+"crossGenerationTransfersAvailable": false,
+"tradingAvailable": false
+}
+}
+
+Use the project's existing capabilities/version mechanism if one already exists.
+
+Do not create a redundant mechanism if Companion already has one.
+
+---
+
+SAVE FILE SAFETY
+
+This is one of the most important requirements.
+
+Never modify a Pokémon save while the associated game is actively using it.
+
+The final system must support game/save locking.
+
+At minimum, Companion should be architected so a Pokémon save can have states like:
+
+AVAILABLE
+ACTIVE_GAME_SESSION
+LOCKED_FOR_OPERATION
+ERROR
+UNKNOWN
+
+When a game is running:
+
+READ operations may eventually be allowed if safe.
+
+WRITE operations must be blocked.
+
+The client should receive a clear reason such as:
+
+"Finish and exit Pokémon Emerald before modifying this save."
+
+Do not fake game-session detection if current infrastructure cannot reliably tell us this.
+
+Instead introduce a clean abstraction/interface that can later be wired to the actual Games session tracking.
+
+Save modification should eventually follow a transaction model:
+
+1. Authenticate user.
+2. Validate ownership.
+3. Verify feature permission.
+4. Verify game is not active.
+5. Acquire save lock.
+6. Verify source save.
+7. Create backup.
+8. Perform Pokémon operation through PKVault.
+9. Validate operation result.
+10. Write safely.
+11. Prefer temporary write + atomic replacement where technically appropriate.
+12. Verify result.
+13. Record transaction/history.
+14. Release lock.
+
+If anything fails after modification begins:
+
+Attempt rollback/restore from backup.
+
+Do not leave partially modified saves.
+
+Do not implement unsafe direct writes merely to make a demo work.
+
+---
+
+BACKUPS
+
+Backups are mandatory before destructive save mutations.
+
+The Vantafyn Companion layer should maintain its own knowledge of operations/backups even if PKVault also creates backups.
+
+Eventually backup metadata should include:
+
+- backup ID
+- Jellyfin user ID
+- game ID
+- original save path reference
+- timestamp
+- reason
+- transfer/operation ID
+- status
+- optional checksum
+- restore status
+
+Do not expose raw filesystem paths to normal users.
+
+Admin restoration tools can come later.
+
+---
+
+TRANSFER HISTORY
+
+Companion should eventually own Pokémon history rather than relying entirely on PKVault for this.
+
+Conceptual model:
+
+PokemonVaultEntry
+
+- Id
+- JellyfinUserId
+- PokemonIdentity
+- Species
+- Form
+- Nickname
+- Level
+- Shiny
+- OriginalTrainer
+- OriginGame
+- CurrentLocation
+- CurrentGeneration
+- CreatedAt
+- UpdatedAt
+
+PokemonTransfer
+
+- Id
+- JellyfinUserId
+- PokemonVaultEntryId
+- SourceGameId
+- DestinationGameId
+- SourceLocation
+- DestinationLocation
+- Timestamp
+- Provider
+- ConversionWarnings
+- LegalityStatus
+- BackupId
+- Result
+
+Do not assume these exact columns if another schema is cleaner.
+
+The requirement is ownership + traceability + future journey/history support.
+
+Eventually this enables a view such as:
+
+CHARIZARD
+
+Caught:
+Pokémon FireRed
+
+Deposited:
+Vantafyn Vault
+
+Transferred:
+Pokémon HeartGold
+
+Transferred:
+Pokémon Black 2
+
+---
+
+POKÉDEX
+
+Later, Companion may aggregate Pokédex information from all supported Pokémon saves belonging to one Jellyfin user.
+
+Desired future outputs:
+
+- seen species
+- caught species
+- currently owned species
+- shiny species
+- per-generation progress
+- Living Dex-like status
+- game-by-game contribution
+
+Do not build Pokédex aggregation in the first phases unless explicitly instructed.
+
+Ensure early data structures do not make it impossible later.
+
+---
+
+TRADING
+
+Trading between Jellyfin users is a FUTURE phase.
+
+It must NOT be implemented early.
+
+The architecture should nevertheless allow it later.
+
+Potential future model:
+
+User A offers Pokémon
+|
+v
+Companion Trading Service
+|
+v
+User B accepts
+|
+v
+Server performs atomic exchange
+|
+|-- backup A
+|-- backup B
+|-- validate both
+|-- transfer both
+|-- process trade evolution where supported
+|-- commit both or rollback both
+
+Possible future UI:
+
+Trade with friend
+Server GTS
+Wonder Trade
+Trade history
+
+Do not implement this until explicitly authorised.
+
+---
+
+ACHIEVEMENTS
+
+Future Vantafyn achievements may include:
+
+- First Pokémon transfer
+- First cross-generation transfer
+- First shiny
+- 100 Pokémon stored
+- Complete Kanto Pokédex
+- Complete Johto Pokédex
+- Own all Eeveelutions
+- Pokémon travelled through 3 games
+- Pokémon travelled through 5 games
+
+The Pokémon module should eventually emit clean internal events that the existing achievements/social infrastructure could subscribe to.
+
+Do not wire achievements during early phases unless explicitly instructed.
+
+---
+
+EDITING / CHEAT FEATURES
+
+Do not make Pokémon editing a core feature.
+
+Normal Vantafyn functionality should focus on:
+
+collect
+store
+transfer
+withdraw
+track
+trade
+
+NOT:
+
+generate illegal Pokémon
+max stats
+give items
+force shiny
+arbitrary save cheating
+
+If PKVault supports editing, that may later become a separately gated advanced/admin option.
+
+Default should be OFF.
+
+Do not expose Pokémon editing in the first implementation phases.
+
+---
+
+ERROR MODEL
+
+Do not return vague generic failures when a meaningful reason is known.
+
+Create a clean structured error model where appropriate.
+
+Examples:
+
+POKEMON_INTEGRATION_DISABLED
+
+PKVAULT_UNAVAILABLE
+
+PKVAULT_NOT_CONFIGURED
+
+UNSUPPORTED_POKEMON_GAME
+
+SAVE_NOT_FOUND
+
+SAVE_BUSY
+
+GAME_CURRENTLY_RUNNING
+
+NOT_OWNER
+
+TRANSFER_NOT_ALLOWED
+
+CROSS_GENERATION_TRANSFER_DISABLED
+
+DESTINATION_INCOMPATIBLE
+
+VALIDATION_FAILED
+
+BACKUP_FAILED
+
+PKVAULT_OPERATION_FAILED
+
+ROLLBACK_FAILED
+
+The Android client should eventually be able to turn these into useful user-facing messages.
+
+---
+
+LOGGING
+
+Use existing Companion logging patterns.
+
+Log important server-side events such as:
+
+- PKVault connection errors
+- invalid configuration
+- save detection
+- failed ownership checks
+- failed locks
+- failed backup
+- failed transfer
+- rollback attempts
+
+Do not log:
+
+- Jellyfin access tokens
+- secrets
+- raw authentication headers
+- unnecessary personally identifying information
+- complete raw Pokémon/save payloads
+
+Keep logs suitable for debugging.
+
+---
+
+PHASED IMPLEMENTATION
+
+You MUST follow these phases.
+
+Do NOT advance without explicit instruction.
+
+==================================================
+PHASE 0 — REPOSITORY / ARCHITECTURE AUDIT
+
+DO NOT modify production code yet unless an extremely small compatibility fix is absolutely required.
+
+Inspect the existing repository and report:
+
+1. Existing Companion plugin structure.
+2. Existing Games architecture.
+3. Existing Games controllers/routes.
+4. Existing game models.
+5. Existing services/repositories.
+6. Existing database/persistence approach.
+7. Existing configuration approach.
+8. Existing Jellyfin user/authentication access.
+9. Existing admin authorization patterns.
+10. Existing client capabilities endpoint/model.
+11. Existing game-session or active-play tracking.
+12. Existing Android Games Hub architecture.
+13. Existing networking/API client patterns.
+14. Best location for the new Pokémon module.
+15. Risks to existing systems.
+
+Then propose exact files/classes/interfaces for Phase 1.
+
+STOP.
+
+Do not implement Phase 1 yet.
+
+==================================================
+PHASE 1 — COMPANION FOUNDATION / CONFIGURATION
+
+Goal:
+
+Create the Pokémon integration foundation inside the existing Companion plugin WITHOUT modifying saves and WITHOUT requiring the Android UI to be changed significantly yet.
+
+Implement:
+
+1. Pokémon integration configuration model.
+2. Enable/disable switch.
+3. PKVault provider type.
+4. PKVault base URL/configuration.
+5. Safe validation of the configured URL.
+6. PKVault service abstraction/interface.
+7. PKVault HTTP client/adapter skeleton.
+8. Health/connection test.
+9. Timeouts and graceful failure.
+10. Admin-only configuration API where required.
+11. Capability exposure to clients.
+12. Feature remains completely optional.
+13. No impact when disabled.
+14. No Pokémon save writes.
+15. No transfers.
+
+Prefer architecture such as:
+
+IPokemonProvider
+
+PokemonProviderCapabilities
+
+PkVaultPokemonProvider
+
+PokemonIntegrationOptions
+
+PokemonIntegrationService
+
+Do not force these names if repository conventions suggest better ones.
+
+Connection failures must not affect Jellyfin startup or normal Vantafyn functionality.
+
+At the end:
+
+- compile
+- run tests
+- add focused tests where appropriate
+- report
+- STOP
+
+==================================================
+PHASE 2 — POKÉMON GAME IDENTIFICATION + SAVE MAPPING
+
+Goal:
+
+Extend the existing Games system so Pokémon titles can carry optional Pokémon metadata.
+
+Requirements:
+
+1. Do not create a second game library.
+2. Reuse existing game IDs.
+3. Support detection/configuration of Pokémon games.
+4. Support metadata such as generation/game identity.
+5. Support save mapping.
+6. Do not expose arbitrary filesystem browsing to normal users.
+7. Admin should eventually be able to correct mappings manually.
+8. Support save-present/save-missing state.
+9. Return Pokémon capability information with existing game data or an appropriate dedicated endpoint.
+10. Preserve every existing non-Pokémon game.
+
+Do not rely solely on filename guessing if a stronger mapping mechanism exists.
+
+A practical hybrid is acceptable:
+
+- known title/database detection
+- ROM metadata if available
+- filename matching as fallback
+- admin override
+
+Support an internal mapping such as:
+
+Game ID
+Pokemon Game ID
+Generation
+Platform
+Save location reference
+Detection confidence
+Admin override
+
+DO NOT modify saves.
+
+At the end:
+
+- test with Pokémon and non-Pokémon games
+- ensure Games library still works
+- report
+- STOP
+
+==================================================
+PHASE 3 — JELLYFIN USER OWNERSHIP + PERSONAL VAULT FOUNDATION
+
+Goal:
+
+Introduce the per-user security and ownership model.
+
+Requirements:
+
+1. Every Pokémon request resolves the authenticated Jellyfin user server-side.
+2. Never trust client-supplied user IDs for authorization.
+3. Create per-user Vault ownership.
+4. Create database/persistence models as needed.
+5. Users cannot enumerate other users' Pokémon data.
+6. Admin privileges do not automatically mean the normal user-facing APIs should leak everyone's Pokémon.
+7. Establish clear user-vault identity.
+8. Add permissions/capability checks.
+9. Still no destructive save modification.
+
+Potential models:
+
+PokemonUserProfile
+PokemonVault
+PokemonVaultBox
+PokemonVaultEntry
+
+Use existing database/persistence patterns.
+
+Add API routes for basic current-user Vault information, such as:
+
+GET current user's Pokémon integration status
+GET current user's Vault summary
+GET current user's supported games
+
+Exact routing should match the existing plugin style.
+
+At the end:
+
+- test two Jellyfin users
+- prove isolation
+- report
+- STOP
+
+==================================================
+PHASE 4 — READ-ONLY SAVE + POKÉMON DATA
+
+Goal:
+
+Allow Companion to read Pokémon data through PKVault without modifying saves.
+
+Requirements:
+
+1. User can inspect only their mapped saves.
+2. Read Pokémon boxes/party/storage where provider supports it.
+3. Normalize PKVault results into Vantafyn-owned DTOs.
+4. Do not expose provider-internal raw models directly to the Android app.
+5. Do not expose raw filesystem paths.
+6. Include useful fields such as:
+   - species
+   - form
+   - nickname
+   - level
+   - gender if available
+   - shiny
+   - original trainer if available
+   - origin game
+   - current game
+   - slot/box reference using opaque IDs
+   - legality state if available
+7. Provider unavailable should fail gracefully.
+8. No writes.
+
+Introduce clear DTOs such as:
+
+PokemonSummaryDto
+PokemonDetailsDto
+PokemonGameSaveDto
+PokemonBoxDto
+
+At the end:
+
+- verify read-only Pokémon data from a real test save if available
+- ensure malformed/unreadable saves do not crash Jellyfin
+- report
+- STOP
+
+==================================================
+PHASE 5 — ACTIVE GAME DETECTION + SAVE LOCKING
+
+Goal:
+
+Build the safety layer before implementing any Pokémon write.
+
+Requirements:
+
+1. Integrate with the existing Games session/runtime tracking if available.
+2. Determine whether a save is associated with an active game.
+3. Introduce per-save locking.
+4. Block mutations while an associated game is active.
+5. Prevent two simultaneous mutations against the same save.
+6. Provide structured status/reason to clients.
+7. Support safe timeout/recovery from abandoned locks.
+8. Do not assume a process lock alone is sufficient if the plugin can restart.
+9. Prefer an abstraction that could later work across additional emulator backends.
+
+Conceptual interface:
+
+ISaveOperationCoordinator
+
+CanRead(...)
+CanWrite(...)
+AcquireLock(...)
+ReleaseLock(...)
+GetSaveState(...)
+
+Possible states:
+
+Available
+GameActive
+OperationLocked
+Missing
+Unknown
+Error
+
+Still do not implement Pokémon transfers yet.
+
+At the end:
+
+- simulate active game
+- verify write operations would be denied
+- simulate concurrent operations
+- report
+- STOP
+
+==================================================
+PHASE 6 — BACKUPS + TRANSACTION INFRASTRUCTURE
+
+Goal:
+
+Create safe mutation infrastructure BEFORE doing real Pokémon transfers.
+
+Implement:
+
+1. Backup service.
+2. Backup metadata persistence.
+3. checksums where useful.
+4. transactional operation model.
+5. temporary working copy where appropriate.
+6. restore/rollback support.
+7. transaction IDs.
+8. operation audit history.
+9. structured operation state.
+10. cleanup policy that does not blindly delete the only recovery copy.
+
+Conceptual workflow:
+
+Authenticate
+-> Validate ownership
+-> Check permissions
+-> Check active game
+-> Acquire lock
+-> Backup
+-> Begin operation
+-> Validate result
+-> Commit
+-> Record history
+-> Release lock
+
+On failure:
+
+Rollback
+-> verify rollback
+-> record failure
+-> release lock
+
+At this phase use a non-destructive/mock operation if required to test the infrastructure.
+
+Do not perform actual Pokémon movement until the safety framework is demonstrated.
+
+At the end:
+
+- deliberately cause an operation failure
+- demonstrate rollback
+- report
+- STOP
+
+==================================================
+PHASE 7 — VAULT DEPOSIT + WITHDRAW
+
+Goal:
+
+Implement the first real Pokémon modifications.
+
+Start only with:
+
+GAME SAVE -> PERSONAL VAULT
+
+and
+
+PERSONAL VAULT -> SAME COMPATIBLE GAME
+
+Do NOT implement arbitrary cross-generation transfer yet.
+
+Requirements:
+
+1. Authenticated user only.
+2. Ownership verification.
+3. Game must be inactive.
+4. Lock save.
+5. Backup.
+6. Provider performs operation.
+7. Validate provider result.
+8. Store/update Vantafyn Vault metadata.
+9. Record operation history.
+10. Atomic commit where possible.
+11. Rollback on failure.
+12. Return clear structured result.
+
+Never allow a Pokémon to disappear because one half of an operation succeeded while the other failed.
+
+At the end:
+
+- test deposit
+- test withdraw
+- test rollback
+- test duplicate request handling
+- report
+- STOP
+
+==================================================
+PHASE 8 — CROSS-GAME / CROSS-GENERATION TRANSFER
+
+Goal:
+
+Support moving Pokémon between supported user-owned games.
+
+Flow:
+
+Source game
+-> personal Vault/intermediate representation
+-> destination game
+
+Requirements:
+
+1. Source and destination both belong to authenticated user.
+2. Both saves must be inactive.
+3. Both must be locked.
+4. Back up BOTH saves.
+5. Validate destination compatibility.
+6. Surface conversion warnings.
+7. Surface legality result.
+8. Commit only when operation is safe.
+9. If destination fails, source must not lose Pokémon.
+10. Record full transfer history.
+
+Introduce provider capability checks such as:
+
+CanTransfer(sourceGame, destinationGame)
+
+Do not claim compatibility solely from generation numbers.
+
+Use provider capabilities.
+
+At the end:
+
+- test same-generation transfer
+- test supported cross-generation transfer
+- test incompatible transfer
+- test destination failure + rollback
+- report
+- STOP
+
+==================================================
+PHASE 9 — ANDROID GAMES HUB UI
+
+Goal:
+
+Expose the existing server functionality in Vantafyn's Games Hub.
+
+DO NOT redesign the entire Games Hub.
+
+Reuse existing Vantafyn design language:
+
+- premium
+- restrained
+- glass surfaces where appropriate
+- existing gradients
+- existing animations
+- existing typography
+- adaptive layouts
+- reduced-motion behaviour
+- foldable/flip support where relevant
+
+Add Pokémon Vault only if server capabilities say it is available.
+
+Potential Games Hub entry:
+
+Pokémon Vault
+
+Sections:
+
+My Pokémon
+Games
+Vault
+History
+
+Pokédex can be introduced in the next phase.
+
+Requirements:
+
+1. Existing game UI remains unchanged when feature disabled.
+2. No hardcoded assumption that every Pokémon game has a save.
+3. Clear states:
+   - available
+   - no save
+   - provider offline
+   - game currently running
+   - operation in progress
+   - unsupported
+4. Confirmation before mutation.
+5. Good rollback/error messaging.
+6. Never expose server filesystem paths.
+7. Never expose another user's data.
+
+Example game action:
+
+Pokémon Emerald
+
+[Play]
+[Manage Pokémon]
+
+Manage Pokémon may show:
+
+Party
+Boxes
+Vault
+
+Deposit action should clearly identify the Pokémon and source.
+
+Do not add trading yet.
+
+At the end:
+
+- verify Games Hub normal games
+- verify Pokémon feature enabled
+- verify feature disabled
+- verify provider offline
+- verify active-game write block
+- report
+- STOP
+
+==================================================
+PHASE 10 — POKÉDEX + JOURNEY / HISTORY
+
+Goal:
+
+Make the Pokémon ecosystem feel persistent across games.
+
+Implement:
+
+1. Per-user aggregated Pokédex.
+2. Seen/caught/owned where reliable.
+3. per-generation progress.
+4. shiny tracking where reliable.
+5. Pokémon transfer journey/history.
+6. Origin game.
+7. Previous games.
+8. transfer timestamps.
+9. conversion warnings/history.
+10. optional game contribution information.
+
+Example:
+
+CHARIZARD
+
+Origin:
+Pokémon FireRed
+
+Journey:
+FireRed
+-> HeartGold
+-> Black 2
+
+The history belongs to Vantafyn Companion.
+
+PKVault is not the source of truth for Vantafyn user identity or Vantafyn journey metadata.
+
+At the end:
+
+- verify user isolation
+- verify Pokédex aggregation
+- verify history survives restart
+- report
+- STOP
+
+==================================================
+PHASE 11 — ADMIN MANAGEMENT
+
+Goal:
+
+Provide polished admin controls.
+
+Admin should be able to:
+
+- enable/disable Pokémon integration
+- configure PKVault
+- test PKVault connection
+- see provider version/capabilities where possible
+- map/correct Pokémon games
+- map/correct saves
+- configure transfer permissions
+- configure cross-generation transfers
+- enable/disable future trading
+- enable/disable advanced editing
+- inspect failures
+- inspect backup health
+- restore backup
+- see integration diagnostics
+
+Normal users must NOT see filesystem paths or server secrets.
+
+At the end:
+
+- verify administrator restrictions
+- verify normal user cannot invoke admin endpoints
+- report
+- STOP
+
+==================================================
+PHASE 12 — OPTIONAL PLAYER-TO-PLAYER TRADING
+
+DO NOT IMPLEMENT unless explicitly instructed.
+
+Future architecture:
+
+Offer
+-> recipient
+-> acceptance
+-> dual-user authorization
+-> lock source assets
+-> backup affected saves/data
+-> provider operation
+-> trade evolution where supported
+-> atomic commit
+-> history/event
+-> rollback both sides on any failure
+
+Potential future modes:
+
+Direct trade
+Server GTS
+Wonder Trade
+
+This phase must be independently reviewable because it significantly increases concurrency and ownership complexity.
+
+==================================================
+PHASE 13 — ACHIEVEMENTS / SOCIAL INTEGRATION
+
+DO NOT IMPLEMENT unless explicitly instructed.
+
+Potential future events:
+
+PokemonDeposited
+PokemonWithdrawn
+PokemonTransferred
+CrossGenerationTransferCompleted
+ShinyAdded
+PokedexMilestoneReached
+TradeCompleted
+
+Use the existing Companion achievements/social system rather than creating another one.
+
+---
+
+API DESIGN GUIDELINES
+
+Follow existing Companion API conventions.
+
+Possible conceptual endpoints:
+
+GET /Vantafyn/Pokemon/Status
+
+GET /Vantafyn/Pokemon/Games
+
+GET /Vantafyn/Pokemon/Games/{gameId}
+
+GET /Vantafyn/Pokemon/Games/{gameId}/Boxes
+
+GET /Vantafyn/Pokemon/Vault
+
+GET /Vantafyn/Pokemon/Vault/Boxes
+
+GET /Vantafyn/Pokemon/{pokemonId}
+
+POST /Vantafyn/Pokemon/Deposit
+
+POST /Vantafyn/Pokemon/Withdraw
+
+POST /Vantafyn/Pokemon/Transfer
+
+GET /Vantafyn/Pokemon/History
+
+GET /Vantafyn/Pokemon/Pokedex
+
+These are examples only.
+
+Do not force these URLs if the existing plugin has established conventions.
+
+Use opaque resource IDs rather than exposing file paths or provider-specific coordinates where possible.
+
+---
+
+PROVIDER ABSTRACTION
+
+Do not make core Vantafyn code depend everywhere on PKVault-specific DTOs.
+
+Introduce an abstraction so another Pokémon backend could theoretically exist later.
+
+Conceptually:
+
+IPokemonProvider
+
+GetCapabilities()
+
+HealthCheck()
+
+ReadGameSave(...)
+
+GetPokemon(...)
+
+Deposit(...)
+
+Withdraw(...)
+
+Transfer(...)
+
+Validate(...)
+
+The initial implementation can be PKVault-only.
+
+Provider result models should be converted into Vantafyn domain models.
+
+This means the Android app should not need to know what PKVault is.
+
+---
+
+DATABASE / PERSISTENCE
+
+Use the current Companion persistence approach.
+
+Do not add another database engine unless truly necessary.
+
+Migrations must be safe and additive.
+
+Never destroy existing Companion data.
+
+Potential entities:
+
+PokemonIntegrationState
+PokemonGameMapping
+PokemonSaveMapping
+PokemonUserProfile
+PokemonVault
+PokemonVaultBox
+PokemonVaultEntry
+PokemonTransferHistory
+PokemonBackup
+PokemonOperation
+
+Only create tables/models when the phase genuinely requires them.
+
+Do not create all future entities prematurely.
+
+---
+
+TESTING REQUIREMENTS
+
+Every phase must include relevant tests where the project currently supports tests.
+
+Priorities:
+
+AUTHORIZATION
+
+User A cannot access User B.
+
+SAVE SAFETY
+
+Running game blocks mutation.
+
+CONCURRENCY
+
+Two operations cannot write the same save simultaneously.
+
+BACKUPS
+
+Mutation does not begin without a successful required backup.
+
+ROLLBACK
+
+Failed operation restores original state.
+
+PROVIDER FAILURE
+
+PKVault offline does not crash Jellyfin or break Games.
+
+OPTIONAL FEATURE
+
+Integration disabled causes no behavioural regression.
+
+NON-POKÉMON GAMES
+
+Continue working normally.
+
+SERVER RESTART
+
+Persistent mappings/history remain correct.
+
+MALFORMED SAVE
+
+Fails safely.
+
+Do not use production saves as destructive test fixtures.
+
+Use copies/test fixtures.
+
+---
+
+COMPATIBILITY REQUIREMENTS
+
+Protect all existing Vantafyn features.
+
+In particular:
+
+- existing Games library
+- game launching
+- library metadata
+- Jellyfin video/music/audiobook functionality
+- current Companion APIs
+- requests
+- social features
+- watch party
+- achievements
+- user settings
+- TV/mobile shared functionality
+
+Do not create an invasive global refactor for Pokémon.
+
+This should be an optional module.
+
+---
+
+PERFORMANCE
+
+Do not scan every Pokémon save on every normal Games Hub request.
+
+Avoid expensive Pokémon parsing unless requested or cached appropriately.
+
+Use lazy loading.
+
+Potential caching is acceptable for:
+
+- Pokémon game detection
+- save metadata
+- Pokédex summaries
+- provider health
+
+Do not cache data in a way that risks stale writes.
+
+Mutation operations must always verify the latest underlying save state.
+
+---
+
+UI / UX PRINCIPLES
+
+Do not make this look like a developer utility or PKHeX clone.
+
+It should feel like a normal polished Vantafyn feature.
+
+Focus on:
+
+My Pokémon
+My games
+Vault
+Journey
+Pokédex
+Transfer
+
+Avoid exposing technical terminology like:
+
+.srm
+.pk8
+PKHeX
+raw save
+filesystem path
+
+unless in an administrator diagnostics screen.
+
+Normal user copy might say:
+
+"Pokémon Emerald is currently running. Save and exit the game before moving Pokémon."
+
+Instead of:
+
+"Unable to acquire SRAM file write lock."
+
+---
+
+FIRST TASK
+
+Start with PHASE 0 ONLY.
+
+Inspect the existing codebase carefully.
+
+Do not implement Phase 1.
+
+Give me a detailed architecture audit showing:
+
+- what already exists
+- what should be reused
+- where Pokémon integration should live
+- exact files/classes likely to change
+- potential technical risks
+- any inconsistencies between the desired architecture above and the current codebase
+
+Then STOP and wait for approval.
+
+The most important priorities are:
+
+1. Do not break existing Vantafyn functionality.
+2. Reuse the current Games architecture.
+3. Use Jellyfin authentication as the identity layer.
+4. Keep users isolated from one another.
+5. Keep PKVault server-side and private.
+6. Maintain a clean licensing/service boundary.
+7. Never perform unsafe save modifications.
+8. Build this incrementally.
+9. Stop after every phase.
+10. Prefer correctness and safety over rapidly producing a huge amount of code.

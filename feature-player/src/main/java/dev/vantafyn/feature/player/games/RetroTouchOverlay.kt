@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.ChangeCircle
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -65,7 +64,7 @@ enum class RetroControllerLayout {
                 key == "n64" || key.contains("nintendo 64") || key.contains("mupen") || key.contains("parallel") -> Nintendo64
                 key == "psx" || key == "ps1" || key.contains("playstation") || key.contains("pcsx") || key.contains("beetle") -> PlayStation
                 key == "gba" || key.contains("advance") -> GBA
-                key == "gb" || key == "gbc" || key == "nes" || key.contains("gameboy") || key.contains("famicom") ||
+                key == "gb" || key == "gbc" || key == "nes" || key.contains("gameboy") || key.contains("game boy") || key.contains("color") || key.contains("famicom") ||
                     key.contains("atari") || key.contains("mastersystem") || key == "segams" || key == "segagg" -> TwoButton
                 else -> Standard
             }
@@ -78,6 +77,7 @@ fun RetroTouchOverlay(
     visible: Boolean,
     systemId: String = "",
     core: String = "",
+    isPortrait: Boolean = false,
     onButtonPress: (RetroButton, Boolean) -> Unit,
     onAxisChange: (String, Float) -> Unit = { _, _ -> },
     onMenuClick: () -> Unit,
@@ -95,12 +95,14 @@ fun RetroTouchOverlay(
         }
 
         val layout = remember(systemId, core) { RetroControllerLayout.from(systemId, core) }
-        var n64UseDpadInsteadOfStick by remember { mutableStateOf(false) }
+        val bottomLift = if (isPortrait) 16.dp else 12.dp
+        val topPadding = if (isPortrait) 76.dp else 16.dp
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp),
+                .padding(horizontal = 14.dp)
+                .padding(top = topPadding, bottom = bottomLift),
         ) {
             // ── TOP SHOULDER BUMPERS & MENU ──────────────────────────────
             when (layout) {
@@ -266,60 +268,36 @@ fun RetroTouchOverlay(
             }
 
             // ── BOTTOM LEFT: D-PAD OR ANALOG STICK ───────────────────────
+            val dpadBottomPad = when {
+                layout == RetroControllerLayout.Nintendo64 -> if (isPortrait) 16.dp else 4.dp
+                else -> if (isPortrait) 80.dp else 4.dp
+            }
+
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .padding(bottom = 12.dp, start = 8.dp),
+                    .padding(bottom = dpadBottomPad, start = if (isPortrait) 6.dp else 4.dp),
             ) {
                 if (layout == RetroControllerLayout.Nintendo64) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalArrangement = Arrangement.spacedBy(if (isPortrait) 12.dp else 8.dp),
                     ) {
-                        // Toggle between Stick & D-pad
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0x55000000))
-                                .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(8.dp))
-                                .clickable {
-                                    performHaptic()
-                                    n64UseDpadInsteadOfStick = !n64UseDpadInsteadOfStick
-                                }
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.ChangeCircle,
-                                contentDescription = null,
-                                tint = VantafynColors.Primary,
-                                modifier = Modifier.size(12.dp),
-                            )
-                            Text(
-                                text = if (n64UseDpadInsteadOfStick) "D-PAD ACTIVE" else "STICK ACTIVE",
-                                color = Color.White.copy(alpha = 0.85f),
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold,
-                                letterSpacing = 0.5.sp,
-                            )
-                        }
-
-                        if (!n64UseDpadInsteadOfStick) {
-                            TouchAnalogStick(
-                                onAxisChange = { x, y ->
-                                    onAxisChange("left_x", x)
-                                    onAxisChange("left_y", y)
-                                },
-                            )
-                        } else {
-                            TouchDpad(
-                                onDirectionChange = { dir, isDown ->
-                                    if (isDown) performHaptic()
-                                    onButtonPress(dir, isDown)
-                                },
-                            )
-                        }
+                        TouchDpad(
+                            onDirectionChange = { dir, isDown ->
+                                if (isDown) performHaptic()
+                                onButtonPress(dir, isDown)
+                            },
+                            dpadSize = if (isPortrait) 88.dp else 92.dp,
+                        )
+                        TouchAnalogStick(
+                            onAxisChange = { x, y ->
+                                onAxisChange("left_x", x)
+                                onAxisChange("left_y", y)
+                            },
+                            sizeDp = if (isPortrait) 120.dp else 126.dp,
+                            knobSizeDp = 46.dp,
+                        )
                     }
                 } else {
                     TouchDpad(
@@ -335,7 +313,7 @@ fun RetroTouchOverlay(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 6.dp),
+                    .padding(bottom = if (isPortrait) 16.dp else 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 if (layout != RetroControllerLayout.Nintendo64) {
@@ -358,10 +336,17 @@ fun RetroTouchOverlay(
             }
 
             // ── BOTTOM RIGHT: ACTION BUTTONS ────────────────────────────
+            val actionBottomPad = when {
+                layout == RetroControllerLayout.Nintendo64 -> if (isPortrait) 16.dp else 4.dp
+                layout == RetroControllerLayout.PlayStation -> if (isPortrait) 64.dp else 4.dp
+                layout == RetroControllerLayout.Standard -> if (isPortrait) 64.dp else 4.dp
+                else -> if (isPortrait) 80.dp else 4.dp // GBA, TwoButton
+            }
+
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 12.dp, end = 8.dp),
+                    .padding(bottom = actionBottomPad, end = if (isPortrait) 6.dp else 4.dp),
             ) {
                 when (layout) {
                     RetroControllerLayout.Nintendo64 -> {
@@ -370,6 +355,7 @@ fun RetroTouchOverlay(
                                 if (isDown) performHaptic()
                                 onButtonPress(btn, isDown)
                             },
+                            isPortrait = isPortrait,
                         )
                     }
 
@@ -540,36 +526,69 @@ fun TouchAnalogStick(
 @Composable
 private fun TouchN64ActionCluster(
     onPress: (RetroButton, Boolean) -> Unit,
+    isPortrait: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    Row(
-        modifier = modifier,
-        verticalAlignment = Alignment.Bottom,
-        horizontalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        // Primary A & B buttons
+    if (isPortrait) {
         Column(
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = modifier,
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(28.dp),
         ) {
-            RetroActionButton(
-                label = "B",
-                color = Color(0xFF00E676), // Classic N64 Green
-                button = RetroButton.B,
-                size = 46.dp,
-                onPress = onPress,
-            )
-            RetroActionButton(
-                label = "A",
-                color = Color(0xFF21D8FF), // Classic N64 Cyan/Blue
-                button = RetroButton.A,
-                size = 50.dp,
-                onPress = onPress,
-            )
-        }
+            // Yellow C-Buttons Diamond (Above)
+            TouchCButtonsDiamond(onPress = onPress)
 
-        // Yellow C-Buttons Diamond
-        TouchCButtonsDiamond(onPress = onPress)
+            // Primary B and A Buttons Row (Below, where C buttons were in the pic)
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                RetroActionButton(
+                    label = "B",
+                    color = Color(0xFF00E676), // Classic N64 Green
+                    button = RetroButton.B,
+                    size = 48.dp,
+                    onPress = onPress,
+                )
+                RetroActionButton(
+                    label = "A",
+                    color = Color(0xFF21D8FF), // Classic N64 Cyan/Blue
+                    button = RetroButton.A,
+                    size = 52.dp,
+                    onPress = onPress,
+                )
+            }
+        }
+    } else {
+        Row(
+            modifier = modifier,
+            verticalAlignment = Alignment.Bottom,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // Primary A & B buttons
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                RetroActionButton(
+                    label = "B",
+                    color = Color(0xFF00E676), // Classic N64 Green
+                    button = RetroButton.B,
+                    size = 46.dp,
+                    onPress = onPress,
+                )
+                RetroActionButton(
+                    label = "A",
+                    color = Color(0xFF21D8FF), // Classic N64 Cyan/Blue
+                    button = RetroButton.A,
+                    size = 50.dp,
+                    onPress = onPress,
+                )
+            }
+
+            // Yellow C-Buttons Diamond
+            TouchCButtonsDiamond(onPress = onPress)
+        }
     }
 }
 
@@ -873,9 +892,12 @@ private fun TouchPillButton(
 private fun TouchDpad(
     onDirectionChange: (RetroButton, Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    dpadSize: Dp = 140.dp,
 ) {
-    val dpadSize = 140.dp
     var activeDirection by remember { mutableStateOf<RetroButton?>(null) }
+    val crossThickness = dpadSize * 0.30f
+    val crossLength = dpadSize * 0.92f
+    val hubSize = dpadSize * 0.26f
 
     Box(
         modifier = modifier
@@ -913,23 +935,23 @@ private fun TouchDpad(
         // Cross overlay
         Box(
             modifier = Modifier
-                .width(42.dp)
-                .height(130.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .width(crossThickness)
+                .height(crossLength)
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color(0x33FFFFFF)),
         )
         Box(
             modifier = Modifier
-                .width(130.dp)
-                .height(42.dp)
-                .clip(RoundedCornerShape(8.dp))
+                .width(crossLength)
+                .height(crossThickness)
+                .clip(RoundedCornerShape(6.dp))
                 .background(Color(0x33FFFFFF)),
         )
 
         // Center hub
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(hubSize)
                 .clip(CircleShape)
                 .background(Color(0x55000000)),
         )

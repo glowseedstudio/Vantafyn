@@ -612,19 +612,25 @@ private fun RecentGameCard(
                 }
             }
 
-            // System Badge in top right
+            // System Badge in top right (matches media card watched/unwatched badge style)
+            val glassShape = RoundedCornerShape(6.dp)
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(6.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(Color.Black.copy(alpha = 0.72f))
-                    .border(0.8.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                    .clip(glassShape)
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.linearGradient(VantafynGradients.AccentColors),
+                        shape = glassShape,
+                    )
+                    .background(VantafynColors.Graphite.copy(alpha = 0.92f))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = record.systemId.uppercase(),
-                    color = Color(0xFF00E5FF),
+                    color = Color.White,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.ExtraBold,
                 )

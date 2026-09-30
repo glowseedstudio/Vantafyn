@@ -12,13 +12,19 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 
 class GameStorageManager(
     private val context: Context,
     private val gamesRepository: JellyfinGamesRepository,
 ) {
+    companion object {
+        val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    }
+
     val persistentRomsDir: File
         get() = File(context.filesDir, "games/roms").apply { mkdirs() }
 

@@ -38,6 +38,8 @@ class GameInputController(
     private var lastHatY = 0f
     private var lastStickX = 0f
     private var lastStickY = 0f
+    private var lastRightStickX = 0f
+    private var lastRightStickY = 0f
 
     fun handleKeyEvent(event: KeyEvent): Boolean {
         val isDown = event.action == KeyEvent.ACTION_DOWN
@@ -94,6 +96,26 @@ class GameInputController(
         lastStickX = normX
         lastStickY = normY
 
+        // Process Right Analog Stick (AXIS_Z & AXIS_RZ) -> maps to C-Buttons on handhelds (Retroid Pocket, Odin, etc.)
+        val rightStickX = event.getAxisValue(MotionEvent.AXIS_Z)
+        val rightStickY = event.getAxisValue(MotionEvent.AXIS_RZ)
+        val cDeadzone = 0.40f
+
+        val normRightX = when {
+            rightStickX > cDeadzone -> 1f
+            rightStickX < -cDeadzone -> -1f
+            else -> 0f
+        }
+        val normRightY = when {
+            rightStickY > cDeadzone -> 1f
+            rightStickY < -cDeadzone -> -1f
+            else -> 0f
+        }
+
+        processCAxisPair(normRightX, normRightY, lastRightStickX, lastRightStickY)
+        lastRightStickX = normRightX
+        lastRightStickY = normRightY
+
         return true
     }
 
@@ -112,6 +134,24 @@ class GameInputController(
 
             if (currY < -0.5f) onButtonEvent(RetroButton.Up, true)
             else if (prevY < -0.5f) onButtonEvent(RetroButton.Up, false)
+        }
+    }
+
+    private fun processCAxisPair(currX: Float, currY: Float, prevX: Float, prevY: Float) {
+        if (currX != prevX) {
+            if (currX > 0.5f) onButtonEvent(RetroButton.CRight, true)
+            else if (prevX > 0.5f) onButtonEvent(RetroButton.CRight, false)
+
+            if (currX < -0.5f) onButtonEvent(RetroButton.CLeft, true)
+            else if (prevX < -0.5f) onButtonEvent(RetroButton.CLeft, false)
+        }
+
+        if (currY != prevY) {
+            if (currY > 0.5f) onButtonEvent(RetroButton.CDown, true)
+            else if (prevY > 0.5f) onButtonEvent(RetroButton.CDown, false)
+
+            if (currY < -0.5f) onButtonEvent(RetroButton.CUp, true)
+            else if (prevY < -0.5f) onButtonEvent(RetroButton.CUp, false)
         }
     }
 
