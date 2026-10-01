@@ -8,20 +8,36 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.1.0",
-        "changelog": "Pokémon Vault & PKVault Integration: Full multi-user 30-box cloud storage system, cross-generation direct transfers, era migrations, National Pokédex, live trading, and ironclad save backups.",
+        "version": "0.2.3.0",
+        "changelog": "Pokémon Vault enhancements: 32-box cloud storage, move relearner & evolution catalogs, ribbons showcase, save backups, and link trading.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.34/Vantafyn.Plugin.Companion_0.2.1_net9.zip",
-        "checksum": "7e75dfc02429c2d8341cfd31dbab4916",
-        "timestamp": "2026-09-30T12:31:10Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.35/Vantafyn.Plugin.Companion_0.2.3_net9.zip",
+        "checksum": "399ffbc612b205bc39195a6b38e1be3a",
+        "timestamp": "2026-10-01T10:08:08Z"
       },
       {
-        "version": "0.2.1.1",
-        "changelog": "Pokémon Vault & PKVault Integration: Full multi-user 30-box cloud storage system, cross-generation direct transfers, era migrations, National Pokédex, live trading, and ironclad save backups.",
+        "version": "0.2.3.1",
+        "changelog": "Pokémon Vault enhancements: 32-box cloud storage, move relearner & evolution catalogs, ribbons showcase, save backups, and link trading.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.34/Vantafyn.Plugin.Companion_0.2.1_net10.zip",
-        "checksum": "75d62015896354c667326845d0727a30",
-        "timestamp": "2026-09-30T12:31:10Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.35/Vantafyn.Plugin.Companion_0.2.3_net10.zip",
+        "checksum": "cee2b8819c49cad17b0c92b2436bcb55",
+        "timestamp": "2026-10-01T10:08:08Z"
+      },
+      {
+        "version": "0.2.2.0",
+        "changelog": "Settings UI fix for all checkboxes, PKVault integration, 30-box storage, direct transfers, and save backups.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.34/Vantafyn.Plugin.Companion_0.2.2_net9.zip",
+        "checksum": "228c55789d45d9e7f5f72e4da7c6fb44",
+        "timestamp": "2026-10-01T08:57:35Z"
+      },
+      {
+        "version": "0.2.2.1",
+        "changelog": "Settings UI fix for all checkboxes, PKVault integration, 30-box storage, direct transfers, and save backups.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.34/Vantafyn.Plugin.Companion_0.2.2_net10.zip",
+        "checksum": "15a5fa1d2a66a4a07f284c2a5d717775",
+        "timestamp": "2026-10-01T08:57:35Z"
       },
       {
         "version": "0.1.4.0",

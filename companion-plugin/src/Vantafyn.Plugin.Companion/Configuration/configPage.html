@@ -52,14 +52,27 @@
         color: #ffffff;
       }
       #VantafynCompanionConfigPage .checkboxOutline {
-        border-color: rgba(255, 255, 255, 0.45);
+        border-color: rgba(255, 255, 255, 0.55) !important;
+        border-width: 2px !important;
+        border-style: solid !important;
+        background-color: rgba(0, 0, 0, 0.35) !important;
       }
+      #VantafynCompanionConfigPage input[type="checkbox"]:checked ~ .checkboxOutline,
       #VantafynCompanionConfigPage .emby-checkbox:checked + span + .checkboxOutline {
         border-color: #00e5ff !important;
         background-color: #00e5ff !important;
       }
+      #VantafynCompanionConfigPage input[type="checkbox"]:checked ~ .checkboxOutline > .checkboxIcon-checked,
       #VantafynCompanionConfigPage .emby-checkbox:checked + span + .checkboxOutline > .checkboxIcon-checked {
         color: #050811 !important;
+        display: flex !important;
+      }
+      #VantafynCompanionConfigPage input[type="checkbox"]:checked ~ .checkboxOutline > .checkboxIcon-unchecked,
+      #VantafynCompanionConfigPage .emby-checkbox:checked + span + .checkboxOutline > .checkboxIcon-unchecked {
+        display: none !important;
+      }
+      #VantafynCompanionConfigPage .checkboxOutline > .checkboxIcon-checked {
+        display: none;
       }
       #VantafynCompanionConfigPage .checkboxFieldDescription {
         font-size: 0.9em;
@@ -164,7 +177,7 @@
           <h2>Profile & Settings Sync</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="userSettingsEnabled" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="userSettingsEnabled" />
               <span>Enable Profile & Settings Sync</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -178,7 +191,7 @@
           <h2>Personal Playlists</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="personalPlaylistsEnabled" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="personalPlaylistsEnabled" />
               <span>Enable Personal Playlists</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -192,7 +205,7 @@
           <h2>Watch Parties</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="watchPartiesEnabled" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="watchPartiesEnabled" />
               <span>Enable Watch Parties</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -206,7 +219,7 @@
           <h2>Retro Games &amp; Cloud Saves</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="gamesEnabled" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="gamesEnabled" />
               <span>Enable Retro Games &amp; Cloud Saves</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -216,7 +229,7 @@
 
           <div class="inputContainer">
             <label class="inputLabel" for="customGamesPath">Custom ROM Directory Path (Optional)</label>
-            <input is="emby-input" type="text" id="customGamesPath" class="emby-input" placeholder="e.g. /mnt/storage/games or D:\ROMs" />
+            <input is="emby-input" type="text" id="customGamesPath" placeholder="e.g. /mnt/storage/games or D:\ROMs" />
             <div class="fieldDescription">
               Direct folder path on your server containing console subfolders (e.g. <code>NES/</code>, <code>SNES/</code>, <code>GBA/</code>, <code>Genesis/</code>, <code>PSX/</code>).
               Leave blank to automatically detect from any Jellyfin library named "Games", "ROMs", or "Emulation".
@@ -229,7 +242,7 @@
           <h2>Requests (Ombi)</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="requestsEnabled" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="requestsEnabled" />
               <span>Enable Requests</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -239,25 +252,25 @@
 
           <div class="inputContainer">
             <label class="inputLabel" for="ombiBaseUrl">Ombi Server URL</label>
-            <input is="emby-input" type="text" id="ombiBaseUrl" class="emby-input" placeholder="https://ombi.example.com" />
+            <input is="emby-input" type="text" id="ombiBaseUrl" placeholder="https://ombi.example.com" />
             <div class="fieldDescription">Base URL of your Ombi instance, including http/https and port if applicable.</div>
           </div>
 
           <div class="inputContainer">
             <label class="inputLabel" for="ombiApiKey">Ombi API Key</label>
-            <input is="emby-input" type="password" id="ombiApiKey" class="emby-input" autocomplete="off" placeholder="Leave blank to keep current key" />
+            <input is="emby-input" type="password" id="ombiApiKey" autocomplete="off" placeholder="Leave blank to keep current key" />
             <div class="fieldDescription">Found in Ombi Settings -> Ombi -> API Key.</div>
           </div>
 
           <div class="inputContainer">
             <label class="inputLabel" for="ombiTimeoutSeconds">Timeout (Seconds)</label>
-            <input is="emby-input" type="number" id="ombiTimeoutSeconds" class="emby-input" min="2" max="30" value="5" />
+            <input is="emby-input" type="number" id="ombiTimeoutSeconds" min="2" max="30" value="5" />
             <div class="fieldDescription">Request timeout duration (2 to 30 seconds).</div>
           </div>
 
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="ombiRequireUserLogin" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="ombiRequireUserLogin" />
               <span>Require each Vantafyn profile to sign in with its own Ombi account</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -274,7 +287,7 @@
           <h2>Pokémon Vault (PKVault)</h2>
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="pokemonEnabled" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="pokemonEnabled" />
               <span>Enable Pokémon Vault Integration</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -284,19 +297,19 @@
 
           <div class="inputContainer">
             <label class="inputLabel" for="pokemonPkVaultBaseUrl">PKVault Service Base URL</label>
-            <input is="emby-input" type="text" id="pokemonPkVaultBaseUrl" class="emby-input" placeholder="http://127.0.0.1:3000 or http://localhost:3000" />
+            <input is="emby-input" type="text" id="pokemonPkVaultBaseUrl" placeholder="http://127.0.0.1:3000 or http://localhost:3000" />
             <div class="fieldDescription">Base URL where your external PKVault container or instance is reachable by this Jellyfin server.</div>
           </div>
 
           <div class="inputContainer">
             <label class="inputLabel" for="pokemonTimeoutSeconds">Timeout (Seconds)</label>
-            <input is="emby-input" type="number" id="pokemonTimeoutSeconds" class="emby-input" min="2" max="30" value="5" />
+            <input is="emby-input" type="number" id="pokemonTimeoutSeconds" min="2" max="30" value="5" />
             <div class="fieldDescription">Provider communication timeout (2 to 30 seconds).</div>
           </div>
 
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="pokemonAllowTransfers" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="pokemonAllowTransfers" />
               <span>Allow Pokémon Transfers (Vault Deposit &amp; Withdraw)</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -306,7 +319,7 @@
 
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="pokemonAllowCrossGenerationTransfers" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="pokemonAllowCrossGenerationTransfers" />
               <span>Allow Cross-Generation Transfers (e.g. Gen 3 ➔ Gen 4)</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -316,7 +329,7 @@
 
           <div class="checkboxContainer checkboxContainer-withDescription">
             <label class="emby-checkbox-label">
-              <input is="emby-checkbox" type="checkbox" id="pokemonAutoBackups" class="emby-checkbox" />
+              <input is="emby-checkbox" type="checkbox" id="pokemonAutoBackups" />
               <span>Mandatory Pre-Mutation Save Backups</span>
             </label>
             <div class="fieldDescription checkboxFieldDescription">
@@ -431,7 +444,25 @@
           el.textContent = text;
         }
 
+        function ensureCheckboxes() {
+          page.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+            cb.classList.add('emby-checkbox');
+            const label = cb.closest('label') || cb.parentNode;
+            if (!label) return;
+            label.classList.add('emby-checkbox-label');
+            const span = label.querySelector('span:not(.checkboxOutline):not(.checkboxIcon)');
+            if (span) span.classList.add('checkboxLabel');
+            if (!label.querySelector('.checkboxOutline')) {
+              const outline = document.createElement('span');
+              outline.className = 'checkboxOutline';
+              outline.innerHTML = '<span class="material-icons checkboxIcon checkboxIcon-checked check" aria-hidden="true"></span><span class="material-icons checkboxIcon checkboxIcon-unchecked" aria-hidden="true"></span>';
+              label.appendChild(outline);
+            }
+          });
+        }
+
         async function load() {
+          ensureCheckboxes();
           try {
             const config = await api('Vantafyn/Admin/Configuration');
             const ombi = config.ombi || config.Ombi || {};
@@ -462,6 +493,8 @@
           } catch (err) {
             console.error('[VantafynCompanion] Failed to load configuration:', err);
             setStatus('saveStatus', 'Failed to load configuration: ' + formatError(err), 'error');
+          } finally {
+            ensureCheckboxes();
           }
         }
 
@@ -469,6 +502,7 @@
         page.addEventListener('viewshow', load);
         page.addEventListener('pageshow', load);
         // Immediate fallback in case page is already loaded
+        ensureCheckboxes();
         setTimeout(load, 50);
 
         // Save Configuration

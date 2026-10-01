@@ -88,6 +88,9 @@ public sealed class PokemonSummaryDto
 
     [JsonPropertyName("legalityStatus")]
     public string LegalityStatus { get; set; } = "valid";
+
+    [JsonPropertyName("isHallOfFameMember")]
+    public bool IsHallOfFameMember { get; set; }
 }
 
 /// <summary>
@@ -140,6 +143,90 @@ public sealed class PokemonDetailsDto
     [JsonPropertyName("rawData")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RawData { get; set; }
+
+    [JsonPropertyName("legalityStatus")]
+    public string LegalityStatus { get; set; } = "valid";
+
+    [JsonPropertyName("legalityReport")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LegalityReport { get; set; }
+
+    [JsonPropertyName("illegalitiesCount")]
+    public int IllegalitiesCount { get; set; }
+
+    [JsonPropertyName("movesLegality")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<bool>? MovesLegality { get; set; }
+
+    [JsonPropertyName("learnableMoves")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PokemonLearnableMoveDto>? LearnableMoves { get; set; }
+
+    [JsonPropertyName("ribbons")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PokemonRibbonDto>? Ribbons { get; set; }
+
+    [JsonPropertyName("isHallOfFameMember")]
+    public bool IsHallOfFameMember { get; set; }
+
+    [JsonPropertyName("availableEvolutions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PokemonEvolutionOptionDto>? AvailableEvolutions { get; set; }
+}
+
+/// <summary>
+/// A move that a Pokémon can learn or relearn via level-up, TM/HM, tutor, or egg moves.
+/// </summary>
+public sealed class PokemonLearnableMoveDto
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "Normal";
+
+    [JsonPropertyName("category")]
+    public string Category { get; set; } = "Physical"; // Physical, Special, Status
+
+    [JsonPropertyName("power")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Power { get; set; }
+
+    [JsonPropertyName("accuracy")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? Accuracy { get; set; }
+
+    [JsonPropertyName("pp")]
+    public int Pp { get; set; } = 20;
+
+    [JsonPropertyName("learnMethod")]
+    public string LearnMethod { get; set; } = "Level Up"; // Level Up, Machine, Tutor, Egg
+
+    [JsonPropertyName("levelLearned")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? LevelLearned { get; set; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; set; }
+}
+
+/// <summary>
+/// Request payload to update or relearn active moves on a Pokémon in the Vault.
+/// </summary>
+public sealed class UpdatePokemonMovesRequest
+{
+    [JsonPropertyName("moves")]
+    public List<string> Moves { get; set; } = [];
+}
+
+/// <summary>
+/// Request payload to trigger in-vault evolution on a Pokémon.
+/// </summary>
+public sealed class EvolvePokemonRequest
+{
+    [JsonPropertyName("targetSpeciesId")]
+    public int TargetSpeciesId { get; set; }
 }
 
 /// <summary>

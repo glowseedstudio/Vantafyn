@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.1}"
+VERSION="${1:-0.2.3}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.34}"
-CHANGELOG="Pokémon Vault & PKVault Integration: Full multi-user 30-box cloud storage system, cross-generation direct transfers, era migrations, National Pokédex, live trading, and ironclad save backups."
+TAG="${2:-v0.9.35}"
+CHANGELOG="Pokémon Vault enhancements: 32-box cloud storage, move relearner & evolution catalogs, ribbons showcase, save backups, and link trading."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.2.0",
+        "changelog": "Settings UI fix for all checkboxes, PKVault integration, 30-box storage, direct transfers, and save backups.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.34/Vantafyn.Plugin.Companion_0.2.2_net9.zip",
+        "checksum": "228c55789d45d9e7f5f72e4da7c6fb44",
+        "timestamp": "2026-10-01T08:57:35Z"
+      },
+      {
+        "version": "0.2.2.1",
+        "changelog": "Settings UI fix for all checkboxes, PKVault integration, 30-box storage, direct transfers, and save backups.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.34/Vantafyn.Plugin.Companion_0.2.2_net10.zip",
+        "checksum": "15a5fa1d2a66a4a07f284c2a5d717775",
+        "timestamp": "2026-10-01T08:57:35Z"
       },
       {
         "version": "0.1.4.0",

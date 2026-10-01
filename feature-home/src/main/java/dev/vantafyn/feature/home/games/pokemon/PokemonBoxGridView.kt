@@ -7,7 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -17,8 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -28,11 +25,14 @@ import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.Pets
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,37 +57,53 @@ fun PokemonBoxGridView(
     modifier: Modifier = Modifier,
     isParty: Boolean = false,
     isLocked: Boolean = false,
+    onOpenDetails: ((PokemonSummaryDto) -> Unit)? = null,
 ) {
     val totalSlots = if (isParty) 6 else 30
     val columns = if (isParty) 3 else 6
+    val rows = totalSlots / columns
 
     val entriesBySlot = remember(entries) {
         entries.associateBy { it.slotIndex }
     }
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(columns),
-        contentPadding = PaddingValues(6.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(6.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
-        modifier = modifier.fillMaxWidth(),
     ) {
-        items(totalSlots) { index ->
-            val slotIndex = index + 1
-            val pokemon = entriesBySlot[slotIndex]
-            val isSelected = selectedSlotIndex == slotIndex
+        for (rowIndex in 0 until rows) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (colIndex in 0 until columns) {
+                    val slotIndex = (rowIndex * columns) + colIndex + 1
+                    val pokemon = entriesBySlot[slotIndex]
+                    val isSelected = selectedSlotIndex == slotIndex
 
-            PokemonSlotCell(
-                slotIndex = slotIndex,
-                pokemon = pokemon,
-                isSelected = isSelected,
-                isLocked = isLocked,
-                onClick = {
-                    if (!isLocked) {
-                        onSelectSlot(slotIndex, pokemon)
-                    }
-                },
-            )
+                    PokemonSlotCell(
+                        slotIndex = slotIndex,
+                        pokemon = pokemon,
+                        isSelected = isSelected,
+                        isLocked = isLocked,
+                        onClick = {
+                            if (!isLocked) {
+                                onSelectSlot(slotIndex, pokemon)
+                            }
+                        },
+                        onOpenDetails = onOpenDetails?.let { cb ->
+                            {
+                                if (pokemon != null) {
+                                    cb(pokemon)
+                                }
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
 }
@@ -100,7 +116,10 @@ fun PokemonSlotCell(
     isLocked: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDetails: (() -> Unit)? = null,
 ) {
+    var lastTapTime by remember { mutableLongStateOf(0L) }
+
     val borderColor by animateColorAsState(
         targetValue = when {
             isSelected -> Color(0xFF00E5FF)
@@ -142,7 +161,18 @@ fun PokemonSlotCell(
                 color = borderColor,
                 shape = RoundedCornerShape(10.dp),
             )
-            .clickable(enabled = !isLocked, onClick = onClick)
+            .clickable(
+                enabled = !isLocked,
+                onClick = {
+                    val now = System.currentTimeMillis()
+                    if (pokemon != null && onOpenDetails != null && (isSelected || (now - lastTapTime < 380L))) {
+                        onOpenDetails()
+                    } else {
+                        onClick()
+                    }
+                    lastTapTime = now
+                }
+            )
             .padding(4.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -152,18 +182,31 @@ fun PokemonSlotCell(
                 verticalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxSize(),
             ) {
-                // Top row: slot number and shiny star
+                // Top row: slot number, legality alert, and shiny star
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        text = "#$slotIndex",
-                        color = VantafynColors.Muted.copy(alpha = 0.5f),
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Medium,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = "#$slotIndex",
+                            color = VantafynColors.Muted.copy(alpha = 0.5f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        if (pokemon.legalityStatus.equals("illegal", ignoreCase = true)) {
+                            Icon(
+                                imageVector = Icons.Rounded.Warning,
+                                contentDescription = "Legality Issue",
+                                tint = Color(0xFFEF4444),
+                                modifier = Modifier.size(9.dp),
+                            )
+                        }
+                    }
                     if (pokemon.isShiny) {
                         Icon(
                             imageVector = Icons.Rounded.AutoAwesome,

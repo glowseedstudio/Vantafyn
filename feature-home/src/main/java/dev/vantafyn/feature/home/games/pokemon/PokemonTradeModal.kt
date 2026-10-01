@@ -17,8 +17,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
@@ -144,21 +148,18 @@ fun PokemonTradeModal(
         )
     }
 
-    BasicAlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.95f)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF151722))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-            .padding(18.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        PokemonModalContainer(
+            modifier = Modifier.fillMaxWidth(0.95f),
+            shape = RoundedCornerShape(20.dp),
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -382,40 +383,72 @@ fun PokemonTradeModal(
                             fontWeight = FontWeight.SemiBold,
                         )
 
+                        var isPinFocused by remember { mutableStateOf(false) }
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            OutlinedTextField(
-                                value = linkCodeInput,
-                                onValueChange = { if (it.length <= 6) linkCodeInput = it.filter { char -> char.isDigit() } },
-                                modifier = Modifier.weight(1f),
-                                placeholder = { Text("e.g. 123456", color = VantafynColors.Muted) },
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                singleLine = true,
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedTextColor = VantafynColors.Ink,
-                                    unfocusedTextColor = VantafynColors.Ink,
-                                    focusedBorderColor = Color(0xFF00E5FF),
-                                    unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                                ),
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF1B1E2B))
+                                    .border(
+                                        width = if (isPinFocused) 1.5.dp else 1.dp,
+                                        brush = if (isPinFocused) VantafynGradients.accentHorizontal() else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.18f))),
+                                        shape = RoundedCornerShape(10.dp),
+                                    )
+                                    .padding(horizontal = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                BasicTextField(
+                                    value = linkCodeInput,
+                                    onValueChange = { if (it.length <= 6) linkCodeInput = it.filter { char -> char.isDigit() } },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { isPinFocused = it.isFocused },
+                                    singleLine = true,
+                                    textStyle = TextStyle(
+                                        color = VantafynColors.Ink,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 1.5.sp,
+                                    ),
+                                    cursorBrush = VantafynGradients.accentHorizontal(),
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    decorationBox = { innerTextField ->
+                                        Box(contentAlignment = Alignment.CenterStart) {
+                                            if (linkCodeInput.isEmpty()) {
+                                                Text(
+                                                    text = "e.g. 123456",
+                                                    color = VantafynColors.Muted,
+                                                    fontSize = 14.sp,
+                                                )
+                                            }
+                                            innerTextField()
+                                        }
+                                    },
+                                )
+                            }
 
                             Box(
                                 modifier = Modifier
+                                    .height(48.dp)
                                     .clip(RoundedCornerShape(10.dp))
                                     .background(Color(0xFF23283B))
+                                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                                     .clickable {
                                         linkCodeInput = Random.nextInt(100000, 999999).toString()
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 14.dp),
+                                    .padding(horizontal = 14.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
                                     text = "New PIN",
                                     color = Color(0xFF00E5FF),
-                                    fontSize = 12.sp,
+                                    fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold,
                                 )
                             }
@@ -538,19 +571,48 @@ fun PokemonTradeModal(
                             fontWeight = FontWeight.SemiBold,
                         )
 
-                        OutlinedTextField(
-                            value = targetTrainerInput,
-                            onValueChange = { targetTrainerInput = it },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("e.g. Gary, Misty, or User ID", color = VantafynColors.Muted) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = VantafynColors.Ink,
-                                unfocusedTextColor = VantafynColors.Ink,
-                                focusedBorderColor = Color(0xFF00E5FF),
-                                unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
-                            ),
-                        )
+                        var isTargetTrainerFocused by remember { mutableStateOf(false) }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1B1E2B))
+                                .border(
+                                    width = if (isTargetTrainerFocused) 1.5.dp else 1.dp,
+                                    brush = if (isTargetTrainerFocused) VantafynGradients.accentHorizontal() else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.18f), Color.White.copy(alpha = 0.18f))),
+                                    shape = RoundedCornerShape(10.dp),
+                                )
+                                .padding(horizontal = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            BasicTextField(
+                                value = targetTrainerInput,
+                                onValueChange = { targetTrainerInput = it },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { isTargetTrainerFocused = it.isFocused },
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    color = VantafynColors.Ink,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                ),
+                                cursorBrush = VantafynGradients.accentHorizontal(),
+                                decorationBox = { innerTextField ->
+                                    Box(contentAlignment = Alignment.CenterStart) {
+                                        if (targetTrainerInput.isEmpty()) {
+                                            Text(
+                                                text = "e.g. Gary, Misty, or User ID",
+                                                color = VantafynColors.Muted,
+                                                fontSize = 13.5.sp,
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                },
+                            )
+                        }
 
                         Box(
                             modifier = Modifier
@@ -762,6 +824,7 @@ fun PokemonTradeModal(
             }
         }
     }
+}
 }
 
 @Composable

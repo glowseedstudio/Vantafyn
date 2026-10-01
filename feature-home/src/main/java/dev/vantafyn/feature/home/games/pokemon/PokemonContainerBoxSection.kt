@@ -16,20 +16,29 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.Pets
 import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.Verified
 import androidx.compose.material.icons.rounded.Warning
+import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -60,17 +69,23 @@ fun PokemonContainerBoxSection(
     onTogglePartyMode: () -> Unit,
     onSelectSlot: (Int, PokemonSummaryDto?) -> Unit,
     modifier: Modifier = Modifier,
+    onOpenDetails: ((PokemonSummaryDto) -> Unit)? = null,
+    onSortBox: ((criterion: String, ascending: Boolean) -> Unit)? = null,
 ) {
     var isDropdownExpanded by remember { mutableStateOf(false) }
+    var showSortModal by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF13151E).copy(alpha = 0.90f))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
-            .padding(10.dp),
+    PokemonModalContainer(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        scrimAlphaTop = 0.92f,
+        scrimAlphaBottom = 0.95f,
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+        ) {
         // Top selector bar: Container Dropdown & Side Label
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -121,69 +136,13 @@ fun PokemonContainerBoxSection(
                     )
                 }
 
-                DropdownMenu(
-                    expanded = isDropdownExpanded,
-                    onDismissRequest = { isDropdownExpanded = false },
-                    modifier = Modifier.background(Color(0xFF1B1E2B)),
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Inventory2,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Text(
-                                    text = "Personal Vault (Cloud)",
-                                    color = VantafynColors.Ink,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                            }
-                        },
-                        onClick = {
-                            isDropdownExpanded = false
-                            onSelectContainer(StorageContainerType.PersonalVault)
-                        },
+                if (isDropdownExpanded) {
+                    PokemonContainerPickerModal(
+                        currentContainer = uiState.containerType,
+                        availableGames = availableGames,
+                        onSelectContainer = onSelectContainer,
+                        onDismiss = { isDropdownExpanded = false },
                     )
-
-                    availableGames.forEach { game ->
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.SportsEsports,
-                                        contentDescription = null,
-                                        tint = VantafynColors.Muted,
-                                        modifier = Modifier.size(16.dp),
-                                    )
-                                    Column {
-                                        Text(
-                                            text = game.cleanTitle,
-                                            color = VantafynColors.Ink,
-                                            fontWeight = FontWeight.Medium,
-                                        )
-                                        Text(
-                                            text = game.systemId.uppercase(),
-                                            color = VantafynColors.Muted,
-                                            fontSize = 10.sp,
-                                        )
-                                    }
-                                }
-                            },
-                            onClick = {
-                                isDropdownExpanded = false
-                                onSelectContainer(StorageContainerType.GameCartridge(game))
-                            },
-                        )
-                    }
                 }
             }
 
@@ -285,6 +244,32 @@ fun PokemonContainerBoxSection(
                         color = VantafynColors.Muted,
                         fontSize = 11.sp,
                     )
+
+                    if (onSortBox != null && uiState.currentOccupiedCount > 1) {
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFF202334))
+                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                .clickable { showSortModal = true }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(3.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Rounded.Sort,
+                                contentDescription = "Sort Box",
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(13.dp),
+                            )
+                            Text(
+                                text = "SORT",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                 }
 
                 IconButton(
@@ -353,7 +338,195 @@ fun PokemonContainerBoxSection(
                 onSelectSlot = onSelectSlot,
                 isParty = uiState.isPartyMode,
                 isLocked = uiState.isLocked,
+                onOpenDetails = onOpenDetails,
                 modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+    }
+
+    if (showSortModal && onSortBox != null) {
+        PokemonBoxSortDialog(
+            boxName = uiState.currentBoxName,
+            onDismiss = { showSortModal = false },
+            onSortSelected = { criterion, ascending ->
+                showSortModal = false
+                onSortBox(criterion, ascending)
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PokemonBoxSortDialog(
+    boxName: String,
+    onDismiss: () -> Unit,
+    onSortSelected: (criterion: String, ascending: Boolean) -> Unit,
+) {
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+    ) {
+        PokemonModalContainer(
+            modifier = Modifier.fillMaxWidth(0.92f),
+            shape = RoundedCornerShape(20.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
+                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), CircleShape),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Rounded.Sort,
+                            contentDescription = "Sort Box",
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Auto-Organize Box",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = boxName,
+                            color = Color(0xFF00E5FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = VantafynColors.Muted,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            Text(
+                text = "Choose an organization rule to automatically sort and re-slot Pokémon into continuous slots (1..N):",
+                color = VantafynColors.Muted,
+                fontSize = 12.sp,
+            )
+
+            // Options
+            SortOptionRow(
+                icon = Icons.Rounded.Pets,
+                iconTint = Color(0xFF00E5FF),
+                title = "National Pokédex Number",
+                subtitle = "Sort by species #1 → #1025 ascending",
+                onClick = { onSortSelected("dex", true) },
+            )
+
+            SortOptionRow(
+                icon = Icons.Rounded.Star,
+                iconTint = Color(0xFFF59E0B),
+                title = "Rare Shinies First",
+                subtitle = "Shiny Pokémon at top, sorted by Pokédex #",
+                onClick = { onSortSelected("shiny", true) },
+            )
+
+            SortOptionRow(
+                icon = Icons.Rounded.AutoAwesome,
+                iconTint = Color(0xFFA855F7),
+                title = "Highest Level First",
+                subtitle = "Sort by level 100 → 1 descending",
+                onClick = { onSortSelected("level", false) },
+            )
+
+            SortOptionRow(
+                icon = Icons.AutoMirrored.Rounded.Sort,
+                iconTint = Color(0xFF38BDF8),
+                title = "Species Name (A – Z)",
+                subtitle = "Sort alphabetically by Pokémon species",
+                onClick = { onSortSelected("name", true) },
+            )
+
+            SortOptionRow(
+                icon = Icons.Rounded.Verified,
+                iconTint = Color(0xFF10B981),
+                title = "IV Potential (Judge Rating)",
+                subtitle = "Sort by total individual values (Best first)",
+                onClick = { onSortSelected("iv", false) },
+            )
+        }
+    }
+    }
+}
+
+@Composable
+private fun SortOptionRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1B1E2B))
+            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(iconTint.copy(alpha = 0.15f))
+                .border(1.dp, iconTint.copy(alpha = 0.35f), RoundedCornerShape(8.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = iconTint,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = subtitle,
+                color = VantafynColors.Muted,
+                fontSize = 10.5.sp,
             )
         }
     }

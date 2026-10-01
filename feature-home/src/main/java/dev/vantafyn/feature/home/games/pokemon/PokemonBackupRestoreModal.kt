@@ -98,21 +98,18 @@ fun PokemonBackupRestoreModal(
         loadData()
     }
 
-    BasicAlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.95f)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF151722))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-            .padding(18.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        PokemonModalContainer(
+            modifier = Modifier.fillMaxWidth(0.95f),
+            shape = RoundedCornerShape(20.dp),
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -310,12 +307,14 @@ fun PokemonBackupRestoreModal(
             }
         }
     }
+}
 
     // Confirmation Alert
     if (backupToRestore != null) {
         val b = backupToRestore!!
         AlertDialog(
             onDismissRequest = { backupToRestore = null },
+            modifier = Modifier.border(1.5.dp, VantafynGradients.accentHorizontal(), RoundedCornerShape(28.dp)),
             title = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,

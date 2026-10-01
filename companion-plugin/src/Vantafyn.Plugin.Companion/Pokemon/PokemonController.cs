@@ -259,6 +259,34 @@ public sealed class PokemonController : ControllerBase
     }
 
     /// <summary>
+    /// Sorts and compacts the Pokémon within a specified Vault box by Pokédex #, Level, Shiny, Name, or IVs.
+    /// </summary>
+    [HttpPost("Vault/Boxes/{boxIndex:int}/Sort")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonVaultBox>> SortVaultBox(
+        [FromRoute] int boxIndex,
+        [FromQuery] string criterion = "dex",
+        [FromQuery] bool ascending = true,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound();
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var sortedBox = await _vaultStore.SortBoxAsync(userId, boxIndex, criterion, ascending, cancellationToken).ConfigureAwait(false);
+        if (sortedBox == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(sortedBox);
+    }
+
+    /// <summary>
     /// Retrieves a specific Pokémon entry by its ID from the current user's vault.
     /// </summary>
     [HttpGet("Vault/Entries/{entryId}")]
@@ -281,7 +309,74 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
+        entry.Details ??= new PokemonDetailsDto { Summary = entry.ToSummaryDto() };
+        entry.Details.LearnableMoves ??= PokemonMovepoolProvider.GetLearnableMoves(entry.SpeciesId, entry.Species, entry.Level);
+        entry.Details.Ribbons ??= PokemonRibbonCatalog.EvaluateRibbons(
+            null,
+            entry.Details.Ev,
+            entry.Level,
+            entry.Details.Friendship ?? 100,
+            entry.OriginGame,
+            entry.Generation,
+            isInParty: false);
+        entry.Details.IsHallOfFameMember = entry.Details.Ribbons.Any(r => r.Category.Equals("Champion", StringComparison.OrdinalIgnoreCase)) || entry.Level >= 55;
+        entry.Details.AvailableEvolutions ??= PokemonEvolutionCatalog.GetAvailableEvolutions(entry.SpeciesId, entry.Species, entry.Level, entry.Details.HeldItem);
         return Ok(entry);
+    }
+
+    /// <summary>
+    /// Updates or relearns active moves for a Pokémon in the user's personal vault.
+    /// </summary>
+    [HttpPut("Vault/Entries/{id}/Moves")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonVaultEntry>> UpdateVaultPokemonMoves(
+        [FromRoute] string id,
+        [FromBody] UpdatePokemonMovesRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound();
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var updated = await _vaultStore.UpdateEntryMovesAsync(userId, id, request.Moves, cancellationToken).ConfigureAwait(false);
+        if (updated == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(updated);
+    }
+
+    /// <summary>
+    /// Triggers an in-vault cloud evolution on a Pokémon in the user's personal vault.
+    /// </summary>
+    [HttpPost("Vault/Entries/{id}/Evolve")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonVaultEntry>> EvolveVaultPokemon(
+        [FromRoute] string id,
+        [FromBody] EvolvePokemonRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound();
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var updated = await _vaultStore.EvolveEntryAsync(userId, id, request.TargetSpeciesId, cancellationToken).ConfigureAwait(false);
+        if (updated == null)
+        {
+            return BadRequest(new { message = "Evolution requirements not met or species mismatch." });
+        }
+
+        return Ok(updated);
     }
 
     private GameDetail? FindGame(string gameId)
@@ -459,7 +554,9 @@ public sealed class PokemonController : ControllerBase
                     CurrentLocation = $"Vault Box {request.TargetVaultBoxIndex}, Slot {targetSlot}",
                     CreatedAtUtc = DateTimeOffset.UtcNow,
                     UpdatedAtUtc = DateTimeOffset.UtcNow,
-                    RawData = details.RawData
+                    RawData = details.RawData,
+                    Details = details,
+                    LegalityStatus = details.LegalityStatus ?? "valid"
                 };
 
                 try
@@ -1009,7 +1106,9 @@ public sealed class PokemonController : ControllerBase
                     CurrentLocation = request.TargetParty ? "Party" : $"Box {request.TargetBoxIndex ?? 1}",
                     CreatedAtUtc = DateTimeOffset.UtcNow,
                     UpdatedAtUtc = DateTimeOffset.UtcNow,
-                    RawData = details.RawData
+                    RawData = details.RawData,
+                    Details = details,
+                    LegalityStatus = details.LegalityStatus ?? "valid"
                 };
 
                 // 4. Inject into destination save working copy

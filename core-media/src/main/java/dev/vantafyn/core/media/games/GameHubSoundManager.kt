@@ -22,6 +22,11 @@ import dev.vantafyn.core.media.MusicPlaybackController
  * hub, smooth fade-out when switching away to the main home screen or other destinations,
  * and immediate stop when an emulator game session begins.
  */
+enum class GameHubTrack(val assetName: String) {
+    GAME_HUB("gamehub.mp3"),
+    POKEMON_HOME("warm_home.mp3"),
+}
+
 object GameHubSoundManager {
 
     private const val TAG = "GameHubSoundManager"
@@ -36,6 +41,10 @@ object GameHubSoundManager {
     private var musicObserverJob: Job? = null
 
     private var mediaPlayer: MediaPlayer? = null
+    @Volatile
+    var activeTrack: GameHubTrack = GameHubTrack.GAME_HUB
+        private set
+
     @Volatile
     private var currentVolume = 0.0f
     @Volatile
@@ -86,11 +95,105 @@ object GameHubSoundManager {
     }
 
     /**
-     * Smoothly fades in the Game Hub ambient music up to the target volume (default 65%).
+     * Seamlessly crossfades between the currently playing track and a new target track.
+     * Smoothly lowers outgoing track volume while ramping up incoming track volume.
      */
     @Synchronized
-    fun fadeIn(context: Context, durationMs: Long = 800L, targetVolume: Float? = null) {
+    fun crossfadeTo(context: Context, targetTrack: GameHubTrack, durationMs: Long = 1000L) {
         val appContext = context.applicationContext
+        if (activeTrack == targetTrack && (isPlayingOrFadingIn || mediaPlayer?.isPlaying == true)) {
+            return
+        }
+
+        if (!isMusicEnabled(appContext)) {
+            activeTrack = targetTrack
+            return
+        }
+
+        if (isMusicPlaying(appContext)) {
+            Log.d(TAG, "Music playback is active; suppressing ambient track.")
+            activeTrack = targetTrack
+            return
+        }
+
+        val targetVol = getTargetVolume(appContext)
+        val outgoingPlayer = mediaPlayer
+        val outgoingVol = currentVolume
+
+        val incomingPlayer = try {
+            createPlayer(appContext, targetTrack.assetName)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to create incoming player for ${targetTrack.assetName}: ${e.message}")
+            null
+        }
+
+        if (incomingPlayer == null) {
+            activeTrack = targetTrack
+            fadeOut(durationMs = 400L)
+            return
+        }
+
+        mediaPlayer = incomingPlayer
+        activeTrack = targetTrack
+        isPlayingOrFadingIn = true
+
+        fadeJob?.cancel()
+        fadeJob = scope.launch {
+            try {
+                incomingPlayer.setVolume(0f, 0f)
+                incomingPlayer.start()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to start incoming player: ${e.message}")
+                resetPlayer()
+                return@launch
+            }
+
+            val stepMs = 25L
+            val stepCount = (durationMs / stepMs).coerceAtLeast(1)
+
+            for (i in 1..stepCount) {
+                delay(stepMs)
+                val fraction = i.toFloat() / stepCount
+                val outVol = (outgoingVol * (1f - fraction)).coerceAtLeast(0f)
+                val inVol = (targetVol * fraction).coerceIn(0f, targetVol)
+                currentVolume = inVol
+
+                try {
+                    outgoingPlayer?.setVolume(outVol, outVol)
+                } catch (_: Exception) { }
+
+                try {
+                    incomingPlayer.setVolume(inVol, inVol)
+                } catch (_: Exception) { }
+            }
+
+            currentVolume = targetVol
+            try {
+                incomingPlayer.setVolume(targetVol, targetVol)
+            } catch (_: Exception) { }
+
+            try {
+                outgoingPlayer?.setVolume(0f, 0f)
+                if (outgoingPlayer?.isPlaying == true) {
+                    outgoingPlayer.pause()
+                }
+                outgoingPlayer?.release()
+            } catch (_: Exception) { }
+        }
+    }
+
+    /**
+     * Smoothly fades in the Game Hub ambient music up to the target volume (default 40%).
+     */
+    @Synchronized
+    fun fadeIn(context: Context, durationMs: Long = 800L, targetVolume: Float? = null, track: GameHubTrack = activeTrack) {
+        val appContext = context.applicationContext
+        if (track != activeTrack && isPlayingOrFadingIn) {
+            crossfadeTo(appContext, track, durationMs)
+            return
+        }
+        activeTrack = track
+
         if (!isMusicEnabled(appContext)) {
             return
         }
@@ -105,7 +208,7 @@ object GameHubSoundManager {
         isPlayingOrFadingIn = true
 
         val player = try {
-            ensurePlayer(appContext)
+            ensurePlayer(appContext, track)
         } catch (e: Exception) {
             Log.w(TAG, "Failed to initialize MediaPlayer for Game Hub audio: ${e.message}")
             return
@@ -277,9 +380,22 @@ object GameHubSoundManager {
     }
 
     @Synchronized
-    private fun ensurePlayer(context: Context): MediaPlayer? {
+    private fun ensurePlayer(context: Context, track: GameHubTrack = activeTrack): MediaPlayer? {
         mediaPlayer?.let { return it }
 
+        val player = try {
+            createPlayer(context, track.assetName)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error initializing player for ${track.assetName}: ${e.message}")
+            return null
+        }
+
+        currentVolume = 0.0f
+        mediaPlayer = player
+        return player
+    }
+
+    private fun createPlayer(context: Context, assetName: String): MediaPlayer {
         val player = MediaPlayer()
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_GAME)
@@ -290,7 +406,7 @@ object GameHubSoundManager {
 
         var dataSourceSet = false
         try {
-            val afd = context.assets.openFd(ASSET_NAME)
+            val afd = context.assets.openFd(assetName)
             player.setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
             afd.close()
             dataSourceSet = true
@@ -299,9 +415,9 @@ object GameHubSoundManager {
         }
 
         if (!dataSourceSet) {
-            val cacheFile = File(context.cacheDir, ASSET_NAME)
+            val cacheFile = File(context.cacheDir, assetName)
             if (!cacheFile.exists() || cacheFile.length() == 0L) {
-                context.assets.open(ASSET_NAME).use { input ->
+                context.assets.open(assetName).use { input ->
                     FileOutputStream(cacheFile).use { output ->
                         input.copyTo(output)
                     }
@@ -311,9 +427,7 @@ object GameHubSoundManager {
         }
 
         player.prepare()
-        currentVolume = 0.0f
         player.setVolume(0.0f, 0.0f)
-        mediaPlayer = player
         return player
     }
 

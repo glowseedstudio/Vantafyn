@@ -14,6 +14,7 @@ interface JellyfinPokemonRepository {
     suspend fun getVaultSummary(session: JellyfinSession): Result<PokemonVaultSummary>
     suspend fun getVaultBoxes(session: JellyfinSession): Result<List<PokemonVaultBoxSummary>>
     suspend fun getVaultBox(session: JellyfinSession, boxIndex: Int): Result<PokemonVaultBox>
+    suspend fun sortVaultBox(session: JellyfinSession, boxIndex: Int, criterion: String = "dex", ascending: Boolean = true): Result<PokemonVaultBox>
     suspend fun getVaultEntry(session: JellyfinSession, entryId: String): Result<PokemonVaultEntry?>
     suspend fun getGameSave(session: JellyfinSession, libraryId: String, gameId: String): Result<PokemonGameSaveDto>
     suspend fun getGameLockState(session: JellyfinSession, libraryId: String, gameId: String): Result<SaveLockStateDto>
@@ -33,8 +34,25 @@ interface JellyfinPokemonRepository {
     suspend fun getDiagnostics(session: JellyfinSession): Result<PokemonDiagnosticsDto>
     suspend fun getPokedex(session: JellyfinSession): Result<PokemonPokedexDto>
     suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto>
+    suspend fun getPokemonDetails(
+        session: JellyfinSession,
+        pokemonId: String,
+        gameId: String? = null,
+        libraryId: String? = null,
+        isVault: Boolean = false,
+    ): Result<PokemonDetailsDto>
     suspend fun getAchievements(session: JellyfinSession): Result<PokemonAchievementsSummaryDto>
     suspend fun getSocialActivity(session: JellyfinSession, limit: Int = 30): Result<List<PokemonSocialActivityEvent>>
+    suspend fun updateVaultEntryMoves(
+        session: JellyfinSession,
+        entryId: String,
+        moves: List<String>,
+    ): Result<PokemonVaultEntry>
+    suspend fun evolveVaultEntry(
+        session: JellyfinSession,
+        entryId: String,
+        targetSpeciesId: Int,
+    ): Result<PokemonVaultEntry>
 }
 
 class DefaultJellyfinPokemonRepository(
@@ -141,6 +159,32 @@ class DefaultJellyfinPokemonRepository(
         withContext(ioDispatcher) {
             runCatching {
                 val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/Boxes/$boxIndex")
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(body)
+                val entriesArray = json.optJSONArray("entries") ?: JSONArray()
+                val entriesList = mutableListOf<PokemonVaultEntry>()
+                for (i in 0 until entriesArray.length()) {
+                    entriesList.add(parseVaultEntry(entriesArray.getJSONObject(i)))
+                }
+                PokemonVaultBox(
+                    boxIndex = json.optInt("boxIndex", boxIndex),
+                    name = json.optString("name", "Box $boxIndex"),
+                    entries = entriesList,
+                )
+            }
+        }
+
+    override suspend fun sortVaultBox(
+        session: JellyfinSession,
+        boxIndex: Int,
+        criterion: String,
+        ascending: Boolean,
+    ): Result<PokemonVaultBox> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/Boxes/$boxIndex/Sort?criterion=$criterion&ascending=$ascending")
+                conn.requestMethod = "POST"
                 checkResponseCode(conn)
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
@@ -718,6 +762,7 @@ class DefaultJellyfinPokemonRepository(
             slotIndex = obj.optInt("slotIndex", 1),
             isInParty = obj.optBoolean("isInParty", false),
             legalityStatus = obj.optString("legalityStatus", "valid"),
+            isHallOfFameMember = obj.optBoolean("isHallOfFameMember", false),
         )
     }
 
@@ -741,6 +786,56 @@ class DefaultJellyfinPokemonRepository(
             friendship = if (obj.has("friendship")) obj.optInt("friendship") else null,
             pokeball = obj.optString("pokeball", "").ifEmpty { null },
             rawData = obj.optString("rawData", "").ifEmpty { null },
+            legalityStatus = obj.optString("legalityStatus", summary.legalityStatus),
+            legalityReport = obj.optString("legalityReport", "").ifEmpty { null },
+            illegalitiesCount = obj.optInt("illegalitiesCount", 0),
+            movesLegality = obj.optJSONArray("movesLegality")?.let { arr ->
+                (0 until arr.length()).map { arr.optBoolean(it, true) }
+            } ?: emptyList(),
+            learnableMoves = obj.optJSONArray("learnableMoves")?.let { arr ->
+                (0 until arr.length()).map { idx ->
+                    val m = arr.getJSONObject(idx)
+                    PokemonLearnableMoveDto(
+                        name = m.optString("name", ""),
+                        type = m.optString("type", "Normal"),
+                        category = m.optString("category", "Physical"),
+                        power = if (m.has("power") && !m.isNull("power")) m.optInt("power") else null,
+                        accuracy = if (m.has("accuracy") && !m.isNull("accuracy")) m.optInt("accuracy") else null,
+                        pp = m.optInt("pp", 20),
+                        learnMethod = m.optString("learnMethod", "Level Up"),
+                        levelLearned = if (m.has("levelLearned") && !m.isNull("levelLearned")) m.optInt("levelLearned") else null,
+                        description = m.optString("description", "").ifEmpty { null },
+                    )
+                }
+            } ?: emptyList(),
+            ribbons = obj.optJSONArray("ribbons")?.let { arr ->
+                (0 until arr.length()).map { idx ->
+                    val r = arr.getJSONObject(idx)
+                    PokemonRibbonDto(
+                        key = r.optString("key", ""),
+                        name = r.optString("name", ""),
+                        category = r.optString("category", "Memorial"),
+                        description = r.optString("description", ""),
+                        title = r.optString("title", "").ifEmpty { null },
+                        iconColorHex = r.optString("iconColorHex", "#3B82F6"),
+                    )
+                }
+            } ?: emptyList(),
+            isHallOfFameMember = obj.optBoolean("isHallOfFameMember", summary.isHallOfFameMember),
+            availableEvolutions = obj.optJSONArray("availableEvolutions")?.let { arr ->
+                (0 until arr.length()).map { idx ->
+                    val ev = arr.getJSONObject(idx)
+                    PokemonEvolutionOptionDto(
+                        targetSpeciesId = ev.optInt("targetSpeciesId", 0),
+                        targetSpecies = ev.optString("targetSpecies", ""),
+                        triggerMethod = ev.optString("triggerMethod", "Trade"),
+                        requiredItem = ev.optString("requiredItem", "").ifEmpty { null },
+                        requiredLevel = if (ev.has("requiredLevel") && !ev.isNull("requiredLevel")) ev.optInt("requiredLevel") else null,
+                        description = ev.optString("description", ""),
+                        canEvolveNow = ev.optBoolean("canEvolveNow", true),
+                    )
+                }
+            } ?: emptyList(),
         )
     }
 
@@ -957,6 +1052,48 @@ class DefaultJellyfinPokemonRepository(
             }
         }
 
+    override suspend fun getPokemonDetails(
+        session: JellyfinSession,
+        pokemonId: String,
+        gameId: String?,
+        libraryId: String?,
+        isVault: Boolean,
+    ): Result<PokemonDetailsDto> =
+        withContext(ioDispatcher) {
+            runCatching {
+                if (isVault || gameId.isNullOrBlank()) {
+                    val entry = getVaultEntry(session, pokemonId).getOrThrow()
+                        ?: throw NoSuchElementException("Vault entry not found: $pokemonId")
+                    entry.details ?: PokemonDetailsDto(
+                        summary = PokemonSummaryDto(
+                            id = entry.id,
+                            species = entry.species,
+                            speciesId = entry.speciesId,
+                            form = entry.form,
+                            nickname = entry.nickname,
+                            level = entry.level,
+                            gender = entry.gender,
+                            isShiny = entry.isShiny,
+                            originalTrainer = entry.originalTrainer,
+                            originalTrainerId = entry.originalTrainerId,
+                            originGame = entry.originGame,
+                            currentGame = entry.originGame,
+                            currentLocation = entry.currentLocation,
+                            boxIndex = entry.boxIndex,
+                            slotIndex = entry.slotIndex,
+                            isInParty = false,
+                        )
+                    )
+                } else {
+                    val lib = libraryId?.ifBlank { "default" } ?: "default"
+                    val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Games/$lib/$gameId/Save/Pokemon/$pokemonId")
+                    checkResponseCode(conn)
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    parsePokemonDetails(JSONObject(body))
+                }
+            }
+        }
+
     override suspend fun getAchievements(session: JellyfinSession): Result<PokemonAchievementsSummaryDto> =
         withContext(ioDispatcher) {
             runCatching {
@@ -1026,6 +1163,49 @@ class DefaultJellyfinPokemonRepository(
                     )
                 }
                 list
+            }
+        }
+
+    override suspend fun updateVaultEntryMoves(
+        session: JellyfinSession,
+        entryId: String,
+        moves: List<String>,
+    ): Result<PokemonVaultEntry> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/Entries/$entryId/Moves")
+                conn.requestMethod = "PUT"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val json = JSONObject()
+                val movesArr = JSONArray()
+                moves.forEach { movesArr.put(it) }
+                json.put("moves", movesArr)
+                conn.outputStream.bufferedWriter().use { it.write(json.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseVaultEntry(JSONObject(body))
+            }
+        }
+
+    override suspend fun evolveVaultEntry(
+        session: JellyfinSession,
+        entryId: String,
+        targetSpeciesId: Int,
+    ): Result<PokemonVaultEntry> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/Entries/$entryId/Evolve")
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val json = JSONObject().apply {
+                    put("targetSpeciesId", targetSpeciesId)
+                }
+                conn.outputStream.bufferedWriter().use { it.write(json.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseVaultEntry(JSONObject(body))
             }
         }
 

@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
@@ -102,20 +103,18 @@ fun PokemonAchievementsModal(
         loadData()
     }
 
-    BasicAlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.96f)
-            .height(680.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF151722))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp)),
-    ) {
-        Column(
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        PokemonModalContainer(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
+                .fillMaxWidth(0.96f)
+                .height(680.dp),
+            shape = RoundedCornerShape(20.dp),
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+            ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -189,13 +188,14 @@ fun PokemonAchievementsModal(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF161926))
+                    .background(Color(0xFF161926).copy(alpha = 0.85f))
                     .padding(3.dp),
             ) {
                 // Achievements Tab
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .height(38.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(
                             if (selectedTab == 0) Brush.horizontalGradient(
@@ -203,12 +203,12 @@ fun PokemonAchievementsModal(
                             ) else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                         )
                         .clickable { selectedTab = 0 }
-                        .padding(vertical = 8.dp),
+                        .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Star,
@@ -217,10 +217,12 @@ fun PokemonAchievementsModal(
                             modifier = Modifier.size(15.dp),
                         )
                         Text(
-                            text = "Achievements (${summary?.unlockedCount ?: 0}/${summary?.totalCount ?: 10})",
+                            text = "Badges (${summary?.unlockedCount ?: 0}/${summary?.totalCount ?: 10})",
                             color = if (selectedTab == 0) Color.White else Color(0xFF94A3B8),
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -229,6 +231,7 @@ fun PokemonAchievementsModal(
                 Box(
                     modifier = Modifier
                         .weight(1f)
+                        .height(38.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(
                             if (selectedTab == 1) Brush.horizontalGradient(
@@ -236,12 +239,12 @@ fun PokemonAchievementsModal(
                             ) else Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
                         )
                         .clickable { selectedTab = 1 }
-                        .padding(vertical = 8.dp),
+                        .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.History,
@@ -252,8 +255,10 @@ fun PokemonAchievementsModal(
                         Text(
                             text = "Trainer Feed (${activityFeed.size})",
                             color = if (selectedTab == 1) Color.White else Color(0xFF94A3B8),
-                            fontSize = 12.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -334,6 +339,7 @@ fun PokemonAchievementsModal(
             }
         }
     }
+}
 }
 
 @Composable

@@ -23,8 +23,11 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CatchingPokemon
@@ -60,6 +63,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
@@ -124,20 +128,19 @@ fun PokemonPokedexModal(
         else pokedex?.generationProgress?.firstOrNull { it.generation == selectedGen }
     }
 
-    BasicAlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier
-            .fillMaxWidth(0.96f)
-            .height(680.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF151722))
-            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-            .padding(16.dp),
-    ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+    BasicAlertDialog(onDismissRequest = onDismiss) {
+        PokemonModalContainer(
+            modifier = Modifier
+                .fillMaxWidth(0.96f)
+                .height(680.dp),
+            shape = RoundedCornerShape(20.dp),
         ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -346,33 +349,70 @@ fun PokemonPokedexModal(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                OutlinedTextField(
-                    value = searchQuery,
-                    onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search Pokémon or #...", fontSize = 12.sp, color = VantafynColors.Muted) },
+                var isSearchFocused by remember { mutableStateOf(false) }
+                Row(
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp),
-                    singleLine = true,
-                    leadingIcon = {
-                        Icon(
-                            imageVector = Icons.Rounded.Search,
-                            contentDescription = null,
-                            tint = VantafynColors.Muted,
-                            modifier = Modifier.size(16.dp),
+                        .height(42.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1B1E2B))
+                        .border(
+                            width = if (isSearchFocused) 1.5.dp else 1.dp,
+                            brush = if (isSearchFocused) VantafynGradients.accentHorizontal() else Brush.linearGradient(listOf(Color(0xFF3B425A), Color(0xFF3B425A))),
+                            shape = RoundedCornerShape(10.dp),
                         )
-                    },
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF00E5FF),
-                        unfocusedBorderColor = Color(0xFF3B425A),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        cursorColor = Color(0xFF00E5FF),
-                    ),
-                    shape = RoundedCornerShape(10.dp),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                )
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        tint = if (isSearchFocused) Color(0xFF00E5FF) else VantafynColors.Muted,
+                        modifier = Modifier.size(17.dp),
+                    )
+                    BasicTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { isSearchFocused = it.isFocused },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Normal,
+                        ),
+                        cursorBrush = VantafynGradients.accentHorizontal(),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                        decorationBox = { innerTextField ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (searchQuery.isEmpty()) {
+                                    Text(
+                                        text = "Search Pokémon or #...",
+                                        color = VantafynColors.Muted,
+                                        fontSize = 12.5.sp,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                innerTextField()
+                            }
+                        },
+                    )
+                    if (searchQuery.isNotEmpty()) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Clear",
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { searchQuery = "" },
+                        )
+                    }
+                }
 
                 // Caught filter chip
                 Box(
@@ -480,6 +520,7 @@ fun PokemonPokedexModal(
             }
         }
     }
+}
 
     // Detail modal for inspecting entry and lineage journey
     if (inspectingEntry != null) {

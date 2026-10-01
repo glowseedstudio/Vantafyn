@@ -319,6 +319,166 @@ public sealed class PokemonVaultStoreTests
         Assert.Equal(30, summary.TotalCount);
     }
 
+    [Fact]
+    public async Task SortBoxAsync_SortsByDexNumberAndRecompactsSlots()
+    {
+        using var temp = new TempPaths();
+        var clock = new FixedClock();
+        var store = new FilePokemonVaultStore(temp, clock);
+        var userId = Guid.NewGuid();
+
+        // Add out-of-order Pokémon in Box 1 with gaps
+        await store.AddOrUpdateEntryAsync(userId, new PokemonVaultEntry
+        {
+            Id = "mewtwo-1",
+            BoxIndex = 1,
+            SlotIndex = 12,
+            Species = "Mewtwo",
+            SpeciesId = 150,
+            Level = 70
+        }, CancellationToken.None);
+
+        await store.AddOrUpdateEntryAsync(userId, new PokemonVaultEntry
+        {
+            Id = "bulbasaur-1",
+            BoxIndex = 1,
+            SlotIndex = 25,
+            Species = "Bulbasaur",
+            SpeciesId = 1,
+            Level = 5
+        }, CancellationToken.None);
+
+        await store.AddOrUpdateEntryAsync(userId, new PokemonVaultEntry
+        {
+            Id = "pikachu-1",
+            BoxIndex = 1,
+            SlotIndex = 4,
+            Species = "Pikachu",
+            SpeciesId = 25,
+            Level = 25
+        }, CancellationToken.None);
+
+        var sortedBox = await store.SortBoxAsync(userId, 1, "dex", ascending: true, CancellationToken.None);
+
+        Assert.NotNull(sortedBox);
+        Assert.Equal(3, sortedBox.Entries.Count);
+        // Should be sorted Bulbasaur (1), Pikachu (25), Mewtwo (150)
+        Assert.Equal("Bulbasaur", sortedBox.Entries[0].Species);
+        Assert.Equal(1, sortedBox.Entries[0].SlotIndex);
+
+        Assert.Equal("Pikachu", sortedBox.Entries[1].Species);
+        Assert.Equal(2, sortedBox.Entries[1].SlotIndex);
+
+        Assert.Equal("Mewtwo", sortedBox.Entries[2].Species);
+        Assert.Equal(3, sortedBox.Entries[2].SlotIndex);
+    }
+
+    [Fact]
+    public async Task UpdateEntryMovesAsync_UpdatesMovesAndPreservesLegality()
+    {
+        using var temp = new TempPaths();
+        var clock = new FixedClock();
+        var store = new FilePokemonVaultStore(temp, clock);
+        var userId = Guid.NewGuid();
+
+        await store.AddOrUpdateEntryAsync(userId, new PokemonVaultEntry
+        {
+            Id = "charizard-moves",
+            BoxIndex = 1,
+            SlotIndex = 1,
+            Species = "Charizard",
+            SpeciesId = 6,
+            Nickname = "Flame",
+            Level = 50,
+            OriginGame = "Pokémon FireRed"
+        }, CancellationToken.None);
+
+        var newMoves = new List<string> { "Flamethrower", "Air Slash", "Dragon Claw", "Roost" };
+        var updated = await store.UpdateEntryMovesAsync(userId, "charizard-moves", newMoves, CancellationToken.None);
+
+        Assert.NotNull(updated);
+        Assert.NotNull(updated.Details);
+        Assert.Equal(4, updated.Details.Moves.Count);
+        Assert.Equal("Flamethrower", updated.Details.Moves[0]);
+        Assert.Equal("Air Slash", updated.Details.Moves[1]);
+        Assert.Equal("Dragon Claw", updated.Details.Moves[2]);
+        Assert.Equal("Roost", updated.Details.Moves[3]);
+        Assert.NotNull(updated.Details.MovesLegality);
+        Assert.All(updated.Details.MovesLegality, Assert.True);
+    }
+
+    [Fact]
+    public void PokemonMovepoolProvider_ReturnsCuratedMovesForCharizard()
+    {
+        var moves = PokemonMovepoolProvider.GetLearnableMoves(6, "Charizard", 50);
+
+        Assert.NotEmpty(moves);
+        Assert.Contains(moves, m => m.Name == "Flamethrower" && m.Type == "Fire");
+        Assert.Contains(moves, m => m.Name == "Air Slash" && m.Type == "Flying");
+        Assert.Contains(moves, m => m.Name == "Solar Beam" && m.LearnMethod == "TM / TR");
+    }
+
+    [Fact]
+    public void PokemonRibbonCatalog_EvaluatesEffortAndChampionRibbons()
+    {
+        var evs = new PokemonStatsDto { Hp = 252, Attack = 252, Speed = 4 };
+        var ribbons = PokemonRibbonCatalog.EvaluateRibbons(
+            explicitRibbons: null,
+            evs: evs,
+            level: 60,
+            friendship: 200,
+            originGame: "Pokemon Emerald",
+            generation: 3,
+            isInParty: true);
+
+        Assert.NotEmpty(ribbons);
+        Assert.Contains(ribbons, r => r.Key == "effort" && r.Category == "Effort");
+        Assert.Contains(ribbons, r => r.Key == "champion" && r.Category == "Champion");
+    }
+
+    [Fact]
+    public void PokemonEvolutionCatalog_ProvidesTradeEvolutionsForHaunterAndMachoke()
+    {
+        var haunterEvos = PokemonEvolutionCatalog.GetAvailableEvolutions(93, "Haunter", 40, null);
+        Assert.NotEmpty(haunterEvos);
+        Assert.Contains(haunterEvos, e => e.TargetSpeciesId == 94 && e.TargetSpecies == "Gengar" && e.TriggerMethod == "Trade");
+
+        var machokeEvos = PokemonEvolutionCatalog.GetAvailableEvolutions(67, "Machoke", 38, null);
+        Assert.NotEmpty(machokeEvos);
+        Assert.Contains(machokeEvos, e => e.TargetSpeciesId == 68 && e.TargetSpecies == "Machamp" && e.TriggerMethod == "Trade");
+    }
+
+    [Fact]
+    public async Task EvolveEntryAsync_EvolvesHaunterToGengar()
+    {
+        using var paths = new TempPaths();
+        var store = new FilePokemonVaultStore(paths, new FixedClock());
+        var userId = Guid.NewGuid();
+
+        var entry = new PokemonVaultEntry
+        {
+            Id = "vault_haunter_1",
+            SpeciesId = 93,
+            Species = "Haunter",
+            Nickname = "Haunter",
+            Level = 45,
+            BoxIndex = 1,
+            SlotIndex = 1,
+            OriginalTrainer = "Ash"
+        };
+
+        await store.AddOrUpdateEntryAsync(userId, entry, CancellationToken.None);
+
+        var evolved = await store.EvolveEntryAsync(userId, "vault_haunter_1", 94, CancellationToken.None);
+
+        Assert.NotNull(evolved);
+        Assert.Equal(94, evolved.SpeciesId);
+        Assert.Equal("Gengar", evolved.Species);
+        Assert.Equal("Gengar", evolved.Nickname);
+        Assert.NotNull(evolved.Details);
+        Assert.Equal(94, evolved.Details.Summary.SpeciesId);
+    }
+
     private sealed class FixedClock : IClock
     {
         public DateTimeOffset UtcNow => new(2026, 9, 30, 12, 0, 0, TimeSpan.Zero);

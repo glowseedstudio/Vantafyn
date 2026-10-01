@@ -322,6 +322,39 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
 
             var pkmList = await pkmResponse.Content.ReadFromJsonAsync<List<PkVaultPkmSaveItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false) ?? [];
 
+            // Extract PKVault PKHeX legality state if present
+            Dictionary<string, PkVaultPkmLegalityDto>? legalityMap = null;
+            var activeSaveData = dataDto?.Saves?.FirstOrDefault(s => s.SaveId == saveId) ?? dataDto?.Saves?.FirstOrDefault();
+            if (activeSaveData?.SavePkmLegality?.Data != null && activeSaveData.SavePkmLegality.Data.Count > 0)
+            {
+                legalityMap = activeSaveData.SavePkmLegality.Data;
+            }
+
+            if ((legalityMap == null || legalityMap.Count == 0) && pkmList.Count > 0)
+            {
+                try
+                {
+                    var pkmQuery = string.Join("&", pkmList.Take(60).Select(p => $"pkmIds={Uri.EscapeDataString(p.Id)}"));
+                    var legResp = await client.GetAsync($"/api/storage/pkm/legality?{pkmQuery}&saveId={saveId}", cts.Token).ConfigureAwait(false);
+                    if (legResp.IsSuccessStatusCode)
+                    {
+                        legalityMap = await legResp.Content.ReadFromJsonAsync<Dictionary<string, PkVaultPkmLegalityDto>>(cancellationToken: cts.Token).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Could not fetch on-demand legality from PKVault");
+                }
+            }
+
+            PkVaultPkmLegalityDto? FindLegality(PkVaultPkmSaveItemDto p)
+            {
+                if (legalityMap == null) return null;
+                if (legalityMap.TryGetValue(p.Id, out var l)) return l;
+                if (!string.IsNullOrEmpty(p.IdBase) && legalityMap.TryGetValue(p.IdBase, out var lb)) return lb;
+                return null;
+            }
+
             var result = new PokemonSaveParseResult
             {
                 IsSuccess = true,
@@ -337,9 +370,10 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             {
                 var p = partyPkms[i];
                 var slotIndex = p.Party >= 0 ? p.Party + 1 : i + 1;
-                var summary = MapToSummary(p, pokemonGameId, isInParty: true, boxIndex: null, slotIndex: slotIndex);
+                var leg = FindLegality(p);
+                var summary = MapToSummary(p, pokemonGameId, isInParty: true, boxIndex: null, slotIndex: slotIndex, legality: leg);
                 result.Party.Add(summary);
-                result.Details[summary.Id] = MapToDetails(p, summary);
+                result.Details[summary.Id] = MapToDetails(p, summary, legality: leg);
             }
 
             // 5. Map Box Pokémon (Party < 0)
@@ -362,9 +396,10 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                         {
                             var p = monsInBox[i];
                             var slotIndex = p.BoxSlot >= 0 ? p.BoxSlot + 1 : i + 1;
-                            var summary = MapToSummary(p, pokemonGameId, isInParty: false, boxIndex: boxNumber, slotIndex: slotIndex);
+                            var leg = FindLegality(p);
+                            var summary = MapToSummary(p, pokemonGameId, isInParty: false, boxIndex: boxNumber, slotIndex: slotIndex, legality: leg);
                             entries.Add(summary);
-                            result.Details[summary.Id] = MapToDetails(p, summary);
+                            result.Details[summary.Id] = MapToDetails(p, summary, legality: leg);
                         }
                     }
 
@@ -486,7 +521,8 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         string gameId,
         bool isInParty,
         int? boxIndex,
-        int slotIndex)
+        int slotIndex,
+        PkVaultPkmLegalityDto? legality = null)
     {
         var id = !string.IsNullOrWhiteSpace(p.Id)
             ? p.Id
@@ -494,6 +530,20 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
 
         var speciesName = _catalog.ResolveSpeciesName(p.Species, p.Nickname, p.IsNicknamed);
         var nickname = !string.IsNullOrWhiteSpace(p.Nickname) ? p.Nickname : speciesName;
+
+        var legalityStatus = "valid";
+        if (legality != null)
+        {
+            legalityStatus = (legality.IsValid && legality.IllegalitiesCount == 0) ? "valid" : "illegal";
+        }
+        else
+        {
+            var ivsValid = p.IVs == null || p.IVs.All(iv => iv is >= 0 and <= 31);
+            var evsValid = p.EVs == null || (p.EVs.All(ev => ev is >= 0 and <= 252) && p.EVs.Sum() <= 510);
+            var levelValid = p.Level is >= 1 and <= 100;
+            var speciesValid = p.Species > 0;
+            legalityStatus = (ivsValid && evsValid && levelValid && speciesValid) ? "valid" : "illegal";
+        }
 
         return new PokemonSummaryDto
         {
@@ -514,11 +564,14 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             BoxIndex = isInParty ? null : boxIndex,
             SlotIndex = slotIndex,
             IsInParty = isInParty,
-            LegalityStatus = "valid"
+            LegalityStatus = legalityStatus
         };
     }
 
-    private PokemonDetailsDto MapToDetails(PkVaultPkmSaveItemDto p, PokemonSummaryDto summary)
+    private PokemonDetailsDto MapToDetails(
+        PkVaultPkmSaveItemDto p,
+        PokemonSummaryDto summary,
+        PkVaultPkmLegalityDto? legality = null)
     {
         var natureName = _catalog.ResolveNatureName(p.Nature);
         var abilityName = _catalog.ResolveAbilityName(p.Ability);
@@ -561,6 +614,36 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             maxHp = p.Stats[0];
         }
 
+        var legalityStatus = summary.LegalityStatus;
+        string? legalityReport = null;
+        var illegalitiesCount = 0;
+        IReadOnlyList<bool>? movesLegality = null;
+
+        if (legality != null)
+        {
+            legalityReport = legality.ValidityReport;
+            illegalitiesCount = legality.IllegalitiesCount;
+            movesLegality = legality.MovesLegality;
+        }
+        else
+        {
+            movesLegality = p.Moves?.Select(_ => true).ToList();
+        }
+
+        var ribbons = PokemonRibbonCatalog.EvaluateRibbons(
+            p.Ribbons,
+            evs,
+            summary.Level,
+            p.Friendship,
+            summary.OriginGame,
+            generation: 3,
+            isInParty: summary.IsInParty);
+
+        var isHallOfFame = ribbons.Any(r => r.Category.Equals("Champion", StringComparison.OrdinalIgnoreCase)) ||
+            (summary.Level >= 55 && summary.IsInParty);
+
+        summary.IsHallOfFameMember = isHallOfFame;
+
         return new PokemonDetailsDto
         {
             Summary = summary,
@@ -574,7 +657,15 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             MaxHp = maxHp,
             Friendship = p.Friendship > 0 ? p.Friendship : null,
             Pokeball = p.Ball > 0 ? p.Ball.ToString() : null,
-            RawData = p.DynamicChecksum
+            RawData = p.DynamicChecksum,
+            LegalityStatus = legalityStatus,
+            LegalityReport = legalityReport,
+            IllegalitiesCount = illegalitiesCount,
+            MovesLegality = movesLegality,
+            LearnableMoves = PokemonMovepoolProvider.GetLearnableMoves(summary.SpeciesId, summary.Species, summary.Level),
+            Ribbons = ribbons,
+            IsHallOfFameMember = isHallOfFame,
+            AvailableEvolutions = PokemonEvolutionCatalog.GetAvailableEvolutions(summary.SpeciesId, summary.Species, summary.Level, heldItemName)
         };
     }
 
@@ -966,6 +1057,54 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
     {
         [JsonPropertyName("saveInfos")]
         public Dictionary<string, PkVaultSaveInfoDto>? SaveInfos { get; set; }
+
+        [JsonPropertyName("saves")]
+        public List<PkVaultDataSaveDto>? Saves { get; set; }
+
+        [JsonPropertyName("mainPkmLegalities")]
+        public PkVaultDataStateLegalityDto? MainPkmLegalities { get; set; }
+    }
+
+    private sealed class PkVaultDataSaveDto
+    {
+        [JsonPropertyName("saveId")]
+        public int SaveId { get; set; }
+
+        [JsonPropertyName("savePkmLegality")]
+        public PkVaultDataStateLegalityDto? SavePkmLegality { get; set; }
+    }
+
+    private sealed class PkVaultDataStateLegalityDto
+    {
+        [JsonPropertyName("all")]
+        public bool All { get; set; }
+
+        [JsonPropertyName("data")]
+        public Dictionary<string, PkVaultPkmLegalityDto>? Data { get; set; }
+    }
+
+    private sealed class PkVaultPkmLegalityDto
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [JsonPropertyName("saveId")]
+        public int? SaveId { get; set; }
+
+        [JsonPropertyName("movesLegality")]
+        public List<bool>? MovesLegality { get; set; }
+
+        [JsonPropertyName("relearnMovesLegality")]
+        public List<bool>? RelearnMovesLegality { get; set; }
+
+        [JsonPropertyName("isValid")]
+        public bool IsValid { get; set; }
+
+        [JsonPropertyName("validityReport")]
+        public string? ValidityReport { get; set; }
+
+        [JsonPropertyName("illegalitiesCount")]
+        public int IllegalitiesCount { get; set; }
     }
 
     private sealed class PkVaultSaveInfoDto
@@ -1098,6 +1237,9 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
 
         [JsonPropertyName("tid")]
         public uint Tid { get; set; }
+
+        [JsonPropertyName("ribbons")]
+        public Dictionary<string, byte>? Ribbons { get; set; }
 
         [JsonPropertyName("dynamicChecksum")]
         public string? DynamicChecksum { get; set; }

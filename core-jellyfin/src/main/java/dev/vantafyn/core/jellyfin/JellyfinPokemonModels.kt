@@ -49,7 +49,27 @@ data class PokemonVaultEntry(
     val currentLocation: String = "",
     val depositedAtUtc: String? = null,
     val details: PokemonDetailsDto? = null,
-) : Serializable
+) : Serializable {
+    fun toSummaryDto(): PokemonSummaryDto = PokemonSummaryDto(
+        id = id,
+        species = species,
+        speciesId = speciesId,
+        form = form,
+        nickname = nickname,
+        level = level,
+        gender = gender,
+        isShiny = isShiny,
+        originalTrainer = originalTrainer,
+        originalTrainerId = originalTrainerId,
+        originGame = originGame,
+        currentLocation = currentLocation,
+        boxIndex = boxIndex,
+        slotIndex = slotIndex,
+        isInParty = false,
+        legalityStatus = details?.legalityStatus ?: "valid",
+        isHallOfFameMember = details?.isHallOfFameMember ?: false,
+    )
+}
 
 data class PokemonVaultBox(
     val boxIndex: Int = 1,

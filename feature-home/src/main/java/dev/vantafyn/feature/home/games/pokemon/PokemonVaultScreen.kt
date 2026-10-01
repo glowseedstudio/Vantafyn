@@ -16,8 +16,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -358,13 +360,94 @@ fun PokemonVaultScreen(
         }
     }
 
+    fun handleSortBox(side: TransferSide, criterion: String, ascending: Boolean) {
+        val state = if (side == TransferSide.Source) upperState else lowerState
+        if (session == null) return
+
+        when (val container = state.containerType) {
+            is StorageContainerType.PersonalVault -> {
+                coroutineScope.launch(Dispatchers.IO) {
+                    val boxIndex = state.selectedBoxIndex
+                    val res = pokemonRepository.sortVaultBox(session, boxIndex, criterion, ascending)
+                    withContext(Dispatchers.Main) {
+                        res.fold(
+                            onSuccess = { sortedBox ->
+                                if (side == TransferSide.Source) {
+                                    upperState = upperState.copy(
+                                        vaultBox = sortedBox,
+                                    )
+                                    upperSelectedSlotIndex = null
+                                } else {
+                                    lowerState = lowerState.copy(
+                                        vaultBox = sortedBox,
+                                    )
+                                    lowerSelectedSlotIndex = null
+                                }
+                                operationResultMessage = "Sorted ${sortedBox.name} by ${criterion.uppercase()}!"
+                            },
+                            onFailure = { err ->
+                                operationResultMessage = "Sort failed: ${err.message}"
+                            }
+                        )
+                    }
+                }
+            }
+            is StorageContainerType.GameCartridge -> {
+                val save = state.gameSave ?: return
+                val boxIndex = state.selectedBoxIndex
+                val targetBox = save.boxes.firstOrNull { it.boxIndex == boxIndex } ?: return
+                if (targetBox.entries.isEmpty()) return
+
+                val sortedEntries = when (criterion.lowercase()) {
+                    "dex" -> {
+                        if (ascending) targetBox.entries.sortedWith(compareBy({ it.speciesId }, { it.level }))
+                        else targetBox.entries.sortedWith(compareByDescending<PokemonSummaryDto> { it.speciesId }.thenByDescending { it.level })
+                    }
+                    "shiny" -> {
+                        targetBox.entries.sortedWith(compareByDescending<PokemonSummaryDto> { it.isShiny }.thenBy { it.speciesId })
+                    }
+                    "level" -> {
+                        if (ascending) targetBox.entries.sortedBy { it.level }
+                        else targetBox.entries.sortedByDescending { it.level }
+                    }
+                    "name" -> {
+                        if (ascending) targetBox.entries.sortedBy { it.species }
+                        else targetBox.entries.sortedByDescending { it.species }
+                    }
+                    "iv" -> {
+                        targetBox.entries.sortedByDescending { it.level }
+                    }
+                    else -> targetBox.entries
+                }.mapIndexed { idx, pkm ->
+                    pkm.copy(slotIndex = idx + 1)
+                }
+
+                val updatedBoxes = save.boxes.map { b ->
+                    if (b.boxIndex == boxIndex) {
+                        b.copy(entries = sortedEntries, occupiedCount = sortedEntries.size)
+                    } else b
+                }
+                val updatedSave = save.copy(boxes = updatedBoxes)
+                if (side == TransferSide.Source) {
+                    upperState = upperState.copy(gameSave = updatedSave)
+                    upperSelectedSlotIndex = null
+                } else {
+                    lowerState = lowerState.copy(gameSave = updatedSave)
+                    lowerSelectedSlotIndex = null
+                }
+                operationResultMessage = "Sorted ${targetBox.name} by ${criterion.uppercase()}!"
+            }
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .padding(horizontal = 14.dp, vertical = 8.dp),
+            .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(horizontal = 14.dp, vertical = 2.dp),
     ) {
-        // Header
+        // Header Row 1: Back, Title, Subtitle, Occupancy Pill, Refresh
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -374,12 +457,12 @@ fun PokemonVaultScreen(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 CompactBackButton(onClick = onBack)
                 Column {
                     Text(
-                        text = "Pokémon Vault & Transfer",
+                        text = "Pokémon Vault",
                         color = VantafynColors.Ink,
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
@@ -392,12 +475,12 @@ fun PokemonVaultScreen(
                             imageVector = Icons.Rounded.Security,
                             contentDescription = "Safe Lock Active",
                             tint = Color(0xFF10B981),
-                            modifier = Modifier.size(12.dp),
+                            modifier = Modifier.size(11.dp),
                         )
                         Text(
                             text = "Safe-Session Transaction Protection",
                             color = Color(0xFF10B981),
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Medium,
                         )
                     }
@@ -406,7 +489,7 @@ fun PokemonVaultScreen(
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 // Vault occupancy pill
                 if (vaultSummary != null) {
@@ -426,7 +509,7 @@ fun PokemonVaultScreen(
                             modifier = Modifier.size(13.dp),
                         )
                         Text(
-                            text = "${vaultSummary!!.totalOccupied}/900 Stored",
+                            text = "${vaultSummary!!.totalOccupied}/900",
                             color = VantafynColors.Ink,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -434,122 +517,130 @@ fun PokemonVaultScreen(
                     }
                 }
 
-                // Trade Center Button
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(VantafynGradients.accentHorizontal())
-                        .clickable { isTradeModalOpen = true }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.SwapHoriz,
-                        contentDescription = "Trade Center",
-                        tint = Color.White,
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Text(
-                        text = "Trade Center",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
-                // Backups & Diagnostics Button
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF202334))
-                        .border(1.dp, Color(0xFF3B425A), RoundedCornerShape(12.dp))
-                        .clickable { isBackupRestoreModalOpen = true }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Security,
-                        contentDescription = "Backups & Diagnostics",
-                        tint = Color(0xFF00E5FF),
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Text(
-                        text = "Backups",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
-                // National Pokédex Button
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF202334))
-                        .border(1.dp, Color(0xFF3B425A), RoundedCornerShape(12.dp))
-                        .clickable { isPokedexModalOpen = true }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.MenuBook,
-                        contentDescription = "National Pokédex",
-                        tint = Color(0xFFE11D48),
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Text(
-                        text = "Pokédex",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
-                // Trainer Badges & Social Activity Button
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF202334))
-                        .border(1.dp, Color(0xFF3B425A), RoundedCornerShape(12.dp))
-                        .clickable { isAchievementsModalOpen = true }
-                        .padding(horizontal = 9.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Star,
-                        contentDescription = "Badges & Activity",
-                        tint = Color(0xFFF59E0B),
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Text(
-                        text = "Badges",
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-
                 IconButton(
-                    onClick = {
-                        loadAll()
-                    },
+                    onClick = { loadAll() },
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.Refresh,
                         contentDescription = "Refresh",
-                        tint = VantafynColors.Muted,
+                        tint = if (isRefreshing) Color(0xFF00E5FF) else VantafynColors.Muted,
                         modifier = Modifier.size(18.dp),
                     )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(6.dp))
+        // Header Row 2: Dedicated Action Chips (Trade, Backups, Pokédex, Badges)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Trade Center Button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(VantafynGradients.accentHorizontal())
+                    .clickable { isTradeModalOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SwapHoriz,
+                    contentDescription = "Trade Center",
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    text = "Trade Center",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            // Backups & Diagnostics Button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF202334))
+                    .border(1.dp, Color(0xFF3B425A), RoundedCornerShape(10.dp))
+                    .clickable { isBackupRestoreModalOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Security,
+                    contentDescription = "Backups & Diagnostics",
+                    tint = Color(0xFF00E5FF),
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    text = "Backups",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            // National Pokédex Button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF202334))
+                    .border(1.dp, Color(0xFF3B425A), RoundedCornerShape(10.dp))
+                    .clickable { isPokedexModalOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MenuBook,
+                    contentDescription = "National Pokédex",
+                    tint = Color(0xFFE11D48),
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    text = "Pokédex",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+
+            // Trainer Badges & Social Activity Button
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color(0xFF202334))
+                    .border(1.dp, Color(0xFF3B425A), RoundedCornerShape(10.dp))
+                    .clickable { isAchievementsModalOpen = true }
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Star,
+                    contentDescription = "Badges & Activity",
+                    tint = Color(0xFFF59E0B),
+                    modifier = Modifier.size(14.dp),
+                )
+                Text(
+                    text = "Badges",
+                    color = Color.White,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
 
         // Split View Container
         if (isLoadingInitial) {
@@ -620,6 +711,12 @@ fun PokemonVaultScreen(
                             }
                         }
                     },
+                    onOpenDetails = { pokemon ->
+                        inspectedPokemon = pokemon
+                    },
+                    onSortBox = { criterion, ascending ->
+                        handleSortBox(TransferSide.Source, criterion, ascending)
+                    },
                 )
 
                 // ACTION TRANSFER BRIDGE
@@ -682,19 +779,35 @@ fun PokemonVaultScreen(
                             }
                         }
                     },
+                    onOpenDetails = { pokemon ->
+                        inspectedPokemon = pokemon
+                    },
+                    onSortBox = { criterion, ascending ->
+                        handleSortBox(TransferSide.Destination, criterion, ascending)
+                    },
                 )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(110.dp))
             }
         }
     }
 
     // Inspection Modal
     if (inspectedPokemon != null) {
+        val selectedItem = selectedPokemonItem
+        val isVault = selectedItem?.isVault 
+            ?: (upperState.vaultBox?.entries?.any { it.id == inspectedPokemon!!.id } == true)
+            ?: (lowerState.vaultBox?.entries?.any { it.id == inspectedPokemon!!.id } == true)
+        val gameId = selectedItem?.gameId
+            ?: (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
+            ?: (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
+
         PokemonDetailModal(
             pokemon = inspectedPokemon!!,
             session = session,
             pokemonRepository = pokemonRepository,
+            gameId = gameId,
+            isVault = isVault,
             onDismiss = { inspectedPokemon = null },
         )
     }
@@ -703,9 +816,10 @@ fun PokemonVaultScreen(
     if (operationResultMessage != null) {
         AlertDialog(
             onDismissRequest = { operationResultMessage = null },
+            modifier = Modifier.border(1.5.dp, VantafynGradients.accentHorizontal(), RoundedCornerShape(28.dp)),
             title = {
                 Text(
-                    text = "Transfer Operation",
+                    text = "Pokémon Vault",
                     color = VantafynColors.Ink,
                     fontWeight = FontWeight.Bold,
                 )

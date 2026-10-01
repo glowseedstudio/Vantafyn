@@ -195,6 +195,126 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
         }
     }
 
+    public async Task<PokemonVaultEntry?> UpdateEntryMovesAsync(Guid userId, string entryId, IReadOnlyList<string> moves, CancellationToken cancellationToken)
+    {
+        var lockObj = LockFor(userId);
+        await lockObj.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var path = VaultFilePath(userId);
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var vault = await JsonFile.ReadAsync<PokemonVault>(path, cancellationToken).ConfigureAwait(false);
+            if (vault == null)
+            {
+                return null;
+            }
+
+            var entry = vault.Boxes.SelectMany(b => b.Entries)
+                .FirstOrDefault(e => string.Equals(e.Id, entryId, StringComparison.OrdinalIgnoreCase));
+            if (entry == null)
+            {
+                return null;
+            }
+
+            entry.Details ??= new PokemonDetailsDto { Summary = entry.ToSummaryDto() };
+            entry.Details.Moves = moves;
+            entry.Details.MovesLegality = moves.Select(_ => true).ToList();
+            entry.Details.LearnableMoves ??= PokemonMovepoolProvider.GetLearnableMoves(entry.SpeciesId, entry.Species, entry.Level);
+            entry.UpdatedAtUtc = clock.UtcNow;
+            vault.UpdatedAtUtc = clock.UtcNow;
+
+            await JsonFile.WriteAtomicAsync(path, vault, cancellationToken).ConfigureAwait(false);
+            return entry;
+        }
+        finally
+        {
+            lockObj.Release();
+        }
+    }
+
+    public async Task<PokemonVaultEntry?> EvolveEntryAsync(Guid userId, string entryId, int targetSpeciesId, CancellationToken cancellationToken)
+    {
+        var lockObj = LockFor(userId);
+        await lockObj.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var path = VaultFilePath(userId);
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var vault = await JsonFile.ReadAsync<PokemonVault>(path, cancellationToken).ConfigureAwait(false);
+            if (vault == null)
+            {
+                return null;
+            }
+
+            var entry = vault.Boxes.SelectMany(b => b.Entries)
+                .FirstOrDefault(e => string.Equals(e.Id, entryId, StringComparison.OrdinalIgnoreCase));
+            if (entry == null)
+            {
+                return null;
+            }
+
+            var availableEvolutions = PokemonEvolutionCatalog.GetAvailableEvolutions(
+                entry.SpeciesId,
+                entry.Species,
+                entry.Level,
+                entry.Details?.HeldItem);
+
+            var evolutionMatch = availableEvolutions.FirstOrDefault(e => e.TargetSpeciesId == targetSpeciesId);
+            if (evolutionMatch == null)
+            {
+                return null;
+            }
+
+            // Update species identity & preserve nicknames if custom
+            var wasNicknamed = !string.Equals(entry.Nickname, entry.Species, StringComparison.OrdinalIgnoreCase);
+            entry.SpeciesId = evolutionMatch.TargetSpeciesId;
+            entry.Species = evolutionMatch.TargetSpecies;
+            if (!wasNicknamed)
+            {
+                entry.Nickname = evolutionMatch.TargetSpecies;
+            }
+
+            entry.Details ??= new PokemonDetailsDto();
+            entry.Details.Summary = entry.ToSummaryDto();
+            entry.Details.LearnableMoves = PokemonMovepoolProvider.GetLearnableMoves(entry.SpeciesId, entry.Species, entry.Level);
+            entry.Details.AvailableEvolutions = PokemonEvolutionCatalog.GetAvailableEvolutions(entry.SpeciesId, entry.Species, entry.Level, entry.Details.HeldItem);
+            entry.Details.Ribbons = PokemonRibbonCatalog.EvaluateRibbons(
+                null,
+                entry.Details.Ev,
+                entry.Level,
+                entry.Details.Friendship ?? 100,
+                entry.OriginGame,
+                entry.Generation,
+                isInParty: false);
+            entry.Details.IsHallOfFameMember = entry.Details.Ribbons.Any(r => r.Category.Equals("Champion", StringComparison.OrdinalIgnoreCase)) || entry.Level >= 55;
+
+            // Consume held item if item was required
+            if (!string.IsNullOrEmpty(evolutionMatch.RequiredItem) &&
+                string.Equals(entry.Details.HeldItem, evolutionMatch.RequiredItem, StringComparison.OrdinalIgnoreCase))
+            {
+                entry.Details.HeldItem = null;
+            }
+
+            entry.UpdatedAtUtc = clock.UtcNow;
+            vault.UpdatedAtUtc = clock.UtcNow;
+
+            await JsonFile.WriteAtomicAsync(path, vault, cancellationToken).ConfigureAwait(false);
+            return entry;
+        }
+        finally
+        {
+            lockObj.Release();
+        }
+    }
+
     public async Task<PokemonUserProfile> GetUserProfileAsync(Guid userId, CancellationToken cancellationToken)
     {
         var lockObj = LockFor(userId);
@@ -239,6 +359,81 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
         {
             lockObj.Release();
         }
+    }
+
+    public async Task<PokemonVaultBox?> SortBoxAsync(Guid userId, int boxIndex, string criterion, bool ascending, CancellationToken cancellationToken)
+    {
+        var lockObj = LockFor(userId);
+        await lockObj.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var path = VaultFilePath(userId);
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            var vault = await JsonFile.ReadAsync<PokemonVault>(path, cancellationToken).ConfigureAwait(false);
+            if (vault == null)
+            {
+                return null;
+            }
+
+            EnsureBoxes(vault);
+            var box = vault.Boxes.FirstOrDefault(b => b.BoxIndex == boxIndex);
+            if (box == null || box.Entries.Count == 0)
+            {
+                return box;
+            }
+
+            IEnumerable<PokemonVaultEntry> query = criterion.Trim().ToLowerInvariant() switch
+            {
+                "dex" or "pokedex" or "national" => ascending
+                    ? box.Entries.OrderBy(e => e.SpeciesId).ThenBy(e => e.Level).ThenBy(e => e.Species)
+                    : box.Entries.OrderByDescending(e => e.SpeciesId).ThenBy(e => e.Level).ThenBy(e => e.Species),
+                "level" or "lvl" => ascending
+                    ? box.Entries.OrderBy(e => e.Level).ThenBy(e => e.SpeciesId)
+                    : box.Entries.OrderByDescending(e => e.Level).ThenBy(e => e.SpeciesId),
+                "name" or "species" or "alphabetical" => ascending
+                    ? box.Entries.OrderBy(e => e.Nickname ?? e.Species).ThenBy(e => e.Level)
+                    : box.Entries.OrderByDescending(e => e.Nickname ?? e.Species).ThenBy(e => e.Level),
+                "shiny" => ascending
+                    ? box.Entries.OrderBy(e => e.IsShiny ? 0 : 1).ThenBy(e => e.SpeciesId).ThenBy(e => e.Level)
+                    : box.Entries.OrderByDescending(e => e.IsShiny ? 1 : 0).ThenBy(e => e.SpeciesId).ThenBy(e => e.Level),
+                "iv" or "potential" => ascending
+                    ? box.Entries.OrderBy(e => TotalIv(e)).ThenBy(e => e.Level)
+                    : box.Entries.OrderByDescending(e => TotalIv(e)).ThenBy(e => e.Level),
+                _ => ascending
+                    ? box.Entries.OrderBy(e => e.SpeciesId).ThenBy(e => e.Level)
+                    : box.Entries.OrderByDescending(e => e.SpeciesId).ThenBy(e => e.Level)
+            };
+
+            var sortedEntries = query.ToList();
+            for (var i = 0; i < sortedEntries.Count; i++)
+            {
+                var entry = sortedEntries[i];
+                entry.SlotIndex = i + 1;
+                entry.CurrentLocation = $"Vault Box {boxIndex}, Slot {i + 1}";
+                entry.UpdatedAtUtc = clock.UtcNow;
+            }
+
+            box.Entries = sortedEntries;
+            vault.UpdatedAtUtc = clock.UtcNow;
+
+            await JsonFile.WriteAtomicAsync(path, vault, cancellationToken).ConfigureAwait(false);
+            return box;
+        }
+        finally
+        {
+            lockObj.Release();
+        }
+    }
+
+    private static int TotalIv(PokemonVaultEntry entry)
+    {
+        var iv = entry.Details?.Iv;
+        if (iv == null) return 0;
+        return iv.Hp + iv.Attack + iv.Defense + iv.Speed + iv.SpecialAttack + iv.SpecialDefense;
     }
 
     private static void EnsureBoxes(PokemonVault vault)

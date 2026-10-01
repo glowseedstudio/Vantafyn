@@ -27,6 +27,12 @@ public interface IPokemonVaultStore
     Task<PokemonVaultBox?> GetBoxAsync(Guid userId, int boxIndex, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Sorts and compacts Pokémon in a specified box using the chosen criterion and direction.
+    /// Re-compacts slot indices 1..N.
+    /// </summary>
+    Task<PokemonVaultBox?> SortBoxAsync(Guid userId, int boxIndex, string criterion, bool ascending, CancellationToken cancellationToken);
+
+    /// <summary>
     /// Retrieves a specific Pokémon entry by its ID from the user's vault.
     /// </summary>
     Task<PokemonVaultEntry?> GetEntryAsync(Guid userId, string entryId, CancellationToken cancellationToken);
@@ -45,6 +51,16 @@ public interface IPokemonVaultStore
     /// Removes a Pokémon entry by its ID from the user's vault.
     /// </summary>
     Task<bool> RemoveEntryAsync(Guid userId, string entryId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Updates the active moves for a Pokémon entry in the user's vault.
+    /// </summary>
+    Task<PokemonVaultEntry?> UpdateEntryMovesAsync(Guid userId, string entryId, IReadOnlyList<string> moves, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Evolves a Pokémon entry in the user's vault to a new species.
+    /// </summary>
+    Task<PokemonVaultEntry?> EvolveEntryAsync(Guid userId, string entryId, int targetSpeciesId, CancellationToken cancellationToken);
 
     /// <summary>
     /// Gets the user's Pokémon profile/preferences.

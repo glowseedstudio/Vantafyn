@@ -20,10 +20,12 @@ import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.media.games.GameHubSoundManager
+import dev.vantafyn.core.media.games.GameHubTrack
 
 import dev.vantafyn.core.jellyfin.DefaultJellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.feature.home.games.pokemon.PokemonVaultScreen
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 
 @Composable
@@ -64,12 +66,18 @@ fun GamesScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        GameHubSoundManager.fadeIn(context)
+        val initialTrack = if (activeTab == GamesTab.Vault) GameHubTrack.POKEMON_HOME else GameHubTrack.GAME_HUB
+        GameHubSoundManager.fadeIn(context, track = initialTrack)
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             GameHubSoundManager.fadeOut()
         }
+    }
+
+    LaunchedEffect(activeTab) {
+        val targetTrack = if (activeTab == GamesTab.Vault) GameHubTrack.POKEMON_HOME else GameHubTrack.GAME_HUB
+        GameHubSoundManager.crossfadeTo(context, targetTrack, durationMs = 900L)
     }
 
     AnimatedContent(

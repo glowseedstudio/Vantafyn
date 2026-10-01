@@ -72,6 +72,16 @@ public sealed class PokemonVaultEntry
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? RawData { get; set; }
 
+    /// <summary>
+    /// Rich details including IVs, EVs, Nature, Ability, Moves, and Held Item.
+    /// </summary>
+    [JsonPropertyName("details")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PokemonDetailsDto? Details { get; set; }
+
+    [JsonPropertyName("legalityStatus")]
+    public string LegalityStatus { get; set; } = "valid";
+
     public PokemonSummaryDto ToSummaryDto()
     {
         return new PokemonSummaryDto
@@ -92,7 +102,7 @@ public sealed class PokemonVaultEntry
             BoxIndex = BoxIndex,
             SlotIndex = SlotIndex,
             IsInParty = false,
-            LegalityStatus = "valid"
+            LegalityStatus = Details?.LegalityStatus ?? (string.IsNullOrWhiteSpace(LegalityStatus) ? "valid" : LegalityStatus)
         };
     }
 }

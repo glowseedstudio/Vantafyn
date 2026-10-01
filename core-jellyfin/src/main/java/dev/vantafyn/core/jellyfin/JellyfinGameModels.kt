@@ -190,6 +190,7 @@ data class PokemonSummaryDto(
     val slotIndex: Int = 1,
     val isInParty: Boolean = false,
     val legalityStatus: String = "valid",
+    val isHallOfFameMember: Boolean = false,
 ) : Serializable
 
 data class PokemonBoxDto(
@@ -241,5 +242,45 @@ data class PokemonDetailsDto(
     val friendship: Int? = null,
     val pokeball: String? = null,
     val rawData: String? = null,
+    val legalityStatus: String = "valid",
+    val legalityReport: String? = null,
+    val illegalitiesCount: Int = 0,
+    val movesLegality: List<Boolean> = emptyList(),
+    val learnableMoves: List<PokemonLearnableMoveDto> = emptyList(),
+    val ribbons: List<PokemonRibbonDto> = emptyList(),
+    val isHallOfFameMember: Boolean = false,
+    val availableEvolutions: List<PokemonEvolutionOptionDto> = emptyList(),
 ) : Serializable
+
+data class PokemonEvolutionOptionDto(
+    val targetSpeciesId: Int = 0,
+    val targetSpecies: String = "",
+    val triggerMethod: String = "Trade",
+    val requiredItem: String? = null,
+    val requiredLevel: Int? = null,
+    val description: String = "",
+    val canEvolveNow: Boolean = true,
+) : Serializable
+
+data class PokemonRibbonDto(
+    val key: String = "",
+    val name: String = "",
+    val category: String = "Memorial",
+    val description: String = "",
+    val title: String? = null,
+    val iconColorHex: String = "#3B82F6",
+) : Serializable
+
+data class PokemonLearnableMoveDto(
+    val name: String = "",
+    val type: String = "Normal",
+    val category: String = "Physical",
+    val power: Int? = null,
+    val accuracy: Int? = null,
+    val pp: Int = 20,
+    val learnMethod: String = "Level Up",
+    val levelLearned: Int? = null,
+    val description: String? = null,
+) : Serializable
+
 
