@@ -22,6 +22,7 @@ public sealed class PokemonFoundationTests
         Assert.False(config.AllowTrading);
         Assert.False(config.AllowEditing);
         Assert.True(config.AutoBackups);
+        Assert.Null(config.ModalBackgroundPath);
     }
 
     [Theory]

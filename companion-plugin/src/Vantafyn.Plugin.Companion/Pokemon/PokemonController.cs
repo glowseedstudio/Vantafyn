@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Mime;
 using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Authorization;
@@ -160,6 +161,12 @@ public sealed class PokemonController : ControllerBase
     public async Task<ActionResult<PokemonIntegrationStatusDto>> GetStatus(CancellationToken cancellationToken)
     {
         var config = Configuration;
+        var bgPath = config.ModalBackgroundPath?.Trim();
+        var hasBackground = !string.IsNullOrEmpty(bgPath) && (
+            bgPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            bgPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+            System.IO.File.Exists(bgPath));
+
         if (!config.Enabled)
         {
             return Ok(new PokemonIntegrationStatusDto
@@ -172,7 +179,8 @@ public sealed class PokemonController : ControllerBase
                 VaultAvailable = false,
                 TransfersAvailable = false,
                 CrossGenerationAvailable = false,
-                TradingAvailable = false
+                TradingAvailable = false,
+                HasCustomBackground = hasBackground
             });
         }
 
@@ -190,8 +198,47 @@ public sealed class PokemonController : ControllerBase
             VaultAvailable = true,
             TransfersAvailable = config.AllowTransfers && capabilities.CanTransferSameGeneration,
             CrossGenerationAvailable = config.AllowCrossGenerationTransfers && capabilities.CanTransferCrossGeneration,
-            TradingAvailable = config.AllowTrading
+            TradingAvailable = config.AllowTrading,
+            HasCustomBackground = hasBackground
         });
+    }
+
+    /// <summary>
+    /// Serves or redirects to the custom Pokémon modal/vault background image if configured.
+    /// </summary>
+    [HttpGet("Background")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status302Found)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetBackground()
+    {
+        var path = Configuration.ModalBackgroundPath?.Trim();
+        if (string.IsNullOrEmpty(path))
+        {
+            return NotFound();
+        }
+
+        if (path.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            path.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return Redirect(path);
+        }
+
+        if (System.IO.File.Exists(path))
+        {
+            var ext = Path.GetExtension(path).ToLowerInvariant();
+            var contentType = ext switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".webp" => "image/webp",
+                ".gif" => "image/gif",
+                _ => "image/png"
+            };
+            return PhysicalFile(path, contentType);
+        }
+
+        return NotFound();
     }
 
     /// <summary>

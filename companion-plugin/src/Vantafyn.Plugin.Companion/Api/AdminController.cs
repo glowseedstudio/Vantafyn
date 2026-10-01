@@ -82,6 +82,10 @@ public sealed class AdminController(
         {
             config.Pokemon.AutoBackups = request.PokemonAutoBackups.Value;
         }
+        if (request.PokemonModalBackgroundPath != null)
+        {
+            config.Pokemon.ModalBackgroundPath = string.IsNullOrWhiteSpace(request.PokemonModalBackgroundPath) ? null : request.PokemonModalBackgroundPath.Trim();
+        }
 
         plugin.SaveConfiguration();
         return Ok(GetConfigurationPayload(config));
@@ -199,7 +203,8 @@ public sealed class AdminController(
             config.Pokemon.AllowCrossGenerationTransfers,
             config.Pokemon.AllowTrading,
             config.Pokemon.AllowEditing,
-            config.Pokemon.AutoBackups
+            config.Pokemon.AutoBackups,
+            config.Pokemon.ModalBackgroundPath
         }
     };
 }
@@ -225,7 +230,8 @@ public sealed record AdminConfigurationRequest(
     bool? PokemonAllowCrossGenerationTransfers = null,
     bool? PokemonAllowTrading = null,
     bool? PokemonAllowEditing = null,
-    bool? PokemonAutoBackups = null);
+    bool? PokemonAutoBackups = null,
+    string? PokemonModalBackgroundPath = null);
 
 public sealed record PokemonTestConnectionRequest(
     string? BaseUrl = null,

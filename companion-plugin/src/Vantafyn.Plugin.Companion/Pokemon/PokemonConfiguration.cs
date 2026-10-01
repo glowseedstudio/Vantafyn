@@ -50,4 +50,11 @@ public sealed class PokemonConfiguration
     /// Whether automatic pre-mutation save backups are mandatory before any write operations.
     /// </summary>
     public bool AutoBackups { get; set; } = true;
+
+    /// <summary>
+    /// Optional custom background image path or URL for Pokémon modals and vault storage.
+    /// Can be a local filesystem path on the Jellyfin server or an HTTP/HTTPS image URL.
+    /// If null or empty, the client falls back to the default dark background.
+    /// </summary>
+    public string? ModalBackgroundPath { get; set; }
 }

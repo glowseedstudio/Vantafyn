@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.3.0",
-        "changelog": "Pokémon Vault enhancements: 32-box cloud storage, move relearner & evolution catalogs, ribbons showcase, save backups, and link trading.",
+        "version": "0.2.4.0",
+        "changelog": "Custom Pokémon modal and vault background support (local server file path or URL), fallback default dark gradient, and complete unbundling of third-party assets.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.35/Vantafyn.Plugin.Companion_0.2.3_net9.zip",
-        "checksum": "399ffbc612b205bc39195a6b38e1be3a",
-        "timestamp": "2026-10-01T10:08:08Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.36/Vantafyn.Plugin.Companion_0.2.4_net9.zip",
+        "checksum": "6e96a2224a5ed685a5253b982355c949",
+        "timestamp": "2026-10-01T10:36:15Z"
       },
       {
-        "version": "0.2.3.1",
-        "changelog": "Pokémon Vault enhancements: 32-box cloud storage, move relearner & evolution catalogs, ribbons showcase, save backups, and link trading.",
+        "version": "0.2.4.1",
+        "changelog": "Custom Pokémon modal and vault background support (local server file path or URL), fallback default dark gradient, and complete unbundling of third-party assets.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.35/Vantafyn.Plugin.Companion_0.2.3_net10.zip",
-        "checksum": "cee2b8819c49cad17b0c92b2436bcb55",
-        "timestamp": "2026-10-01T10:08:08Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.36/Vantafyn.Plugin.Companion_0.2.4_net10.zip",
+        "checksum": "0cfe3c94ea8509dedd26120a66463be9",
+        "timestamp": "2026-10-01T10:36:15Z"
       },
       {
         "version": "0.2.2.0",

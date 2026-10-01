@@ -42,6 +42,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -62,6 +63,7 @@ import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDepositRequest
 import dev.vantafyn.core.jellyfin.PokemonDirectTransferRequest
+import dev.vantafyn.core.jellyfin.PokemonIntegrationStatus
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
 import dev.vantafyn.core.jellyfin.PokemonTransferCompatibilityResult
 import dev.vantafyn.core.jellyfin.PokemonTransferValidateRequest
@@ -85,6 +87,7 @@ fun PokemonVaultScreen(
 
     var availableGames by remember { mutableStateOf<List<GameSummary>>(emptyList()) }
     var vaultSummary by remember { mutableStateOf<PokemonVaultSummary?>(null) }
+    var integrationStatus by remember { mutableStateOf<PokemonIntegrationStatus?>(null) }
     var isLoadingInitial by remember { mutableStateOf(true) }
     var isRefreshing by remember { mutableStateOf(false) }
 
@@ -196,6 +199,9 @@ fun PokemonVaultScreen(
         if (session == null) return
         coroutineScope.launch(Dispatchers.IO) {
             isLoadingInitial = true
+            pokemonRepository.getStatus(session).onSuccess { st ->
+                integrationStatus = st
+            }
             val gamesRes = pokemonRepository.getPokemonGames(session)
             gamesRes.onSuccess { games ->
                 availableGames = games
@@ -208,6 +214,15 @@ fun PokemonVaultScreen(
             loadContainerData(TransferSide.Source)
             loadContainerData(TransferSide.Destination)
             isLoadingInitial = false
+        }
+    }
+
+    val customBackgroundUrl = remember(session, integrationStatus) {
+        if (session != null && integrationStatus?.hasCustomBackground == true) {
+            val base = session.server.url.trimEnd('/')
+            "$base/Vantafyn/Pokemon/Background?api_key=${session.accessToken}"
+        } else {
+            null
         }
     }
 
@@ -440,13 +455,14 @@ fun PokemonVaultScreen(
         }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-            .padding(horizontal = 14.dp, vertical = 2.dp),
-    ) {
+    CompositionLocalProvider(LocalPokemonModalBackground provides customBackgroundUrl) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                .padding(horizontal = 14.dp, vertical = 2.dp),
+        ) {
         // Header Row 1: Back, Title, Subtitle, Occupancy Pill, Refresh
         Row(
             modifier = Modifier
@@ -901,4 +917,5 @@ fun PokemonVaultScreen(
             onDismiss = { isAchievementsModalOpen = false },
         )
     }
+}
 }

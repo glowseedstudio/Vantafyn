@@ -12,6 +12,7 @@ data class PokemonIntegrationStatus(
     val transfersAvailable: Boolean = false,
     val crossGenerationAvailable: Boolean = false,
     val tradingAvailable: Boolean = false,
+    val hasCustomBackground: Boolean = false,
 ) : Serializable
 
 data class PokemonVaultSummary(

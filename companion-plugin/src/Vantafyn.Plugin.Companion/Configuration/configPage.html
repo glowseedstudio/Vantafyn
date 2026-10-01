@@ -337,6 +337,14 @@
             </div>
           </div>
 
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonModalBackgroundPath">Custom Modal &amp; Vault Background (Optional)</label>
+            <input is="emby-input" type="text" id="pokemonModalBackgroundPath" placeholder="e.g. /mnt/storage/pokemon_bg.png or https://example.com/bg.png" />
+            <div class="fieldDescription">
+              Custom background image displayed behind Pokémon storage boxes and dialogs. Accepts a local image file path on this server (PNG, JPG, WEBP, GIF) or an HTTP/HTTPS image URL. If left blank, the clean dark gradient background is used.
+            </div>
+          </div>
+
           <button is="emby-button" type="button" class="actionButton secondary" id="testPokemon">Test PKVault Connection</button>
           <div id="pokemonStatus" class="statusBox"></div>
         </div>
@@ -485,6 +493,7 @@
             page.querySelector('#pokemonAllowTransfers').checked = !!getVal(pokemon, 'allowTransfers', 'AllowTransfers', true);
             page.querySelector('#pokemonAllowCrossGenerationTransfers').checked = !!getVal(pokemon, 'allowCrossGenerationTransfers', 'AllowCrossGenerationTransfers', false);
             page.querySelector('#pokemonAutoBackups').checked = !!getVal(pokemon, 'autoBackups', 'AutoBackups', true);
+            page.querySelector('#pokemonModalBackgroundPath').value = getVal(pokemon, 'modalBackgroundPath', 'ModalBackgroundPath', '') || '';
 
             const diagnostics = await api('Vantafyn/Admin/Diagnostics').catch(() => null);
             if (diagnostics) {
@@ -529,7 +538,8 @@
                 pokemonTimeoutSeconds: parseInt(page.querySelector('#pokemonTimeoutSeconds').value || '5', 10),
                 pokemonAllowTransfers: page.querySelector('#pokemonAllowTransfers').checked,
                 pokemonAllowCrossGenerationTransfers: page.querySelector('#pokemonAllowCrossGenerationTransfers').checked,
-                pokemonAutoBackups: page.querySelector('#pokemonAutoBackups').checked
+                pokemonAutoBackups: page.querySelector('#pokemonAutoBackups').checked,
+                pokemonModalBackgroundPath: page.querySelector('#pokemonModalBackgroundPath').value.trim()
               };
 
               await api('Vantafyn/Admin/Configuration', {

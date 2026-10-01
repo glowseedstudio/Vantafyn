@@ -274,4 +274,7 @@ public sealed class PokemonIntegrationStatusDto
 
     [JsonPropertyName("tradingAvailable")]
     public bool TradingAvailable { get; set; }
+
+    [JsonPropertyName("hasCustomBackground")]
+    public bool HasCustomBackground { get; set; }
 }

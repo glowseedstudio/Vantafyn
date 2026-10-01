@@ -94,6 +94,7 @@ class DefaultJellyfinPokemonRepository(
                     transfersAvailable = json.optBoolean("transfersAvailable", false),
                     crossGenerationAvailable = json.optBoolean("crossGenerationAvailable", false),
                     tradingAvailable = json.optBoolean("tradingAvailable", false),
+                    hasCustomBackground = json.optBoolean("hasCustomBackground", false),
                 )
             }
         }
