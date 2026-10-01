@@ -54,3 +54,11 @@ public sealed class CommunityActivityRecord
     public DateTimeOffset UpdatedAtUtc { get; set; } = DateTimeOffset.UtcNow;
     public List<PokemonSocialActivityEvent> Events { get; set; } = new();
 }
+
+public sealed class PokemonPokedexSyncRequest
+{
+    public List<int> CaughtSpeciesIds { get; set; } = new();
+    public List<int> SeenSpeciesIds { get; set; } = new();
+    public string? OriginGame { get; set; }
+}
+

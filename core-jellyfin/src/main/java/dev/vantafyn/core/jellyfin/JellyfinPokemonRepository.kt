@@ -33,6 +33,12 @@ interface JellyfinPokemonRepository {
     suspend fun restoreBackup(session: JellyfinSession, request: RestoreBackupRequest): Result<RestoreBackupResponse>
     suspend fun getDiagnostics(session: JellyfinSession): Result<PokemonDiagnosticsDto>
     suspend fun getPokedex(session: JellyfinSession): Result<PokemonPokedexDto>
+    suspend fun syncPokedex(
+        session: JellyfinSession,
+        caughtSpeciesIds: List<Int>,
+        seenSpeciesIds: List<Int>,
+        originGame: String? = null,
+    ): Result<PokemonPokedexDto>
     suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto>
     suspend fun getPokemonDetails(
         session: JellyfinSession,
@@ -956,60 +962,86 @@ class DefaultJellyfinPokemonRepository(
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
 
-                val genArray = json.optJSONArray("generationProgress")
-                val genProgress = mutableListOf<PokemonPokedexGenerationProgressDto>()
-                if (genArray != null) {
-                    for (i in 0 until genArray.length()) {
-                        val g = genArray.getJSONObject(i)
-                        genProgress.add(
-                            PokemonPokedexGenerationProgressDto(
-                                generation = g.optInt("generation", 1),
-                                generationName = g.optString("generationName", ""),
-                                minDexNumber = g.optInt("minDexNumber", 1),
-                                maxDexNumber = g.optInt("maxDexNumber", 151),
-                                totalSpecies = g.optInt("totalSpecies", 151),
-                                caughtCount = g.optInt("caughtCount", 0),
-                                seenCount = g.optInt("seenCount", 0),
-                                shinyCount = g.optInt("shinyCount", 0),
-                                caughtPercentage = g.optDouble("caughtPercentage", 0.0),
-                            )
-                        )
-                    }
-                }
+                parsePokedexDto(json)
+            }
+        }
 
-                val entriesArray = json.optJSONArray("entries")
-                val entries = mutableListOf<PokemonPokedexEntryDto>()
-                if (entriesArray != null) {
-                    for (i in 0 until entriesArray.length()) {
-                        val e = entriesArray.getJSONObject(i)
-                        entries.add(
-                            PokemonPokedexEntryDto(
-                                speciesId = e.optInt("speciesId", 0),
-                                speciesName = e.optString("speciesName", ""),
-                                generation = e.optInt("generation", 1),
-                                isCaught = e.optBoolean("isCaught", false),
-                                isSeen = e.optBoolean("isSeen", false),
-                                hasShiny = e.optBoolean("hasShiny", false),
-                                firstEncounteredGame = e.optString("firstEncounteredGame", "").ifEmpty { null },
-                                firstEncounteredTimestamp = e.optString("firstEncounteredTimestamp", "").ifEmpty { null },
-                                encounterCount = e.optInt("encounterCount", 0),
-                            )
-                        )
-                    }
+    override suspend fun syncPokedex(
+        session: JellyfinSession,
+        caughtSpeciesIds: List<Int>,
+        seenSpeciesIds: List<Int>,
+        originGame: String?,
+    ): Result<PokemonPokedexDto> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Pokedex/Sync", "POST")
+                conn.doOutput = true
+                val payload = JSONObject().apply {
+                    put("caughtSpeciesIds", JSONArray(caughtSpeciesIds))
+                    put("seenSpeciesIds", JSONArray(seenSpeciesIds))
+                    if (originGame != null) put("originGame", originGame)
                 }
+                conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parsePokedexDto(JSONObject(body))
+            }
+        }
 
-                PokemonPokedexDto(
-                    userId = json.optString("userId", ""),
-                    isEnabled = json.optBoolean("isEnabled", true),
-                    totalCaught = json.optInt("totalCaught", 0),
-                    totalSeen = json.optInt("totalSeen", 0),
-                    totalShinies = json.optInt("totalShinies", 0),
-                    lastUpdatedUtc = json.optString("lastUpdatedUtc", "").ifEmpty { null },
-                    generationProgress = genProgress,
-                    entries = entries,
+    private fun parsePokedexDto(json: JSONObject): PokemonPokedexDto {
+        val genArray = json.optJSONArray("generationProgress")
+        val genProgress = mutableListOf<PokemonPokedexGenerationProgressDto>()
+        if (genArray != null) {
+            for (i in 0 until genArray.length()) {
+                val g = genArray.getJSONObject(i)
+                genProgress.add(
+                    PokemonPokedexGenerationProgressDto(
+                        generation = g.optInt("generation", 1),
+                        generationName = g.optString("generationName", ""),
+                        minDexNumber = g.optInt("minDexNumber", 1),
+                        maxDexNumber = g.optInt("maxDexNumber", 151),
+                        totalSpecies = g.optInt("totalSpecies", 151),
+                        caughtCount = g.optInt("caughtCount", 0),
+                        seenCount = g.optInt("seenCount", 0),
+                        shinyCount = g.optInt("shinyCount", 0),
+                        caughtPercentage = g.optDouble("caughtPercentage", 0.0),
+                    )
                 )
             }
         }
+
+        val entriesArray = json.optJSONArray("entries")
+        val entries = mutableListOf<PokemonPokedexEntryDto>()
+        if (entriesArray != null) {
+            for (i in 0 until entriesArray.length()) {
+                val e = entriesArray.getJSONObject(i)
+                entries.add(
+                    PokemonPokedexEntryDto(
+                        speciesId = e.optInt("speciesId", 0),
+                        speciesName = e.optString("speciesName", ""),
+                        generation = e.optInt("generation", 1),
+                        isCaught = e.optBoolean("isCaught", false),
+                        isSeen = e.optBoolean("isSeen", false),
+                        hasShiny = e.optBoolean("hasShiny", false),
+                        firstEncounteredGame = e.optString("firstEncounteredGame", "").ifEmpty { null },
+                        firstEncounteredTimestamp = e.optString("firstEncounteredTimestamp", "").ifEmpty { null },
+                        encounterCount = e.optInt("encounterCount", 0),
+                    )
+                )
+            }
+        }
+
+        return PokemonPokedexDto(
+            userId = json.optString("userId", ""),
+            isEnabled = json.optBoolean("isEnabled", true),
+            totalCaught = json.optInt("totalCaught", 0),
+            totalSeen = json.optInt("totalSeen", 0),
+            totalShinies = json.optInt("totalShinies", 0),
+            lastUpdatedUtc = json.optString("lastUpdatedUtc", "").ifEmpty { null },
+            generationProgress = genProgress,
+            entries = entries,
+        )
+    }
 
     override suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto> =
         withContext(ioDispatcher) {

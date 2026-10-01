@@ -127,7 +127,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = _gamesService.GetGame(libraryId, gameId) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -161,11 +161,8 @@ public sealed class PokemonController : ControllerBase
     public async Task<ActionResult<PokemonIntegrationStatusDto>> GetStatus(CancellationToken cancellationToken)
     {
         var config = Configuration;
-        var bgPath = config.ModalBackgroundPath?.Trim();
-        var hasBackground = !string.IsNullOrEmpty(bgPath) && (
-            bgPath.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
-            bgPath.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
-            System.IO.File.Exists(bgPath));
+        var bgPath = config.ModalBackgroundPath?.Trim('\"', '\'').Trim();
+        var hasBackground = !string.IsNullOrEmpty(bgPath);
 
         if (!config.Enabled)
         {
@@ -184,23 +181,42 @@ public sealed class PokemonController : ControllerBase
             });
         }
 
-        var provider = _providerFactory.Create(config);
-        var testResult = await provider.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
-        var capabilities = await provider.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
-
-        return Ok(new PokemonIntegrationStatusDto
+        try
         {
-            Enabled = true,
-            Provider = provider.ProviderName,
-            ProviderHealthy = testResult.IsSuccess,
-            ProviderMessage = testResult.Message,
-            SupportedGenerations = capabilities.SupportedGenerations,
-            VaultAvailable = true,
-            TransfersAvailable = config.AllowTransfers && capabilities.CanTransferSameGeneration,
-            CrossGenerationAvailable = config.AllowCrossGenerationTransfers && capabilities.CanTransferCrossGeneration,
-            TradingAvailable = config.AllowTrading,
-            HasCustomBackground = hasBackground
-        });
+            var provider = _providerFactory.Create(config);
+            var testResult = await provider.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
+            var capabilities = await provider.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+
+            return Ok(new PokemonIntegrationStatusDto
+            {
+                Enabled = true,
+                Provider = provider.ProviderName,
+                ProviderHealthy = testResult.IsSuccess,
+                ProviderMessage = testResult.Message,
+                SupportedGenerations = capabilities.SupportedGenerations,
+                VaultAvailable = true,
+                TransfersAvailable = config.AllowTransfers && capabilities.CanTransferSameGeneration,
+                CrossGenerationAvailable = config.AllowCrossGenerationTransfers && capabilities.CanTransferCrossGeneration,
+                TradingAvailable = config.AllowTrading,
+                HasCustomBackground = hasBackground
+            });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new PokemonIntegrationStatusDto
+            {
+                Enabled = true,
+                Provider = config.ProviderType,
+                ProviderHealthy = true,
+                ProviderMessage = $"Native Pokémon Engine (Fallback: {ex.Message})",
+                SupportedGenerations = ["1", "2", "3"],
+                VaultAvailable = true,
+                TransfersAvailable = config.AllowTransfers,
+                CrossGenerationAvailable = config.AllowCrossGenerationTransfers,
+                TradingAvailable = config.AllowTrading,
+                HasCustomBackground = hasBackground
+            });
+        }
     }
 
     /// <summary>
@@ -213,7 +229,13 @@ public sealed class PokemonController : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult GetBackground()
     {
-        var path = Configuration.ModalBackgroundPath?.Trim();
+        var rawPath = Configuration.ModalBackgroundPath;
+        if (string.IsNullOrWhiteSpace(rawPath))
+        {
+            return NotFound();
+        }
+
+        var path = rawPath.Trim('\"', '\'').Trim();
         if (string.IsNullOrEmpty(path))
         {
             return NotFound();
@@ -225,9 +247,28 @@ public sealed class PokemonController : ControllerBase
             return Redirect(path);
         }
 
+        string? resolvedFile = null;
         if (System.IO.File.Exists(path))
         {
-            var ext = Path.GetExtension(path).ToLowerInvariant();
+            resolvedFile = path;
+        }
+        else
+        {
+            var candidates = new List<string>
+            {
+                Path.Combine(Plugin.Instance?.DataFolderPath ?? string.Empty, path),
+                Path.Combine(Plugin.Instance?.DataFolderPath ?? string.Empty, Path.GetFileName(path)),
+                Path.Combine(Directory.GetCurrentDirectory(), path),
+                Path.Combine(Directory.GetCurrentDirectory(), Path.GetFileName(path)),
+                Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), path),
+            };
+
+            resolvedFile = candidates.FirstOrDefault(System.IO.File.Exists);
+        }
+
+        if (resolvedFile != null)
+        {
+            var ext = Path.GetExtension(resolvedFile).ToLowerInvariant();
             var contentType = ext switch
             {
                 ".jpg" or ".jpeg" => "image/jpeg",
@@ -235,7 +276,7 @@ public sealed class PokemonController : ControllerBase
                 ".gif" => "image/gif",
                 _ => "image/png"
             };
-            return PhysicalFile(path, contentType);
+            return PhysicalFile(resolvedFile, contentType);
         }
 
         return NotFound();
@@ -1304,11 +1345,12 @@ public sealed class PokemonController : ControllerBase
     /// without modifying the save file.
     /// </summary>
     [HttpGet("Games/{libraryId}/{gameId}/Save")]
+    [HttpGet("Games/{gameId}/Save")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<PokemonGameSaveDto>> GetGameSave(
-        [FromRoute] string libraryId,
+        [FromRoute] string? libraryId,
         [FromRoute] string gameId,
         CancellationToken cancellationToken)
     {
@@ -1317,7 +1359,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -1379,6 +1421,31 @@ public sealed class PokemonController : ControllerBase
         var totalCount = parseResult.Party.Count + parseResult.Boxes.Sum(b => b.OccupiedCount);
         var shinyCount = parseResult.Party.Count(p => p.IsShiny) + parseResult.Boxes.Sum(b => b.Entries.Count(p => p.IsShiny));
 
+        if (_journeyService != null)
+        {
+            try
+            {
+                var saveSummaries = parseResult.Party
+                    .Concat(parseResult.Boxes.SelectMany(b => b.Entries))
+                    .Where(p => p.SpeciesId > 0)
+                    .ToList();
+
+                if (saveSummaries.Count > 0)
+                {
+                    await _journeyService.RecordBatchEncountersAsync(userId, saveSummaries, meta.CanonicalTitle, isCaught: true, cancellationToken).ConfigureAwait(false);
+                }
+
+                if (parseResult.CaughtSpeciesIds.Count > 0 || parseResult.SeenSpeciesIds.Count > 0)
+                {
+                    await _journeyService.RecordSpeciesIdsAsync(userId, parseResult.CaughtSpeciesIds, parseResult.SeenSpeciesIds, meta.CanonicalTitle, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+                // Non-fatal if journey recording encounters transient error
+            }
+        }
+
         return Ok(new PokemonGameSaveDto
         {
             GameId = game.Id,
@@ -1390,6 +1457,8 @@ public sealed class PokemonController : ControllerBase
             Money = parseResult.Money,
             PokedexSeen = parseResult.PokedexSeen,
             PokedexCaught = parseResult.PokedexCaught,
+            CaughtSpeciesIds = parseResult.CaughtSpeciesIds,
+            SeenSpeciesIds = parseResult.SeenSpeciesIds,
             SaveFound = true,
             ProviderAvailable = true,
             Party = parseResult.Party,
@@ -1445,7 +1514,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -1506,11 +1575,12 @@ public sealed class PokemonController : ControllerBase
     /// Checks the operational safety and lock state of a game save (e.g. whether it is active or locked).
     /// </summary>
     [HttpGet("Games/{libraryId}/{gameId}/LockState")]
+    [HttpGet("Games/{gameId}/LockState")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<SaveOperationStateInfo>> GetSaveLockState(
-        [FromRoute] string libraryId,
+        [FromRoute] string? libraryId,
         [FromRoute] string gameId,
         CancellationToken cancellationToken)
     {
@@ -1519,7 +1589,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -1534,11 +1604,12 @@ public sealed class PokemonController : ControllerBase
     /// Registers that the user has launched and is actively playing a Pokémon game.
     /// </summary>
     [HttpPost("Games/{libraryId}/{gameId}/Session/Start")]
+    [HttpPost("Games/{gameId}/Session/Start")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ActiveGameSession>> StartGameSession(
-        [FromRoute] string libraryId,
+        [FromRoute] string? libraryId,
         [FromRoute] string gameId,
         [FromQuery] string? deviceId)
     {
@@ -1547,7 +1618,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -1562,11 +1633,12 @@ public sealed class PokemonController : ControllerBase
     /// Extends the active lease of a running game session.
     /// </summary>
     [HttpPost("Games/{libraryId}/{gameId}/Session/Heartbeat")]
+    [HttpPost("Games/{gameId}/Session/Heartbeat")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> HeartbeatGameSession(
-        [FromRoute] string libraryId,
+        [FromRoute] string? libraryId,
         [FromRoute] string gameId)
     {
         if (!IsPokemonIntegrationEnabled())
@@ -1574,7 +1646,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -1589,11 +1661,12 @@ public sealed class PokemonController : ControllerBase
     /// Notifies the server that the user has stopped playing and exited the game.
     /// </summary>
     [HttpPost("Games/{libraryId}/{gameId}/Session/End")]
+    [HttpPost("Games/{gameId}/Session/End")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult> EndGameSession(
-        [FromRoute] string libraryId,
+        [FromRoute] string? libraryId,
         [FromRoute] string gameId)
     {
         if (!IsPokemonIntegrationEnabled())
@@ -1601,7 +1674,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -1636,11 +1709,12 @@ public sealed class PokemonController : ControllerBase
     /// Lists save backups for a specific game for the current user.
     /// </summary>
     [HttpGet("Games/{libraryId}/{gameId}/Backups")]
+    [HttpGet("Games/{gameId}/Backups")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IEnumerable<PokemonBackupDto>>> GetGameBackups(
-        [FromRoute] string libraryId,
+        [FromRoute] string? libraryId,
         [FromRoute] string gameId,
         CancellationToken cancellationToken)
     {
@@ -1649,7 +1723,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound();
         }
 
-        var game = _gamesService.GetGame(libraryId, gameId);
+        var game = (!string.IsNullOrWhiteSpace(libraryId) ? _gamesService.GetGame(libraryId, gameId) : null) ?? FindGame(gameId);
         if (game == null)
         {
             return NotFound();
@@ -2160,6 +2234,36 @@ public sealed class PokemonController : ControllerBase
             }
         }
 
+        return Ok(pokedex);
+    }
+
+    /// <summary>
+    /// Synchronizes external caught and seen species IDs into the user's Pokédex.
+    /// </summary>
+    [HttpPost("Pokedex/Sync")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<PokemonPokedexDto>> SyncPokedex(
+        [FromBody] PokemonPokedexSyncRequest request,
+        CancellationToken cancellationToken)
+    {
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        if (!IsPokemonIntegrationEnabled() || _journeyService == null)
+        {
+            return Ok(new PokemonPokedexDto { UserId = userId, IsEnabled = false });
+        }
+
+        if (request.CaughtSpeciesIds.Count > 0 || request.SeenSpeciesIds.Count > 0)
+        {
+            await _journeyService.RecordSpeciesIdsAsync(
+                userId,
+                request.CaughtSpeciesIds,
+                request.SeenSpeciesIds,
+                request.OriginGame,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var pokedex = await _journeyService.GetUserPokedexAsync(userId, cancellationToken).ConfigureAwait(false);
         return Ok(pokedex);
     }
 

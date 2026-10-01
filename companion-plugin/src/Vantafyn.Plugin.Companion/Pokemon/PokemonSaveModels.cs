@@ -287,6 +287,12 @@ public sealed class PokemonGameSaveDto
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? PokedexCaught { get; set; }
 
+    [JsonPropertyName("caughtSpeciesIds")]
+    public List<int> CaughtSpeciesIds { get; set; } = [];
+
+    [JsonPropertyName("seenSpeciesIds")]
+    public List<int> SeenSpeciesIds { get; set; } = [];
+
     [JsonPropertyName("saveFound")]
     public bool SaveFound { get; set; }
 
@@ -341,6 +347,12 @@ public sealed class PokemonSaveParseResult
 
     [JsonPropertyName("boxes")]
     public List<PokemonBoxDto> Boxes { get; set; } = [];
+
+    [JsonPropertyName("caughtSpeciesIds")]
+    public List<int> CaughtSpeciesIds { get; set; } = [];
+
+    [JsonPropertyName("seenSpeciesIds")]
+    public List<int> SeenSpeciesIds { get; set; } = [];
 
     [JsonPropertyName("details")]
     public Dictionary<string, PokemonDetailsDto> Details { get; set; } = [];

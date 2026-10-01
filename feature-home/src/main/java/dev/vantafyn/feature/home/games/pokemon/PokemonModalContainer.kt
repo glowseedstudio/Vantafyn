@@ -37,19 +37,28 @@ fun PokemonModalContainer(
     borderWidth: Dp = 1.5.dp,
     scrimAlphaTop: Float = 0.85f,
     scrimAlphaBottom: Float = 0.90f,
+    customBackgroundUrl: String? = null,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val customBackgroundUrl = LocalPokemonModalBackground.current
+    val effectiveBackgroundUrl = customBackgroundUrl ?: LocalPokemonModalBackground.current
 
     Box(
         modifier = modifier
             .clip(shape)
-            .border(borderWidth, VantafynGradients.accentHorizontal(), shape),
+            .border(borderWidth, VantafynGradients.accentHorizontal(), shape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color(0xFF131623),
+                        Color(0xFF0E111C),
+                    )
+                )
+            ),
     ) {
-        if (!customBackgroundUrl.isNullOrBlank()) {
+        if (!effectiveBackgroundUrl.isNullOrBlank()) {
             // User-configured custom background image from companion plugin or remote URL
             AsyncImage(
-                model = customBackgroundUrl,
+                model = effectiveBackgroundUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.matchParentSize(),

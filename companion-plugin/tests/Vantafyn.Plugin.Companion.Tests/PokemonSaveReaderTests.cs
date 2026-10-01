@@ -2,6 +2,7 @@ using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Vantafyn.Plugin.Companion.Pokemon;
 using Vantafyn.Plugin.Companion.Pokemon.PkVault;
+using Vantafyn.Plugin.Companion.Pokemon.Native;
 using Xunit;
 
 namespace Vantafyn.Plugin.Companion.Tests;
@@ -584,6 +585,30 @@ public sealed class PokemonSaveReaderTests
         Assert.NotNull(result.UpdatedSaveBytes);
         Assert.Equal(new byte[] { 0xCA, 0xFE, 0xBA, 0xBE }, result.UpdatedSaveBytes);
         Assert.Contains("Box 1 Slot 1", result.AssignedLocation);
+    }
+
+    [Fact]
+    public void ParseGen1Save_ValidSave_ParsesAshAndCharmander()
+    {
+        if (!File.Exists("/tmp/pokemon_red.sram")) return;
+
+        var bytes = File.ReadAllBytes("/tmp/pokemon_red.sram");
+        Assert.True(Gen1SaveParser.IsGen1Save(bytes));
+
+        var catalog = new PkVaultStaticCatalog();
+        var result = Gen1SaveParser.Parse(bytes, "pokemon_red", catalog);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal("ASH", result.TrainerName);
+        Assert.Equal("477", result.TrainerId);
+        Assert.Single(result.Party);
+
+        var charmander = result.Party[0];
+        Assert.Equal(4, charmander.SpeciesId);
+        Assert.Equal("Charmander", charmander.Species);
+        Assert.Equal("CHARMANDER", charmander.Nickname);
+        Assert.Equal(6, charmander.Level);
+        Assert.True(charmander.IsInParty);
     }
 
     private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory

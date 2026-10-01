@@ -26,14 +26,25 @@ public sealed class GamePathResolver
 
     public ResolvedGameFile? ResolveAbsoluteGameFile(string libraryId, string path, bool requireExisting)
     {
-        var library = _getLibraries().FirstOrDefault(l => string.Equals(l.Id, libraryId, StringComparison.OrdinalIgnoreCase));
-        if (library == null || !IsWithinLibrary(library, path) || (requireExisting && !File.Exists(path)))
+        var libraries = _getLibraries();
+        var library = libraries.FirstOrDefault(l => string.Equals(l.Id, libraryId, StringComparison.OrdinalIgnoreCase));
+        if (library != null && IsWithinLibrary(library, path) && (!requireExisting || File.Exists(path)))
         {
-            return null;
+            var systemDir = FindSystemDir(library, path);
+            return new ResolvedGameFile(library, path, systemDir, systemDir == null ? string.Empty : Path.GetFileName(systemDir));
         }
 
-        var systemDir = FindSystemDir(library, path);
-        return new ResolvedGameFile(library, path, systemDir, systemDir == null ? string.Empty : Path.GetFileName(systemDir));
+        // Fallback: If libraryId is "default" or mismatched, search across all configured libraries
+        foreach (var lib in libraries)
+        {
+            if (IsWithinLibrary(lib, path) && (!requireExisting || File.Exists(path)))
+            {
+                var systemDir = FindSystemDir(lib, path);
+                return new ResolvedGameFile(lib, path, systemDir, systemDir == null ? string.Empty : Path.GetFileName(systemDir));
+            }
+        }
+
+        return null;
     }
 
     public string? ResolveFilePath(string libraryId, string token, bool allowBios)

@@ -64,6 +64,7 @@ import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDetailsDto
 import dev.vantafyn.core.jellyfin.PokemonJourneyDto
 import dev.vantafyn.core.jellyfin.PokemonRibbonDto
+import dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog
 import dev.vantafyn.core.jellyfin.PokemonStatsDto
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
 import dev.vantafyn.core.ui.VantafynColors
@@ -85,11 +86,13 @@ fun PokemonDetailModal(
     gameId: String? = null,
     libraryId: String? = null,
     isVault: Boolean = false,
+    initialDetails: PokemonDetailsDto? = null,
+    customBackgroundUrl: String? = null,
     onDismiss: () -> Unit,
 ) {
     var journey by remember { mutableStateOf<PokemonJourneyDto?>(null) }
-    var details by remember { mutableStateOf<PokemonDetailsDto?>(null) }
-    var isLoadingDetails by remember { mutableStateOf(true) }
+    var details by remember(pokemon.id) { mutableStateOf(initialDetails) }
+    var isLoadingDetails by remember(pokemon.id) { mutableStateOf(initialDetails == null) }
     var selectedStatTab by remember { mutableStateOf(StatAppraisalTab.JudgeIVs) }
     var showLegalityDialog by remember { mutableStateOf(false) }
     var showMoveRelearnerModal by remember { mutableStateOf(false) }
@@ -97,7 +100,11 @@ fun PokemonDetailModal(
     var showEvolutionModal by remember { mutableStateOf(false) }
     var currentPokemonState by remember { mutableStateOf(pokemon) }
 
-    LaunchedEffect(pokemon.id) {
+    LaunchedEffect(pokemon.id, initialDetails) {
+        if (initialDetails != null) {
+            details = initialDetails
+            isLoadingDetails = false
+        }
         if (session != null && pokemonRepository != null && pokemon.id.isNotBlank()) {
             withContext(Dispatchers.IO) {
                 // Load journey history
@@ -110,14 +117,44 @@ fun PokemonDetailModal(
                     pokemonId = pokemon.id,
                     gameId = gameId,
                     libraryId = libraryId,
-                    isVault = isVault,
-                ).onSuccess {
-                    details = it
+                ).onSuccess { netDetails ->
+                    val existing = details
+                    details = if (existing != null) {
+                        netDetails.copy(
+                            iv = netDetails.iv ?: existing.iv,
+                            ev = netDetails.ev ?: existing.ev,
+                            moves = if (netDetails.moves.isNotEmpty()) netDetails.moves else existing.moves,
+                            nature = if (!netDetails.nature.isNullOrBlank()) netDetails.nature else existing.nature,
+                            ability = if (!netDetails.ability.isNullOrBlank()) netDetails.ability else existing.ability,
+                            heldItem = if (!netDetails.heldItem.isNullOrBlank()) netDetails.heldItem else existing.heldItem,
+                            currentHp = netDetails.currentHp ?: existing.currentHp,
+                            maxHp = netDetails.maxHp ?: existing.maxHp,
+                            friendship = if ((netDetails.friendship ?: 0) > 0) netDetails.friendship else existing.friendship,
+                        )
+                    } else {
+                        netDetails
+                    }
                 }
             }
             isLoadingDetails = false
         } else {
             isLoadingDetails = false
+        }
+    }
+
+    val resolvedSpeciesName = remember(pokemon.speciesId, pokemon.species) {
+        if (pokemon.species.isNotBlank() && !pokemon.species.startsWith("#")) {
+            pokemon.species
+        } else {
+            val fromCatalog = PokemonSpeciesCatalog.resolveSpeciesName(pokemon.speciesId)
+            if (fromCatalog.isNotBlank() && !fromCatalog.startsWith("#")) fromCatalog else pokemon.species
+        }
+    }
+    val displayName = remember(pokemon.nickname, resolvedSpeciesName) {
+        if (pokemon.nickname.isNotBlank() && !pokemon.nickname.equals(pokemon.species, ignoreCase = true) && !pokemon.nickname.startsWith("#")) {
+            pokemon.nickname
+        } else {
+            resolvedSpeciesName
         }
     }
 
@@ -127,6 +164,7 @@ fun PokemonDetailModal(
         PokemonModalContainer(
             modifier = Modifier.fillMaxWidth(0.95f),
             shape = RoundedCornerShape(22.dp),
+            customBackgroundUrl = customBackgroundUrl,
         ) {
             Column(
                 modifier = Modifier
@@ -146,7 +184,7 @@ fun PokemonDetailModal(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     Text(
-                        text = pokemon.nickname.ifBlank { pokemon.species },
+                        text = displayName,
                         color = VantafynColors.Ink,
                         fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
@@ -276,7 +314,7 @@ fun PokemonDetailModal(
                     }
 
                     Text(
-                        text = pokemon.species,
+                        text = resolvedSpeciesName,
                         color = VantafynColors.Ink,
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
@@ -359,7 +397,8 @@ fun PokemonDetailModal(
                                     )
                                 }
                             }
-                            val evos = details?.availableEvolutions ?: emptyList()
+                            val evos = details?.availableEvolutions?.ifEmpty { null }
+                                ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.getAvailableEvolutions(pokemon.speciesId, pokemon.level)
                             if (evos.isNotEmpty()) {
                                 Row(
                                     modifier = Modifier
@@ -1041,7 +1080,8 @@ fun PokemonDetailModal(
     }
 
     if (showEvolutionModal && session != null && pokemonRepository != null) {
-        val evos = details?.availableEvolutions ?: emptyList()
+        val evos = details?.availableEvolutions?.ifEmpty { null }
+            ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.getAvailableEvolutions(currentPokemonState.speciesId, currentPokemonState.level)
         PokemonEvolutionModal(
             pokemon = currentPokemonState,
             availableEvolutions = evos,
@@ -1452,9 +1492,10 @@ private fun PokemonLegalityReportDialog(
                     fontWeight = FontWeight.Bold,
                 )
 
+                val speciesLabel = if (pokemon.species.isNotBlank() && !pokemon.species.startsWith("#")) pokemon.species else PokemonSpeciesCatalog.resolveSpeciesName(pokemon.speciesId)
                 LegalityCheckRow(
                     label = "Species Identity",
-                    value = "${pokemon.species} (#${pokemon.speciesId})",
+                    value = "$speciesLabel (#${pokemon.speciesId})",
                     isPass = pokemon.speciesId > 0,
                 )
                 LegalityCheckRow(

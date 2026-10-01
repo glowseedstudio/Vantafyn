@@ -218,6 +218,9 @@ data class PokemonGameSaveDto(
     val boxes: List<PokemonBoxDto> = emptyList(),
     val totalPokemonCount: Int = 0,
     val shinyCount: Int = 0,
+    val pokemonDetails: Map<String, PokemonDetailsDto> = emptyMap(),
+    val caughtSpeciesIds: List<Int> = emptyList(),
+    val seenSpeciesIds: List<Int> = emptyList(),
 ) : Serializable
 
 data class PokemonStatsDto(

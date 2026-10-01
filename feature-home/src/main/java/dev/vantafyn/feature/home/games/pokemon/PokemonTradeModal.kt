@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,6 +70,7 @@ import dev.vantafyn.core.jellyfin.CreateTradeRequest
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JoinLinkTradeRequest
+import dev.vantafyn.core.jellyfin.PokemonBoxDto
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
 import dev.vantafyn.core.jellyfin.PokemonTradeOffer
 import dev.vantafyn.core.jellyfin.PokemonTradeSession
@@ -92,11 +95,33 @@ fun PokemonTradeModal(
     session: JellyfinSession?,
     pokemonRepository: JellyfinPokemonRepository,
     selectedPokemon: PokemonSummaryDto?,
+    vaultBoxes: List<PokemonBoxDto> = emptyList(),
     onDismiss: () -> Unit,
     onTradeCompleted: () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableStateOf(TradeTab.LinkCode) }
+
+    val allVaultPokemon = remember(vaultBoxes) {
+        vaultBoxes.flatMap { box ->
+            box.entries.map { entry ->
+                PokemonSummaryDto(
+                    id = entry.id,
+                    species = entry.species,
+                    speciesId = entry.speciesId,
+                    nickname = entry.nickname,
+                    level = entry.level,
+                    isShiny = entry.isShiny,
+                    boxIndex = entry.boxIndex,
+                    slotIndex = entry.slotIndex,
+                )
+            }
+        }
+    }
+    var activeOfferPokemon by remember(selectedPokemon, allVaultPokemon) {
+        mutableStateOf(selectedPokemon ?: allVaultPokemon.firstOrNull())
+    }
+    var showPokemonPicker by remember { mutableStateOf(false) }
 
     // Link Trade state
     var linkCodeInput by remember {
@@ -133,7 +158,7 @@ fun PokemonTradeModal(
     }
 
     fun buildOffer(): PokemonTradeOffer? {
-        val p = selectedPokemon ?: return null
+        val p = activeOfferPokemon ?: return null
         return PokemonTradeOffer(
             pokemonId = p.id,
             species = p.species,
@@ -307,15 +332,34 @@ fun PokemonTradeModal(
                         .padding(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text(
-                        text = "YOUR OFFERED POKÉMON",
-                        color = VantafynColors.Muted,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp,
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "YOUR OFFERED POKÉMON",
+                            color = VantafynColors.Muted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                        )
+                        if (allVaultPokemon.isNotEmpty()) {
+                            Text(
+                                text = if (activeOfferPokemon != null) "Change Pokémon" else "Choose from Vault",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .clickable { showPokemonPicker = true }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
 
-                    if (selectedPokemon != null) {
+                    if (activeOfferPokemon != null) {
+                        val offer = activeOfferPokemon!!
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -328,8 +372,8 @@ fun PokemonTradeModal(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 AsyncImage(
-                                    model = getPokemonSpriteUrl(selectedPokemon.speciesId, selectedPokemon.isShiny),
-                                    contentDescription = selectedPokemon.species,
+                                    model = getPokemonSpriteUrl(offer.speciesId, offer.isShiny),
+                                    contentDescription = offer.species,
                                     modifier = Modifier.size(46.dp),
                                     contentScale = ContentScale.Fit,
                                 )
@@ -340,12 +384,12 @@ fun PokemonTradeModal(
                                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                                 ) {
                                     Text(
-                                        text = selectedPokemon.nickname.ifBlank { selectedPokemon.species },
+                                        text = offer.nickname.ifBlank { offer.species },
                                         color = VantafynColors.Ink,
                                         fontSize = 15.sp,
                                         fontWeight = FontWeight.Bold,
                                     )
-                                    if (selectedPokemon.isShiny) {
+                                    if (offer.isShiny) {
                                         Icon(
                                             imageVector = Icons.Rounded.AutoAwesome,
                                             contentDescription = "Shiny",
@@ -355,7 +399,7 @@ fun PokemonTradeModal(
                                     }
                                 }
                                 Text(
-                                    text = "Lv. ${selectedPokemon.level} • Box ${selectedPokemon.boxIndex ?: 1}",
+                                    text = "Lv. ${offer.level} • Box ${offer.boxIndex ?: 1}",
                                     color = VantafynColors.Muted,
                                     fontSize = 12.sp,
                                 )
@@ -368,6 +412,113 @@ fun PokemonTradeModal(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                         )
+                    }
+                }
+            }
+
+            if (showPokemonPicker) {
+                BasicAlertDialog(onDismissRequest = { showPokemonPicker = false }) {
+                    PokemonModalContainer(
+                        modifier = Modifier
+                            .fillMaxWidth(0.92f)
+                            .heightIn(max = 500.dp),
+                        shape = RoundedCornerShape(20.dp),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Select Pokémon to Trade",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                IconButton(
+                                    onClick = { showPokemonPicker = false },
+                                    modifier = Modifier.size(28.dp),
+                                ) {
+                                    Icon(Icons.Rounded.Close, contentDescription = "Close", tint = VantafynColors.Muted, modifier = Modifier.size(18.dp))
+                                }
+                            }
+
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(allVaultPokemon, key = { it.id }) { p ->
+                                    val isCurrent = activeOfferPokemon?.id == p.id
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(if (isCurrent) Color(0xFF2B324D) else Color(0xFF1B1E2B))
+                                            .border(
+                                                1.dp,
+                                                if (isCurrent) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.08f),
+                                                RoundedCornerShape(12.dp)
+                                            )
+                                            .clickable {
+                                                activeOfferPokemon = p
+                                                showPokemonPicker = false
+                                            }
+                                            .padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                    ) {
+                                        AsyncImage(
+                                            model = getPokemonSpriteUrl(p.speciesId, p.isShiny),
+                                            contentDescription = p.species,
+                                            modifier = Modifier.size(40.dp),
+                                            contentScale = ContentScale.Fit,
+                                        )
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            ) {
+                                                Text(
+                                                    text = p.nickname.ifBlank { p.species },
+                                                    color = Color.White,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                                if (p.isShiny) {
+                                                    Icon(
+                                                        imageVector = Icons.Rounded.AutoAwesome,
+                                                        contentDescription = "Shiny",
+                                                        tint = Color(0xFFFFD700),
+                                                        modifier = Modifier.size(12.dp),
+                                                    )
+                                                }
+                                            }
+                                            Text(
+                                                text = "Lv. ${p.level} • Box ${p.boxIndex ?: 1}",
+                                                color = VantafynColors.Muted,
+                                                fontSize = 11.sp,
+                                            )
+                                        }
+                                        if (isCurrent) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.CheckCircle,
+                                                contentDescription = "Selected",
+                                                tint = Color(0xFF00E5FF),
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -465,13 +616,13 @@ fun PokemonTradeModal(
                                     .weight(1f)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(
-                                        if (selectedPokemon != null && linkCodeInput.length == 6 && !isExecutingAction)
+                                        if (activeOfferPokemon != null && linkCodeInput.length == 6 && !isExecutingAction)
                                             Color(0xFF2B324D)
                                         else
                                             Color.White.copy(alpha = 0.05f)
                                     )
                                     .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
-                                    .clickable(enabled = selectedPokemon != null && linkCodeInput.length == 6 && !isExecutingAction && session != null) {
+                                    .clickable(enabled = activeOfferPokemon != null && linkCodeInput.length == 6 && !isExecutingAction && session != null) {
                                         val offer = buildOffer() ?: return@clickable
                                         coroutineScope.launch(Dispatchers.IO) {
                                             isExecutingAction = true
@@ -510,12 +661,12 @@ fun PokemonTradeModal(
                                     .weight(1f)
                                     .clip(RoundedCornerShape(12.dp))
                                     .then(
-                                        if (selectedPokemon != null && linkCodeInput.length == 6 && !isExecutingAction)
+                                        if (activeOfferPokemon != null && linkCodeInput.length == 6 && !isExecutingAction)
                                             Modifier.background(VantafynGradients.accentHorizontal())
                                         else
                                             Modifier.background(Color.White.copy(alpha = 0.05f))
                                     )
-                                    .clickable(enabled = selectedPokemon != null && linkCodeInput.length == 6 && !isExecutingAction && session != null) {
+                                    .clickable(enabled = activeOfferPokemon != null && linkCodeInput.length == 6 && !isExecutingAction && session != null) {
                                         val offer = buildOffer() ?: return@clickable
                                         coroutineScope.launch(Dispatchers.IO) {
                                             isExecutingAction = true
@@ -619,12 +770,12 @@ fun PokemonTradeModal(
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
                                 .then(
-                                    if (selectedPokemon != null && targetTrainerInput.isNotBlank() && !isExecutingAction)
+                                    if (activeOfferPokemon != null && targetTrainerInput.isNotBlank() && !isExecutingAction)
                                         Modifier.background(VantafynGradients.accentHorizontal())
                                     else
                                         Modifier.background(Color.White.copy(alpha = 0.05f))
                                 )
-                                .clickable(enabled = selectedPokemon != null && targetTrainerInput.isNotBlank() && !isExecutingAction && session != null) {
+                                .clickable(enabled = activeOfferPokemon != null && targetTrainerInput.isNotBlank() && !isExecutingAction && session != null) {
                                     val offer = buildOffer() ?: return@clickable
                                     coroutineScope.launch(Dispatchers.IO) {
                                         isExecutingAction = true
@@ -725,7 +876,7 @@ fun PokemonTradeModal(
                             pendingTrades.forEach { trade ->
                                 TradePendingCard(
                                     trade = trade,
-                                    canCounterOffer = selectedPokemon != null,
+                                    canCounterOffer = activeOfferPokemon != null,
                                     isExecutingAction = isExecutingAction,
                                     onAccept = {
                                         val offer = buildOffer() ?: return@TradePendingCard

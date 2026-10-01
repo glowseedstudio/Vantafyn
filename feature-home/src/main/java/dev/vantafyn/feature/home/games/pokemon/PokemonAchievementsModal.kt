@@ -64,22 +64,107 @@ import dev.vantafyn.core.ui.VantafynGradients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+import dev.vantafyn.core.jellyfin.PokemonBoxDto
+import dev.vantafyn.core.jellyfin.PokemonGameSaveDto
+
+private data class LocalAchievementDef(
+    val id: String,
+    val title: String,
+    val description: String,
+    val rarity: String,
+    val score: Int,
+    val max: Int,
+    val current: Int,
+)
+
+private fun computeLocalAchievements(
+    localSaves: List<PokemonGameSaveDto>,
+    vaultBoxes: List<PokemonBoxDto>,
+): PokemonAchievementsSummaryDto {
+    val vaultEntries = vaultBoxes.flatMap { it.entries }
+    val vaultCount = vaultEntries.size
+
+    val caughtSet = mutableSetOf<Int>()
+    for (save in localSaves) {
+        caughtSet.addAll(save.caughtSpeciesIds)
+        save.party.forEach { if (it.speciesId > 0) caughtSet.add(it.speciesId) }
+        save.boxes.forEach { b -> b.entries.forEach { if (it.speciesId > 0) caughtSet.add(it.speciesId) } }
+    }
+    for (p in vaultEntries) {
+        if (p.speciesId > 0) caughtSet.add(p.speciesId)
+    }
+
+    val hasShiny = vaultEntries.any { it.isShiny } || localSaves.any { save ->
+        save.party.any { it.isShiny } || save.boxes.any { b -> b.entries.any { it.isShiny } }
+    }
+
+    val kantoCaught = (1..151).count { caughtSet.contains(it) }
+
+    val defs = listOf(
+        LocalAchievementDef("pk-vault-first-deposit", "Vault Initiate", "Deposited your first Pokémon into the personal cloud vault.", "Common", 100, 1, if (vaultCount >= 1) 1 else 0),
+        LocalAchievementDef("pk-vault-50", "Pokemon Collector", "Stored 50 or more Pokémon in your personal vault.", "Rare", 250, 50, minOf(50, vaultCount)),
+        LocalAchievementDef("pk-vault-withdraw", "Ready for Battle", "Withdrew a Pokémon from the cloud vault into an active game save.", "Common", 100, 1, 0),
+        LocalAchievementDef("pk-transfer-first", "Cross-Game Traveler", "Transferred a Pokémon directly from one game save to another.", "Uncommon", 150, 1, 0),
+        LocalAchievementDef("pk-crossgen-transfer", "Time Traveler", "Successfully performed a cross-generation migration across historical eras.", "Epic", 300, 1, 0),
+        LocalAchievementDef("pk-shiny-first", "Gotta Gleam 'Em All", "Registered a Shiny Pokémon in your vault or Pokédex.", "Legendary", 500, 1, if (hasShiny) 1 else 0),
+        LocalAchievementDef("pk-pokedex-10", "Research Assistant", "Registered 10 unique species in the National Pokédex.", "Common", 100, 10, minOf(10, caughtSet.size)),
+        LocalAchievementDef("pk-pokedex-50", "Field Researcher", "Registered 50 unique species in the National Pokédex.", "Rare", 300, 50, minOf(50, caughtSet.size)),
+        LocalAchievementDef("pk-pokedex-kanto-master", "Kanto Master", "Completed the Generation I Pokédex (all 151 species).", "Mythic", 1000, 151, minOf(151, kantoCaught)),
+        LocalAchievementDef("pk-trade-first", "Link Cable Connection", "Completed a Pokémon trade with another trainer.", "Rare", 250, 1, 0),
+    )
+
+    val dtoList = defs.map { d ->
+        val unlocked = d.current >= d.max
+        PokemonAchievementDto(
+            id = d.id,
+            title = d.title,
+            description = d.description,
+            category = "Pokemon",
+            rarity = d.rarity,
+            score = d.score,
+            iconName = "star",
+            isUnlocked = unlocked,
+            unlockedAtUtc = null,
+            currentProgress = d.current,
+            maxProgress = d.max,
+        )
+    }
+
+    return PokemonAchievementsSummaryDto(
+        userId = java.util.UUID.randomUUID().toString(),
+        totalScore = dtoList.filter { it.isUnlocked }.sumOf { it.score },
+        unlockedCount = dtoList.count { it.isUnlocked },
+        totalCount = dtoList.size,
+        achievements = dtoList,
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PokemonAchievementsModal(
     session: JellyfinSession?,
     pokemonRepository: JellyfinPokemonRepository,
+    localSaves: List<PokemonGameSaveDto> = emptyList(),
+    vaultBoxes: List<PokemonBoxDto> = emptyList(),
     onDismiss: () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
     var selectedTab by remember { mutableIntStateOf(0) } // 0 = Achievements, 1 = Social Activity
-    var summary by remember { mutableStateOf<PokemonAchievementsSummaryDto?>(null) }
+    val localBaseline = remember(localSaves, vaultBoxes) {
+        computeLocalAchievements(localSaves, vaultBoxes)
+    }
+    var summary by remember { mutableStateOf<PokemonAchievementsSummaryDto?>(localBaseline) }
     var activityFeed by remember { mutableStateOf<List<PokemonSocialActivityEvent>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(session != null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
 
     fun loadData() {
-        if (session == null) return
+        val currentLocal = computeLocalAchievements(localSaves, vaultBoxes)
+        if (session == null) {
+            summary = currentLocal
+            isLoading = false
+            return
+        }
         coroutineScope.launch(Dispatchers.IO) {
             isLoading = true
             errorMessage = null
@@ -87,9 +172,35 @@ fun PokemonAchievementsModal(
             val feedResult = pokemonRepository.getSocialActivity(session, limit = 50)
 
             if (achResult.isSuccess) {
-                summary = achResult.getOrNull()
+                val netSummary = achResult.getOrNull()
+                if (netSummary != null) {
+                    val mergedList = netSummary.achievements.map { netAch ->
+                        val localMatch = currentLocal.achievements.firstOrNull { it.id.equals(netAch.id, ignoreCase = true) }
+                        if (localMatch != null) {
+                            val isUnlocked = netAch.isUnlocked || localMatch.isUnlocked
+                            val maxP = maxOf(netAch.maxProgress, localMatch.maxProgress)
+                            val curP = if (isUnlocked) maxP else maxOf(netAch.currentProgress, localMatch.currentProgress)
+                            netAch.copy(
+                                isUnlocked = isUnlocked,
+                                currentProgress = curP,
+                                maxProgress = maxP,
+                            )
+                        } else {
+                            netAch
+                        }
+                    }
+                    val unlockedCount = mergedList.count { it.isUnlocked }
+                    val totalScore = mergedList.filter { it.isUnlocked }.sumOf { it.score }
+                    summary = netSummary.copy(
+                        unlockedCount = unlockedCount,
+                        totalScore = totalScore,
+                        achievements = mergedList,
+                    )
+                } else {
+                    summary = currentLocal
+                }
             } else {
-                errorMessage = achResult.exceptionOrNull()?.message ?: "Failed to load achievements"
+                summary = currentLocal
             }
 
             if (feedResult.isSuccess) {

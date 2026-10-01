@@ -12,5 +12,6 @@ public interface IPokemonJourneyService
     Task RecordJourneyStepAsync(Guid userId, string pokemonId, PokemonJourneyStepDto step, PokemonSummaryDto? summary = null, CancellationToken cancellationToken = default);
     Task RecordEncounterAsync(Guid userId, PokemonSummaryDto pokemon, string? gameName, bool isCaught = true, CancellationToken cancellationToken = default);
     Task RecordBatchEncountersAsync(Guid userId, IEnumerable<PokemonSummaryDto> pokemons, string? gameName, bool isCaught = true, CancellationToken cancellationToken = default);
+    Task RecordSpeciesIdsAsync(Guid userId, IEnumerable<int> caughtSpeciesIds, IEnumerable<int> seenSpeciesIds, string? gameName, CancellationToken cancellationToken = default);
     Task SynchronizeWithVaultAsync(Guid userId, PokemonVault vault, CancellationToken cancellationToken = default);
 }

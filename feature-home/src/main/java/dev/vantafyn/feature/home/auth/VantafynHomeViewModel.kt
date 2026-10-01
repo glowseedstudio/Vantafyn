@@ -6277,7 +6277,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.34")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.37")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()

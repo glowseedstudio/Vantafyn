@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.4}"
+VERSION="${1:-0.2.5}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.36}"
-CHANGELOG="Custom Pokémon modal and vault background support (local server file path or URL), fallback default dark gradient, and complete unbundling of third-party assets."
+TAG="${2:-v0.9.37}"
+CHANGELOG="Live cartridge SRAM Pokédex seen/caught synchronisation, multi-cartridge save snapshots, interactive trade vault picker, and offline badge progress evaluation."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.4.0",
+        "changelog": "Custom Pokémon modal and vault background support (local server file path or URL), fallback default dark gradient, and complete unbundling of third-party assets.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.36/Vantafyn.Plugin.Companion_0.2.4_net9.zip",
+        "checksum": "f433d7c5f77f8fd31ed3ede25bae563a",
+        "timestamp": "2026-10-01T12:52:06Z"
+      },
+      {
+        "version": "0.2.4.1",
+        "changelog": "Custom Pokémon modal and vault background support (local server file path or URL), fallback default dark gradient, and complete unbundling of third-party assets.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.36/Vantafyn.Plugin.Companion_0.2.4_net10.zip",
+        "checksum": "98cf34d3b20f530eaced80e0f9577dd0",
+        "timestamp": "2026-10-01T12:52:06Z"
       },
       {
         "version": "0.2.2.0",

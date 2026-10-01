@@ -37,44 +37,66 @@ public sealed class PkVaultStaticCatalog
             _natureNames[i] = NatureNames[i];
         }
 
-        // Seed Gen 1 Pokémon (1..151)
-        var gen1 = new[]
+        // Seed All Pokémon species (1..1025)
+        for (var i = 0; i < PokemonSpeciesCatalog.AllSpecies.Length; i++)
         {
-            "Bulbasaur", "Ivysaur", "Venusaur", "Charmander", "Charmeleon", "Charizard",
-            "Squirtle", "Wartortle", "Blastoise", "Caterpie", "Metapod", "Butterfree",
-            "Weedle", "Kakuna", "Beedrill", "Pidgey", "Pidgeotto", "Pidgeot",
-            "Rattata", "Raticate", "Spearow", "Fearow", "Ekans", "Arbok",
-            "Pikachu", "Raichu", "Sandshrew", "Sandslash", "Nidoran♀", "Nidorina",
-            "Nidoqueen", "Nidoran♂", "Nidorino", "Nidoking", "Clefairy", "Clefable",
-            "Vulpix", "Ninetales", "Jigglypuff", "Wigglytuff", "Zubat", "Golbat",
-            "Oddish", "Gloom", "Vileplume", "Paras", "Parasect", "Venonat",
-            "Venomoth", "Diglett", "Dugtrio", "Meowth", "Persian", "Psyduck",
-            "Golduck", "Mankey", "Primeape", "Growlithe", "Arcanine", "Poliwag",
-            "Poliwhirl", "Poliwrath", "Abra", "Kadabra", "Alakazam", "Machop",
-            "Machoke", "Machamp", "Bellsprout", "Weepinbell", "Victreebel", "Tentacool",
-            "Tentacruel", "Geodude", "Graveler", "Golem", "Ponyta", "Rapidash",
-            "Slowpoke", "Slowbro", "Magnemite", "Magneton", "Farfetch'd", "Doduo",
-            "Dodrio", "Seel", "Dewgong", "Grimer", "Muk", "Shellder",
-            "Cloyster", "Gastly", "Haunter", "Gengar", "Onix", "Drowzee",
-            "Hypno", "Krabby", "Kingler", "Voltorb", "Electrode", "Exeggcute",
-            "Exeggutor", "Cubone", "Marowak", "Hitmonlee", "Hitmonchan", "Lickitung",
-            "Koffing", "Weezing", "Rhyhorn", "Rhydon", "Chansey", "Tangela",
-            "Kangaskhan", "Horsea", "Seadra", "Goldeen", "Seaking", "Staryu",
-            "Starmie", "Mr. Mime", "Scyther", "Jynx", "Electabuzz", "Magmar",
-            "Pinsir", "Tauros", "Magikarp", "Gyarados", "Lapras", "Ditto",
-            "Eevee", "Vaporeon", "Jolteon", "Flareon", "Porygon", "Omanyte",
-            "Omastar", "Kabuto", "Kabutops", "Aerodactyl", "Snorlax", "Articuno",
-            "Zapdos", "Moltres", "Dratini", "Dragonair", "Dragonite", "Mewtwo", "Mew"
-        };
-
-        for (var i = 0; i < gen1.Length; i++)
-        {
-            _speciesNames[i + 1] = gen1[i];
+            _speciesNames[i + 1] = PokemonSpeciesCatalog.AllSpecies[i];
         }
 
         // Seed common test/starter abilities & items & moves
+        _abilityNames[4] = "Battle Armor";
+        _abilityNames[5] = "Sturdy";
+        _abilityNames[6] = "Damp";
+        _abilityNames[7] = "Limber";
+        _abilityNames[8] = "Sand Veil";
         _abilityNames[9] = "Static";
-        _abilityNames[65] = "Blaze";
+        _abilityNames[10] = "Volt Absorb";
+        _abilityNames[11] = "Water Absorb";
+        _abilityNames[12] = "Oblivious";
+        _abilityNames[13] = "Cloud Nine";
+        _abilityNames[14] = "Compound Eyes";
+        _abilityNames[15] = "Insomnia";
+        _abilityNames[17] = "Immunity";
+        _abilityNames[18] = "Flash Fire";
+        _abilityNames[19] = "Shield Dust";
+        _abilityNames[20] = "Own Tempo";
+        _abilityNames[22] = "Intimidate";
+        _abilityNames[26] = "Levitate";
+        _abilityNames[27] = "Effect Spore";
+        _abilityNames[28] = "Synchronize";
+        _abilityNames[29] = "Clear Body";
+        _abilityNames[30] = "Natural Cure";
+        _abilityNames[31] = "Lightning Rod";
+        _abilityNames[32] = "Serene Grace";
+        _abilityNames[33] = "Swift Swim";
+        _abilityNames[34] = "Chlorophyll";
+        _abilityNames[35] = "Illuminate";
+        _abilityNames[36] = "Trace";
+        _abilityNames[38] = "Poison Point";
+        _abilityNames[39] = "Inner Focus";
+        _abilityNames[41] = "Water Veil";
+        _abilityNames[42] = "Magnet Pull";
+        _abilityNames[43] = "Soundproof";
+        _abilityNames[46] = "Pressure";
+        _abilityNames[47] = "Thick Fat";
+        _abilityNames[48] = "Early Bird";
+        _abilityNames[49] = "Flame Body";
+        _abilityNames[50] = "Run Away";
+        _abilityNames[51] = "Keen Eye";
+        _abilityNames[52] = "Hyper Cutter";
+        _abilityNames[53] = "Pickup";
+        _abilityNames[56] = "Cute Charm";
+        _abilityNames[61] = "Shed Skin";
+        _abilityNames[62] = "Guts";
+        _abilityNames[64] = "Liquid Ooze";
+        _abilityNames[65] = "Overgrow";
+        _abilityNames[66] = "Blaze";
+        _abilityNames[67] = "Torrent";
+        _abilityNames[68] = "Swarm";
+        _abilityNames[69] = "Rock Head";
+        _abilityNames[71] = "Arena Trap";
+        _abilityNames[72] = "Vital Spirit";
+        _abilityNames[75] = "Shell Armor";
         _itemNames[236] = "Light Ball";
         _moveNames[85] = "Thunderbolt";
         _moveNames[98] = "Quick Attack";
@@ -87,6 +109,12 @@ public sealed class PkVaultStaticCatalog
         if (_speciesNames.TryGetValue(speciesId, out var knownName))
         {
             return knownName;
+        }
+
+        var catalogName = PokemonSpeciesCatalog.ResolveSpeciesName(speciesId);
+        if (!catalogName.StartsWith('#'))
+        {
+            return catalogName;
         }
 
         if (!isNicknamed && !string.IsNullOrWhiteSpace(nickname))

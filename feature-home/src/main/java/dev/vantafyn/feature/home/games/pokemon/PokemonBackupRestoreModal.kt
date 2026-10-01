@@ -59,17 +59,23 @@ import dev.vantafyn.core.ui.VantafynGradients
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+import androidx.compose.foundation.horizontalScroll
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PokemonBackupRestoreModal(
     session: JellyfinSession?,
     pokemonRepository: JellyfinPokemonRepository,
     selectedGame: GameSummary?,
+    availableGames: List<GameSummary> = emptyList(),
     onDismiss: () -> Unit,
     onSaveRestored: () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
 
+    var activeGame by remember(selectedGame, availableGames) {
+        mutableStateOf(selectedGame ?: availableGames.firstOrNull())
+    }
     var backups by remember { mutableStateOf<List<PokemonBackupDto>>(emptyList()) }
     var diagnostics by remember { mutableStateOf<PokemonDiagnosticsDto?>(null) }
     var isLoading by remember { mutableStateOf(true) }
@@ -85,16 +91,19 @@ fun PokemonBackupRestoreModal(
             pokemonRepository.getDiagnostics(session).onSuccess {
                 diagnostics = it
             }
-            if (selectedGame != null) {
-                pokemonRepository.getGameBackups(session, "default", selectedGame.id).onSuccess {
+            val game = activeGame
+            if (game != null) {
+                pokemonRepository.getGameBackups(session, "default", game.id).onSuccess {
                     backups = it
                 }
+            } else {
+                backups = emptyList()
             }
             isLoading = false
         }
     }
 
-    LaunchedEffect(selectedGame) {
+    LaunchedEffect(activeGame) {
         loadData()
     }
 
@@ -261,11 +270,39 @@ fun PokemonBackupRestoreModal(
                     }
                 }
 
+                if (availableGames.size > 1) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        availableGames.forEach { game ->
+                            val isSelected = activeGame?.id == game.id
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.2f) else Color(0xFF1B1E2B))
+                                    .border(1.dp, if (isSelected) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                                    .clickable { activeGame = game }
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    text = game.title,
+                                    color = if (isSelected) Color(0xFF00E5FF) else VantafynColors.Muted,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                )
+                            }
+                        }
+                    }
+                }
+
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator(modifier = Modifier.size(24.dp), color = Color(0xFF00E5FF))
                     }
-                } else if (selectedGame == null) {
+                } else if (activeGame == null) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -343,13 +380,14 @@ fun PokemonBackupRestoreModal(
                     onClick = {
                         val target = backupToRestore ?: return@TextButton
                         backupToRestore = null
-                        if (session != null && selectedGame != null) {
+                        val game = activeGame
+                        if (session != null && game != null) {
                             coroutineScope.launch(Dispatchers.IO) {
                                 isRestoring = true
                                 statusMessage = null
                                 pokemonRepository.restoreBackup(
                                     session,
-                                    RestoreBackupRequest(backupId = target.backupId, gameId = selectedGame.id)
+                                    RestoreBackupRequest(backupId = target.backupId, gameId = game.id)
                                 ).fold(
                                     onSuccess = { res ->
                                         isSuccessMessage = res.isSuccess

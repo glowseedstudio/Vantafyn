@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Vantafyn.Plugin.Companion.Core;
+using Vantafyn.Plugin.Companion.Pokemon.PkVault;
 
 namespace Vantafyn.Plugin.Companion.Pokemon;
 
@@ -215,6 +216,88 @@ public sealed class FilePokemonJourneyService : IPokemonJourneyService
                         updated = true;
                     }
                     entry.EncounterCount++;
+                    if (updated) modified = true;
+                }
+            }
+
+            if (modified)
+            {
+                record.UpdatedAtUtc = _clock.UtcNow;
+                var path = PokedexFilePath(userId);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await JsonFile.WriteAtomicAsync(path, record, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            sem.Release();
+        }
+    }
+
+    public async Task RecordSpeciesIdsAsync(Guid userId, IEnumerable<int> caughtSpeciesIds, IEnumerable<int> seenSpeciesIds, string? gameName, CancellationToken cancellationToken = default)
+    {
+        var sem = LockFor(userId);
+        await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var record = await LoadPokedexRecordAsync(userId, cancellationToken).ConfigureAwait(false);
+            var modified = false;
+
+            foreach (var id in seenSpeciesIds)
+            {
+                if (id <= 0) continue;
+                if (!record.Entries.TryGetValue(id, out var entry))
+                {
+                    record.Entries[id] = new PokemonPokedexEntryDto
+                    {
+                        SpeciesId = id,
+                        SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
+                        Generation = GetGenerationForSpecies(id),
+                        IsSeen = true,
+                        IsCaught = false,
+                        HasShiny = false,
+                        FirstEncounteredGame = gameName,
+                        FirstEncounteredTimestamp = _clock.UtcNow,
+                        EncounterCount = 1
+                    };
+                    modified = true;
+                }
+                else if (!entry.IsSeen)
+                {
+                    entry.IsSeen = true;
+                    modified = true;
+                }
+            }
+
+            foreach (var id in caughtSpeciesIds)
+            {
+                if (id <= 0) continue;
+                if (!record.Entries.TryGetValue(id, out var entry))
+                {
+                    record.Entries[id] = new PokemonPokedexEntryDto
+                    {
+                        SpeciesId = id,
+                        SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
+                        Generation = GetGenerationForSpecies(id),
+                        IsSeen = true,
+                        IsCaught = true,
+                        HasShiny = false,
+                        FirstEncounteredGame = gameName,
+                        FirstEncounteredTimestamp = _clock.UtcNow,
+                        EncounterCount = 1
+                    };
+                    modified = true;
+                }
+                else
+                {
+                    var updated = false;
+                    if (!entry.IsSeen) { entry.IsSeen = true; updated = true; }
+                    if (!entry.IsCaught) { entry.IsCaught = true; updated = true; }
+                    if (string.IsNullOrEmpty(entry.FirstEncounteredGame) && !string.IsNullOrEmpty(gameName))
+                    {
+                        entry.FirstEncounteredGame = gameName;
+                        updated = true;
+                    }
                     if (updated) modified = true;
                 }
             }

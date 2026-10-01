@@ -67,6 +67,11 @@ import dev.vantafyn.core.jellyfin.PokemonIntegrationStatus
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
 import dev.vantafyn.core.jellyfin.PokemonTransferCompatibilityResult
 import dev.vantafyn.core.jellyfin.PokemonTransferValidateRequest
+import androidx.compose.ui.platform.LocalContext
+import dev.vantafyn.core.jellyfin.DefaultJellyfinGamesRepository
+import dev.vantafyn.core.jellyfin.GameSaveKind
+import dev.vantafyn.feature.player.games.GameStorageManager
+import dev.vantafyn.feature.player.games.SaveSyncStatus
 import dev.vantafyn.core.jellyfin.PokemonVaultSummary
 import dev.vantafyn.core.jellyfin.PokemonWithdrawRequest
 import dev.vantafyn.core.ui.VantafynColors
@@ -84,6 +89,9 @@ fun PokemonVaultScreen(
     pokemonRepository: JellyfinPokemonRepository = remember { DefaultJellyfinPokemonRepository() },
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val gamesRepository = remember { DefaultJellyfinGamesRepository() }
+    val storageManager = remember(context) { GameStorageManager(context, gamesRepository) }
 
     var availableGames by remember { mutableStateOf<List<GameSummary>>(emptyList()) }
     var vaultSummary by remember { mutableStateOf<PokemonVaultSummary?>(null) }
@@ -168,26 +176,113 @@ fun PokemonVaultScreen(
                     )
                 }
                 is StorageContainerType.GameCartridge -> {
-                    val libId = "default"
-                    val saveRes = pokemonRepository.getGameSave(session, libId, target.game.id)
-                    val lockRes = pokemonRepository.getGameLockState(session, libId, target.game.id)
+                    val gameId = target.game.id
+                    val safeGameId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
 
-                    val save = saveRes.getOrNull()
-                    val lock = lockRes.getOrNull()
+                    // 1. Locate local save file (.sram, .sav, .srm)
+                    var localSaveFile = storageManager.getLocalSaveFile(gameId, GameSaveKind.Sram)
+                    if (!localSaveFile.exists() || localSaveFile.length() == 0L) {
+                        val altSav = java.io.File(storageManager.savesDir, "$safeGameId.sav")
+                        val altSrm = java.io.File(storageManager.savesDir, "$safeGameId.srm")
+                        if (altSav.exists() && altSav.length() > 0L) localSaveFile = altSav
+                        else if (altSrm.exists() && altSrm.length() > 0L) localSaveFile = altSrm
+                    }
+
+                    // If local save exists and is newer or local-only, push it to cloud so companion plugin can see it
+                    if (session != null && localSaveFile.exists() && localSaveFile.length() > 0L) {
+                        try {
+                            val syncInfo = storageManager.checkSaveSync(session, gameId, GameSaveKind.Sram)
+                            if (syncInfo.status == SaveSyncStatus.LOCAL_NEWER || syncInfo.status == SaveSyncStatus.LOCAL_ONLY) {
+                                storageManager.replaceCloudWithLocalSave(session, gameId, GameSaveKind.Sram)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("PokemonVault", "Save sync check error: ${e.message}")
+                        }
+                    }
+
+                    // 2. Query companion plugin for game save and lock state
+                    var saveDto: dev.vantafyn.core.jellyfin.PokemonGameSaveDto? = null
+                    var lockState: dev.vantafyn.core.jellyfin.SaveLockStateDto? = null
+                    var errorMsg: String? = null
+
+                    if (session != null) {
+                        val libId = "default"
+                        val saveRes = pokemonRepository.getGameSave(session, libId, gameId)
+                        val lockRes = pokemonRepository.getGameLockState(session, libId, gameId)
+                        saveDto = saveRes.getOrNull()
+                        lockState = lockRes.getOrNull()
+                        if (saveDto == null || !saveDto.saveFound || !saveDto.providerAvailable) {
+                            errorMsg = saveRes.exceptionOrNull()?.message
+                        }
+                    }
+
+                    // 3. Fallback to native client-side parsing if server is offline, missing save, or returned empty/unavailable
+                    val isServerEmpty = saveDto?.party?.isEmpty() == true && saveDto.boxes.all { it.entries.isEmpty() }
+                    if (saveDto == null || !saveDto.saveFound || !saveDto.providerAvailable || isServerEmpty) {
+                        val saveBytes = if (localSaveFile.exists() && localSaveFile.length() > 0L) {
+                            runCatching { localSaveFile.readBytes() }.getOrNull()
+                        } else if (session != null) {
+                            storageManager.loadSaveState(session, gameId, GameSaveKind.Sram)
+                        } else null
+
+                        if (saveBytes != null && saveBytes.isNotEmpty()) {
+                            val localParsed = when {
+                                dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.isGen1Save(saveBytes) -> {
+                                    dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.parse(
+                                        saveBytes = saveBytes,
+                                        gameTitle = target.game.title,
+                                        gameId = gameId,
+                                    )
+                                }
+                                dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.isGen2Save(saveBytes) -> {
+                                    dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.parse(
+                                        saveBytes = saveBytes,
+                                        gameTitle = target.game.title,
+                                        gameId = gameId,
+                                    )
+                                }
+                                dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.isGen4Save(saveBytes, target.game.title) -> {
+                                    dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(
+                                        saveBytes = saveBytes,
+                                        gameTitle = target.game.title,
+                                        gameId = gameId,
+                                    )
+                                }
+                                dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(saveBytes, target.game.title) -> {
+                                    dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(
+                                        saveBytes = saveBytes,
+                                        gameTitle = target.game.title,
+                                        gameId = gameId,
+                                    )
+                                }
+                                else -> {
+                                    dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(
+                                        saveBytes = saveBytes,
+                                        gameTitle = target.game.title,
+                                        gameId = gameId,
+                                    )
+                                }
+                            }
+                            if (localParsed != null && (localParsed.party.isNotEmpty() || localParsed.boxes.any { it.entries.isNotEmpty() })) {
+                                saveDto = localParsed
+                                errorMsg = null
+                            }
+                        }
+                    }
 
                     if (isUpper) {
                         upperState = upperState.copy(
-                            gameSave = save,
-                            lockState = lock,
+                            gameSave = saveDto,
+                            lockState = lockState,
                             isLoading = false,
-                            errorMessage = saveRes.exceptionOrNull()?.message,
+                            errorMessage = errorMsg,
                         )
                     } else {
                         lowerState = lowerState.copy(
-                            gameSave = save,
-                            lockState = lock,
+                            gameSave = saveDto,
+                            lockState = lockState,
                             isLoading = false,
-                            errorMessage = saveRes.exceptionOrNull()?.message,
+                            errorMessage = errorMsg,
                         )
                     }
                 }
@@ -218,7 +313,7 @@ fun PokemonVaultScreen(
     }
 
     val customBackgroundUrl = remember(session, integrationStatus) {
-        if (session != null && integrationStatus?.hasCustomBackground == true) {
+        if (session != null && integrationStatus?.hasCustomBackground != false) {
             val base = session.server.url.trimEnd('/')
             "$base/Vantafyn/Pokemon/Background?api_key=${session.accessToken}"
         } else {
@@ -818,12 +913,17 @@ fun PokemonVaultScreen(
             ?: (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
             ?: (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
 
+        val initialDetails = upperState.gameSave?.pokemonDetails?.get(inspectedPokemon!!.id)
+            ?: lowerState.gameSave?.pokemonDetails?.get(inspectedPokemon!!.id)
+
         PokemonDetailModal(
             pokemon = inspectedPokemon!!,
             session = session,
             pokemonRepository = pokemonRepository,
             gameId = gameId,
             isVault = isVault,
+            initialDetails = initialDetails,
+            customBackgroundUrl = customBackgroundUrl,
             onDismiss = { inspectedPokemon = null },
         )
     }
@@ -856,26 +956,81 @@ fun PokemonVaultScreen(
         )
     }
 
+    val allVaultBoxes = remember(upperState.vaultBox, lowerState.vaultBox) {
+        listOfNotNull(upperState.vaultBox, lowerState.vaultBox)
+            .distinctBy { it.boxIndex }
+            .map { box ->
+                dev.vantafyn.core.jellyfin.PokemonBoxDto(
+                    boxIndex = box.boxIndex,
+                    name = box.name,
+                    entries = box.entries.map { it.toSummaryDto() },
+                )
+            }
+    }
+
+    val allDetectedSaves = remember(upperState.gameSave, lowerState.gameSave, availableGames) {
+        val map = mutableMapOf<String, dev.vantafyn.core.jellyfin.PokemonGameSaveDto>()
+        upperState.gameSave?.let { map[it.gameId] = it }
+        lowerState.gameSave?.let { map[it.gameId] = it }
+        for (game in availableGames) {
+            if (!map.containsKey(game.id)) {
+                val safeGameId = game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                var localSaveFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                if (!localSaveFile.exists() || localSaveFile.length() == 0L) {
+                    val altSav = java.io.File(storageManager.savesDir, "$safeGameId.sav")
+                    val altSrm = java.io.File(storageManager.savesDir, "$safeGameId.srm")
+                    if (altSav.exists() && altSav.length() > 0L) localSaveFile = altSav
+                    else if (altSrm.exists() && altSrm.length() > 0L) localSaveFile = altSrm
+                }
+                if (localSaveFile.exists() && localSaveFile.length() > 0L) {
+                    val bytes = runCatching { localSaveFile.readBytes() }.getOrNull()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val parsed = when {
+                            dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.isGen1Save(bytes) ->
+                                dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.parse(bytes, game.title, game.id)
+                            dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.isGen2Save(bytes) ->
+                                dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.parse(bytes, game.title, game.id)
+                            dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.isGen4Save(bytes, game.title) ->
+                                dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(bytes, game.title, game.id)
+                            dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(bytes, game.title) ->
+                                dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(bytes, game.title, game.id)
+                            else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(bytes, game.title, game.id)
+                        }
+                        if (parsed != null && (parsed.party.isNotEmpty() || parsed.boxes.any { it.entries.isNotEmpty() } || parsed.seenSpeciesIds.isNotEmpty() || parsed.caughtSpeciesIds.isNotEmpty())) {
+                            map[game.id] = parsed
+                        }
+                    }
+                }
+            }
+        }
+        map.values.toList()
+    }
+
     // Trade Center Modal
     if (isTradeModalOpen) {
+        val selectedTradePokemon = inspectedPokemon ?: selectedPokemonItem?.let { sel ->
+            val upperMatch = upperState.vaultBox?.entries?.firstOrNull { it.id == sel.pokemonId }
+            val lowerMatch = lowerState.vaultBox?.entries?.firstOrNull { it.id == sel.pokemonId }
+            val match = upperMatch ?: lowerMatch
+            if (match != null) {
+                PokemonSummaryDto(
+                    id = match.id,
+                    species = match.species,
+                    speciesId = match.speciesId,
+                    nickname = match.nickname,
+                    level = match.level,
+                    isShiny = match.isShiny,
+                    boxIndex = match.boxIndex,
+                    slotIndex = match.slotIndex,
+                )
+            } else null
+        }
+
         PokemonTradeModal(
             session = session,
             pokemonRepository = pokemonRepository,
-            selectedPokemon = inspectedPokemon ?: selectedPokemonItem?.let { sel ->
-                val upperMatch = upperState.vaultBox?.entries?.firstOrNull { it.id == sel.pokemonId }
-                if (upperMatch != null) {
-                    PokemonSummaryDto(
-                        id = upperMatch.id,
-                        species = upperMatch.species,
-                        speciesId = upperMatch.speciesId,
-                        nickname = upperMatch.nickname,
-                        level = upperMatch.level,
-                        isShiny = upperMatch.isShiny,
-                        boxIndex = upperMatch.boxIndex,
-                        slotIndex = upperMatch.slotIndex,
-                    )
-                } else null
-            },
+            selectedPokemon = selectedTradePokemon,
+            vaultBoxes = allVaultBoxes,
             onDismiss = { isTradeModalOpen = false },
             onTradeCompleted = {
                 loadAll()
@@ -893,6 +1048,7 @@ fun PokemonVaultScreen(
             session = session,
             pokemonRepository = pokemonRepository,
             selectedGame = activeGame,
+            availableGames = availableGames,
             onDismiss = { isBackupRestoreModalOpen = false },
             onSaveRestored = {
                 loadAll()
@@ -905,6 +1061,8 @@ fun PokemonVaultScreen(
         PokemonPokedexModal(
             session = session,
             pokemonRepository = pokemonRepository,
+            localSaves = allDetectedSaves,
+            vaultBoxes = allVaultBoxes,
             onDismiss = { isPokedexModalOpen = false },
         )
     }
@@ -914,6 +1072,8 @@ fun PokemonVaultScreen(
         PokemonAchievementsModal(
             session = session,
             pokemonRepository = pokemonRepository,
+            localSaves = allDetectedSaves,
+            vaultBoxes = allVaultBoxes,
             onDismiss = { isAchievementsModalOpen = false },
         )
     }
