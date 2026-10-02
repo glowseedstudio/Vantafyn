@@ -91,8 +91,15 @@ fun PokemonDetailModal(
     onDismiss: () -> Unit,
 ) {
     var journey by remember { mutableStateOf<PokemonJourneyDto?>(null) }
-    var details by remember(pokemon.id) { mutableStateOf(initialDetails) }
-    var isLoadingDetails by remember(pokemon.id) { mutableStateOf(initialDetails == null) }
+    val canonicalFallback = remember(pokemon.id, pokemon.speciesId, pokemon.level) {
+        PokemonSpeciesCatalog.generateCanonicalDetails(pokemon)
+    }
+    var details by remember(pokemon.id, initialDetails) {
+        mutableStateOf(initialDetails ?: canonicalFallback)
+    }
+    var isLoadingDetails by remember(pokemon.id, initialDetails) {
+        mutableStateOf(initialDetails == null && session != null && pokemonRepository != null && pokemon.id.isNotBlank() && !pokemon.id.startsWith("dex-"))
+    }
     var selectedStatTab by remember { mutableStateOf(StatAppraisalTab.JudgeIVs) }
     var showLegalityDialog by remember { mutableStateOf(false) }
     var showMoveRelearnerModal by remember { mutableStateOf(false) }
@@ -104,8 +111,11 @@ fun PokemonDetailModal(
         if (initialDetails != null) {
             details = initialDetails
             isLoadingDetails = false
+        } else if (details == null) {
+            details = canonicalFallback
+            isLoadingDetails = false
         }
-        if (session != null && pokemonRepository != null && pokemon.id.isNotBlank()) {
+        if (session != null && pokemonRepository != null && pokemon.id.isNotBlank() && !pokemon.id.startsWith("dex-")) {
             withContext(Dispatchers.IO) {
                 // Load journey history
                 pokemonRepository.getPokemonJourney(session, pokemon.id).onSuccess {
@@ -117,23 +127,22 @@ fun PokemonDetailModal(
                     pokemonId = pokemon.id,
                     gameId = gameId,
                     libraryId = libraryId,
+                    isVault = isVault,
                 ).onSuccess { netDetails ->
-                    val existing = details
-                    details = if (existing != null) {
-                        netDetails.copy(
-                            iv = netDetails.iv ?: existing.iv,
-                            ev = netDetails.ev ?: existing.ev,
-                            moves = if (netDetails.moves.isNotEmpty()) netDetails.moves else existing.moves,
-                            nature = if (!netDetails.nature.isNullOrBlank()) netDetails.nature else existing.nature,
-                            ability = if (!netDetails.ability.isNullOrBlank()) netDetails.ability else existing.ability,
-                            heldItem = if (!netDetails.heldItem.isNullOrBlank()) netDetails.heldItem else existing.heldItem,
-                            currentHp = netDetails.currentHp ?: existing.currentHp,
-                            maxHp = netDetails.maxHp ?: existing.maxHp,
-                            friendship = if ((netDetails.friendship ?: 0) > 0) netDetails.friendship else existing.friendship,
-                        )
-                    } else {
-                        netDetails
-                    }
+                    val existing = details ?: initialDetails ?: canonicalFallback
+                    details = netDetails.copy(
+                        iv = netDetails.iv ?: existing?.iv ?: canonicalFallback.iv,
+                        ev = netDetails.ev ?: existing?.ev ?: canonicalFallback.ev,
+                        moves = if (netDetails.moves.isNotEmpty()) netDetails.moves else existing?.moves?.ifEmpty { null } ?: canonicalFallback.moves,
+                        nature = if (!netDetails.nature.isNullOrBlank()) netDetails.nature else existing?.nature ?: canonicalFallback.nature,
+                        ability = if (!netDetails.ability.isNullOrBlank()) netDetails.ability else existing?.ability ?: canonicalFallback.ability,
+                        heldItem = if (!netDetails.heldItem.isNullOrBlank()) netDetails.heldItem else existing?.heldItem ?: canonicalFallback.heldItem,
+                        currentHp = netDetails.currentHp ?: existing?.currentHp,
+                        maxHp = netDetails.maxHp ?: existing?.maxHp,
+                        friendship = if ((netDetails.friendship ?: 0) > 0) netDetails.friendship else existing?.friendship,
+                        ribbons = if (netDetails.ribbons.isNotEmpty()) netDetails.ribbons else existing?.ribbons ?: emptyList(),
+                        isHallOfFameMember = netDetails.isHallOfFameMember || (existing?.isHallOfFameMember == true),
+                    )
                 }
             }
             isLoadingDetails = false
@@ -430,9 +439,10 @@ fun PokemonDetailModal(
             }
 
             // Stat & Judge Appraisal System
-            val effectiveIvs = details?.iv
-            val effectiveEvs = details?.ev
-            val natureMods = remember(details?.nature) { getNatureModifiers(details?.nature) }
+            val effectiveIvs = details?.iv ?: canonicalFallback.iv
+            val effectiveEvs = details?.ev ?: canonicalFallback.ev
+            val effectiveNature = details?.nature?.ifBlank { canonicalFallback.nature } ?: canonicalFallback.nature
+            val natureMods = remember(effectiveNature) { getNatureModifiers(effectiveNature) }
 
             Column(
                 modifier = Modifier
@@ -581,7 +591,7 @@ fun PokemonDetailModal(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = details?.ability?.ifBlank { "Standard" } ?: "Standard",
+                        text = details?.ability?.ifBlank { canonicalFallback.ability } ?: canonicalFallback.ability ?: "Standard",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -604,9 +614,10 @@ fun PokemonDetailModal(
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
                     )
+                    val effectiveHeldItem = details?.heldItem?.ifBlank { canonicalFallback.heldItem } ?: canonicalFallback.heldItem ?: "None"
                     Text(
-                        text = details?.heldItem?.ifBlank { "None" } ?: "None",
-                        color = if (!details?.heldItem.isNullOrBlank() && details?.heldItem != "None") Color(0xFF00E5FF) else VantafynColors.Muted,
+                        text = effectiveHeldItem,
+                        color = if (effectiveHeldItem != "None") Color(0xFF00E5FF) else VantafynColors.Muted,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                     )
@@ -629,7 +640,7 @@ fun PokemonDetailModal(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = resolveBallName(details?.pokeball),
+                        text = resolveBallName(details?.pokeball ?: canonicalFallback.pokeball),
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
@@ -638,7 +649,7 @@ fun PokemonDetailModal(
             }
 
             // Moveset Card (if moves available)
-            val moves = details?.moves ?: emptyList()
+            val moves = details?.moves?.filter { it.isNotBlank() && it != "—" }?.ifEmpty { null } ?: canonicalFallback.moves
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1066,7 +1077,7 @@ fun PokemonDetailModal(
             isVault = isVault,
             onDismiss = { showMoveRelearnerModal = false },
             onMovesUpdated = { newMoves ->
-                details = details?.copy(moves = newMoves)
+                details = details.copy(moves = newMoves)
             },
         )
     }
@@ -1080,7 +1091,7 @@ fun PokemonDetailModal(
     }
 
     if (showEvolutionModal && session != null && pokemonRepository != null) {
-        val evos = details?.availableEvolutions?.ifEmpty { null }
+        val evos = details.availableEvolutions.ifEmpty { null }
             ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.getAvailableEvolutions(currentPokemonState.speciesId, currentPokemonState.level)
         PokemonEvolutionModal(
             pokemon = currentPokemonState,
@@ -1091,7 +1102,7 @@ fun PokemonDetailModal(
             onDismiss = { showEvolutionModal = false },
             onEvolved = { evolvedPokemon ->
                 currentPokemonState = evolvedPokemon
-                details = details?.copy(
+                details = details.copy(
                     summary = evolvedPokemon,
                     availableEvolutions = emptyList()
                 )

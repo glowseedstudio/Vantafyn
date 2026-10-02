@@ -38,6 +38,7 @@ interface JellyfinPokemonRepository {
         caughtSpeciesIds: List<Int>,
         seenSpeciesIds: List<Int>,
         originGame: String? = null,
+        replaceExisting: Boolean = false,
     ): Result<PokemonPokedexDto>
     suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto>
     suspend fun getPokemonDetails(
@@ -971,6 +972,7 @@ class DefaultJellyfinPokemonRepository(
         caughtSpeciesIds: List<Int>,
         seenSpeciesIds: List<Int>,
         originGame: String?,
+        replaceExisting: Boolean,
     ): Result<PokemonPokedexDto> =
         withContext(ioDispatcher) {
             runCatching {
@@ -979,6 +981,7 @@ class DefaultJellyfinPokemonRepository(
                 val payload = JSONObject().apply {
                     put("caughtSpeciesIds", JSONArray(caughtSpeciesIds))
                     put("seenSpeciesIds", JSONArray(seenSpeciesIds))
+                    put("replaceExisting", replaceExisting)
                     if (originGame != null) put("originGame", originGame)
                 }
                 conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
@@ -1180,9 +1183,11 @@ class DefaultJellyfinPokemonRepository(
                 val list = mutableListOf<PokemonSocialActivityEvent>()
                 for (i in 0 until array.length()) {
                     val e = array.getJSONObject(i)
+                    val rawId = e.optString("id", "").trim()
+                    val safeId = if (rawId.isNotEmpty()) rawId else "event_${i}_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}"
                     list.add(
                         PokemonSocialActivityEvent(
-                            id = e.optString("id", ""),
+                            id = safeId,
                             userId = e.optString("userId", ""),
                             userName = e.optString("userName", ""),
                             eventType = e.optString("eventType", ""),

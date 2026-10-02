@@ -69,6 +69,7 @@ import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonBoxDto
+import dev.vantafyn.core.jellyfin.PokemonDetailsDto
 import dev.vantafyn.core.jellyfin.PokemonGameSaveDto
 import dev.vantafyn.core.jellyfin.PokemonPokedexDto
 import dev.vantafyn.core.jellyfin.PokemonPokedexEntryDto
@@ -99,6 +100,10 @@ fun PokemonPokedexModal(
     var filterCaughtOnly by remember { mutableStateOf(false) }
     var filterShinyOnly by remember { mutableStateOf(false) }
     var inspectingEntry by remember { mutableStateOf<PokemonPokedexEntryDto?>(null) }
+    var inspectingSpecimenPokemon by remember { mutableStateOf<PokemonSummaryDto?>(null) }
+    var inspectingSpecimenDetails by remember { mutableStateOf<PokemonDetailsDto?>(null) }
+    var inspectingSpecimenGameId by remember { mutableStateOf<String?>(null) }
+    var inspectingSpecimenIsVault by remember { mutableStateOf(false) }
 
     // 1. Gather all local Pokémon from active game saves & personal vault
     val localPokemon = remember(localSaves, vaultBoxes) {
@@ -126,7 +131,10 @@ fun PokemonPokedexModal(
     val localCaughtIds = remember(localSaves, localPokemon) {
         val set = mutableSetOf<Int>()
         for (save in localSaves) {
-            set.addAll(save.caughtSpeciesIds)
+            // Only trust save.caughtSpeciesIds if save actually has active pokemon and isn't uninitialized SRAM
+            if (save.totalPokemonCount > 0 && save.caughtSpeciesIds.size <= (save.totalPokemonCount + 40)) {
+                set.addAll(save.caughtSpeciesIds)
+            }
         }
         for ((p, _) in localPokemon) {
             if (p.speciesId in 1..1025) set.add(p.speciesId)
@@ -137,7 +145,9 @@ fun PokemonPokedexModal(
     val localSeenIds = remember(localSaves, localCaughtIds) {
         val set = mutableSetOf<Int>()
         for (save in localSaves) {
-            set.addAll(save.seenSpeciesIds)
+            if (save.totalPokemonCount > 0 && save.seenSpeciesIds.size <= (save.totalPokemonCount + 80)) {
+                set.addAll(save.seenSpeciesIds)
+            }
         }
         set.addAll(localCaughtIds)
         set
@@ -162,13 +172,16 @@ fun PokemonPokedexModal(
         coroutineScope.launch(Dispatchers.IO) {
             isLoading = true
             // If local data contains caught/seen species, sync them to companion plugin
-            if (localCaughtIds.isNotEmpty() || localSeenIds.isNotEmpty()) {
+            // Prevent syncing corrupt bitfields (e.g. 150+ caught with only 4 pokemon owned)
+            val isCorruptedDex = localCaughtIds.size >= 100 && localPokemon.size <= 10
+            if (!isCorruptedDex && (localCaughtIds.isNotEmpty() || localSeenIds.isNotEmpty())) {
                 val primaryGame = localSaves.firstOrNull()?.title
                 pokemonRepository.syncPokedex(
                     session = session,
                     caughtSpeciesIds = localCaughtIds.toList(),
                     seenSpeciesIds = localSeenIds.toList(),
                     originGame = primaryGame,
+                    replaceExisting = true,
                 ).fold(
                     onSuccess = { pokedex = it },
                     onFailure = {
@@ -193,7 +206,9 @@ fun PokemonPokedexModal(
         val serverMap = pokedex?.entries?.associateBy { it.speciesId } ?: emptyMap()
         (1..1025).map { speciesId ->
             val serverEntry = serverMap[speciesId]
-            val isCaught = (serverEntry?.isCaught == true) || (speciesId in localCaughtIds)
+            // If local collection is small (e.g. <= 10 pokemon), don't trust server saying all 151 are caught if local has no gen 1 complete save
+            val trustServerCaught = serverEntry?.isCaught == true && (localCaughtIds.size >= 100 || localPokemon.isEmpty())
+            val isCaught = trustServerCaught || (speciesId in localCaughtIds)
             val isSeen = isCaught || (serverEntry?.isSeen == true) || (speciesId in localSeenIds)
             val hasShiny = (serverEntry?.hasShiny == true) || (speciesId in localShinyIds)
             val firstGame = serverEntry?.firstEncounteredGame ?: localFirstGameMap[speciesId]
@@ -675,10 +690,11 @@ fun PokemonPokedexModal(
         }
     }
 
-    // Detail modal for inspecting entry and lineage journey
+    // Encyclopedic Pokédex Entry modal
     if (inspectingEntry != null) {
         val entry = inspectingEntry!!
-        val localMatch = localPokemon.firstOrNull { it.first.speciesId == entry.speciesId }?.first
+        val matchingPokemonList = localPokemon.filter { it.first.speciesId == entry.speciesId }
+        val localMatch = matchingPokemonList.firstOrNull()?.first
         val summary = localMatch ?: PokemonSummaryDto(
             id = "dex-${entry.speciesId}",
             species = entry.speciesName,
@@ -687,11 +703,42 @@ fun PokemonPokedexModal(
             isShiny = entry.hasShiny,
             originGame = entry.firstEncounteredGame,
         )
+        val matchingSave = localSaves.firstOrNull { save ->
+            save.party.any { it.id == summary.id } ||
+            save.boxes.any { b -> b.entries.any { it.id == summary.id } }
+        }
+        val saveDetails = matchingSave?.pokemonDetails?.get(summary.id)
+            ?: matchingSave?.pokemonDetails?.values?.firstOrNull { it.summary.speciesId == summary.speciesId }
+        val isVault = vaultBoxes.any { box -> box.entries.any { it.id == summary.id } }
+        val initialDetails = saveDetails
+            ?: PokemonSpeciesCatalog.generateCanonicalDetails(summary)
+
+        PokemonPokedexEntryModal(
+            entry = entry,
+            matchedSpecimen = if (localMatch != null) summary else null,
+            matchedDetails = initialDetails,
+            totalOwnedCount = matchingPokemonList.size,
+            onInspectSpecimen = { specSummary, specDetails ->
+                inspectingSpecimenPokemon = specSummary
+                inspectingSpecimenDetails = specDetails
+                inspectingSpecimenGameId = matchingSave?.gameId
+                inspectingSpecimenIsVault = isVault
+            },
+            onDismiss = { inspectingEntry = null },
+        )
+    }
+
+    // Modal for inspecting individual caught specimen (IVs, EVs, moves, ribbons) if requested
+    if (inspectingSpecimenPokemon != null) {
         PokemonDetailModal(
-            pokemon = summary,
+            pokemon = inspectingSpecimenPokemon!!,
             session = session,
             pokemonRepository = pokemonRepository,
-            onDismiss = { inspectingEntry = null },
+            gameId = inspectingSpecimenGameId,
+            isVault = inspectingSpecimenIsVault,
+            initialDetails = inspectingSpecimenDetails,
+            customBackgroundUrl = LocalPokemonModalBackground.current,
+            onDismiss = { inspectingSpecimenPokemon = null },
         )
     }
 }

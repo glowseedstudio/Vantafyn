@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -86,7 +87,10 @@ private fun computeLocalAchievements(
 
     val caughtSet = mutableSetOf<Int>()
     for (save in localSaves) {
-        caughtSet.addAll(save.caughtSpeciesIds)
+        // Sanity guard: Only trust caughtSpeciesIds if save actually has active pokemon and isn't uninitialized SRAM
+        if (save.totalPokemonCount > 0 && save.caughtSpeciesIds.size <= (save.totalPokemonCount + 40)) {
+            caughtSet.addAll(save.caughtSpeciesIds)
+        }
         save.party.forEach { if (it.speciesId > 0) caughtSet.add(it.speciesId) }
         save.boxes.forEach { b -> b.entries.forEach { if (it.speciesId > 0) caughtSet.add(it.speciesId) } }
     }
@@ -98,7 +102,10 @@ private fun computeLocalAchievements(
         save.party.any { it.isShiny } || save.boxes.any { b -> b.entries.any { it.isShiny } }
     }
 
+    val totalOwnedPokemon = vaultCount + localSaves.sumOf { it.totalPokemonCount }
     val kantoCaught = (1..151).count { caughtSet.contains(it) }
+    val isLegitKantoMaster = kantoCaught >= 151 && caughtSet.size >= 151 && totalOwnedPokemon >= 25
+    val kantoProgress = if (isLegitKantoMaster) 151 else minOf(kantoCaught, minOf(totalOwnedPokemon + 5, 150))
 
     val defs = listOf(
         LocalAchievementDef("pk-vault-first-deposit", "Vault Initiate", "Deposited your first Pokémon into the personal cloud vault.", "Common", 100, 1, if (vaultCount >= 1) 1 else 0),
@@ -109,7 +116,7 @@ private fun computeLocalAchievements(
         LocalAchievementDef("pk-shiny-first", "Gotta Gleam 'Em All", "Registered a Shiny Pokémon in your vault or Pokédex.", "Legendary", 500, 1, if (hasShiny) 1 else 0),
         LocalAchievementDef("pk-pokedex-10", "Research Assistant", "Registered 10 unique species in the National Pokédex.", "Common", 100, 10, minOf(10, caughtSet.size)),
         LocalAchievementDef("pk-pokedex-50", "Field Researcher", "Registered 50 unique species in the National Pokédex.", "Rare", 300, 50, minOf(50, caughtSet.size)),
-        LocalAchievementDef("pk-pokedex-kanto-master", "Kanto Master", "Completed the Generation I Pokédex (all 151 species).", "Mythic", 1000, 151, minOf(151, kantoCaught)),
+        LocalAchievementDef("pk-pokedex-kanto-master", "Kanto Master", "Completed the Generation I Pokédex (all 151 species).", "Mythic", 1000, 151, kantoProgress),
         LocalAchievementDef("pk-trade-first", "Link Cable Connection", "Completed a Pokémon trade with another trainer.", "Rare", 250, 1, 0),
     )
 
@@ -174,12 +181,19 @@ fun PokemonAchievementsModal(
             if (achResult.isSuccess) {
                 val netSummary = achResult.getOrNull()
                 if (netSummary != null) {
+                    val totalOwned = vaultBoxes.sumOf { it.entries.size } + localSaves.sumOf { it.totalPokemonCount }
                     val mergedList = netSummary.achievements.map { netAch ->
                         val localMatch = currentLocal.achievements.firstOrNull { it.id.equals(netAch.id, ignoreCase = true) }
                         if (localMatch != null) {
-                            val isUnlocked = netAch.isUnlocked || localMatch.isUnlocked
+                            val isPokedexMilestone = netAch.id.startsWith("pk-pokedex-", ignoreCase = true)
+                            // Pokédex milestone achievements must strictly reflect legitimate collection progress
+                            val isUnlocked = if (isPokedexMilestone) {
+                                localMatch.isUnlocked
+                            } else {
+                                netAch.isUnlocked || localMatch.isUnlocked
+                            }
                             val maxP = maxOf(netAch.maxProgress, localMatch.maxProgress)
-                            val curP = if (isUnlocked) maxP else maxOf(netAch.currentProgress, localMatch.currentProgress)
+                            val curP = if (isUnlocked) maxP else if (isPokedexMilestone) localMatch.currentProgress else minOf(netAch.currentProgress, localMatch.currentProgress)
                             netAch.copy(
                                 isUnlocked = isUnlocked,
                                 currentProgress = curP,
@@ -414,7 +428,10 @@ fun PokemonAchievementsModal(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         contentPadding = PaddingValues(bottom = 8.dp),
                     ) {
-                        items(achievements, key = { it.id }) { ach ->
+                        itemsIndexed(
+                            items = achievements,
+                            key = { index, ach -> if (ach.id.isNotBlank()) ach.id else "ach_$index" }
+                        ) { _, ach ->
                             PokemonAchievementCard(achievement = ach)
                         }
                     }
@@ -441,7 +458,12 @@ fun PokemonAchievementsModal(
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                             contentPadding = PaddingValues(bottom = 8.dp),
                         ) {
-                            items(activityFeed, key = { it.id }) { event ->
+                            itemsIndexed(
+                                items = activityFeed,
+                                key = { index, event ->
+                                    if (event.id.isNotBlank()) event.id else "${event.eventType}_${event.timestampUtc}_$index"
+                                }
+                            ) { _, event ->
                                 PokemonSocialActivityCard(event = event)
                             }
                         }

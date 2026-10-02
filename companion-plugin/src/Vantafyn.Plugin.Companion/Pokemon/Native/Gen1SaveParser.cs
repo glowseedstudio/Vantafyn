@@ -102,25 +102,35 @@ public static class Gen1SaveParser
         // Pokedex
         var caughtIds = new HashSet<int>();
         var seenIds = new HashSet<int>();
-        for (int offset = 0; offset < 19; offset++)
+        var cBytes = new byte[19];
+        for (int i = 0; i < 19; i++)
         {
-            int cIdx = 0x25A3 + offset;
-            int sIdx = 0x25B6 + offset;
-            byte cByte = cIdx < saveBytes.Length ? saveBytes[cIdx] : (byte)0;
-            byte sByte = sIdx < saveBytes.Length ? saveBytes[sIdx] : (byte)0;
-            for (int bit = 0; bit < 8; bit++)
+            int cIdx = 0x25A3 + i;
+            cBytes[i] = cIdx < saveBytes.Length ? saveBytes[cIdx] : (byte)0;
+        }
+        bool isErasedOrCorrupt = cBytes.All(b => b == 0xFF) || cBytes.Count(b => b == 0xFF) >= 12;
+        if (!isErasedOrCorrupt)
+        {
+            for (int offset = 0; offset < 19; offset++)
             {
-                int speciesNum = offset * 8 + bit + 1;
-                if (speciesNum <= 151)
+                int cIdx = 0x25A3 + offset;
+                int sIdx = 0x25B6 + offset;
+                byte cByte = cIdx < saveBytes.Length ? saveBytes[cIdx] : (byte)0;
+                byte sByte = sIdx < saveBytes.Length ? saveBytes[sIdx] : (byte)0;
+                for (int bit = 0; bit < 8; bit++)
                 {
-                    if ((cByte & (1 << bit)) != 0)
+                    int speciesNum = offset * 8 + bit + 1;
+                    if (speciesNum <= 151)
                     {
-                        caughtIds.Add(speciesNum);
-                        seenIds.Add(speciesNum);
-                    }
-                    if ((sByte & (1 << bit)) != 0)
-                    {
-                        seenIds.Add(speciesNum);
+                        if ((cByte & (1 << bit)) != 0)
+                        {
+                            caughtIds.Add(speciesNum);
+                            seenIds.Add(speciesNum);
+                        }
+                        if ((sByte & (1 << bit)) != 0)
+                        {
+                            seenIds.Add(speciesNum);
+                        }
                     }
                 }
             }
@@ -230,6 +240,13 @@ public static class Gen1SaveParser
                     seenIds.Add(p.SpeciesId);
                 }
             }
+        }
+
+        int totalOwnedCount = partyList.Count + boxesList.Sum(b => b.OccupiedCount);
+        if (totalOwnedCount == 0)
+        {
+            caughtIds.Clear();
+            seenIds.Clear();
         }
 
         result.PokedexCaught = caughtIds.Count;

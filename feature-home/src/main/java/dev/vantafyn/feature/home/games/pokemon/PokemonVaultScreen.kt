@@ -1,6 +1,11 @@
 package dev.vantafyn.feature.home.games.pokemon
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -29,6 +34,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Cable
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Refresh
@@ -62,6 +68,7 @@ import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDepositRequest
+import dev.vantafyn.core.jellyfin.PokemonDetailsDto
 import dev.vantafyn.core.jellyfin.PokemonDirectTransferRequest
 import dev.vantafyn.core.jellyfin.PokemonIntegrationStatus
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
@@ -77,21 +84,38 @@ import dev.vantafyn.core.jellyfin.PokemonWithdrawRequest
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.feature.home.CompactBackButton
+import dev.vantafyn.feature.home.games.GameScreenReveal
+import dev.vantafyn.feature.home.games.gamesTabTransitionSpec
+import dev.vantafyn.feature.home.rememberReducedMotionPreference
+import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+enum class VaultSubScreen {
+    Home,
+    BoxTransfer,
+}
 
 @Composable
 fun PokemonVaultScreen(
     session: JellyfinSession?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    vaultHomeTrigger: Long = 0L,
     pokemonRepository: JellyfinPokemonRepository = remember { DefaultJellyfinPokemonRepository() },
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val gamesRepository = remember { DefaultJellyfinGamesRepository() }
     val storageManager = remember(context) { GameStorageManager(context, gamesRepository) }
+    val reducedMotion = rememberReducedMotionPreference()
+
+    var subScreen by remember { mutableStateOf(VaultSubScreen.Home) }
+
+    BackHandler(enabled = subScreen == VaultSubScreen.BoxTransfer) {
+        subScreen = VaultSubScreen.Home
+    }
 
     var availableGames by remember { mutableStateOf<List<GameSummary>>(emptyList()) }
     var vaultSummary by remember { mutableStateOf<PokemonVaultSummary?>(null) }
@@ -126,6 +150,9 @@ fun PokemonVaultScreen(
     // Active Selection & Inspection
     var selectedPokemonItem by remember { mutableStateOf<SelectedPokemonItem?>(null) }
     var inspectedPokemon by remember { mutableStateOf<PokemonSummaryDto?>(null) }
+    var inspectedPokemonDetails by remember { mutableStateOf<PokemonDetailsDto?>(null) }
+    var inspectedPokemonGameId by remember { mutableStateOf<String?>(null) }
+    var inspectedPokemonIsVault by remember { mutableStateOf<Boolean?>(null) }
     var compatibilityResult by remember { mutableStateOf<PokemonTransferCompatibilityResult?>(null) }
     var isValidatingCompatibility by remember { mutableStateOf(false) }
     var isExecutingTransfer by remember { mutableStateOf(false) }
@@ -134,6 +161,20 @@ fun PokemonVaultScreen(
     var isBackupRestoreModalOpen by remember { mutableStateOf(false) }
     var isPokedexModalOpen by remember { mutableStateOf(false) }
     var isAchievementsModalOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(vaultHomeTrigger) {
+        if (vaultHomeTrigger > 0L) {
+            subScreen = VaultSubScreen.Home
+            isTradeModalOpen = false
+            isBackupRestoreModalOpen = false
+            isPokedexModalOpen = false
+            isAchievementsModalOpen = false
+            inspectedPokemon = null
+            inspectedPokemonDetails = null
+            inspectedPokemonGameId = null
+            inspectedPokemonIsVault = null
+        }
+    }
 
     fun loadVaultSummary() {
         if (session == null) return
@@ -550,53 +591,155 @@ fun PokemonVaultScreen(
         }
     }
 
-    CompositionLocalProvider(LocalPokemonModalBackground provides customBackgroundUrl) {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
-                .padding(horizontal = 14.dp, vertical = 2.dp),
-        ) {
-        // Header Row 1: Back, Title, Subtitle, Occupancy Pill, Refresh
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                CompactBackButton(onClick = onBack)
-                Column {
-                    Text(
-                        text = "Pokémon Vault",
-                        color = VantafynColors.Ink,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Security,
-                            contentDescription = "Safe Lock Active",
-                            tint = Color(0xFF10B981),
-                            modifier = Modifier.size(11.dp),
-                        )
-                        Text(
-                            text = "Safe-Session Transaction Protection",
-                            color = Color(0xFF10B981),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
+    val allVaultBoxes = remember(upperState.vaultBox, lowerState.vaultBox) {
+        listOfNotNull(upperState.vaultBox, lowerState.vaultBox)
+            .distinctBy { it.boxIndex }
+            .map { box ->
+                dev.vantafyn.core.jellyfin.PokemonBoxDto(
+                    boxIndex = box.boxIndex,
+                    name = box.name,
+                    entries = box.entries.map { it.toSummaryDto() },
+                )
+            }
+    }
+
+    val allDetectedSaves = remember(upperState.gameSave, lowerState.gameSave, availableGames) {
+        val map = mutableMapOf<String, dev.vantafyn.core.jellyfin.PokemonGameSaveDto>()
+        upperState.gameSave?.let { map[it.gameId] = it }
+        lowerState.gameSave?.let { map[it.gameId] = it }
+        for (game in availableGames) {
+            if (!map.containsKey(game.id)) {
+                val safeGameId = game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                var localSaveFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                if (!localSaveFile.exists() || localSaveFile.length() == 0L) {
+                    val altSav = java.io.File(storageManager.savesDir, "$safeGameId.sav")
+                    val altSrm = java.io.File(storageManager.savesDir, "$safeGameId.srm")
+                    if (altSav.exists() && altSav.length() > 0L) localSaveFile = altSav
+                    else if (altSrm.exists() && altSrm.length() > 0L) localSaveFile = altSrm
+                }
+                if (localSaveFile.exists() && localSaveFile.length() > 0L) {
+                    val bytes = runCatching { localSaveFile.readBytes() }.getOrNull()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        val parsed = when {
+                            dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.isGen1Save(bytes) ->
+                                dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.parse(bytes, game.title, game.id)
+                            dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.isGen2Save(bytes) ->
+                                dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.parse(bytes, game.title, game.id)
+                            dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.isGen4Save(bytes, game.title) ->
+                                dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(bytes, game.title, game.id)
+                            dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(bytes, game.title) ->
+                                dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(bytes, game.title, game.id)
+                            else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(bytes, game.title, game.id)
+                        }
+                        val hasRealPokemon = parsed != null && (parsed.party.isNotEmpty() || parsed.boxes.any { it.entries.isNotEmpty() } || parsed.totalPokemonCount > 0)
+                        if (hasRealPokemon) {
+                            map[game.id] = parsed!!
+                        }
                     }
                 }
             }
+        }
+        map.values.toList()
+    }
+
+    CompositionLocalProvider(LocalPokemonModalBackground provides customBackgroundUrl) {
+        GameScreenReveal(
+            key = "pokemon_vault_screen_root",
+            modifier = modifier.fillMaxSize(),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.statusBars.only(WindowInsetsSides.Top))
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                    .padding(horizontal = 14.dp, vertical = 2.dp),
+            ) {
+                AnimatedContent(
+                    targetState = subScreen,
+                    transitionSpec = {
+                        gamesTabTransitionSpec(reducedMotion)
+                    },
+                    label = "VaultScreenTransition",
+                    modifier = Modifier.fillMaxSize(),
+                ) { screen ->
+                when (screen) {
+                    VaultSubScreen.Home -> {
+                        PokemonVaultHomeScreen(
+                            session = session,
+                            vaultSummary = vaultSummary,
+                            availableGames = availableGames,
+                            allDetectedSaves = allDetectedSaves,
+                            allVaultBoxes = allVaultBoxes,
+                            isLoading = isLoadingInitial,
+                            isRefreshing = isRefreshing,
+                            onMovePokemon = { subScreen = VaultSubScreen.BoxTransfer },
+                            onSelectGameForTransfer = { game ->
+                                lowerState = lowerState.copy(
+                                    containerType = StorageContainerType.GameCartridge(game),
+                                    selectedBoxIndex = 1,
+                                    isPartyMode = false,
+                                )
+                                loadContainerData(TransferSide.Destination)
+                                subScreen = VaultSubScreen.BoxTransfer
+                            },
+                            onOpenTradeCenter = { isTradeModalOpen = true },
+                            onOpenPokedex = { isPokedexModalOpen = true },
+                            onOpenBadges = { isAchievementsModalOpen = true },
+                            onOpenBackups = { isBackupRestoreModalOpen = true },
+                            onInspectPokemon = { pkm, details, gameId, isVault ->
+                                inspectedPokemon = pkm
+                                inspectedPokemonDetails = details
+                                inspectedPokemonGameId = gameId
+                                inspectedPokemonIsVault = isVault
+                            },
+                            onRefresh = { loadAll() },
+                            onBack = onBack,
+                        )
+                    }
+                    VaultSubScreen.BoxTransfer -> {
+                        GameScreenReveal(key = "pokemon_vault_box_transfer", modifier = Modifier.fillMaxSize()) {
+                            Column(
+                                modifier = Modifier.fillMaxSize(),
+                            ) {
+                            // Header Row 1: Back, Title, Subtitle, Occupancy Pill, Refresh
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    CompactBackButton(onClick = { subScreen = VaultSubScreen.Home })
+                                    Column {
+                                        Text(
+                                            text = "Move Pokémon",
+                                            color = VantafynColors.Ink,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Security,
+                                                contentDescription = "Protected",
+                                                tint = Color(0xFF10B981),
+                                                modifier = Modifier.size(11.dp),
+                                            )
+                                            Text(
+                                                text = "Protected",
+                                                color = Color(0xFF10B981),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                            )
+                                        }
+                                    }
+                                }
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -662,7 +805,7 @@ fun PokemonVaultScreen(
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
             ) {
                 Icon(
-                    imageVector = Icons.Rounded.SwapHoriz,
+                    imageVector = Icons.Rounded.Cable,
                     contentDescription = "Trade Center",
                     tint = Color.White,
                     modifier = Modifier.size(14.dp),
@@ -902,29 +1045,56 @@ fun PokemonVaultScreen(
             }
         }
     }
+    }
+    }
+    }
+    }
+    }
+    }
 
     // Inspection Modal
     if (inspectedPokemon != null) {
+        val currentPkm = inspectedPokemon!!
+        val matchingSave = allDetectedSaves.firstOrNull { save ->
+            save.party.any { it.id == currentPkm.id } ||
+            save.boxes.any { b -> b.entries.any { it.id == currentPkm.id } }
+        }
+        val matchingVaultBox = allVaultBoxes.firstOrNull { box ->
+            box.entries.any { it.id == currentPkm.id }
+        }
         val selectedItem = selectedPokemonItem
-        val isVault = selectedItem?.isVault 
-            ?: (upperState.vaultBox?.entries?.any { it.id == inspectedPokemon!!.id } == true)
-            ?: (lowerState.vaultBox?.entries?.any { it.id == inspectedPokemon!!.id } == true)
-        val gameId = selectedItem?.gameId
+        val isVault = inspectedPokemonIsVault
+            ?: selectedItem?.isVault 
+            ?: (matchingVaultBox != null ||
+                upperState.vaultBox?.entries?.any { it.id == currentPkm.id } == true ||
+                lowerState.vaultBox?.entries?.any { it.id == currentPkm.id } == true)
+        val gameId = inspectedPokemonGameId
+            ?: selectedItem?.gameId
+            ?: matchingSave?.gameId
             ?: (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
             ?: (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
 
-        val initialDetails = upperState.gameSave?.pokemonDetails?.get(inspectedPokemon!!.id)
-            ?: lowerState.gameSave?.pokemonDetails?.get(inspectedPokemon!!.id)
+        val initialDetails = inspectedPokemonDetails
+            ?: matchingSave?.pokemonDetails?.get(currentPkm.id)
+            ?: upperState.gameSave?.pokemonDetails?.get(currentPkm.id)
+            ?: lowerState.gameSave?.pokemonDetails?.get(currentPkm.id)
+            ?: matchingSave?.pokemonDetails?.values?.firstOrNull { it.summary.speciesId == currentPkm.speciesId && it.summary.level == currentPkm.level }
+            ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.generateCanonicalDetails(currentPkm)
 
         PokemonDetailModal(
-            pokemon = inspectedPokemon!!,
+            pokemon = currentPkm,
             session = session,
             pokemonRepository = pokemonRepository,
             gameId = gameId,
             isVault = isVault,
             initialDetails = initialDetails,
             customBackgroundUrl = customBackgroundUrl,
-            onDismiss = { inspectedPokemon = null },
+            onDismiss = {
+                inspectedPokemon = null
+                inspectedPokemonDetails = null
+                inspectedPokemonGameId = null
+                inspectedPokemonIsVault = null
+            },
         )
     }
 
@@ -954,56 +1124,6 @@ fun PokemonVaultScreen(
             },
             containerColor = Color(0xFF1B1E2B),
         )
-    }
-
-    val allVaultBoxes = remember(upperState.vaultBox, lowerState.vaultBox) {
-        listOfNotNull(upperState.vaultBox, lowerState.vaultBox)
-            .distinctBy { it.boxIndex }
-            .map { box ->
-                dev.vantafyn.core.jellyfin.PokemonBoxDto(
-                    boxIndex = box.boxIndex,
-                    name = box.name,
-                    entries = box.entries.map { it.toSummaryDto() },
-                )
-            }
-    }
-
-    val allDetectedSaves = remember(upperState.gameSave, lowerState.gameSave, availableGames) {
-        val map = mutableMapOf<String, dev.vantafyn.core.jellyfin.PokemonGameSaveDto>()
-        upperState.gameSave?.let { map[it.gameId] = it }
-        lowerState.gameSave?.let { map[it.gameId] = it }
-        for (game in availableGames) {
-            if (!map.containsKey(game.id)) {
-                val safeGameId = game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-                var localSaveFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
-                if (!localSaveFile.exists() || localSaveFile.length() == 0L) {
-                    val altSav = java.io.File(storageManager.savesDir, "$safeGameId.sav")
-                    val altSrm = java.io.File(storageManager.savesDir, "$safeGameId.srm")
-                    if (altSav.exists() && altSav.length() > 0L) localSaveFile = altSav
-                    else if (altSrm.exists() && altSrm.length() > 0L) localSaveFile = altSrm
-                }
-                if (localSaveFile.exists() && localSaveFile.length() > 0L) {
-                    val bytes = runCatching { localSaveFile.readBytes() }.getOrNull()
-                    if (bytes != null && bytes.isNotEmpty()) {
-                        val parsed = when {
-                            dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.isGen1Save(bytes) ->
-                                dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.parse(bytes, game.title, game.id)
-                            dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.isGen2Save(bytes) ->
-                                dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.parse(bytes, game.title, game.id)
-                            dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.isGen4Save(bytes, game.title) ->
-                                dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(bytes, game.title, game.id)
-                            dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(bytes, game.title) ->
-                                dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(bytes, game.title, game.id)
-                            else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(bytes, game.title, game.id)
-                        }
-                        if (parsed != null && (parsed.party.isNotEmpty() || parsed.boxes.any { it.entries.isNotEmpty() } || parsed.seenSpeciesIds.isNotEmpty() || parsed.caughtSpeciesIds.isNotEmpty())) {
-                            map[game.id] = parsed
-                        }
-                    }
-                }
-            }
-        }
-        map.values.toList()
     }
 
     // Trade Center Modal

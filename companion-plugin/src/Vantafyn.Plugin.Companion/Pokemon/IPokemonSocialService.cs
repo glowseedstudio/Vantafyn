@@ -16,4 +16,5 @@ public interface IPokemonSocialService
     Task ProcessShinyAddedAsync(Guid userId, string userName, PokemonSummaryDto pokemon, CancellationToken cancellationToken = default);
     Task ProcessPokedexMilestoneAsync(Guid userId, string userName, int totalCaught, int gen1Caught, CancellationToken cancellationToken = default);
     Task ProcessTradeCompletedAsync(Guid userId1, string userName1, Guid userId2, string userName2, PokemonSummaryDto pokemon1, PokemonSummaryDto pokemon2, CancellationToken cancellationToken = default);
+    Task<bool> TryRevokeAsync(Guid userId, string achievementId, CancellationToken cancellationToken = default);
 }

@@ -72,20 +72,27 @@ object Gen1NativeSaveParser {
         // Pokedex bitfields (0x25A3..0x25B5 for caught, 0x25B6..0x25C8 for seen)
         val caughtIds = mutableSetOf<Int>()
         val seenIds = mutableSetOf<Int>()
-        for (offset in 0 until 19) {
+        val cBytes = (0 until 19).map { offset ->
             val caughtByteIdx = 0x25A3 + offset
-            val seenByteIdx = 0x25B6 + offset
-            val cByte = if (caughtByteIdx < saveBytes.size) saveBytes[caughtByteIdx].toInt() and 0xFF else 0
-            val sByte = if (seenByteIdx < saveBytes.size) saveBytes[seenByteIdx].toInt() and 0xFF else 0
-            for (bit in 0 until 8) {
-                val speciesNum = offset * 8 + bit + 1
-                if (speciesNum in 1..151) {
-                    if ((cByte and (1 shl bit)) != 0) {
-                        caughtIds.add(speciesNum)
-                        seenIds.add(speciesNum)
-                    }
-                    if ((sByte and (1 shl bit)) != 0) {
-                        seenIds.add(speciesNum)
+            if (caughtByteIdx < saveBytes.size) saveBytes[caughtByteIdx].toInt() and 0xFF else 0
+        }
+        val isErasedOrCorrupt = cBytes.all { it == 0xFF } || (cBytes.count { it == 0xFF } >= 12)
+        if (!isErasedOrCorrupt) {
+            for (offset in 0 until 19) {
+                val caughtByteIdx = 0x25A3 + offset
+                val seenByteIdx = 0x25B6 + offset
+                val cByte = if (caughtByteIdx < saveBytes.size) saveBytes[caughtByteIdx].toInt() and 0xFF else 0
+                val sByte = if (seenByteIdx < saveBytes.size) saveBytes[seenByteIdx].toInt() and 0xFF else 0
+                for (bit in 0 until 8) {
+                    val speciesNum = offset * 8 + bit + 1
+                    if (speciesNum in 1..151) {
+                        if ((cByte and (1 shl bit)) != 0) {
+                            caughtIds.add(speciesNum)
+                            seenIds.add(speciesNum)
+                        }
+                        if ((sByte and (1 shl bit)) != 0) {
+                            seenIds.add(speciesNum)
+                        }
                     }
                 }
             }

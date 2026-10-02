@@ -3951,6 +3951,7 @@ private fun MobileShellScreen(
                         gamesRepository = viewModel.gamesRepository,
                         pokemonRepository = viewModel.pokemonRepository,
                         isPokemonVaultAvailable = state.isPokemonVaultAvailable,
+                        vaultHomeTrigger = state.pokemonVaultHomeTrigger,
                         onRefresh = viewModel::refreshGames,
                         onSelectTab = viewModel::setActiveGamesTab,
                         onSelectSystem = viewModel::selectGameSystem,
@@ -24168,7 +24169,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.37"
+private const val VANTAFYN_APP_VERSION = "0.9.38"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

@@ -234,7 +234,7 @@ public sealed class FilePokemonJourneyService : IPokemonJourneyService
         }
     }
 
-    public async Task RecordSpeciesIdsAsync(Guid userId, IEnumerable<int> caughtSpeciesIds, IEnumerable<int> seenSpeciesIds, string? gameName, CancellationToken cancellationToken = default)
+    public async Task RecordSpeciesIdsAsync(Guid userId, IEnumerable<int> caughtSpeciesIds, IEnumerable<int> seenSpeciesIds, string? gameName, bool replaceExisting = false, CancellationToken cancellationToken = default)
     {
         var sem = LockFor(userId);
         await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -243,62 +243,100 @@ public sealed class FilePokemonJourneyService : IPokemonJourneyService
             var record = await LoadPokedexRecordAsync(userId, cancellationToken).ConfigureAwait(false);
             var modified = false;
 
-            foreach (var id in seenSpeciesIds)
+            if (replaceExisting)
             {
-                if (id <= 0) continue;
-                if (!record.Entries.TryGetValue(id, out var entry))
-                {
-                    record.Entries[id] = new PokemonPokedexEntryDto
-                    {
-                        SpeciesId = id,
-                        SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
-                        Generation = GetGenerationForSpecies(id),
-                        IsSeen = true,
-                        IsCaught = false,
-                        HasShiny = false,
-                        FirstEncounteredGame = gameName,
-                        FirstEncounteredTimestamp = _clock.UtcNow,
-                        EncounterCount = 1
-                    };
-                    modified = true;
-                }
-                else if (!entry.IsSeen)
-                {
-                    entry.IsSeen = true;
-                    modified = true;
-                }
-            }
+                var newEntries = new Dictionary<int, PokemonPokedexEntryDto>();
+                var caughtSet = caughtSpeciesIds.Where(id => id > 0).ToHashSet();
+                var seenSet = seenSpeciesIds.Where(id => id > 0).ToHashSet();
+                seenSet.UnionWith(caughtSet);
 
-            foreach (var id in caughtSpeciesIds)
-            {
-                if (id <= 0) continue;
-                if (!record.Entries.TryGetValue(id, out var entry))
+                foreach (var id in seenSet)
                 {
-                    record.Entries[id] = new PokemonPokedexEntryDto
+                    bool isCaught = caughtSet.Contains(id);
+                    if (record.Entries.TryGetValue(id, out var existing))
                     {
-                        SpeciesId = id,
-                        SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
-                        Generation = GetGenerationForSpecies(id),
-                        IsSeen = true,
-                        IsCaught = true,
-                        HasShiny = false,
-                        FirstEncounteredGame = gameName,
-                        FirstEncounteredTimestamp = _clock.UtcNow,
-                        EncounterCount = 1
-                    };
-                    modified = true;
-                }
-                else
-                {
-                    var updated = false;
-                    if (!entry.IsSeen) { entry.IsSeen = true; updated = true; }
-                    if (!entry.IsCaught) { entry.IsCaught = true; updated = true; }
-                    if (string.IsNullOrEmpty(entry.FirstEncounteredGame) && !string.IsNullOrEmpty(gameName))
-                    {
-                        entry.FirstEncounteredGame = gameName;
-                        updated = true;
+                        existing.IsCaught = isCaught;
+                        existing.IsSeen = true;
+                        newEntries[id] = existing;
                     }
-                    if (updated) modified = true;
+                    else
+                    {
+                        newEntries[id] = new PokemonPokedexEntryDto
+                        {
+                            SpeciesId = id,
+                            SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
+                            Generation = GetGenerationForSpecies(id),
+                            IsSeen = true,
+                            IsCaught = isCaught,
+                            HasShiny = false,
+                            FirstEncounteredGame = gameName,
+                            FirstEncounteredTimestamp = _clock.UtcNow,
+                            EncounterCount = 1
+                        };
+                    }
+                }
+                record.Entries = newEntries;
+                modified = true;
+            }
+            else
+            {
+                foreach (var id in seenSpeciesIds)
+                {
+                    if (id <= 0) continue;
+                    if (!record.Entries.TryGetValue(id, out var entry))
+                    {
+                        record.Entries[id] = new PokemonPokedexEntryDto
+                        {
+                            SpeciesId = id,
+                            SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
+                            Generation = GetGenerationForSpecies(id),
+                            IsSeen = true,
+                            IsCaught = false,
+                            HasShiny = false,
+                            FirstEncounteredGame = gameName,
+                            FirstEncounteredTimestamp = _clock.UtcNow,
+                            EncounterCount = 1
+                        };
+                        modified = true;
+                    }
+                    else if (!entry.IsSeen)
+                    {
+                        entry.IsSeen = true;
+                        modified = true;
+                    }
+                }
+
+                foreach (var id in caughtSpeciesIds)
+                {
+                    if (id <= 0) continue;
+                    if (!record.Entries.TryGetValue(id, out var entry))
+                    {
+                        record.Entries[id] = new PokemonPokedexEntryDto
+                        {
+                            SpeciesId = id,
+                            SpeciesName = PokemonSpeciesCatalog.ResolveSpeciesName(id),
+                            Generation = GetGenerationForSpecies(id),
+                            IsSeen = true,
+                            IsCaught = true,
+                            HasShiny = false,
+                            FirstEncounteredGame = gameName,
+                            FirstEncounteredTimestamp = _clock.UtcNow,
+                            EncounterCount = 1
+                        };
+                        modified = true;
+                    }
+                    else
+                    {
+                        var updated = false;
+                        if (!entry.IsSeen) { entry.IsSeen = true; updated = true; }
+                        if (!entry.IsCaught) { entry.IsCaught = true; updated = true; }
+                        if (string.IsNullOrEmpty(entry.FirstEncounteredGame) && !string.IsNullOrEmpty(gameName))
+                        {
+                            entry.FirstEncounteredGame = gameName;
+                            updated = true;
+                        }
+                        if (updated) modified = true;
+                    }
                 }
             }
 

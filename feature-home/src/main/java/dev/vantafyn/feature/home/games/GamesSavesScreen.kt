@@ -238,14 +238,18 @@ fun GamesSavesScreen(
         }
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-        contentPadding = PaddingValues(top = 12.dp, bottom = 180.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+    GameScreenReveal(
+        key = "games_saves_screen",
+        modifier = modifier.fillMaxSize(),
     ) {
-        // 1. Top Bar
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 180.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            // 1. Top Bar
         item {
             Row(
                 modifier = Modifier
@@ -710,6 +714,7 @@ fun GamesSavesScreen(
                 )
             }
         }
+    }
     }
 
     // Delete Confirmation Dialog

@@ -60,5 +60,6 @@ public sealed class PokemonPokedexSyncRequest
     public List<int> CaughtSpeciesIds { get; set; } = new();
     public List<int> SeenSpeciesIds { get; set; } = new();
     public string? OriginGame { get; set; }
+    public bool ReplaceExisting { get; set; } = false;
 }
 

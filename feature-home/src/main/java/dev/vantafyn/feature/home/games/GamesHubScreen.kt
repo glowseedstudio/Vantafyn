@@ -126,12 +126,16 @@ fun GamesHubScreen(
 
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-            .padding(top = if (isLandscape) 4.dp else 12.dp),
+    GameScreenReveal(
+        key = selectedSystem?.id ?: (if (isOfflineFilterSelected) "downloaded" else "all"),
+        modifier = modifier.fillMaxSize(),
     ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                .padding(top = if (isLandscape) 4.dp else 12.dp),
+        ) {
         if (isLandscape) {
             Row(
                 modifier = Modifier
@@ -454,6 +458,7 @@ fun GamesHubScreen(
             }
         }
     }
+}
 }
 
 @Composable

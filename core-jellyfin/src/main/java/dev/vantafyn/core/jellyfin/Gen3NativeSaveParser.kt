@@ -366,25 +366,36 @@ object Gen3NativeSaveParser {
             )
         }
 
+        val totalCount = partyList.size + boxesList.sumOf { it.occupiedCount }
+        val shinyCount = partyList.count { it.isShiny } + boxesList.sumOf { it.entries.count { p -> p.isShiny } }
+
         // Pokedex bitfields in Section 0 (0x0028 caught, 0x005C seen, 49 bytes each)
         val caughtIds = mutableSetOf<Int>()
         val seenIds = mutableSetOf<Int>()
         val sec0 = sections[0]
-        if (sec0 != null) {
-            for (offset in 0 until 49) {
+        if (sec0 != null && totalCount > 0) {
+            val cBytes = (0 until 49).map { offset ->
                 val cIdx = 0x0028 + offset
-                val sIdx = 0x005C + offset
-                val cByte = if (cIdx < sec0.size) sec0[cIdx].toInt() and 0xFF else 0
-                val sByte = if (sIdx < sec0.size) sec0[sIdx].toInt() and 0xFF else 0
-                for (bit in 0 until 8) {
-                    val speciesNum = offset * 8 + bit + 1
-                    if (speciesNum in 1..386) {
-                        if ((cByte and (1 shl bit)) != 0) {
-                            caughtIds.add(speciesNum)
-                            seenIds.add(speciesNum)
-                        }
-                        if ((sByte and (1 shl bit)) != 0) {
-                            seenIds.add(speciesNum)
+                if (cIdx < sec0.size) sec0[cIdx].toInt() and 0xFF else 0
+            }
+            // Sanity check: Erased flash / corrupt memory is filled with 0xFF bytes
+            val isErasedOrCorrupt = cBytes.all { it == 0xFF } || (cBytes.count { it == 0xFF } >= 20)
+            if (!isErasedOrCorrupt) {
+                for (offset in 0 until 49) {
+                    val cIdx = 0x0028 + offset
+                    val sIdx = 0x005C + offset
+                    val cByte = if (cIdx < sec0.size) sec0[cIdx].toInt() and 0xFF else 0
+                    val sByte = if (sIdx < sec0.size) sec0[sIdx].toInt() and 0xFF else 0
+                    for (bit in 0 until 8) {
+                        val speciesNum = offset * 8 + bit + 1
+                        if (speciesNum in 1..386) {
+                            if ((cByte and (1 shl bit)) != 0) {
+                                caughtIds.add(speciesNum)
+                                seenIds.add(speciesNum)
+                            }
+                            if ((sByte and (1 shl bit)) != 0) {
+                                seenIds.add(speciesNum)
+                            }
                         }
                     }
                 }
@@ -405,9 +416,6 @@ object Gen3NativeSaveParser {
                 }
             }
         }
-
-        val totalCount = partyList.size + boxesList.sumOf { it.occupiedCount }
-        val shinyCount = partyList.count { it.isShiny } + boxesList.sumOf { it.entries.count { p -> p.isShiny } }
 
         return PokemonGameSaveDto(
             gameId = gameId,

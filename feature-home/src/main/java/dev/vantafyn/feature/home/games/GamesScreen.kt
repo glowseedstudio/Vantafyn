@@ -47,6 +47,7 @@ fun GamesScreen(
     gamesRepository: JellyfinGamesRepository? = null,
     pokemonRepository: JellyfinPokemonRepository? = null,
     isPokemonVaultAvailable: Boolean = false,
+    vaultHomeTrigger: Long = 0L,
     onRefresh: () -> Unit = {},
     onSelectTab: (GamesTab) -> Unit,
     onSelectSystem: (GameSystem?) -> Unit,
@@ -56,6 +57,7 @@ fun GamesScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val reducedMotion = dev.vantafyn.feature.home.rememberReducedMotionPreference()
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -80,81 +82,87 @@ fun GamesScreen(
         GameHubSoundManager.crossfadeTo(context, targetTrack, durationMs = 900L)
     }
 
-    AnimatedContent(
-        targetState = activeTab,
-        transitionSpec = {
-            fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(180))
-        },
-        label = "GamesTabContent",
+    GameScreenReveal(
+        key = "games_screen_root",
         modifier = modifier.fillMaxSize(),
-    ) { tab ->
-        when (tab) {
-            GamesTab.Home -> {
-                GamesHomeScreen(
-                    userName = userName,
-                    userImageUrl = userImageUrl,
-                    systems = systems,
-                    games = games,
-                    allGames = allGames,
-                    recentGames = recentGames,
-                    totalPlayTimeMs = totalPlayTimeMs,
-                    isRefreshing = isRefreshing,
-                    onRefresh = onRefresh,
-                    onOpenGame = onOpenGame,
-                    onSelectSystem = { sys ->
-                        onSelectSystem(sys)
-                        onSelectTab(GamesTab.Library)
-                    },
-                    onNavigateBack = onBackToMain,
-                )
-            }
-            GamesTab.Library -> {
-                GamesHubScreen(
-                    systems = systems,
-                    games = games,
-                    allGames = allGames,
-                    selectedSystem = selectedSystem,
-                    isLoading = isLoadingGames,
-                    isRefreshing = isRefreshing,
-                    downloadedGameKeys = downloadedGameKeys,
-                    isPokemonVaultAvailable = isPokemonVaultAvailable,
-                    onOpenPokemonVault = { onSelectTab(GamesTab.Vault) },
-                    onRefresh = onRefresh,
-                    onSelectSystem = onSelectSystem,
-                    onOpenGame = onOpenGame,
-                    onBack = {
-                        if (selectedSystem != null) {
-                            onSelectSystem(null)
-                        } else {
-                            onSelectTab(GamesTab.Home)
-                        }
-                    },
-                )
-            }
-            GamesTab.Vault -> {
-                PokemonVaultScreen(
-                    session = session,
-                    pokemonRepository = pokemonRepository ?: remember { DefaultJellyfinPokemonRepository() },
-                    onBack = { onSelectTab(GamesTab.Home) },
-                )
-            }
-            GamesTab.Saves -> {
-                GamesSavesScreen(
-                    serverName = serverName,
-                    games = allGames,
-                    systems = systems,
-                    session = session,
-                    gamesRepository = gamesRepository,
-                    onBack = { onSelectTab(GamesTab.Home) },
-                )
-            }
-            GamesTab.Settings -> {
-                GamesSettingsScreen(
-                    games = games,
-                    allGames = allGames,
-                    systems = systems,
-                    onBack = { onSelectTab(GamesTab.Home) },
-                )
+    ) {
+        AnimatedContent(
+            targetState = activeTab,
+            transitionSpec = {
+                gamesTabTransitionSpec(reducedMotion)
+            },
+            label = "GamesTabContent",
+            modifier = Modifier.fillMaxSize(),
+        ) { tab ->
+            when (tab) {
+                GamesTab.Home -> {
+                    GamesHomeScreen(
+                        userName = userName,
+                        userImageUrl = userImageUrl,
+                        systems = systems,
+                        games = games,
+                        allGames = allGames,
+                        recentGames = recentGames,
+                        totalPlayTimeMs = totalPlayTimeMs,
+                        isRefreshing = isRefreshing,
+                        onRefresh = onRefresh,
+                        onOpenGame = onOpenGame,
+                        onSelectSystem = { sys ->
+                            onSelectSystem(sys)
+                            onSelectTab(GamesTab.Library)
+                        },
+                        onNavigateBack = onBackToMain,
+                    )
+                }
+                GamesTab.Library -> {
+                    GamesHubScreen(
+                        systems = systems,
+                        games = games,
+                        allGames = allGames,
+                        selectedSystem = selectedSystem,
+                        isLoading = isLoadingGames,
+                        isRefreshing = isRefreshing,
+                        downloadedGameKeys = downloadedGameKeys,
+                        isPokemonVaultAvailable = isPokemonVaultAvailable,
+                        onOpenPokemonVault = { onSelectTab(GamesTab.Vault) },
+                        onRefresh = onRefresh,
+                        onSelectSystem = onSelectSystem,
+                        onOpenGame = onOpenGame,
+                        onBack = {
+                            if (selectedSystem != null) {
+                                onSelectSystem(null)
+                            } else {
+                                onSelectTab(GamesTab.Home)
+                            }
+                        },
+                    )
+                }
+                GamesTab.Vault -> {
+                    PokemonVaultScreen(
+                        session = session,
+                        pokemonRepository = pokemonRepository ?: remember { DefaultJellyfinPokemonRepository() },
+                        onBack = { onSelectTab(GamesTab.Home) },
+                        vaultHomeTrigger = vaultHomeTrigger,
+                    )
+                }
+                GamesTab.Saves -> {
+                    GamesSavesScreen(
+                        serverName = serverName,
+                        games = allGames,
+                        systems = systems,
+                        session = session,
+                        gamesRepository = gamesRepository,
+                        onBack = { onSelectTab(GamesTab.Home) },
+                    )
+                }
+                GamesTab.Settings -> {
+                    GamesSettingsScreen(
+                        games = games,
+                        allGames = allGames,
+                        systems = systems,
+                        onBack = { onSelectTab(GamesTab.Home) },
+                    )
+                }
             }
         }
     }

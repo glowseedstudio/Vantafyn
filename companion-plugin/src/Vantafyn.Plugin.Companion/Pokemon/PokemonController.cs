@@ -1437,7 +1437,7 @@ public sealed class PokemonController : ControllerBase
 
                 if (parseResult.CaughtSpeciesIds.Count > 0 || parseResult.SeenSpeciesIds.Count > 0)
                 {
-                    await _journeyService.RecordSpeciesIdsAsync(userId, parseResult.CaughtSpeciesIds, parseResult.SeenSpeciesIds, meta.CanonicalTitle, cancellationToken).ConfigureAwait(false);
+                    await _journeyService.RecordSpeciesIdsAsync(userId, parseResult.CaughtSpeciesIds, parseResult.SeenSpeciesIds, meta.CanonicalTitle, replaceExisting: false, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch
@@ -2253,17 +2253,33 @@ public sealed class PokemonController : ControllerBase
             return Ok(new PokemonPokedexDto { UserId = userId, IsEnabled = false });
         }
 
-        if (request.CaughtSpeciesIds.Count > 0 || request.SeenSpeciesIds.Count > 0)
+        if (request.CaughtSpeciesIds.Count > 0 || request.SeenSpeciesIds.Count > 0 || request.ReplaceExisting)
         {
             await _journeyService.RecordSpeciesIdsAsync(
                 userId,
                 request.CaughtSpeciesIds,
                 request.SeenSpeciesIds,
                 request.OriginGame,
+                request.ReplaceExisting,
                 cancellationToken).ConfigureAwait(false);
         }
 
         var pokedex = await _journeyService.GetUserPokedexAsync(userId, cancellationToken).ConfigureAwait(false);
+
+        if (_socialService != null)
+        {
+            try
+            {
+                var userName = await this.CurrentUserNameAsync(_authorizationContext).ConfigureAwait(false);
+                var gen1 = pokedex.GenerationProgress.FirstOrDefault(g => g.Generation == 1);
+                await _socialService.ProcessPokedexMilestoneAsync(userId, userName, pokedex.TotalCaught, gen1?.CaughtCount ?? 0, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Non-fatal
+            }
+        }
+
         return Ok(pokedex);
     }
 

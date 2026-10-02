@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -27,6 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Cable
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.History
@@ -203,7 +205,7 @@ fun PokemonTradeModal(
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
-                            imageVector = Icons.Rounded.SwapHoriz,
+                            imageVector = Icons.Rounded.Cable,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(20.dp),
@@ -455,7 +457,7 @@ fun PokemonTradeModal(
                                     .weight(1f, fill = false),
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                items(allVaultPokemon, key = { it.id }) { p ->
+                                itemsIndexed(allVaultPokemon, key = { index, p -> if (p.id.isNotBlank()) p.id else "vault_pkm_$index" }) { _, p ->
                                     val isCurrent = activeOfferPokemon?.id == p.id
                                     Row(
                                         modifier = Modifier

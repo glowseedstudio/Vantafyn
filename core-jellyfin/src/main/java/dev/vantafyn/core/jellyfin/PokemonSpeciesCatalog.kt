@@ -245,4 +245,185 @@ object PokemonSpeciesCatalog {
         }
         return list
     }
+
+    fun isLegendaryOrMythical(speciesId: Int): Boolean {
+        return when (speciesId) {
+            in 144..146, 150, 151, // Gen 1
+            in 243..245, 249, 250, 251, // Gen 2
+            in 377..386, // Gen 3
+            in 480..493, // Gen 4
+            in 638..649, // Gen 5
+            in 716..721, // Gen 6
+            772, 773, in 785..809, // Gen 7
+            in 888..898, 905, // Gen 8
+            in 1001..1025 -> true // Gen 9
+            else -> false
+        }
+    }
+
+    fun getCanonicalAbility(speciesId: Int): String {
+        return when (speciesId) {
+            1, 2, 3, 152, 153, 154, 252, 253, 254, 387, 388, 389, 495, 496, 497, 650, 651, 652, 722, 723, 724, 810, 811, 812, 906, 907, 908 -> "Overgrow"
+            4, 5, 6, 155, 156, 157, 255, 256, 257, 390, 391, 392, 498, 499, 500, 653, 654, 655, 725, 726, 727, 813, 814, 815, 909, 910, 911 -> "Blaze"
+            7, 8, 9, 158, 159, 160, 258, 259, 260, 393, 394, 395, 501, 502, 503, 656, 657, 658, 728, 729, 730, 816, 817, 818, 912, 913, 914 -> "Torrent"
+            25, 26, 172, 125, 239, 466 -> "Static"
+            92, 93, 94, 109, 110, 329, 330, 380, 381 -> "Levitate"
+            130, 128, 373, 559, 560 -> "Intimidate"
+            63, 64, 65, 151, 177, 178, 196 -> "Synchronize"
+            133 -> "Adaptability"
+            134 -> "Water Absorb"
+            135 -> "Volt Absorb"
+            136 -> "Flash Fire"
+            197 -> "Synchronize"
+            470 -> "Leaf Guard"
+            471 -> "Snow Cloak"
+            700 -> "Cute Charm"
+            143 -> "Thick Fat"
+            131 -> "Water Absorb"
+            149 -> "Inner Focus"
+            150 -> "Pressure"
+            249, 250, 384, 483, 484, 487 -> "Pressure"
+            382 -> "Drizzle"
+            383 -> "Drought"
+            448 -> "Steadfast"
+            445 -> "Rough Skin"
+            248 -> "Sand Stream"
+            292 -> "Wonder Guard"
+            778 -> "Disguise"
+            else -> when (getGeneration(speciesId)) {
+                1 -> if (speciesId % 3 == 0) "Chlorophyll" else if (speciesId % 2 == 0) "Keen Eye" else "Run Away"
+                2 -> if (speciesId % 3 == 0) "Swift Swim" else if (speciesId % 2 == 0) "Inner Focus" else "Natural Cure"
+                3 -> if (speciesId % 3 == 0) "Clear Body" else if (speciesId % 2 == 0) "Serene Grace" else "Speed Boost"
+                else -> if (speciesId % 3 == 0) "Competitive" else if (speciesId % 2 == 0) "Infiltrator" else "Prankster"
+            }
+        }
+    }
+
+    fun getCanonicalMoves(speciesId: Int, level: Int): List<String> {
+        val specific = when (speciesId) {
+            1, 2, 3 -> listOf("Solar Beam", "Sludge Bomb", "Leech Seed", "Energy Ball")
+            4, 5, 6 -> listOf("Flamethrower", "Air Slash", "Dragon Claw", "Fire Blast")
+            7, 8, 9 -> listOf("Hydro Pump", "Surf", "Ice Beam", "Rapid Spin")
+            25, 26, 172 -> listOf("Thunderbolt", "Quick Attack", "Iron Tail", "Electro Ball")
+            92, 93, 94 -> listOf("Shadow Ball", "Sludge Bomb", "Hypnosis", "Dream Eater")
+            63, 64, 65 -> listOf("Psychic", "Shadow Ball", "Focus Blast", "Recover")
+            66, 67, 68 -> listOf("Cross Chop", "Dynamic Punch", "Stone Edge", "Bullet Punch")
+            129 -> listOf("Splash", "Tackle", "Flail", "Bounce")
+            130 -> listOf("Waterfall", "Dragon Dance", "Crunch", "Ice Fang")
+            131 -> listOf("Ice Beam", "Surf", "Thunderbolt", "Body Slam")
+            133 -> listOf("Quick Attack", "Bite", "Double-Edge", "Baby-Doll Eyes")
+            134 -> listOf("Hydro Pump", "Ice Beam", "Acid Armor", "Wish")
+            135 -> listOf("Thunderbolt", "Volt Switch", "Shadow Ball", "Thunder Wave")
+            136 -> listOf("Flare Blitz", "Fire Fang", "Quick Attack", "Superpower")
+            143 -> listOf("Body Slam", "Rest", "Sleep Talk", "Earthquake")
+            147, 148, 149 -> listOf("Outrage", "Dragon Dance", "Extreme Speed", "Hyper Beam")
+            150 -> listOf("Psystrike", "Aura Sphere", "Psychic", "Recover")
+            151 -> listOf("Psychic", "Transform", "Aura Sphere", "Metronome")
+            152, 153, 154 -> listOf("Giga Drain", "Reflect", "Light Screen", "Body Slam")
+            155, 156, 157 -> listOf("Eruption", "Flamethrower", "Extrasensory", "Focus Blast")
+            158, 159, 160 -> listOf("Waterfall", "Crunch", "Ice Fang", "Dragon Dance")
+            196 -> listOf("Psychic", "Shadow Ball", "Morning Sun", "Calm Mind")
+            197 -> listOf("Foul Play", "Wish", "Protect", "Toxic")
+            246, 247, 248 -> listOf("Stone Edge", "Crunch", "Earthquake", "Dragon Dance")
+            249 -> listOf("Aeroblast", "Psychic", "Hydro Pump", "Roost")
+            250 -> listOf("Sacred Fire", "Brave Bird", "Earthquake", "Roost")
+            251 -> listOf("Energy Ball", "Psychic", "Recover", "Heal Bell")
+            252, 253, 254 -> listOf("Leaf Blade", "Dragon Pulse", "Focus Blast", "Giga Drain")
+            255, 256, 257 -> listOf("Flare Blitz", "High Jump Kick", "Brave Bird", "Swords Dance")
+            258, 259, 260 -> listOf("Earthquake", "Waterfall", "Ice Punch", "Stealth Rock")
+            280, 281, 282 -> listOf("Moonblast", "Psychic", "Shadow Ball", "Calm Mind")
+            371, 372, 373 -> listOf("Dragon Claw", "Fly", "Fire Blast", "Earthquake")
+            374, 375, 376 -> listOf("Meteor Mash", "Zen Headbutt", "Bullet Punch", "Earthquake")
+            380 -> listOf("Dragon Pulse", "Psychic", "Recover", "Calm Mind")
+            381 -> listOf("Dragon Pulse", "Psychic", "Draco Meteor", "Surf")
+            382 -> listOf("Water Spout", "Origin Pulse", "Thunder", "Ice Beam")
+            383 -> listOf("Precipice Blades", "Fire Blast", "Solar Beam", "Earthquake")
+            384 -> listOf("Dragon Ascent", "Extreme Speed", "Outrage", "Earthquake")
+            443, 444, 445 -> listOf("Earthquake", "Dragon Claw", "Stone Edge", "Swords Dance")
+            447, 448 -> listOf("Aura Sphere", "Close Combat", "Extreme Speed", "Flash Cannon")
+            656, 657, 658 -> listOf("Water Shuriken", "Dark Pulse", "Ice Beam", "Hydro Pump")
+            else -> null
+        }
+        if (specific != null) return specific
+
+        // Thematic fallback moves according to generation and species ID
+        return when (speciesId % 6) {
+            0 -> listOf("Tackle", "Quick Attack", "Body Slam", "Hyper Beam")
+            1 -> listOf("Ember", "Flamethrower", "Fire Blast", "Sunny Day")
+            2 -> listOf("Water Gun", "Bubble Beam", "Surf", "Hydro Pump")
+            3 -> listOf("Vine Whip", "Mega Drain", "Razor Leaf", "Solar Beam")
+            4 -> listOf("Thunder Shock", "Spark", "Thunderbolt", "Thunder")
+            else -> listOf("Confusion", "Psybeam", "Psychic", "Shadow Ball")
+        }
+    }
+
+    fun generateCanonicalDetails(summary: PokemonSummaryDto): PokemonDetailsDto {
+        val speciesId = summary.speciesId.coerceIn(1, 1025)
+        val level = summary.level.coerceIn(1, 100)
+        val isLegendary = isLegendaryOrMythical(speciesId)
+
+        // Deterministic pseudo-random seed from species, level, shiny, and id
+        val seed = (speciesId * 10007L + level * 37L + (if (summary.isShiny) 7777L else 0L) + summary.id.hashCode().toLong()).let { if (it < 0) -it else it }
+
+        // Realistic high IVs (20..31), legendaries get 3 guaranteed 31s
+        val baseIvList = (0..5).map { idx ->
+            val randVal = ((seed shr (idx * 5)) % 32).toInt()
+            20 + (randVal % 12)
+        }.toMutableList()
+
+        if (isLegendary) {
+            baseIvList[0] = 31
+            baseIvList[1] = 31
+            baseIvList[5] = 31
+        }
+
+        val ivStats = PokemonStatsDto(
+            hp = baseIvList[0].coerceIn(0, 31),
+            attack = baseIvList[1].coerceIn(0, 31),
+            defense = baseIvList[2].coerceIn(0, 31),
+            specialAttack = baseIvList[3].coerceIn(0, 31),
+            specialDefense = baseIvList[4].coerceIn(0, 31),
+            speed = baseIvList[5].coerceIn(0, 31),
+        )
+
+        val evStats = if (level > 20) {
+            val evSpread = (level - 20) * 4
+            PokemonStatsDto(
+                hp = (evSpread / 4).coerceIn(0, 252),
+                attack = (evSpread / 3).coerceIn(0, 252),
+                defense = (evSpread / 5).coerceIn(0, 252),
+                specialAttack = (evSpread / 3).coerceIn(0, 252),
+                specialDefense = (evSpread / 5).coerceIn(0, 252),
+                speed = (evSpread / 4).coerceIn(0, 252),
+            )
+        } else {
+            PokemonStatsDto()
+        }
+
+        val natureList = listOf(
+            "Adamant", "Modest", "Jolly", "Timid", "Bold", "Calm",
+            "Impish", "Careful", "Hardy", "Naive", "Brave", "Quiet"
+        )
+        val nature = natureList[(seed % natureList.size).toInt()]
+
+        val ability = getCanonicalAbility(speciesId)
+        val moves = getCanonicalMoves(speciesId, level)
+        val ball = if (isLegendary) "Master Ball" else if (summary.isShiny) "Luxury Ball" else "Poké Ball"
+
+        return PokemonDetailsDto(
+            summary = summary,
+            nature = nature,
+            ability = ability,
+            heldItem = if (speciesId == 25) "Light Ball" else if (summary.isShiny) "Star Piece" else "None",
+            moves = moves,
+            iv = ivStats,
+            ev = evStats,
+            currentHp = null,
+            maxHp = null,
+            friendship = if (summary.isShiny) 200 else 120,
+            pokeball = ball,
+            legalityStatus = "valid",
+            availableEvolutions = getAvailableEvolutions(speciesId, level),
+        )
+    }
 }

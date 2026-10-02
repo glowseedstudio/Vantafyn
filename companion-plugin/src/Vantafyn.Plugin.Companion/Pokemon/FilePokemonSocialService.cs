@@ -70,6 +70,10 @@ public sealed class FilePokemonSocialService : IPokemonSocialService
         await ActivityLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (string.IsNullOrWhiteSpace(activityEvent.Id))
+            {
+                activityEvent.Id = Guid.NewGuid().ToString("N");
+            }
             var record = await LoadActivityRecordAsync(cancellationToken).ConfigureAwait(false);
             activityEvent.TimestampUtc = _clock.UtcNow;
             record.Events.Insert(0, activityEvent);
@@ -100,7 +104,15 @@ public sealed class FilePokemonSocialService : IPokemonSocialService
         try
         {
             var record = await LoadActivityRecordAsync(cancellationToken).ConfigureAwait(false);
-            return record.Events.Take(Math.Max(1, Math.Min(limit, 100))).ToList();
+            var list = record.Events.Take(Math.Max(1, Math.Min(limit, 100))).ToList();
+            foreach (var evt in list)
+            {
+                if (string.IsNullOrWhiteSpace(evt.Id))
+                {
+                    evt.Id = Guid.NewGuid().ToString("N");
+                }
+            }
+            return list;
         }
         finally
         {
@@ -312,13 +324,51 @@ public sealed class FilePokemonSocialService : IPokemonSocialService
         {
             await TryUnlockAsync(userId, userName, "pk-pokedex-10", cancellationToken).ConfigureAwait(false);
         }
+        else
+        {
+            await TryRevokeAsync(userId, "pk-pokedex-10", cancellationToken).ConfigureAwait(false);
+        }
+
         if (totalCaught >= 50)
         {
             await TryUnlockAsync(userId, userName, "pk-pokedex-50", cancellationToken).ConfigureAwait(false);
         }
+        else
+        {
+            await TryRevokeAsync(userId, "pk-pokedex-50", cancellationToken).ConfigureAwait(false);
+        }
+
         if (gen1Caught >= 151)
         {
             await TryUnlockAsync(userId, userName, "pk-pokedex-kanto-master", cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            await TryRevokeAsync(userId, "pk-pokedex-kanto-master", cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task<bool> TryRevokeAsync(Guid userId, string achievementId, CancellationToken cancellationToken = default)
+    {
+        var sem = UserLockFor(userId);
+        await sem.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var record = await LoadUserAchievementsRecordAsync(userId, cancellationToken).ConfigureAwait(false);
+            if (record.UnlockedAchievements.Remove(achievementId))
+            {
+                record.UpdatedAtUtc = _clock.UtcNow;
+                var path = UserAchievementsFilePath(userId);
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await JsonFile.WriteAtomicAsync(path, record, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Revoked invalid achievement {AchievementId} for user {UserId}", achievementId, userId);
+                return true;
+            }
+            return false;
+        }
+        finally
+        {
+            sem.Release();
         }
     }
 

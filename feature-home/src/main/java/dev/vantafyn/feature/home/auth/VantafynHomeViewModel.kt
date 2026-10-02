@@ -1914,7 +1914,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun setActiveGamesTab(tab: GamesTab) {
-        _state.update { it.copy(activeGamesTab = tab) }
+        _state.update {
+            it.copy(
+                activeGamesTab = tab,
+                pokemonVaultHomeTrigger = if (tab == GamesTab.Vault) it.pokemonVaultHomeTrigger + 1L else it.pokemonVaultHomeTrigger,
+            )
+        }
         refreshGameTrackerData()
     }
 
@@ -6277,7 +6282,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     append("🆔 Item ID: ${mediaDetail.id}\n")
                     append("⚠️ Issue: $categoryText")
                     append(commentText)
-                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.37")
+                    append("\n📱 Reported by ${session.user.name} via Vantafyn 0.9.38")
                 }
 
                 val pushRepo = dev.vantafyn.core.integrations.push.CompanionPushRepository()
@@ -10568,6 +10573,7 @@ data class VantafynHomeUiState(
     val activeGameDetail: GameDetail? = null,
     val activeGamePlaying: GameDetail? = null,
     val activeGamesTab: GamesTab = GamesTab.Home,
+    val pokemonVaultHomeTrigger: Long = 0L,
     val recentGames: List<RecentGameRecord> = emptyList(),
     val totalGamePlayTimeMs: Long = 0L,
     val downloadedGameKeys: Set<String> = emptySet(),

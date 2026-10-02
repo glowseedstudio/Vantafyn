@@ -93,11 +93,15 @@ fun GamesHomeScreen(
 
     val pullToRefreshState = rememberPullToRefreshState()
 
-    PullToRefreshBox(
-        isRefreshing = isRefreshing,
-        state = pullToRefreshState,
-        onRefresh = onRefresh,
+    GameScreenReveal(
+        key = "games_home_screen",
         modifier = modifier.fillMaxSize(),
+    ) {
+        PullToRefreshBox(
+            isRefreshing = isRefreshing,
+            state = pullToRefreshState,
+            onRefresh = onRefresh,
+            modifier = Modifier.fillMaxSize(),
         indicator = {
             PullToRefreshDefaults.Indicator(
                 state = pullToRefreshState,
@@ -502,7 +506,8 @@ fun GamesHomeScreen(
             }
         }
     }
-}
+    }
+    }
 }
 
 @Composable

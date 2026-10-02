@@ -182,20 +182,27 @@ object Gen2NativeSaveParser {
         val seenIds = mutableSetOf<Int>()
         val caughtStart = if (isCrystal) 0x2A6C else 0x2A4C
         val seenStart = if (isCrystal) 0x2A8C else 0x2A6C
-        for (offset in 0 until 32) {
+        val cBytes = (0 until 32).map { offset ->
             val cIdx = caughtStart + offset
-            val sIdx = seenStart + offset
-            val cByte = if (cIdx < saveBytes.size) saveBytes[cIdx].toInt() and 0xFF else 0
-            val sByte = if (sIdx < saveBytes.size) saveBytes[sIdx].toInt() and 0xFF else 0
-            for (bit in 0 until 8) {
-                val speciesNum = offset * 8 + bit + 1
-                if (speciesNum in 1..251) {
-                    if ((cByte and (1 shl bit)) != 0) {
-                        caughtIds.add(speciesNum)
-                        seenIds.add(speciesNum)
-                    }
-                    if ((sByte and (1 shl bit)) != 0) {
-                        seenIds.add(speciesNum)
+            if (cIdx < saveBytes.size) saveBytes[cIdx].toInt() and 0xFF else 0
+        }
+        val isErasedOrCorrupt = cBytes.all { it == 0xFF } || (cBytes.count { it == 0xFF } >= 16)
+        if (!isErasedOrCorrupt) {
+            for (offset in 0 until 32) {
+                val cIdx = caughtStart + offset
+                val sIdx = seenStart + offset
+                val cByte = if (cIdx < saveBytes.size) saveBytes[cIdx].toInt() and 0xFF else 0
+                val sByte = if (sIdx < saveBytes.size) saveBytes[sIdx].toInt() and 0xFF else 0
+                for (bit in 0 until 8) {
+                    val speciesNum = offset * 8 + bit + 1
+                    if (speciesNum in 1..251) {
+                        if ((cByte and (1 shl bit)) != 0) {
+                            caughtIds.add(speciesNum)
+                            seenIds.add(speciesNum)
+                        }
+                        if ((sByte and (1 shl bit)) != 0) {
+                            seenIds.add(speciesNum)
+                        }
                     }
                 }
             }

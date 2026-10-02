@@ -78,25 +78,35 @@ public static class Gen2SaveParser
         var seenIds = new HashSet<int>();
         int caughtStart = isCrystal ? 0x2A6C : 0x2A4C;
         int seenStart = isCrystal ? 0x2A8C : 0x2A6C;
-        for (int offset = 0; offset < 32; offset++)
+        var cBytes = new byte[32];
+        for (int i = 0; i < 32; i++)
         {
-            int cIdx = caughtStart + offset;
-            int sIdx = seenStart + offset;
-            byte cByte = cIdx < saveBytes.Length ? saveBytes[cIdx] : (byte)0;
-            byte sByte = sIdx < saveBytes.Length ? saveBytes[sIdx] : (byte)0;
-            for (int bit = 0; bit < 8; bit++)
+            int cIdx = caughtStart + i;
+            cBytes[i] = cIdx < saveBytes.Length ? saveBytes[cIdx] : (byte)0;
+        }
+        bool isErasedOrCorrupt = cBytes.All(b => b == 0xFF) || cBytes.Count(b => b == 0xFF) >= 16;
+        if (!isErasedOrCorrupt)
+        {
+            for (int offset = 0; offset < 32; offset++)
             {
-                int speciesNum = offset * 8 + bit + 1;
-                if (speciesNum <= 251)
+                int cIdx = caughtStart + offset;
+                int sIdx = seenStart + offset;
+                byte cByte = cIdx < saveBytes.Length ? saveBytes[cIdx] : (byte)0;
+                byte sByte = sIdx < saveBytes.Length ? saveBytes[sIdx] : (byte)0;
+                for (int bit = 0; bit < 8; bit++)
                 {
-                    if ((cByte & (1 << bit)) != 0)
+                    int speciesNum = offset * 8 + bit + 1;
+                    if (speciesNum <= 251)
                     {
-                        caughtIds.Add(speciesNum);
-                        seenIds.Add(speciesNum);
-                    }
-                    if ((sByte & (1 << bit)) != 0)
-                    {
-                        seenIds.Add(speciesNum);
+                        if ((cByte & (1 << bit)) != 0)
+                        {
+                            caughtIds.Add(speciesNum);
+                            seenIds.Add(speciesNum);
+                        }
+                        if ((sByte & (1 << bit)) != 0)
+                        {
+                            seenIds.Add(speciesNum);
+                        }
                     }
                 }
             }
@@ -219,6 +229,13 @@ public static class Gen2SaveParser
                     seenIds.Add(p.SpeciesId);
                 }
             }
+        }
+
+        int totalOwnedCount = partyList.Count + boxesList.Sum(b => b.OccupiedCount);
+        if (totalOwnedCount == 0)
+        {
+            caughtIds.Clear();
+            seenIds.Clear();
         }
 
         result.PokedexCaught = caughtIds.Count;
