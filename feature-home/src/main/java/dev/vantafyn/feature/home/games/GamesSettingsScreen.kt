@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Vibration
 import dev.vantafyn.core.media.games.GameHubSoundManager
@@ -114,6 +115,9 @@ fun GamesSettingsScreen(
     }
     var selectedAspectRatio by remember {
         mutableStateOf(prefs.getString("default_aspect_ratio", "4:3") ?: "4:3")
+    }
+    var selectedVideoFilter by remember {
+        mutableStateOf(prefs.getString("video_filter", "crisp") ?: "crisp")
     }
     var fastForwardSpeed by remember {
         mutableStateOf(prefs.getString("fast_forward_speed", "2x") ?: "2x")
@@ -513,6 +517,61 @@ fun GamesSettingsScreen(
                                         text = ratio,
                                         color = if (selected) Color.White else VantafynColors.Muted,
                                         fontSize = 13.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Retro Video Filter
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.padding(top = 4.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Tv,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text(
+                                text = "Default Video Filter",
+                                color = VantafynColors.Ink,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(
+                                "crisp" to "Crisp Pixels",
+                                "crt" to "CRT Scanlines",
+                                "smooth" to "Smooth Filter"
+                            ).forEach { (filterId, label) ->
+                                val selected = selectedVideoFilter == filterId
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) VantafynGradients.accentHorizontal()
+                                            else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                        )
+                                        .clickable {
+                                            selectedVideoFilter = filterId
+                                            prefs.edit().putString("video_filter", filterId).apply()
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (selected) Color.White else VantafynColors.Muted,
+                                        fontSize = 12.sp,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                                     )
                                 }

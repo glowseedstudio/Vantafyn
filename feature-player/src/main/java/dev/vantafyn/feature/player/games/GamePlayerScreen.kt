@@ -1,6 +1,7 @@
 package dev.vantafyn.feature.player.games
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.util.Base64
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -30,6 +31,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -145,19 +147,75 @@ fun GamePlayerScreen(
     var statusMessage by remember { mutableStateOf("Preparing game environment...") }
     var romFile by remember { mutableStateOf<File?>(null) }
 
+    val prefs = remember { context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE) }
+    val initialAspect = remember {
+        when (prefs.getString("default_aspect_ratio", "4:3")) {
+            "16:9" -> GameAspectRatio.Widescreen
+            "1:1" -> GameAspectRatio.Square
+            else -> GameAspectRatio.Standard
+        }
+    }
+    val initialFilter = remember {
+        when (prefs.getString("video_filter", "crisp")) {
+            "crt" -> GameVideoFilter.Crt
+            "smooth" -> GameVideoFilter.Smooth
+            else -> GameVideoFilter.Crisp
+        }
+    }
+    val initialFfSpeed = remember {
+        when (prefs.getString("fast_forward_speed", "2x")) {
+            "3x" -> 3f
+            "4x" -> 4f
+            else -> 2f
+        }
+    }
+
     var isPaused by remember { mutableStateOf(false) }
     var isSavingState by remember { mutableStateOf(false) }
     var saveStateSuccess by remember { mutableStateOf(false) }
-    var aspectRatio by remember { mutableStateOf(GameAspectRatio.Standard) }
+    var aspectRatio by remember { mutableStateOf(initialAspect) }
     var fastForwardSpeed by remember { mutableFloatStateOf(1f) }
+    var configuredFfSpeed by remember { mutableFloatStateOf(initialFfSpeed) }
     var isMuted by remember { mutableStateOf(false) }
-    var videoFilter by remember { mutableStateOf(GameVideoFilter.Crisp) }
+    var videoFilter by remember { mutableStateOf(initialFilter) }
     var showTouchControls by remember { mutableStateOf(true) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
     var initialSramBase64 by remember { mutableStateOf<String?>(null) }
     var pendingConflict by remember { mutableStateOf<SaveSyncInfo?>(null) }
     var pendingDownloadedRom by remember { mutableStateOf<File?>(null) }
+
+    // Sync aspect ratio changes to preferences and WebView
+    LaunchedEffect(aspectRatio, webViewInstance) {
+        val prefStr = when (aspectRatio) {
+            GameAspectRatio.Widescreen -> "16:9"
+            GameAspectRatio.Square -> "1:1"
+            GameAspectRatio.Standard -> "4:3"
+        }
+        prefs.edit().putString("default_aspect_ratio", prefStr).apply()
+        val mode = when (aspectRatio) {
+            GameAspectRatio.Widescreen -> "widescreen"
+            GameAspectRatio.Square -> "square"
+            GameAspectRatio.Standard -> "standard"
+        }
+        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setAspectRatio('$mode');", null)
+    }
+
+    // Sync video filter changes to preferences and WebView
+    LaunchedEffect(videoFilter, webViewInstance) {
+        prefs.edit().putString("video_filter", videoFilter.id).apply()
+        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVideoFilter('${videoFilter.id}');", null)
+    }
+
+    // Sync speed changes to WebView
+    LaunchedEffect(fastForwardSpeed, webViewInstance) {
+        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setSpeed($fastForwardSpeed);", null)
+    }
+
+    // Sync audio mute to WebView
+    LaunchedEffect(isMuted, webViewInstance) {
+        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setMute($isMuted);", null)
+    }
 
     // Intercept hardware Back press to flush saves and toggle Pause HUD
     BackHandler(enabled = true) {
@@ -265,10 +323,15 @@ fun GamePlayerScreen(
                     .fillMaxWidth()
                     .height(gameHeight)
             } else {
-                Modifier
-                    .align(Alignment.Center)
-                    .fillMaxSize()
-                    .aspectRatio(ratioFloat, matchHeightConstraintsFirst = true)
+                when (aspectRatio) {
+                    GameAspectRatio.Widescreen -> Modifier
+                        .align(Alignment.Center)
+                        .fillMaxSize()
+                    GameAspectRatio.Standard, GameAspectRatio.Square -> Modifier
+                        .align(Alignment.Center)
+                        .fillMaxHeight()
+                        .aspectRatio(ratioFloat, matchHeightConstraintsFirst = true)
+                }
             }
 
             Box(
@@ -464,6 +527,12 @@ fun GamePlayerScreen(
                                     gameTitle = game.cleanTitle.ifEmpty { game.title },
                                     romFileName = friendlyRomFileName,
                                     initialSramBase64 = initialSramBase64,
+                                    initialFilter = videoFilter.id,
+                                    initialAspectRatio = when (aspectRatio) {
+                                        GameAspectRatio.Widescreen -> "widescreen"
+                                        GameAspectRatio.Square -> "square"
+                                        GameAspectRatio.Standard -> "standard"
+                                    },
                                 )
                                 loadDataWithBaseURL("https://vantafyn.emulator/", html, "text/html", "UTF-8", null)
                                 webViewInstance = this
@@ -474,7 +543,12 @@ fun GamePlayerScreen(
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
+
+                // High-fidelity CRT scanline & curved tube vignette overlay
+                if (videoFilter == GameVideoFilter.Crt) {
+                    RetroCrtOverlay(modifier = Modifier.matchParentSize())
                 }
+            }
         }
 
         // Loading Screen
@@ -579,7 +653,6 @@ fun GamePlayerScreen(
             isMuted = isMuted,
             onToggleMute = {
                 isMuted = !isMuted
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setMute($isMuted);", null)
             },
             videoFilter = videoFilter,
             onCycleVideoFilter = {
@@ -588,7 +661,6 @@ fun GamePlayerScreen(
                     GameVideoFilter.Crt -> GameVideoFilter.Smooth
                     GameVideoFilter.Smooth -> GameVideoFilter.Crisp
                 }
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVideoFilter('${videoFilter.id}');", null)
             },
             showTouchControls = showTouchControls,
             onToggleTouchControls = {
@@ -616,11 +688,10 @@ fun GamePlayerScreen(
             },
             onToggleSpeed = {
                 fastForwardSpeed = when (fastForwardSpeed) {
-                    1f -> 2f
-                    2f -> 4f
+                    1f -> configuredFfSpeed
+                    configuredFfSpeed -> if (configuredFfSpeed < 4f) 4f else 1f
                     else -> 1f
                 }
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setSpeed($fastForwardSpeed);", null)
             },
             onCycleAspectRatio = {
                 aspectRatio = when (aspectRatio) {
@@ -628,12 +699,6 @@ fun GamePlayerScreen(
                     GameAspectRatio.Widescreen -> GameAspectRatio.Square
                     GameAspectRatio.Square -> GameAspectRatio.Standard
                 }
-                val mode = when (aspectRatio) {
-                    GameAspectRatio.Widescreen -> "widescreen"
-                    GameAspectRatio.Square -> "square"
-                    GameAspectRatio.Standard -> "standard"
-                }
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setAspectRatio('$mode');", null)
             },
             onReset = {
                 webViewInstance?.evaluateJavascript("window.VantafynEmulator?.reset();", null)
@@ -732,6 +797,8 @@ private fun generateEmulatorHtml(
     gameTitle: String,
     romFileName: String,
     initialSramBase64: String?,
+    initialFilter: String = "crisp",
+    initialAspectRatio: String = "standard",
 ): String {
     val key = core.ifBlank { systemId }.lowercase().trim()
     val ext = romFileName.substringAfterLast('.', "").lowercase().trim()
@@ -760,10 +827,23 @@ private fun generateEmulatorHtml(
             <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
             <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
-                body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; }
+                body, html { width: 100%; height: 100%; overflow: hidden; background-color: #000; position: relative; }
                 #game-container { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
                 canvas { width: 100% !important; height: 100% !important; object-fit: contain; image-rendering: pixelated; }
                 canvas.widescreen-fill { object-fit: fill !important; }
+
+                /* CRT Scanline and Vignette Layer */
+                #vantafyn-crt-overlay {
+                    position: absolute;
+                    top: 0; left: 0; right: 0; bottom: 0;
+                    width: 100%; height: 100%;
+                    pointer-events: none;
+                    z-index: 9999;
+                    display: ${if (initialFilter == "crt") "block" else "none"};
+                    background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.35) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.04), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.04));
+                    background-size: 100% 4px, 6px 100%;
+                    box-shadow: inset 0 0 70px rgba(0, 0, 0, 0.65);
+                }
 
                 /* Completely hide and disable EmulatorJS built-in menus, settings dialogs, popups and touch controls */
                 .ejs_virtualGamepad_parent,
@@ -800,6 +880,7 @@ private fun generateEmulatorHtml(
         </head>
         <body>
             <div id="game-container"></div>
+            <div id="vantafyn-crt-overlay"></div>
             <script>
                 window.EJS_player = '#game-container';
                 window.EJS_core = '$systemCoreName';
@@ -1033,6 +1114,10 @@ private fun generateEmulatorHtml(
                     if (window.VantafynBridge) {
                         window.VantafynBridge.onGameReady();
                     }
+                    if (window.VantafynEmulator) {
+                        window.VantafynEmulator.setVideoFilter('$initialFilter');
+                        window.VantafynEmulator.setAspectRatio('$initialAspectRatio');
+                    }
                 };
 
                 window.EJS_onSaveUpdate = function(e) {
@@ -1072,13 +1157,13 @@ private fun generateEmulatorHtml(
                 window.VantafynEmulator = {
                     setMute: function(muted) {
                         try {
-                            if (window.EJS_emulator && typeof window.EJS_emulator.setVolume === 'function') {
-                                window.EJS_emulator.setVolume(muted ? 0 : 1);
+                            var emu = window.EJS_emulator;
+                            if (emu) {
+                                if (typeof emu.setVolume === 'function') emu.setVolume(muted ? 0 : 1);
+                                if (typeof emu.changeSettingOption === 'function') emu.changeSettingOption('volume', muted ? '0' : '100');
+                                emu.muted = !!muted;
                             }
-                            if (window.EJS_emulator && typeof window.EJS_emulator.muted !== 'undefined') {
-                                window.EJS_emulator.muted = muted;
-                            }
-                            var audios = document.querySelectorAll('audio');
+                            var audios = document.querySelectorAll('audio, video');
                             for (var i = 0; i < audios.length; i++) {
                                 audios[i].muted = muted;
                             }
@@ -1089,17 +1174,36 @@ private fun generateEmulatorHtml(
                     setVideoFilter: function(filterId) {
                         try {
                             var cv = document.querySelector('canvas');
-                            if (!cv) return;
+                            var crtOverlay = document.getElementById('vantafyn-crt-overlay');
+                            var emu = window.EJS_emulator;
                             if (filterId === 'crt') {
-                                cv.style.filter = 'contrast(1.08) brightness(1.03)';
-                                cv.style.imageRendering = 'pixelated';
+                                if (crtOverlay) crtOverlay.style.display = 'block';
+                                if (cv) {
+                                    cv.style.filter = 'contrast(1.10) brightness(1.04)';
+                                    cv.style.imageRendering = 'pixelated';
+                                }
+                                if (emu && typeof emu.changeSettingOption === 'function') {
+                                    emu.changeSettingOption('shader', 'crt-aperture');
+                                }
                             } else if (filterId === 'smooth') {
-                                cv.style.filter = 'none';
-                                cv.style.imageRendering = 'auto';
+                                if (crtOverlay) crtOverlay.style.display = 'none';
+                                if (cv) {
+                                    cv.style.filter = 'blur(0.4px)';
+                                    cv.style.imageRendering = 'auto';
+                                }
+                                if (emu && typeof emu.changeSettingOption === 'function') {
+                                    emu.changeSettingOption('shader', 'bicubic');
+                                }
                             } else {
                                 // crisp pixel
-                                cv.style.filter = 'none';
-                                cv.style.imageRendering = 'pixelated';
+                                if (crtOverlay) crtOverlay.style.display = 'none';
+                                if (cv) {
+                                    cv.style.filter = 'none';
+                                    cv.style.imageRendering = 'pixelated';
+                                }
+                                if (emu && typeof emu.changeSettingOption === 'function') {
+                                    emu.changeSettingOption('shader', 'disabled');
+                                }
                             }
                         } catch(e) {
                             console.warn("Vantafyn: setVideoFilter error", e);
@@ -1122,14 +1226,25 @@ private fun generateEmulatorHtml(
                         }
                     },
                     pause: function() {
-                        if (window.EJS_emulator && window.EJS_emulator.pause) {
-                            window.EJS_emulator.pause();
-                        }
+                        try {
+                            var emu = window.EJS_emulator;
+                            if (!emu) return;
+                            if (typeof emu.pause === 'function') emu.pause();
+                            if (emu.gameManager && typeof emu.gameManager.toggleMainLoop === 'function') {
+                                emu.gameManager.toggleMainLoop(0);
+                            }
+                        } catch(e) { console.warn("Vantafyn: pause error", e); }
                     },
                     resume: function() {
-                        if (window.EJS_emulator && window.EJS_emulator.play) {
-                            window.EJS_emulator.play();
-                        }
+                        try {
+                            var emu = window.EJS_emulator;
+                            if (!emu) return;
+                            if (typeof emu.play === 'function') emu.play();
+                            if (typeof emu.resume === 'function') emu.resume();
+                            if (emu.gameManager && typeof emu.gameManager.toggleMainLoop === 'function') {
+                                emu.gameManager.toggleMainLoop(1);
+                            }
+                        } catch(e) { console.warn("Vantafyn: resume error", e); }
                     },
                     reset: function() {
                         var gm = window.EJS_emulator && window.EJS_emulator.gameManager;
@@ -1140,8 +1255,21 @@ private fun generateEmulatorHtml(
                         }
                     },
                     setSpeed: function(speed) {
-                        if (window.EJS_emulator && window.EJS_emulator.setSpeed) {
-                            window.EJS_emulator.setSpeed(speed);
+                        try {
+                            var emu = window.EJS_emulator;
+                            if (!emu) return;
+                            var ratioStr = (speed > 1) ? speed.toFixed(1) : '1.0';
+                            if (typeof emu.changeSettingOption === 'function') {
+                                emu.changeSettingOption('ff-ratio', ratioStr);
+                            }
+                            if (emu.gameManager && typeof emu.gameManager.toggleFastForward === 'function') {
+                                emu.gameManager.toggleFastForward(speed > 1 ? 1 : 0);
+                            }
+                            if (typeof emu.setSpeed === 'function') {
+                                emu.setSpeed(speed);
+                            }
+                        } catch(e) {
+                            console.warn("Vantafyn: setSpeed error", e);
                         }
                     },
                     flushAllSaves: function() {
