@@ -57,4 +57,11 @@ public sealed class PokemonConfiguration
     /// If null or empty, the client falls back to the default dark background.
     /// </summary>
     public string? ModalBackgroundPath { get; set; }
+
+    /// <summary>
+    /// URL template for resolving Pokémon cry audio (.ogg).
+    /// Placeholders {style} (latest or legacy) and {speciesId} are supported.
+    /// Defaults to the official PokeAPI cries repository on GitHub.
+    /// </summary>
+    public string CrySourceUrlTemplate { get; set; } = "https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/{style}/{speciesId}.ogg";
 }

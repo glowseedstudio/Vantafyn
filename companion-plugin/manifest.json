@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.7.0",
+        "changelog": "Pokémon cry audio streaming endpoint and asset discovery, Pokémon configuration cry path settings, and audio resource mapping.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.39/Vantafyn.Plugin.Companion_0.2.7_net9.zip",
+        "checksum": "bb76b16ac18fc5fce399782e05fc0c3b",
+        "timestamp": "2026-10-02T05:34:10Z"
+      },
+      {
+        "version": "0.2.7.1",
+        "changelog": "Pokémon cry audio streaming endpoint and asset discovery, Pokémon configuration cry path settings, and audio resource mapping.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.39/Vantafyn.Plugin.Companion_0.2.7_net10.zip",
+        "checksum": "538b6e538b48d143e7b58656ffb25b63",
+        "timestamp": "2026-10-02T05:34:10Z"
+      },
+      {
         "version": "0.2.6.0",
         "changelog": "SRAM erased 0xFF bitfield guards, Pokédex milestone achievement revocation, duplicate-key crash prevention, and Pokédex entry modal visual overhaul.",
         "targetAbi": "10.11.0.0",

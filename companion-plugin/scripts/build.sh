@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.6}"
+VERSION="${1:-0.2.7}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.38}"
-CHANGELOG="SRAM erased 0xFF bitfield guards, Pokédex milestone achievement revocation, duplicate-key crash prevention, and Pokédex entry modal visual overhaul."
+TAG="${2:-v0.9.39}"
+CHANGELOG="Pokémon cry audio streaming endpoint and asset discovery, Pokémon configuration cry path settings, and audio resource mapping."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.6.0",
+        "changelog": "SRAM erased 0xFF bitfield guards, Pokédex milestone achievement revocation, duplicate-key crash prevention, and Pokédex entry modal visual overhaul.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.38/Vantafyn.Plugin.Companion_0.2.6_net9.zip",
+        "checksum": "a60ec65cae824e367a02976614f578a5",
+        "timestamp": "2026-10-02T02:06:49Z"
+      },
+      {
+        "version": "0.2.6.1",
+        "changelog": "SRAM erased 0xFF bitfield guards, Pokédex milestone achievement revocation, duplicate-key crash prevention, and Pokédex entry modal visual overhaul.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.38/Vantafyn.Plugin.Companion_0.2.6_net10.zip",
+        "checksum": "76bfa2cf414215691c0df555749a5fe7",
+        "timestamp": "2026-10-02T02:06:49Z"
       },
       {
         "version": "0.2.4.0",

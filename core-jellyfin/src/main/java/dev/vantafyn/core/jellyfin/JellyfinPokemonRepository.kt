@@ -60,6 +60,25 @@ interface JellyfinPokemonRepository {
         entryId: String,
         targetSpeciesId: Int,
     ): Result<PokemonVaultEntry>
+
+    companion object {
+        fun getPokemonCryUrl(
+            session: JellyfinSession?,
+            speciesId: Int,
+            style: String = "latest",
+        ): String {
+            if (session != null) {
+                val base = session.server.url.trimEnd('/')
+                val token = session.accessToken
+                return if (token.isNotBlank()) {
+                    "$base/Vantafyn/Pokemon/Cries/$speciesId?style=$style&api_key=$token"
+                } else {
+                    "$base/Vantafyn/Pokemon/Cries/$speciesId?style=$style"
+                }
+            }
+            return "https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/$style/$speciesId.ogg"
+        }
+    }
 }
 
 class DefaultJellyfinPokemonRepository(

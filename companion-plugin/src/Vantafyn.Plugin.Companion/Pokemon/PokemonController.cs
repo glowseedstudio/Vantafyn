@@ -26,6 +26,7 @@ public sealed class PokemonController : ControllerBase
     private readonly IPokemonTradingService? _tradingService;
     private readonly IPokemonJourneyService? _journeyService;
     private readonly IPokemonSocialService? _socialService;
+    private readonly IPokemonCryService? _cryService;
     private readonly IAuthorizationContext _authorizationContext;
     private readonly PokemonConfiguration? _overrideConfig;
 
@@ -43,7 +44,8 @@ public sealed class PokemonController : ControllerBase
         PokemonConfiguration? configuration = null,
         IPokemonTradingService? tradingService = null,
         IPokemonJourneyService? journeyService = null,
-        IPokemonSocialService? socialService = null)
+        IPokemonSocialService? socialService = null,
+        IPokemonCryService? cryService = null)
     {
         _gamesService = gamesService;
         _gameSavesService = gameSavesService;
@@ -59,6 +61,7 @@ public sealed class PokemonController : ControllerBase
         _tradingService = tradingService;
         _journeyService = journeyService;
         _socialService = socialService;
+        _cryService = cryService;
     }
 
     private PokemonConfiguration Configuration =>
@@ -280,6 +283,34 @@ public sealed class PokemonController : ControllerBase
         }
 
         return NotFound();
+    }
+
+    /// <summary>
+    /// Serves Pokémon cry audio stream (.ogg) for the given species ID.
+    /// Downloads and caches on-demand on the server if not already present.
+    /// </summary>
+    [HttpGet("Cries/{speciesId}")]
+    [AllowAnonymous]
+    [Produces("audio/ogg")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetCry(
+        [FromRoute] int speciesId,
+        [FromQuery] string? style,
+        CancellationToken cancellationToken)
+    {
+        if (_cryService == null || speciesId <= 0)
+        {
+            return NotFound();
+        }
+
+        var (stream, contentType, found) = await _cryService.GetCryStreamAsync(speciesId, style, cancellationToken).ConfigureAwait(false);
+        if (!found || stream == null)
+        {
+            return NotFound();
+        }
+
+        return File(stream, contentType, enableRangeProcessing: true);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 package dev.vantafyn.feature.home.games.pokemon
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -11,12 +12,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -34,13 +39,14 @@ import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import dev.vantafyn.feature.home.CompactBackButton
+import dev.vantafyn.feature.home.games.GameScreenReveal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +63,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.TextStyle
@@ -76,6 +83,9 @@ import dev.vantafyn.core.jellyfin.PokemonPokedexEntryDto
 import dev.vantafyn.core.jellyfin.PokemonPokedexGenerationProgressDto
 import dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.platform.LocalContext
+import dev.vantafyn.core.media.games.GameHubSoundManager
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +102,15 @@ fun PokemonPokedexModal(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val focusManager = LocalFocusManager.current
+    val context = LocalContext.current
+
+    // Duck ambient background music to 20% so Pokémon cries are crisp and clear
+    DisposableEffect(Unit) {
+        GameHubSoundManager.duck(context, duckFactor = 0.20f, durationMs = 500L)
+        onDispose {
+            GameHubSoundManager.unduck(context, durationMs = 500L)
+        }
+    }
 
     var pokedex by remember { mutableStateOf<PokemonPokedexDto?>(null) }
     var isLoading by remember { mutableStateOf(false) }
@@ -291,83 +310,69 @@ fun PokemonPokedexModal(
         else genProgressList.firstOrNull { it.generation == selectedGen }
     }
 
-    BasicAlertDialog(onDismissRequest = onDismiss) {
-        PokemonModalContainer(
+    BackHandler(onBack = onDismiss)
+
+    GameScreenReveal(
+        key = "pokemon_pokedex_modal",
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.96f)
-                .height(680.dp),
-            shape = RoundedCornerShape(20.dp),
+                .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+        ) {
+        PokemonModalContainer(
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
+            borderWidth = 0.dp,
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(16.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Header
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(VantafynGradients.accentHorizontal()),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.MenuBook,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
-                        Column {
-                            Text(
-                                text = "National Pokédex",
-                                color = Color.White,
-                                fontSize = 17.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                            Text(
-                                text = "Aggregated Cross-Game Archive (1025 Species)",
-                                color = VantafynColors.Muted,
-                                fontSize = 11.sp,
-                            )
-                        }
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = { loadPokedex() },
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Refresh Pokédex",
-                                tint = VantafynColors.Muted,
-                                modifier = Modifier.size(17.dp),
-                            )
-                        }
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = "Close",
-                                tint = VantafynColors.Muted,
-                                modifier = Modifier.size(18.dp),
-                            )
-                        }
+                    CompactBackButton(onClick = onDismiss)
+                    Column {
+                        Text(
+                            text = "National Pokédex",
+                            color = Color.White,
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Aggregated Cross-Game Archive (1025 Species)",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                        )
                     }
                 }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { loadPokedex() },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Refresh Pokédex",
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            }
 
                 // Statistics Bar
                 Row(
@@ -670,7 +675,7 @@ fun PokemonPokedexModal(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
-                        contentPadding = PaddingValues(vertical = 4.dp),
+                        contentPadding = PaddingValues(top = 4.dp, bottom = 120.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -678,9 +683,7 @@ fun PokemonPokedexModal(
                             PokedexCard(
                                 entry = entry,
                                 onClick = {
-                                    if (entry.isCaught || entry.isSeen) {
-                                        inspectingEntry = entry
-                                    }
+                                    inspectingEntry = entry
                                 },
                             )
                         }
@@ -688,6 +691,7 @@ fun PokemonPokedexModal(
                 }
             }
         }
+    }
     }
 
     // Encyclopedic Pokédex Entry modal
@@ -718,6 +722,11 @@ fun PokemonPokedexModal(
             matchedSpecimen = if (localMatch != null) summary else null,
             matchedDetails = initialDetails,
             totalOwnedCount = matchingPokemonList.size,
+            session = session,
+            allEntries = allEntries,
+            localPokemonList = localPokemon,
+            localSaves = localSaves,
+            vaultBoxes = vaultBoxes,
             onInspectSpecimen = { specSummary, specDetails ->
                 inspectingSpecimenPokemon = specSummary
                 inspectingSpecimenDetails = specDetails
@@ -784,6 +793,7 @@ private fun PokedexCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .height(130.dp)
             .clip(RoundedCornerShape(14.dp))
             .background(if (isKnown) Color(0xFF1B1E2B) else Color(0xFF131520))
             .border(
@@ -794,10 +804,10 @@ private fun PokedexCard(
                 else Color(0xFF262A3B),
                 RoundedCornerShape(14.dp),
             )
-            .clickable(enabled = isKnown, onClick = onClick)
-            .padding(8.dp),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -834,7 +844,7 @@ private fun PokedexCard(
 
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(64.dp)
                 .clip(CircleShape)
                 .background(if (isKnown) Color(0xFF12141D) else Color(0xFF0E1017)),
             contentAlignment = Alignment.Center,
@@ -844,7 +854,7 @@ private fun PokedexCard(
                     model = spriteUrl,
                     contentDescription = entry.speciesName,
                     modifier = Modifier
-                        .size(46.dp)
+                        .size(58.dp)
                         .then(if (!entry.isCaught && entry.isSeen) Modifier.alpha(0.7f) else Modifier),
                     contentScale = ContentScale.Fit,
                 )
@@ -853,7 +863,7 @@ private fun PokedexCard(
                     model = spriteUrl,
                     contentDescription = "Unknown",
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(54.dp)
                         .alpha(0.12f),
                     colorFilter = ColorFilter.tint(Color.White),
                     contentScale = ContentScale.Fit,
@@ -870,22 +880,21 @@ private fun PokedexCard(
             overflow = TextOverflow.Ellipsis,
         )
 
-        val firstGame = entry.firstEncounteredGame
-        if (!firstGame.isNullOrEmpty() && entry.isCaught) {
-            Text(
-                text = firstGame,
-                color = VantafynColors.Muted,
-                fontSize = 8.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        } else if (entry.isSeen && !entry.isCaught) {
-            Text(
-                text = "Seen",
-                color = Color(0xFF00E5FF).copy(alpha = 0.8f),
-                fontSize = 8.5.sp,
-                maxLines = 1,
-            )
-        }
+        Text(
+            text = when {
+                entry.isCaught -> "Registered"
+                entry.isSeen -> "Seen"
+                else -> "Unregistered"
+            },
+            color = when {
+                entry.isCaught -> Color(0xFF10B981).copy(alpha = 0.85f)
+                entry.isSeen -> Color(0xFF00E5FF).copy(alpha = 0.85f)
+                else -> Color(0xFF38405A)
+            },
+            fontSize = 8.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }

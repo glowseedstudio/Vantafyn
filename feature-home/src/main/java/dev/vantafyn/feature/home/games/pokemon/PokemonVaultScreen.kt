@@ -153,6 +153,8 @@ fun PokemonVaultScreen(
     var inspectedPokemonDetails by remember { mutableStateOf<PokemonDetailsDto?>(null) }
     var inspectedPokemonGameId by remember { mutableStateOf<String?>(null) }
     var inspectedPokemonIsVault by remember { mutableStateOf<Boolean?>(null) }
+    var inspectedPokemonNavigationList by remember { mutableStateOf<List<PokemonSummaryDto>>(emptyList()) }
+    var inspectedPokemonIndex by remember { mutableIntStateOf(-1) }
     var compatibilityResult by remember { mutableStateOf<PokemonTransferCompatibilityResult?>(null) }
     var isValidatingCompatibility by remember { mutableStateOf(false) }
     var isExecutingTransfer by remember { mutableStateOf(false) }
@@ -173,6 +175,8 @@ fun PokemonVaultScreen(
             inspectedPokemonDetails = null
             inspectedPokemonGameId = null
             inspectedPokemonIsVault = null
+            inspectedPokemonNavigationList = emptyList()
+            inspectedPokemonIndex = -1
         }
     }
 
@@ -682,15 +686,17 @@ fun PokemonVaultScreen(
                                 loadContainerData(TransferSide.Destination)
                                 subScreen = VaultSubScreen.BoxTransfer
                             },
-                            onOpenTradeCenter = { isTradeModalOpen = true },
+                            onOpenTradeCenter = { subScreen = VaultSubScreen.BoxTransfer },
                             onOpenPokedex = { isPokedexModalOpen = true },
                             onOpenBadges = { isAchievementsModalOpen = true },
                             onOpenBackups = { isBackupRestoreModalOpen = true },
-                            onInspectPokemon = { pkm, details, gameId, isVault ->
+                            onInspectPokemon = { pkm, details, gameId, isVault, summaries, idx ->
                                 inspectedPokemon = pkm
                                 inspectedPokemonDetails = details
                                 inspectedPokemonGameId = gameId
                                 inspectedPokemonIsVault = isVault
+                                inspectedPokemonNavigationList = summaries
+                                inspectedPokemonIndex = idx
                             },
                             onRefresh = { loadAll() },
                             onBack = onBack,
@@ -966,7 +972,19 @@ fun PokemonVaultScreen(
                         }
                     },
                     onOpenDetails = { pokemon ->
+                        val boxList: List<PokemonSummaryDto> = (if (upperState.isPartyMode) {
+                            upperState.gameSave?.party
+                        } else if (upperState.containerType is StorageContainerType.PersonalVault) {
+                            upperState.vaultBox?.entries?.map { it.toSummaryDto() }
+                        } else {
+                            upperState.gameSave?.boxes?.getOrNull(upperState.selectedBoxIndex - 1)?.entries
+                        }) ?: listOf(pokemon)
                         inspectedPokemon = pokemon
+                        inspectedPokemonDetails = null
+                        inspectedPokemonGameId = (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id ?: upperState.gameSave?.gameId
+                        inspectedPokemonIsVault = upperState.containerType is StorageContainerType.PersonalVault
+                        inspectedPokemonNavigationList = boxList
+                        inspectedPokemonIndex = boxList.indexOfFirst { it.id == pokemon.id }
                     },
                     onSortBox = { criterion, ascending ->
                         handleSortBox(TransferSide.Source, criterion, ascending)
@@ -981,7 +999,14 @@ fun PokemonVaultScreen(
                     isExecutingTransfer = isExecutingTransfer,
                     onExecuteTransfer = { executeTransfer() },
                     onInspectDetails = {
-                        inspectedPokemon = selectedPokemonItem?.summary
+                        selectedPokemonItem?.summary?.let { pkm ->
+                            inspectedPokemon = pkm
+                            inspectedPokemonDetails = null
+                            inspectedPokemonGameId = selectedPokemonItem?.gameId
+                            inspectedPokemonIsVault = selectedPokemonItem?.isVault
+                            inspectedPokemonNavigationList = listOf(pkm)
+                            inspectedPokemonIndex = 0
+                        }
                     },
                 )
 
@@ -1034,7 +1059,19 @@ fun PokemonVaultScreen(
                         }
                     },
                     onOpenDetails = { pokemon ->
+                        val boxList: List<PokemonSummaryDto> = (if (lowerState.isPartyMode) {
+                            lowerState.gameSave?.party
+                        } else if (lowerState.containerType is StorageContainerType.PersonalVault) {
+                            lowerState.vaultBox?.entries?.map { it.toSummaryDto() }
+                        } else {
+                            lowerState.gameSave?.boxes?.getOrNull(lowerState.selectedBoxIndex - 1)?.entries
+                        }) ?: listOf(pokemon)
                         inspectedPokemon = pokemon
+                        inspectedPokemonDetails = null
+                        inspectedPokemonGameId = (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id ?: lowerState.gameSave?.gameId
+                        inspectedPokemonIsVault = lowerState.containerType is StorageContainerType.PersonalVault
+                        inspectedPokemonNavigationList = boxList
+                        inspectedPokemonIndex = boxList.indexOfFirst { it.id == pokemon.id }
                     },
                     onSortBox = { criterion, ascending ->
                         handleSortBox(TransferSide.Destination, criterion, ascending)
@@ -1089,11 +1126,23 @@ fun PokemonVaultScreen(
             isVault = isVault,
             initialDetails = initialDetails,
             customBackgroundUrl = customBackgroundUrl,
+            navigationList = inspectedPokemonNavigationList,
+            currentIndex = inspectedPokemonIndex,
+            onNavigateToIndex = { newIndex ->
+                if (newIndex in inspectedPokemonNavigationList.indices) {
+                    val nextPkm = inspectedPokemonNavigationList[newIndex]
+                    inspectedPokemon = nextPkm
+                    inspectedPokemonIndex = newIndex
+                    inspectedPokemonDetails = null
+                }
+            },
             onDismiss = {
                 inspectedPokemon = null
                 inspectedPokemonDetails = null
                 inspectedPokemonGameId = null
                 inspectedPokemonIsVault = null
+                inspectedPokemonNavigationList = emptyList()
+                inspectedPokemonIndex = -1
             },
         )
     }
@@ -1128,7 +1177,7 @@ fun PokemonVaultScreen(
 
     // Trade Center Modal
     if (isTradeModalOpen) {
-        val selectedTradePokemon = inspectedPokemon ?: selectedPokemonItem?.let { sel ->
+        val selectedTradePokemon = inspectedPokemon ?: selectedPokemonItem?.summary ?: selectedPokemonItem?.let { sel ->
             val upperMatch = upperState.vaultBox?.entries?.firstOrNull { it.id == sel.pokemonId }
             val lowerMatch = lowerState.vaultBox?.entries?.firstOrNull { it.id == sel.pokemonId }
             val match = upperMatch ?: lowerMatch

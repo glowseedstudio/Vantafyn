@@ -38,6 +38,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<Pokemon.IPokemonTradingService, Pokemon.FilePokemonTradingService>();
         serviceCollection.AddSingleton<Pokemon.IPokemonJourneyService, Pokemon.FilePokemonJourneyService>();
         serviceCollection.AddSingleton<Pokemon.IPokemonSocialService, Pokemon.FilePokemonSocialService>();
+        serviceCollection.AddSingleton<Pokemon.IPokemonCryService, Pokemon.FilePokemonCryService>();
         serviceCollection.AddHttpClient();
     }
 }

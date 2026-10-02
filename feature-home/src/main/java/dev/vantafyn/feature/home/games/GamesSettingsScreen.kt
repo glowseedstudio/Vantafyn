@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Vibration
 import dev.vantafyn.core.media.games.GameHubSoundManager
 import androidx.compose.material3.CircularProgressIndicator
@@ -116,6 +117,12 @@ fun GamesSettingsScreen(
     }
     var fastForwardSpeed by remember {
         mutableStateOf(prefs.getString("fast_forward_speed", "2x") ?: "2x")
+    }
+    var pokemonCryAutoplay by remember {
+        mutableStateOf(prefs.getBoolean("pokemon_cry_autoplay", true))
+    }
+    var pokemonCryStyle by remember {
+        mutableStateOf(prefs.getString("pokemon_cry_style", "latest") ?: "latest")
     }
     var romCacheSize by remember { mutableLongStateOf(0L) }
     var romFileCount by remember { mutableStateOf(0) }
@@ -621,6 +628,113 @@ fun GamesSettingsScreen(
                             GameHubSoundManager.setMusicEnabled(context, checked)
                         },
                     )
+                }
+
+                // Pokédex Cry Auto-Play
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val newVal = !pokemonCryAutoplay
+                            pokemonCryAutoplay = newVal
+                            prefs.edit().putBoolean("pokemon_cry_autoplay", newVal).apply()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
+                        contentDescription = null,
+                        tint = Color(0xFF10B981),
+                        modifier = Modifier.size(22.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Pokédex Cry Auto-Play",
+                            color = VantafynColors.Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Play Pokémon cry automatically when opening Pokédex details",
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    VantafynSwitch(
+                        checked = pokemonCryAutoplay,
+                        onCheckedChange = { checked ->
+                            pokemonCryAutoplay = checked
+                            prefs.edit().putBoolean("pokemon_cry_autoplay", checked).apply()
+                        },
+                    )
+                }
+
+                // Pokédex Cry Style
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = Color(0xFFA855F7),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Text(
+                                text = "Pokédex Cry Style",
+                                color = VantafynColors.Ink,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf("latest" to "Modern (Remastered)", "legacy" to "Retro (Gen 1-5)").forEach { (style, label) ->
+                                val selected = pokemonCryStyle == style
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) VantafynGradients.accentHorizontal()
+                                            else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                        )
+                                        .clickable {
+                                            pokemonCryStyle = style
+                                            prefs.edit().putString("pokemon_cry_style", style).apply()
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (selected) Color.White else VantafynColors.Muted,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
                 // Fast Forward Speed

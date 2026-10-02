@@ -113,7 +113,7 @@ fun PokemonVaultHomeScreen(
     onOpenPokedex: () -> Unit,
     onOpenBadges: () -> Unit,
     onOpenBackups: () -> Unit,
-    onInspectPokemon: (PokemonSummaryDto, PokemonDetailsDto?, String?, Boolean) -> Unit,
+    onInspectPokemon: (PokemonSummaryDto, PokemonDetailsDto?, String?, Boolean, List<PokemonSummaryDto>, Int) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -252,7 +252,9 @@ fun PokemonVaultHomeScreen(
                 availableGames = availableGames,
                 session = session,
                 onInspect = { candidate ->
-                    onInspectPokemon(candidate.summary, candidate.details, candidate.originGameId, candidate.isVault)
+                    val summaries = heroCandidates.map { it.summary }
+                    val idx = summaries.indexOfFirst { it.id == candidate.summary.id }
+                    onInspectPokemon(candidate.summary, candidate.details, candidate.originGameId, candidate.isVault, summaries, idx)
                 },
                 onOpenBoxes = onMovePokemon,
             )
@@ -287,11 +289,14 @@ fun PokemonVaultHomeScreen(
 
             // Recent Pokémon / Activity Section
             if (allCandidatePokemon.isNotEmpty()) {
+                val recentCandidates = remember(allCandidatePokemon) { allCandidatePokemon.take(16) }
                 VaultRecentPokemonRail(
-                    candidates = allCandidatePokemon.take(16),
+                    candidates = recentCandidates,
                     availableGames = availableGames,
                     onInspectPokemon = { candidate ->
-                        onInspectPokemon(candidate.summary, candidate.details, candidate.originGameId, candidate.isVault)
+                        val summaries = recentCandidates.map { it.summary }
+                        val idx = summaries.indexOfFirst { it.id == candidate.summary.id }
+                        onInspectPokemon(candidate.summary, candidate.details, candidate.originGameId, candidate.isVault, summaries, idx)
                     },
                 )
             } else if (totalOccupied == 0) {

@@ -42,10 +42,16 @@ fun PokemonModalContainer(
 ) {
     val effectiveBackgroundUrl = customBackgroundUrl ?: LocalPokemonModalBackground.current
 
+    val borderModifier = if (borderWidth > 0.dp) {
+        Modifier.border(borderWidth, VantafynGradients.accentHorizontal(), shape)
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
             .clip(shape)
-            .border(borderWidth, VantafynGradients.accentHorizontal(), shape)
+            .then(borderModifier)
             .background(
                 Brush.verticalGradient(
                     listOf(

@@ -22079,18 +22079,22 @@ private fun RailInteriorAtmosphere(
 
     if (atmosphereAlpha <= 0.001f && !isEnabled) return
 
+    val actualCornerRadius = if (cornerRadius <= 0.dp) 30.dp else cornerRadius
+
     Canvas(
         modifier = modifier
             .graphicsLayer {
                 alpha = atmosphereAlpha
                 clip = true
             }
-            .clip(RoundedCornerShape(cornerRadius))
+            .clip(RoundedCornerShape(actualCornerRadius))
             .drawWithCache {
                 val width = size.width
                 val height = size.height
-                val radius = width * 0.44f
-                val bloomY = height * 0.5f
+                if (width <= 0f || height <= 0f) return@drawWithCache onDrawBehind {}
+
+                val isVertical = height > width
+                val radius = if (isVertical) height * 0.38f else width * 0.44f
 
                 val cyanBrush = Brush.radialGradient(
                     colors = listOf(
@@ -22110,45 +22114,103 @@ private fun RailInteriorAtmosphere(
                     center = Offset.Zero,
                     radius = radius,
                 )
-                val washBrush = Brush.horizontalGradient(
+                val midBrush = Brush.radialGradient(
                     colors = listOf(
-                        Color(0xFF00E5FF).copy(alpha = 0.35f),
-                        Color(0xFF5B8CFF).copy(alpha = 0.45f),
-                        Color(0xFF9B5CFF).copy(alpha = 0.40f),
-                        Color(0xFF00E5FF).copy(alpha = 0.35f),
+                        Color(0xFF5B8CFF).copy(alpha = 1.10f),
+                        Color(0xFF9B5CFF).copy(alpha = 0.55f),
+                        Color.Transparent,
                     ),
-                    startX = 0f,
-                    endX = width,
+                    center = Offset.Zero,
+                    radius = radius * 0.85f,
                 )
+                val washBrush = if (isVertical) {
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF00E5FF).copy(alpha = 0.45f),
+                            Color(0xFF5B8CFF).copy(alpha = 0.50f),
+                            Color(0xFF9B5CFF).copy(alpha = 0.50f),
+                            Color(0xFF5B8CFF).copy(alpha = 0.45f),
+                            Color(0xFF00E5FF).copy(alpha = 0.45f),
+                        ),
+                        startY = 0f,
+                        endY = height,
+                    )
+                } else {
+                    Brush.horizontalGradient(
+                        colors = listOf(
+                            Color(0xFF00E5FF).copy(alpha = 0.35f),
+                            Color(0xFF5B8CFF).copy(alpha = 0.45f),
+                            Color(0xFF9B5CFF).copy(alpha = 0.40f),
+                            Color(0xFF00E5FF).copy(alpha = 0.35f),
+                        ),
+                        startX = 0f,
+                        endX = width,
+                    )
+                }
 
                 onDrawBehind {
                     if (width <= 0f || height <= 0f) return@onDrawBehind
-
-                    val bloom1X = width * 0.28f
-                    val bloom2X = width * 0.72f
                     val baseAlpha = 0.16f
 
-                    // 1. Electric Cyan Nebula Bloom
-                    translate(left = bloom1X, top = bloomY) {
-                        drawCircle(
-                            brush = cyanBrush,
-                            radius = radius,
-                            center = Offset.Zero,
-                            alpha = baseAlpha,
-                        )
+                    if (isVertical) {
+                        val centerX = width * 0.5f
+
+                        // 1. Top Cyan Nebula Bloom (illuminates top of the rail)
+                        translate(left = centerX, top = height * 0.20f) {
+                            drawCircle(
+                                brush = cyanBrush,
+                                radius = radius,
+                                center = Offset.Zero,
+                                alpha = baseAlpha,
+                            )
+                        }
+
+                        // 2. Middle Indigo/Violet Bloom (illuminates center of the rail)
+                        translate(left = centerX, top = height * 0.50f) {
+                            drawCircle(
+                                brush = midBrush,
+                                radius = radius * 0.85f,
+                                center = Offset.Zero,
+                                alpha = baseAlpha,
+                            )
+                        }
+
+                        // 3. Bottom Violet Light Bloom (illuminates bottom of the rail)
+                        translate(left = centerX, top = height * 0.80f) {
+                            drawCircle(
+                                brush = violetBrush,
+                                radius = radius,
+                                center = Offset.Zero,
+                                alpha = baseAlpha,
+                            )
+                        }
+                    } else {
+                        val bloomY = height * 0.5f
+                        val bloom1X = width * 0.28f
+                        val bloom2X = width * 0.72f
+
+                        // 1. Electric Cyan Nebula Bloom
+                        translate(left = bloom1X, top = bloomY) {
+                            drawCircle(
+                                brush = cyanBrush,
+                                radius = radius,
+                                center = Offset.Zero,
+                                alpha = baseAlpha,
+                            )
+                        }
+
+                        // 2. Violet / Indigo Light Bloom
+                        translate(left = bloom2X, top = bloomY) {
+                            drawCircle(
+                                brush = violetBrush,
+                                radius = radius,
+                                center = Offset.Zero,
+                                alpha = baseAlpha,
+                            )
+                        }
                     }
 
-                    // 2. Violet / Indigo Light Bloom
-                    translate(left = bloom2X, top = bloomY) {
-                        drawCircle(
-                            brush = violetBrush,
-                            radius = radius,
-                            center = Offset.Zero,
-                            alpha = baseAlpha,
-                        )
-                    }
-
-                    // 3. Continuous ambient horizontal gradient wash
+                    // Continuous ambient gradient wash across entire surface
                     drawRect(
                         brush = washBrush,
                         alpha = baseAlpha,
@@ -22630,6 +22692,7 @@ private fun MobileLandscapeSideNavRail(
             RailInteriorAtmosphere(
                 mode = atmosphereMode,
                 modifier = Modifier.matchParentSize(),
+                cornerRadius = 24.dp,
             )
             Column(
                 modifier = Modifier.fillMaxSize(),
@@ -24169,7 +24232,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.38"
+private const val VANTAFYN_APP_VERSION = "0.9.39"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

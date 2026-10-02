@@ -298,6 +298,27 @@ class JellyfinPokemonRepositoryTest {
         assertEquals("PokemonDeposited", activity.eventType)
         assertEquals("Pikachu", activity.speciesName)
     }
+
+    @Test
+    fun getPokemonCryUrl_formatsCorrectUrls() {
+        val serverUrl = JellyfinPokemonRepository.getPokemonCryUrl(testSession, 25, "latest")
+        assertEquals(
+            "https://jellyfin.example.com/Vantafyn/Pokemon/Cries/25?style=latest&api_key=vault-token-xyz",
+            serverUrl
+        )
+
+        val legacyServerUrl = JellyfinPokemonRepository.getPokemonCryUrl(testSession, 150, "legacy")
+        assertEquals(
+            "https://jellyfin.example.com/Vantafyn/Pokemon/Cries/150?style=legacy&api_key=vault-token-xyz",
+            legacyServerUrl
+        )
+
+        val fallbackUrl = JellyfinPokemonRepository.getPokemonCryUrl(null, 25, "latest")
+        assertEquals(
+            "https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/latest/25.ogg",
+            fallbackUrl
+        )
+    }
 }
 
 

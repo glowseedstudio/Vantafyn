@@ -1,6 +1,8 @@
 package dev.vantafyn.feature.home.games.pokemon
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -9,13 +11,17 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +30,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Cancel
 import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.History
@@ -40,6 +48,9 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.ui.graphics.RectangleShape
+import dev.vantafyn.feature.home.CompactBackButton
+import dev.vantafyn.feature.home.games.GameScreenReveal
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,8 +60,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -77,6 +95,11 @@ private enum class StatAppraisalTab {
     EVTraining
 }
 
+private enum class StatDisplayFormat {
+    Bars,
+    Radar
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PokemonDetailModal(
@@ -88,6 +111,9 @@ fun PokemonDetailModal(
     isVault: Boolean = false,
     initialDetails: PokemonDetailsDto? = null,
     customBackgroundUrl: String? = null,
+    navigationList: List<PokemonSummaryDto> = emptyList(),
+    currentIndex: Int = -1,
+    onNavigateToIndex: ((Int) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
     var journey by remember { mutableStateOf<PokemonJourneyDto?>(null) }
@@ -101,11 +127,12 @@ fun PokemonDetailModal(
         mutableStateOf(initialDetails == null && session != null && pokemonRepository != null && pokemon.id.isNotBlank() && !pokemon.id.startsWith("dex-"))
     }
     var selectedStatTab by remember { mutableStateOf(StatAppraisalTab.JudgeIVs) }
+    var statDisplayFormat by remember { mutableStateOf(StatDisplayFormat.Bars) }
     var showLegalityDialog by remember { mutableStateOf(false) }
     var showMoveRelearnerModal by remember { mutableStateOf(false) }
     var selectedRibbon by remember { mutableStateOf<PokemonRibbonDto?>(null) }
     var showEvolutionModal by remember { mutableStateOf(false) }
-    var currentPokemonState by remember { mutableStateOf(pokemon) }
+    var currentPokemonState by remember(pokemon.id) { mutableStateOf(pokemon) }
 
     LaunchedEffect(pokemon.id, initialDetails) {
         if (initialDetails != null) {
@@ -167,22 +194,33 @@ fun PokemonDetailModal(
         }
     }
 
-    BasicAlertDialog(
-        onDismissRequest = onDismiss,
+    BackHandler(onBack = onDismiss)
+
+    GameScreenReveal(
+        key = "pokemon_detail_modal",
+        modifier = Modifier.fillMaxSize(),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0C0E17))
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .windowInsetsPadding(WindowInsets.navigationBars),
+        ) {
         PokemonModalContainer(
-            modifier = Modifier.fillMaxWidth(0.95f),
-            shape = RoundedCornerShape(22.dp),
+            modifier = Modifier.fillMaxSize(),
+            shape = RectangleShape,
+            borderWidth = 0.dp,
             customBackgroundUrl = customBackgroundUrl,
         ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp)
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-            // Header: Nickname/Species, Shiny icon, and Close Button
+            // Header: Nickname/Species, Shiny icon, chevrons, and Back Button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -191,12 +229,16 @@ fun PokemonDetailModal(
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f, fill = false),
                 ) {
+                    CompactBackButton(onClick = onDismiss)
                     Text(
                         text = displayName,
                         color = VantafynColors.Ink,
                         fontSize = 19.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     if (pokemon.isShiny) {
                         Row(
@@ -223,86 +265,162 @@ fun PokemonDetailModal(
                     }
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(30.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = VantafynColors.Muted,
-                        modifier = Modifier.size(18.dp),
-                    )
+                if (navigationList.size > 1 && currentIndex >= 0) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        IconButton(
+                            onClick = { onNavigateToIndex?.invoke(currentIndex - 1) },
+                            enabled = currentIndex > 0,
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ChevronLeft,
+                                contentDescription = "Previous Pokémon",
+                                tint = if (currentIndex > 0) Color(0xFF00E5FF) else VantafynColors.Muted.copy(alpha = 0.35f),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                        Text(
+                            text = "${currentIndex + 1}/${navigationList.size}",
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        IconButton(
+                            onClick = { onNavigateToIndex?.invoke(currentIndex + 1) },
+                            enabled = currentIndex < navigationList.size - 1,
+                            modifier = Modifier.size(34.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ChevronRight,
+                                contentDescription = "Next Pokémon",
+                                tint = if (currentIndex < navigationList.size - 1) Color(0xFF00E5FF) else VantafynColors.Muted.copy(alpha = 0.35f),
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
                 }
             }
 
-            // Hero Pokémon Card
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(
-                        Brush.horizontalGradient(
-                            listOf(
-                                Color(0xFF1A1D2B),
-                                Color(0xFF1E2235),
-                            )
-                        )
+            // Hero Pokémon Card with Type Atmosphere & Prominent Artwork
+            val (primaryType, secondaryType) = remember(pokemon.speciesId, resolvedSpeciesName) {
+                PokemonTypeCatalog.getTypes(pokemon.speciesId, resolvedSpeciesName)
+            }
+            val cardBorderBrush = remember(primaryType, secondaryType) {
+                Brush.horizontalGradient(
+                    listOf(
+                        primaryType.accentColor.copy(alpha = 0.35f),
+                        (secondaryType?.accentColor ?: primaryType.secondaryAccent).copy(alpha = 0.20f),
+                        Color.White.copy(alpha = 0.06f),
                     )
-                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                val spriteUrl = remember(pokemon.speciesId, pokemon.isShiny) {
+                )
+            }
+            val artworkUrl: String = remember(pokemon.speciesId, pokemon.isShiny) {
+                if (pokemon.speciesId > 0) {
+                    if (pokemon.isShiny) {
+                        "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/shiny/${pokemon.speciesId}.png"
+                    } else {
+                        "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokemon.speciesId}.png"
+                    }
+                } else {
                     getPokemonSpriteUrl(pokemon.speciesId, pokemon.isShiny)
                 }
+            }
 
-                Box(
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.horizontalGradient(
+                            listOf(
+                                primaryType.accentColor.copy(alpha = 0.50f),
+                                (secondaryType?.accentColor ?: primaryType.secondaryAccent).copy(alpha = 0.30f),
+                                Color.White.copy(alpha = 0.08f),
+                            )
+                        ),
+                        shape = RoundedCornerShape(20.dp),
+                    ),
+            ) {
+                // 1. Dynamic Type Atmosphere & Scrim Layer (like Vaults Home Page)
+                PokemonHeroTypeAtmosphere(
+                    primaryType = primaryType,
+                    secondaryType = secondaryType,
+                    modifier = Modifier.matchParentSize(),
+                )
+
+                // 2. Foreground Card Content: Centered Column (Artwork on top, info under)
+                Column(
                     modifier = Modifier
-                        .size(86.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(
-                            Brush.radialGradient(
-                                listOf(
-                                    Color(0xFF00E5FF).copy(alpha = 0.18f),
-                                    Color(0xFF10121A).copy(alpha = 0.85f),
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 20.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    // Featured Pokémon Artwork with layered aura and grounded shadow
+                    Box(
+                        modifier = Modifier
+                            .size(165.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // Layer A: Ambient Radial Aura Glow
+                        Box(
+                            modifier = Modifier
+                                .size(160.dp)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            if (pokemon.isShiny) Color(0xFFF59E0B).copy(alpha = 0.40f)
+                                            else primaryType.glowColor.copy(alpha = 0.35f),
+                                            (secondaryType?.accentColor ?: primaryType.accentColor).copy(alpha = 0.15f),
+                                            Color.Transparent,
+                                        )
+                                    )
+                                )
+                        )
+
+                        // Layer B: Subtle Grounded Drop Shadow under the Pokémon
+                        Canvas(
+                            modifier = Modifier
+                                .size(width = 120.dp, height = 28.dp)
+                                .align(Alignment.BottomCenter)
+                        ) {
+                            drawOval(
+                                brush = Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0xFF020408).copy(alpha = 0.60f),
+                                        Color(0xFF020408).copy(alpha = 0.25f),
+                                        Color.Transparent,
+                                    ),
+                                    center = Offset(size.width / 2f, size.height / 2f),
+                                    radius = size.width / 2f,
                                 )
                             )
-                        )
-                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (spriteUrl.isNotBlank()) {
+                        }
+
+                        // Layer C: Prominent High-Resolution Pokémon Artwork
                         AsyncImage(
-                            model = spriteUrl,
-                            contentDescription = pokemon.species,
+                            model = artworkUrl,
+                            contentDescription = resolvedSpeciesName,
                             contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize().padding(4.dp),
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Rounded.Pets,
-                            contentDescription = null,
-                            tint = VantafynColors.Muted,
-                            modifier = Modifier.size(36.dp),
+                            modifier = Modifier.size(155.dp),
                         )
                     }
-                }
 
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
+                    // Species No. & Gender Row
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         Text(
-                            text = "No. ${pokemon.speciesId}",
-                            color = Color(0xFF00E5FF),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
+                            text = if (pokemon.speciesId > 0) "No. %04d".format(pokemon.speciesId) else "No. —",
+                            color = primaryType.accentColor,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            fontFamily = FontFamily.Monospace,
                         )
                         if (!pokemon.gender.isNullOrBlank()) {
                             Text(
@@ -316,47 +434,86 @@ fun PokemonDetailModal(
                                     "F", "FEMALE" -> Color(0xFFF472B6)
                                     else -> VantafynColors.Muted
                                 },
-                                fontSize = 12.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                             )
                         }
                     }
 
+                    // Display Name (Nickname / Species)
                     Text(
-                        text = resolvedSpeciesName,
-                        color = VantafynColors.Ink,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
+                        text = displayName,
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Black,
+                        textAlign = TextAlign.Center,
+                        letterSpacing = 0.3.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
+                    if (displayName != resolvedSpeciesName && resolvedSpeciesName.isNotBlank()) {
+                        Text(
+                            text = resolvedSpeciesName,
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center,
+                        )
+                    }
 
+                    // Type Badges Row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        PokemonTypeBadge(type = primaryType)
+                        if (secondaryType != null && secondaryType != primaryType) {
+                            PokemonTypeBadge(type = secondaryType)
+                        }
+                    }
+
+                    // Level & Nature Row
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            text = "Lv. ${pokemon.level}",
-                            color = Color.White,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF0D111A).copy(alpha = 0.85f))
+                                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 8.dp, vertical = 2.5.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Lv. ${pokemon.level}",
+                                color = Color(0xFFF1F5F9),
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 0.4.sp,
+                            )
+                        }
                         val nature = details?.nature
                         if (!nature.isNullOrBlank()) {
                             Text(
                                 text = "$nature Nature",
                                 color = VantafynColors.Muted,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
                             )
                         }
                     }
 
-                    // Hall of Fame Champion & Ribbon Accolades
+                    // Hall of Fame Champion, Ribbons, and Evolve Action
                     val isHallOfFame = details?.isHallOfFameMember == true || pokemon.isHallOfFameMember
                     val ribbonCount = details?.ribbons?.size ?: 0
-                    if (isHallOfFame || ribbonCount > 0) {
+                    val evos = details?.availableEvolutions?.ifEmpty { null }
+                        ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.getAvailableEvolutions(pokemon.speciesId, pokemon.level)
+                    if (isHallOfFame || ribbonCount > 0 || evos.isNotEmpty()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(top = 2.dp),
+                            modifier = Modifier.padding(top = 4.dp),
                         ) {
                             if (isHallOfFame) {
                                 Row(
@@ -406,8 +563,6 @@ fun PokemonDetailModal(
                                     )
                                 }
                             }
-                            val evos = details?.availableEvolutions?.ifEmpty { null }
-                                ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.getAvailableEvolutions(pokemon.speciesId, pokemon.level)
                             if (evos.isNotEmpty()) {
                                 Row(
                                     modifier = Modifier
@@ -449,11 +604,11 @@ fun PokemonDetailModal(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color(0xFF161925))
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                    .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                // Tab Header: Judge IVs vs EV Training
+                // Tab Header: Judge IVs vs EV Training & Bars vs Hexagon
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -499,26 +654,100 @@ fun PokemonDetailModal(
                         }
                     }
 
-                    // Potential or EV Total badge
+                    // View Format Toggle: Bars vs Hexagon
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF0F111A))
+                            .padding(2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (statDisplayFormat == StatDisplayFormat.Bars) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+                                .clickable { statDisplayFormat = StatDisplayFormat.Bars }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Bars",
+                                color = if (statDisplayFormat == StatDisplayFormat.Bars) Color.White else VantafynColors.Muted,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (statDisplayFormat == StatDisplayFormat.Radar) (if (selectedStatTab == StatAppraisalTab.JudgeIVs) Color(0xFF00E5FF) else Color(0xFFF59E0B)).copy(alpha = 0.25f) else Color.Transparent)
+                                .clickable { statDisplayFormat = StatDisplayFormat.Radar }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Hexagon",
+                                color = if (statDisplayFormat == StatDisplayFormat.Radar) (if (selectedStatTab == StatAppraisalTab.JudgeIVs) Color(0xFF00E5FF) else Color(0xFFF59E0B)) else VantafynColors.Muted,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+
+                // Potential or EV Total sub-header badge
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     if (selectedStatTab == StatAppraisalTab.JudgeIVs && effectiveIvs != null) {
                         val totalIv = effectiveIvs.hp + effectiveIvs.attack + effectiveIvs.defense +
                                 effectiveIvs.speed + effectiveIvs.specialAttack + effectiveIvs.specialDefense
                         val (potentialLabel, potentialColor) = getOverallPotential(totalIv)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Overall Potential:",
+                                color = VantafynColors.Muted,
+                                fontSize = 10.sp,
+                            )
+                            Text(
+                                text = potentialLabel,
+                                color = potentialColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                         Text(
-                            text = potentialLabel,
-                            color = potentialColor,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
+                            text = "$totalIv / 186 IVs",
+                            color = Color(0xFF94A3B8),
+                            fontSize = 9.5.sp,
+                            fontFamily = FontFamily.Monospace,
                         )
                     } else if (selectedStatTab == StatAppraisalTab.EVTraining && effectiveEvs != null) {
                         val totalEv = effectiveEvs.hp + effectiveEvs.attack + effectiveEvs.defense +
                                 effectiveEvs.speed + effectiveEvs.specialAttack + effectiveEvs.specialDefense
-                        Text(
-                            text = "$totalEv / 510 Total EVs",
-                            color = Color(0xFFF59E0B),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(5.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "Total Effort Investment:",
+                                color = VantafynColors.Muted,
+                                fontSize = 10.sp,
+                            )
+                            Text(
+                                text = "$totalEv / 510 Total EVs",
+                                color = Color(0xFFF59E0B),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
                     }
                 }
 
@@ -544,13 +773,20 @@ fun PokemonDetailModal(
                         StatRowData("Speed", effectiveIvs?.speed ?: 0, effectiveEvs?.speed ?: 0, isBoosted = natureMods.first == "Speed", isHindered = natureMods.second == "Speed"),
                     )
 
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        stats.forEach { stat ->
-                            StatBarRow(
-                                stat = stat,
-                                mode = selectedStatTab,
-                            )
+                    if (statDisplayFormat == StatDisplayFormat.Bars) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            stats.forEach { stat ->
+                                StatBarRow(
+                                    stat = stat,
+                                    mode = selectedStatTab,
+                                )
+                            }
                         }
+                    } else {
+                        PokemonStatHexagonChart(
+                            stats = stats,
+                            mode = selectedStatTab,
+                        )
                     }
                 } else {
                     Box(
@@ -580,7 +816,7 @@ fun PokemonDetailModal(
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF181B26))
-                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                        .border(1.dp, cardBorderBrush, RoundedCornerShape(12.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
@@ -604,7 +840,7 @@ fun PokemonDetailModal(
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF181B26))
-                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                        .border(1.dp, cardBorderBrush, RoundedCornerShape(12.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
@@ -629,7 +865,7 @@ fun PokemonDetailModal(
                         .weight(0.9f)
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0xFF181B26))
-                        .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(12.dp))
+                        .border(1.dp, cardBorderBrush, RoundedCornerShape(12.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
@@ -655,7 +891,7 @@ fun PokemonDetailModal(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFF161925))
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                    .border(1.dp, cardBorderBrush, RoundedCornerShape(14.dp))
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
@@ -729,7 +965,7 @@ fun PokemonDetailModal(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
                     .background(Color(0xFF181B26))
-                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(14.dp))
+                    .border(1.dp, cardBorderBrush, RoundedCornerShape(14.dp))
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
@@ -756,6 +992,7 @@ fun PokemonDetailModal(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
                         .background(Color(0xFF1B1E2B))
+                        .border(1.dp, cardBorderBrush, RoundedCornerShape(14.dp))
                         .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
@@ -796,7 +1033,7 @@ fun PokemonDetailModal(
                                                 else -> Color(0xFF3B82F6)
                                             }
                                         ),
-                                )
+                                    )
                                 if (index < journey!!.steps.lastIndex) {
                                     Box(
                                         modifier = Modifier
@@ -853,7 +1090,7 @@ fun PokemonDetailModal(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
                     .background(Color(0xFF161926))
-                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+                    .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -1056,7 +1293,10 @@ fun PokemonDetailModal(
                     )
                 }
             }
+
+            Spacer(modifier = Modifier.height(120.dp))
         }
+    }
     }
     }
 
@@ -1174,14 +1414,14 @@ private fun StatBarRow(
                 )
             }
 
-            // Judge Label Badge
+            // Judge Label Badge - Fixed uniform dimensions for all rows
             Box(
                 modifier = Modifier
-                    .width(76.dp)
+                    .width(96.dp)
+                    .height(24.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(appraisal.color.copy(alpha = 0.15f))
-                    .border(0.5.dp, appraisal.color.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                    .border(0.5.dp, appraisal.color.copy(alpha = 0.35f), RoundedCornerShape(6.dp)),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -1189,6 +1429,7 @@ private fun StatBarRow(
                     color = appraisal.color,
                     fontSize = 9.sp,
                     fontWeight = FontWeight.Bold,
+                    maxLines = 1,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -1212,14 +1453,253 @@ private fun StatBarRow(
                 )
             }
 
-            Text(
-                text = "${stat.ev} / 252",
-                color = if (stat.ev > 0) Color(0xFFF59E0B) else VantafynColors.Muted,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.width(60.dp),
-                textAlign = TextAlign.End,
+            // EV Label Badge - Matching uniform dimensions
+            Box(
+                modifier = Modifier
+                    .width(96.dp)
+                    .height(24.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (stat.ev > 0) Color(0xFFF59E0B).copy(alpha = 0.15f) else Color(0xFF1B1E2B))
+                    .border(0.5.dp, if (stat.ev > 0) Color(0xFFF59E0B).copy(alpha = 0.40f) else Color.White.copy(alpha = 0.08f), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "${stat.ev} / 252",
+                    color = if (stat.ev > 0) Color(0xFFF59E0B) else VantafynColors.Muted,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Authentic Pokémon Hexagon Radar Chart (as featured in Sun/Moon, Sword/Shield, Scarlet/Violet & Pokémon HOME).
+ * Clockwise stat layout: HP (Top), Attack (Top-Right), Defense (Bottom-Right), Speed (Bottom), Sp. Def (Bottom-Left), Sp. Atk (Top-Left).
+ */
+@Composable
+private fun PokemonStatHexagonChart(
+    stats: List<StatRowData>,
+    mode: StatAppraisalTab,
+    modifier: Modifier = Modifier,
+) {
+    val orderedStats = remember(stats) {
+        listOf(
+            stats.firstOrNull { it.name == "HP" } ?: stats.getOrElse(0) { StatRowData("HP", 0, 0) },
+            stats.firstOrNull { it.name == "Attack" } ?: stats.getOrElse(1) { StatRowData("Attack", 0, 0) },
+            stats.firstOrNull { it.name == "Defense" } ?: stats.getOrElse(2) { StatRowData("Defense", 0, 0) },
+            stats.firstOrNull { it.name == "Speed" } ?: stats.getOrElse(5) { StatRowData("Speed", 0, 0) },
+            stats.firstOrNull { it.name == "Sp. Def" } ?: stats.getOrElse(4) { StatRowData("Sp. Def", 0, 0) },
+            stats.firstOrNull { it.name == "Sp. Atk" } ?: stats.getOrElse(3) { StatRowData("Sp. Atk", 0, 0) },
+        )
+    }
+
+    val textMeasurer = rememberTextMeasurer()
+    val themeColor = if (mode == StatAppraisalTab.JudgeIVs) Color(0xFF00E5FF) else Color(0xFFF59E0B)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(270.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        ) {
+            val centerX = size.width / 2f
+            val centerY = size.height / 2f
+            // Outer hexagon radius dynamically sized to expand and fill available card canvas
+            val maxVerticalRadius = (size.height / 2f) - 34.dp.toPx()
+            val maxHorizontalRadius = ((size.width / 2f) - 86.dp.toPx()) / 0.866f
+            val maxRadius = minOf(maxVerticalRadius, maxHorizontalRadius).coerceIn(65.dp.toPx(), 110.dp.toPx())
+
+            val anglesDeg = listOf(-90f, -30f, 30f, 90f, 150f, 210f)
+            val anglesRad = anglesDeg.map { Math.toRadians(it.toDouble()).toFloat() }
+
+            // 1. Concentric guide hexagons
+            val guideFractions = listOf(0.33f, 0.66f, 1.0f)
+            guideFractions.forEach { frac ->
+                val r = maxRadius * frac
+                val guidePath = Path()
+                anglesRad.forEachIndexed { i, a ->
+                    val x = centerX + r * kotlin.math.cos(a)
+                    val y = centerY + r * kotlin.math.sin(a)
+                    if (i == 0) guidePath.moveTo(x, y) else guidePath.lineTo(x, y)
+                }
+                guidePath.close()
+
+                drawPath(
+                    path = guidePath,
+                    color = Color.White.copy(alpha = if (frac == 1.0f) 0.16f else 0.06f),
+                    style = Stroke(width = if (frac == 1.0f) 1.2.dp.toPx() else 0.8.dp.toPx()),
+                )
+            }
+
+            // 2. Radial axis spoke lines
+            anglesRad.forEach { a ->
+                val endX = centerX + maxRadius * kotlin.math.cos(a)
+                val endY = centerY + maxRadius * kotlin.math.sin(a)
+                drawLine(
+                    color = Color.White.copy(alpha = 0.09f),
+                    start = Offset(centerX, centerY),
+                    end = Offset(endX, endY),
+                    strokeWidth = 1.dp.toPx(),
+                )
+            }
+
+            // Center origin marker
+            drawCircle(
+                color = Color.White.copy(alpha = 0.25f),
+                radius = 2.5.dp.toPx(),
+                center = Offset(centerX, centerY),
             )
+
+            // 3. Stat polygon
+            val statPolygonPath = Path()
+            val statPoints = mutableListOf<Offset>()
+
+            orderedStats.forEachIndexed { i, stat ->
+                val a = anglesRad[i]
+                val normalizedValue = if (mode == StatAppraisalTab.JudgeIVs) {
+                    (stat.iv.toFloat() / 31f).coerceIn(0f, 1f)
+                } else {
+                    (stat.ev.toFloat() / 252f).coerceIn(0f, 1f)
+                }
+                val r = maxRadius * normalizedValue
+                val px = centerX + r * kotlin.math.cos(a)
+                val py = centerY + r * kotlin.math.sin(a)
+                val pt = Offset(px, py)
+                statPoints.add(pt)
+
+                if (i == 0) statPolygonPath.moveTo(px, py) else statPolygonPath.lineTo(px, py)
+            }
+            statPolygonPath.close()
+
+            // Fill polygon with radiant atmospheric wash
+            drawPath(
+                path = statPolygonPath,
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        themeColor.copy(alpha = 0.45f),
+                        themeColor.copy(alpha = 0.15f),
+                    ),
+                    center = Offset(centerX, centerY),
+                    radius = maxRadius,
+                ),
+            )
+
+            // Stroke polygon outline
+            drawPath(
+                path = statPolygonPath,
+                color = themeColor,
+                style = Stroke(width = 2.dp.toPx()),
+            )
+
+            // Vertex dots
+            statPoints.forEach { pt ->
+                drawCircle(
+                    color = themeColor,
+                    radius = 4.dp.toPx(),
+                    center = pt,
+                )
+                drawCircle(
+                    color = Color.White,
+                    radius = 1.8.dp.toPx(),
+                    center = pt,
+                )
+            }
+
+            // 4. Draw Stat Labels around outer hexagon
+            orderedStats.forEachIndexed { i, stat ->
+                val a = anglesRad[i]
+                val deg = anglesDeg[i]
+
+                val labelColor = when {
+                    stat.isBoosted -> Color(0xFFF43F5E)
+                    stat.isHindered -> Color(0xFF38BDF8)
+                    else -> Color(0xFFCBD5E1)
+                }
+
+                val statNameText = stat.name + when {
+                    stat.isBoosted -> " ▲"
+                    stat.isHindered -> " ▼"
+                    else -> ""
+                }
+
+                val valText = if (mode == StatAppraisalTab.JudgeIVs) {
+                    val rating = getIvJudgeRating(stat.iv)
+                    "${stat.iv} • ${rating.label}"
+                } else {
+                    "${stat.ev} / 252"
+                }
+
+                val nameMeasured = textMeasurer.measure(
+                    text = AnnotatedString(statNameText),
+                    style = TextStyle(
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = labelColor,
+                    ),
+                )
+
+                val valMeasured = textMeasurer.measure(
+                    text = AnnotatedString(valText),
+                    style = TextStyle(
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (mode == StatAppraisalTab.JudgeIVs) getIvJudgeRating(stat.iv).color else if (stat.ev > 0) Color(0xFFF59E0B) else Color(0xFF64748B),
+                    ),
+                )
+
+                val outerVertexX = centerX + maxRadius * kotlin.math.cos(a)
+                val outerVertexY = centerY + maxRadius * kotlin.math.sin(a)
+
+                val (nameX, nameY) = when (deg) {
+                    -90f -> { // Top (HP)
+                        val nx = (centerX - nameMeasured.size.width / 2f).coerceIn(2.dp.toPx(), size.width - nameMeasured.size.width - 2.dp.toPx())
+                        val ny = (outerVertexY - nameMeasured.size.height - valMeasured.size.height - 4.dp.toPx()).coerceAtLeast(2.dp.toPx())
+                        nx to ny
+                    }
+                    90f -> { // Bottom (Speed)
+                        val nx = (centerX - nameMeasured.size.width / 2f).coerceIn(2.dp.toPx(), size.width - nameMeasured.size.width - 2.dp.toPx())
+                        val ny = (outerVertexY + 4.dp.toPx()).coerceAtMost(size.height - nameMeasured.size.height - valMeasured.size.height - 2.dp.toPx())
+                        nx to ny
+                    }
+                    -30f, 30f -> { // Right side (Attack / Defense)
+                        val maxLabelW = maxOf(nameMeasured.size.width, valMeasured.size.width)
+                        val nx = (outerVertexX + 6.dp.toPx()).coerceAtMost(size.width - maxLabelW - 2.dp.toPx())
+                        val ny = outerVertexY - (nameMeasured.size.height + valMeasured.size.height) / 2f
+                        nx to ny
+                    }
+                    else -> { // Left side (Sp. Atk / Sp. Def)
+                        val w = maxOf(nameMeasured.size.width, valMeasured.size.width)
+                        val nx = (outerVertexX - 6.dp.toPx() - w).coerceAtLeast(2.dp.toPx())
+                        val ny = outerVertexY - (nameMeasured.size.height + valMeasured.size.height) / 2f
+                        nx to ny
+                    }
+                }
+
+                val valX = when (deg) {
+                    -90f, 90f -> (centerX - valMeasured.size.width / 2f).coerceIn(2.dp.toPx(), size.width - valMeasured.size.width - 2.dp.toPx())
+                    -30f, 30f -> nameX
+                    else -> (outerVertexX - 6.dp.toPx() - valMeasured.size.width).coerceAtLeast(2.dp.toPx())
+                }
+                val valY = nameY + nameMeasured.size.height
+
+                drawText(
+                    textLayoutResult = nameMeasured,
+                    topLeft = Offset(nameX, nameY),
+                )
+                drawText(
+                    textLayoutResult = valMeasured,
+                    topLeft = Offset(valX, valY),
+                )
+            }
         }
     }
 }
