@@ -1,5 +1,6 @@
 package dev.vantafyn.core.integrations.updater
 
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -17,6 +18,20 @@ class AppUpdateChecker(
         const val DEFAULT_REPO_OWNER = "glowseedstudio"
         const val DEFAULT_REPO_NAME = "Vantafyn"
         private const val TAG = "AppUpdateChecker"
+
+        /**
+         * Resolves the actual installed versionName from the Android Package Manager dynamically.
+         */
+        fun getInstalledAppVersion(context: Context): String {
+            return runCatching {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getPackageInfo(context.packageName, android.content.pm.PackageManager.PackageInfoFlags.of(0)).versionName
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                }
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.9.42"
+        }
 
         /**
          * Compares two SemVer strings (e.g., "0.9.23" vs "0.9.22").

@@ -82,7 +82,7 @@ import java.util.Locale
 
 @Composable
 fun AppUpdateDialog(
-    currentVersion: String,
+    currentVersion: String = AppUpdateChecker.getInstalledAppVersion(LocalContext.current),
     target: AppTarget = AppTarget.MOBILE,
     initialCheckOnOpen: Boolean = true,
     onDismiss: () -> Unit,

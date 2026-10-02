@@ -142,6 +142,10 @@ fun TvSettingsScreen(
     onSetMediaSegmentBehavior: (JellyfinMediaSegmentType, JellyfinMediaSegmentBehavior) -> Unit = { _, _ -> },
 ) {
     var showUpdateDialog by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val currentAppVersion = remember(context) {
+        dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context)
+    }
 
     VantafynTvScreenScaffold(modifier = modifier) {
         Column(
@@ -195,6 +199,7 @@ fun TvSettingsScreen(
                         TvSettingsCategory.Permissions -> permissionsItems()
                         TvSettingsCategory.Vantafyn -> vantafynItems(
                             state = state,
+                            currentVersion = currentAppVersion,
                             onToggleAutoLoginLastProfile = onToggleAutoLoginLastProfile,
                             onToggleWhatsNew = onToggleWhatsNew,
                             onToggleAchievementsEnabled = onToggleAchievementsEnabled,
@@ -209,6 +214,7 @@ fun TvSettingsScreen(
                         )
                         TvSettingsCategory.About -> aboutItems(
                             session = session,
+                            currentVersion = currentAppVersion,
                             onCheckForUpdates = { showUpdateDialog = true },
                         )
                     }
@@ -219,7 +225,7 @@ fun TvSettingsScreen(
 
     if (showUpdateDialog) {
         AppUpdateDialog(
-            currentVersion = VANTAFYN_TV_APP_VERSION,
+            currentVersion = currentAppVersion,
             target = AppTarget.TV,
             onDismiss = { showUpdateDialog = false },
         )
@@ -550,6 +556,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.permissionsItems() {
 
 private fun androidx.compose.foundation.lazy.LazyListScope.vantafynItems(
     state: VantafynHomeUiState,
+    currentVersion: String = VANTAFYN_TV_APP_VERSION,
     onToggleAutoLoginLastProfile: () -> Unit,
     onToggleWhatsNew: () -> Unit,
     onToggleAchievementsEnabled: () -> Unit,
@@ -649,17 +656,18 @@ private fun androidx.compose.foundation.lazy.LazyListScope.vantafynItems(
             TvActionRow(
                 icon = Icons.Rounded.CloudDownload,
                 title = "Check for Updates",
-                subtitle = "Version $VANTAFYN_TV_APP_VERSION • Check GitHub for latest release",
+                subtitle = "Version $currentVersion • Check GitHub for latest release",
                 onClick = onCheckForUpdates,
             )
             TvInfoRow(Icons.Rounded.Tv, "Discover Vantafyn", "Feature guide is available from the mobile app")
-            TvInfoRow(Icons.Rounded.Info, "App version", VANTAFYN_TV_APP_VERSION)
+            TvInfoRow(Icons.Rounded.Info, "App version", currentVersion)
         }
     }
 }
 
 private fun androidx.compose.foundation.lazy.LazyListScope.aboutItems(
     session: JellyfinSession?,
+    currentVersion: String = VANTAFYN_TV_APP_VERSION,
     onCheckForUpdates: () -> Unit = {},
 ) {
     item {
@@ -674,12 +682,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.aboutItems(
             TvActionRow(
                 icon = Icons.Rounded.CloudDownload,
                 title = "Check for Updates",
-                subtitle = "Version $VANTAFYN_TV_APP_VERSION • Check GitHub for latest release",
+                subtitle = "Version $currentVersion • Check GitHub for latest release",
                 onClick = onCheckForUpdates,
             )
             TvInfoRow(Icons.Rounded.Dns, "Server", session?.server?.url.orEmpty().ifBlank { "Not connected" })
             TvInfoRow(Icons.Rounded.CheckCircle, "Privacy", "No analytics, trackers, or advertising SDKs")
-            TvInfoRow(Icons.Rounded.Info, "App version", VANTAFYN_TV_APP_VERSION)
+            TvInfoRow(Icons.Rounded.Info, "App version", currentVersion)
         }
     }
 }
@@ -1075,4 +1083,4 @@ private fun String.subtitleModeDisplayLabel(): String =
         else -> this
     }
 
-private const val VANTAFYN_TV_APP_VERSION = "0.9.40"
+private const val VANTAFYN_TV_APP_VERSION = "0.9.42"

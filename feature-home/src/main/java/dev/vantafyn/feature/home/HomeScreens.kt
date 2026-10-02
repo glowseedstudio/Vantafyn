@@ -482,7 +482,8 @@ fun VantafynAppContent(
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     val checker = dev.vantafyn.core.integrations.updater.AppUpdateChecker()
                     val target = if (tv) dev.vantafyn.core.integrations.updater.AppTarget.TV else dev.vantafyn.core.integrations.updater.AppTarget.MOBILE
-                    val res = checker.checkForUpdate(VANTAFYN_APP_VERSION, target)
+                    val currentVersion = dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context)
+                    val res = checker.checkForUpdate(currentVersion, target)
                     prefs.recordCheckPerformed()
                     if (res is dev.vantafyn.core.integrations.updater.UpdateCheckResult.Available) {
                         if (!prefs.isVersionDismissed(res.releaseInfo.versionName)) {
@@ -770,7 +771,7 @@ fun VantafynAppContent(
 
         if (showAutoUpdateDialog) {
             AppUpdateDialog(
-                currentVersion = VANTAFYN_APP_VERSION,
+                currentVersion = dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context),
                 target = if (tv) dev.vantafyn.core.integrations.updater.AppTarget.TV else dev.vantafyn.core.integrations.updater.AppTarget.MOBILE,
                 onDismiss = {
                     showAutoUpdateDialog = false
@@ -13777,16 +13778,18 @@ private fun SettingsScreen(
                             SettingsCardGroup(
                                 items = listOf(
                                     {
+                                        val installedAppVersion = dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context)
                                         SettingsNavigationRow(
                                             title = "Check for Updates",
-                                            subtitle = "Version $VANTAFYN_APP_VERSION • Check GitHub for latest release",
+                                            subtitle = "Version $installedAppVersion • Check GitHub for latest release",
                                             icon = Icons.Rounded.CloudDownload,
                                             onClick = { showUpdateDialog = true },
                                         )
                                     },
                                     {
+                                        val installedAppVersion = dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context)
                                         SettingsNavigationRow(
-                                            title = "App version $VANTAFYN_APP_VERSION",
+                                            title = "App version $installedAppVersion",
                                             subtitle = "Vantafyn build and release information",
                                             icon = Icons.Rounded.Info,
                                             onClick = { showVersionDialog = true },
@@ -13836,7 +13839,7 @@ private fun SettingsScreen(
     }
     if (showUpdateDialog) {
         AppUpdateDialog(
-            currentVersion = VANTAFYN_APP_VERSION,
+            currentVersion = dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context),
             target = dev.vantafyn.core.integrations.updater.AppTarget.MOBILE,
             onDismiss = { showUpdateDialog = false },
         )
@@ -15669,6 +15672,10 @@ private fun AppVersionDialog(
     onDismiss: () -> Unit,
     onCheckForUpdates: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val currentVersion = remember(context) {
+        dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context)
+    }
     AlertDialog(
         modifier = Modifier
             .imePadding()
@@ -15726,7 +15733,7 @@ private fun AppVersionDialog(
                         .background(VantafynGradients.accentHorizontal())
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 ) {
-                    Text("Version $VANTAFYN_APP_VERSION", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    Text("Version $currentVersion", color = Color.White, fontWeight = FontWeight.SemiBold)
                 }
                 Text(
                     "Built with love for people who want more from Jellyfin — one beautiful, unified experience for all their media.",
@@ -23782,6 +23789,10 @@ private fun ProfileSettingsDialog(
     onDismiss: () -> Unit,
     onSwitchUser: () -> Unit,
 ) {
+    val context = LocalContext.current
+    val currentVersion = remember(context) {
+        dev.vantafyn.core.integrations.updater.AppUpdateChecker.getInstalledAppVersion(context)
+    }
     AlertDialog(
         modifier = Modifier.vantafynAnimatedModalBorder(),
         onDismissRequest = onDismiss,
@@ -23804,7 +23815,7 @@ private fun ProfileSettingsDialog(
                 Text(state.server?.name ?: "Jellyfin Server")
                 Text(state.server?.url ?: "", color = VantafynColors.Muted)
                 Text("Add Profile from the profile picker.")
-                Text("App version $VANTAFYN_APP_VERSION")
+                Text("App version $currentVersion")
             }
         },
     )
@@ -24232,7 +24243,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.40"
+private const val VANTAFYN_APP_VERSION = "0.9.42"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable
