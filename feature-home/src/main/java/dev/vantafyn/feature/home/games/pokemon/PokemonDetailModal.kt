@@ -317,15 +317,29 @@ fun PokemonDetailModal(
                     )
                 )
             }
-            val artworkUrl: String = remember(pokemon.speciesId, pokemon.isShiny) {
-                if (pokemon.speciesId > 0) {
-                    if (pokemon.isShiny) {
-                        "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/shiny/${pokemon.speciesId}.png"
-                    } else {
-                        "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${pokemon.speciesId}.png"
+            val isFemale = pokemon.gender?.equals("Female", ignoreCase = true) == true ||
+                pokemon.gender?.equals("Girl", ignoreCase = true) == true ||
+                pokemon.gender?.equals("F", ignoreCase = true) == true
+
+            val matchedForm = remember(pokemon.speciesId, pokemon.form) {
+                if (!pokemon.form.isNullOrBlank()) {
+                    PokemonFormsCatalog.getForms(pokemon.speciesId).firstOrNull {
+                        it.name.contains(pokemon.form!!, ignoreCase = true) ||
+                            pokemon.form!!.contains(it.name, ignoreCase = true)
                     }
+                } else null
+            }
+
+            val artworkUrl: String = remember(pokemon.speciesId, pokemon.isShiny, isFemale, matchedForm) {
+                if (pokemon.speciesId > 0) {
+                    PokemonGenderCatalog.getPokedexArtworkUrl(
+                        speciesId = pokemon.speciesId,
+                        isShiny = pokemon.isShiny,
+                        isFemale = isFemale,
+                        formKey = matchedForm?.spriteKey,
+                    )
                 } else {
-                    getPokemonSpriteUrl(pokemon.speciesId, pokemon.isShiny)
+                    getPokemonSpriteUrl(pokemon.speciesId, pokemon.isShiny, isFemale = isFemale)
                 }
             }
 

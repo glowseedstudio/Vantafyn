@@ -104,6 +104,22 @@ fun PokemonPokedexModal(
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> GameHubSoundManager.pause()
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> GameHubSoundManager.resume(context)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     // Duck ambient background music to 20% so Pokémon cries are crisp and clear
     DisposableEffect(Unit) {
         GameHubSoundManager.duck(context, duckFactor = 0.20f, durationMs = 500L)

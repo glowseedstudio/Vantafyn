@@ -237,8 +237,11 @@ fun PokemonSlotCell(
                 }
 
                 // Sprite - dynamically expanded to fill cell prominently in storage boxes
-                val spriteUrl = remember(pokemon.speciesId, pokemon.isShiny) {
-                    getPokemonSpriteUrl(pokemon.speciesId, pokemon.isShiny)
+                val isFemale = pokemon.gender?.equals("Female", ignoreCase = true) == true ||
+                    pokemon.gender?.equals("Girl", ignoreCase = true) == true ||
+                    pokemon.gender?.equals("F", ignoreCase = true) == true
+                val spriteUrl = remember(pokemon.speciesId, pokemon.isShiny, isFemale) {
+                    getPokemonSpriteUrl(pokemon.speciesId, pokemon.isShiny, isFemale = isFemale)
                 }
 
                 Box(

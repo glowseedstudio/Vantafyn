@@ -48,11 +48,18 @@ class TvMainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = true
+        dev.vantafyn.core.media.games.GameHubSoundManager.resume(this)
     }
 
     override fun onStop() {
         super.onStop()
         dev.vantafyn.core.integrations.push.UnifiedPushPayloadDispatcher.isAppInForeground = false
+        dev.vantafyn.core.media.games.GameHubSoundManager.pause()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        dev.vantafyn.core.media.games.GameHubSoundManager.stop(instant = true)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

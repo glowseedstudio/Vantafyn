@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -189,6 +190,31 @@ fun PokemonPokedexEntryModal(
     var isPlayingCry by remember { mutableStateOf(false) }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> {
+                    GameHubSoundManager.pause()
+                    try {
+                        activePlayer?.let { mp ->
+                            if (mp.isPlaying) mp.stop()
+                            mp.release()
+                        }
+                    } catch (_: Throwable) {}
+                    activePlayer = null
+                    isPlayingCry = false
+                }
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> GameHubSoundManager.resume(context)
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     val playCry: (String) -> Unit = { style ->
         try {
             activePlayer?.let { mp ->
@@ -207,9 +233,11 @@ fun PokemonPokedexEntryModal(
                         .build()
                 )
                 setDataSource(cryUrl)
+                setVolume(0.70f, 0.70f)
                 isLooping = false
                 setOnPreparedListener { mp ->
                     try {
+                        mp.setVolume(0.70f, 0.70f)
                         mp.start()
                         isPlayingCry = true
                     } catch (_: Throwable) {
@@ -251,14 +279,27 @@ fun PokemonPokedexEntryModal(
         }
     }
 
+    val initialFemale = remember(currentSpeciesId, currentSummary) {
+        currentSummary?.gender?.equals("Female", ignoreCase = true) == true ||
+            currentSummary?.gender?.equals("Girl", ignoreCase = true) == true ||
+            currentSummary?.gender?.equals("F", ignoreCase = true) == true
+    }
     var showShinyArtwork by remember(currentSpeciesId, hasShiny) { mutableStateOf(hasShiny) }
+    var showFemaleArtwork by remember(currentSpeciesId) { mutableStateOf(initialFemale) }
 
-    val artworkUrl = remember(currentSpeciesId, showShinyArtwork) {
-        if (showShinyArtwork) {
-            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/shiny/$currentSpeciesId.png"
-        } else {
-            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/$currentSpeciesId.png"
-        }
+    var selectedFormKey by remember(currentSpeciesId) { mutableStateOf<String?>(null) }
+
+    val hasGenderDiff = remember(currentSpeciesId, selectedFormKey) {
+        if (selectedFormKey != null) false else PokemonGenderCatalog.hasGenderDifferences(currentSpeciesId)
+    }
+
+    val artworkUrl = remember(currentSpeciesId, showShinyArtwork, showFemaleArtwork, selectedFormKey) {
+        PokemonGenderCatalog.getPokedexArtworkUrl(
+            speciesId = currentSpeciesId,
+            isShiny = showShinyArtwork,
+            isFemale = showFemaleArtwork,
+            formKey = selectedFormKey,
+        )
     }
 
     BackHandler(onBack = onDismiss)
@@ -437,6 +478,123 @@ fun PokemonPokedexEntryModal(
                         contentScale = ContentScale.Fit,
                     )
 
+                    // Gender toggle chip (for species with visual gender differences)
+                    if (hasGenderDiff) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(10.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF161928).copy(alpha = 0.85f))
+                                .border(1.dp, Color(0xFF282F48), RoundedCornerShape(12.dp))
+                                .padding(2.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                // Male
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(
+                                            if (!showFemaleArtwork) Color(0xFF0284C7).copy(alpha = 0.35f)
+                                            else Color.Transparent
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (!showFemaleArtwork) Color(0xFF38BDF8) else Color.Transparent,
+                                            RoundedCornerShape(9.dp)
+                                        )
+                                        .clickable { showFemaleArtwork = false }
+                                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    ) {
+                                        Text(
+                                            text = "♂",
+                                            color = if (!showFemaleArtwork) Color(0xFF38BDF8) else Color(0xFF64748B),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                        )
+                                        Text(
+                                            text = "Male",
+                                            color = if (!showFemaleArtwork) Color.White else Color(0xFF64748B),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+
+                                // Female
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(9.dp))
+                                        .background(
+                                            if (showFemaleArtwork) Color(0xFFE11D48).copy(alpha = 0.35f)
+                                            else Color.Transparent
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (showFemaleArtwork) Color(0xFFFB7185) else Color.Transparent,
+                                            RoundedCornerShape(9.dp)
+                                        )
+                                        .clickable { showFemaleArtwork = true }
+                                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
+                                    ) {
+                                        Text(
+                                            text = "♀",
+                                            color = if (showFemaleArtwork) Color(0xFFFB7185) else Color(0xFF64748B),
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                        )
+                                        Text(
+                                            text = "Female",
+                                            color = if (showFemaleArtwork) Color.White else Color(0xFF64748B),
+                                            fontSize = 10.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        // Difference note at bottom of artwork if female selected
+                        if (showFemaleArtwork) {
+                            val diffDesc = remember(currentSpeciesId) {
+                                PokemonGenderCatalog.getGenderDifferenceDescription(currentSpeciesId)
+                            }
+                            if (!diffDesc.isNullOrBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .padding(bottom = 6.dp, start = 12.dp, end = 12.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF0F121E).copy(alpha = 0.90f))
+                                        .border(1.dp, Color(0xFFFB7185).copy(alpha = 0.40f), RoundedCornerShape(10.dp))
+                                        .padding(horizontal = 10.dp, vertical = 3.dp),
+                                ) {
+                                    Text(
+                                        text = diffDesc,
+                                        color = Color(0xFFFDA4AF),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Shiny toggle chip (if user has unlocked shiny in their save archive)
                     if (hasShiny) {
                         Box(
@@ -526,6 +684,126 @@ fun PokemonPokedexEntryModal(
             }
 
             Spacer(modifier = Modifier.height(14.dp))
+
+            // 2b. Alternate Forms & Regional Variants Carousel / Spinda Lore
+            val alternateForms = remember(currentSpeciesId) {
+                PokemonFormsCatalog.getForms(currentSpeciesId)
+            }
+            val isSpinda = remember(currentSpeciesId) {
+                PokemonFormsCatalog.isSpinda(currentSpeciesId)
+            }
+
+            if (alternateForms.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "FORMS & VARIATIONS",
+                            color = VantafynColors.Muted,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp,
+                        )
+                        val activeForm = alternateForms.firstOrNull { it.spriteKey == selectedFormKey }
+                            ?: alternateForms.firstOrNull()
+                        if (activeForm != null && !activeForm.description.isNullOrBlank()) {
+                            Text(
+                                text = activeForm.description,
+                                color = primaryType.accentColor,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(start = 8.dp),
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        alternateForms.forEach { form ->
+                            val isSelected = (selectedFormKey == form.spriteKey) ||
+                                (selectedFormKey == null && form == alternateForms.first())
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        if (isSelected) primaryType.accentColor.copy(alpha = 0.25f)
+                                        else Color(0xFF141726)
+                                    )
+                                    .border(
+                                        1.dp,
+                                        if (isSelected) primaryType.accentColor else Color(0xFF282F48),
+                                        RoundedCornerShape(12.dp),
+                                    )
+                                    .clickable {
+                                        selectedFormKey = if (form == alternateForms.first()) null else form.spriteKey
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = form.name,
+                                    color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+            } else if (isSpinda) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0xFF161928))
+                        .border(1.dp, Color(0xFFFB7185).copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        Text(
+                            text = "🌀",
+                            fontSize = 20.sp,
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = "4,294,967,296 Spot Variations",
+                                color = Color(0xFFFB7185),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = "Spinda's 4 facial spot coordinates are calculated from a 32-bit personality value, making every specimen mathematically unique in Pokémon history.",
+                                color = Color(0xFFCBD5E1),
+                                fontSize = 10.sp,
+                                lineHeight = 13.sp,
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+            }
 
             if (isRegistered) {
                 // Registered Species View

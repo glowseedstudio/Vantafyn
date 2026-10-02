@@ -76,11 +76,21 @@ data class ContainerUiState(
         get() = if (isPartyMode) 6 else 30
 }
 
-fun getPokemonSpriteUrl(speciesId: Int, isShiny: Boolean = false): String {
+fun getPokemonSpriteUrl(
+    speciesId: Int,
+    isShiny: Boolean = false,
+    isFemale: Boolean = false,
+): String {
     if (speciesId <= 0) return ""
-    return if (isShiny) {
-        "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/shiny/$speciesId.png"
-    } else {
-        "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/$speciesId.png"
+    val hasDiff = PokemonGenderCatalog.hasGenderDifferences(speciesId)
+    return when {
+        isShiny && isFemale && hasDiff ->
+            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/shiny/female/$speciesId.png"
+        isShiny ->
+            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/shiny/$speciesId.png"
+        isFemale && hasDiff ->
+            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/female/$speciesId.png"
+        else ->
+            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/$speciesId.png"
     }
 }

@@ -425,11 +425,11 @@ object GameHubSoundManager {
         fadeJob?.cancel()
         fadeJob = null
         try {
+            mediaPlayer?.setVolume(0f, 0f)
             if (mediaPlayer?.isPlaying == true) {
                 mediaPlayer?.pause()
             }
-        } catch (e: Exception)
-        {
+        } catch (e: Exception) {
             Log.w(TAG, "Error pausing Game Hub audio: ${e.message}")
         }
     }

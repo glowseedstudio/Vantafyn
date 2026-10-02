@@ -388,12 +388,26 @@ private fun VaultHeroItemCard(
         PokemonTypeCatalog.getTypes(summary.speciesId, speciesName)
     }
 
-    val artworkUrl = remember(summary.speciesId, summary.isShiny) {
-        if (summary.isShiny) {
-            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/shiny/${summary.speciesId}.png"
-        } else {
-            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/${summary.speciesId}.png"
-        }
+    val isFemale = summary.gender?.equals("Female", ignoreCase = true) == true ||
+        summary.gender?.equals("Girl", ignoreCase = true) == true ||
+        summary.gender?.equals("F", ignoreCase = true) == true
+
+    val matchedForm = remember(summary.speciesId, summary.form) {
+        if (!summary.form.isNullOrBlank()) {
+            PokemonFormsCatalog.getForms(summary.speciesId).firstOrNull {
+                it.name.contains(summary.form!!, ignoreCase = true) ||
+                    summary.form!!.contains(it.name, ignoreCase = true)
+            }
+        } else null
+    }
+
+    val artworkUrl = remember(summary.speciesId, summary.isShiny, isFemale, matchedForm) {
+        PokemonGenderCatalog.getPokedexArtworkUrl(
+            speciesId = summary.speciesId,
+            isShiny = summary.isShiny,
+            isFemale = isFemale,
+            formKey = matchedForm?.spriteKey,
+        )
     }
 
     val statusDescriptor = when {
@@ -1435,7 +1449,10 @@ private fun VaultRecentPokemonRail(
             candidates.forEach { candidate ->
                 val pkm = candidate.summary
                 val speciesName = PokemonSpeciesCatalog.resolveSpeciesName(pkm.speciesId)
-                val spriteUrl = getPokemonSpriteUrl(pkm.speciesId, pkm.isShiny)
+                val isFemale = pkm.gender?.equals("Female", ignoreCase = true) == true ||
+                    pkm.gender?.equals("Girl", ignoreCase = true) == true ||
+                    pkm.gender?.equals("F", ignoreCase = true) == true
+                val spriteUrl = getPokemonSpriteUrl(pkm.speciesId, pkm.isShiny, isFemale = isFemale)
 
                 val matchedGame = remember(candidate.originGameId, candidate.originGameTitle, availableGames) {
                     if (candidate.originGameId != null) {
