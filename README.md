@@ -17,6 +17,7 @@
   <a href="https://developer.android.com/guide/topics/media/media3"><img src="https://img.shields.io/badge/Media3-ExoPlayer-3DDC84.svg?style=flat-square&logo=android&logoColor=white" alt="Media3" /></a>
   <a href="#-libretro-retro-gaming-hub--cloud-saves"><img src="https://img.shields.io/badge/Libretro-Retro_Gaming-FF5722.svg?style=flat-square" alt="Libretro Retro Gaming" /></a>
   <a href="#-pokémon-cloud-vault--pkvault-server-integration"><img src="https://img.shields.io/badge/PKVault-Cloud_Storage-4CAF50.svg?style=flat-square" alt="PKVault Cloud Storage" /></a>
+  <a href="#-unifiedpush--ntfy-real-time-notifications"><img src="https://img.shields.io/badge/UnifiedPush-ntfy-9C27B0.svg?style=flat-square" alt="UnifiedPush ntfy" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=flat-square" alt="License: GPL v3" /></a>
 </p>
 
@@ -218,16 +219,24 @@ The Vantafyn ecosystem is designed with strict security, local-network boundarie
 2. **Zero Corruption Guarantee**: Before any Pokémon transfer, migration, or trade writes data into a cartridge save file, the Companion Plugin creates an immutable, timestamped `.bak` backup copy on the server.
 3. **Private Network Friendly**: PKVault can run entirely inside an internal Docker network alongside Jellyfin without exposing any ports to the outside world.
 
-### Quick PKVault Deployment (Docker Compose)
+### Complete Self-Hosted Ecosystem (Docker Compose)
 
-Add PKVault to your server's `docker-compose.yml`:
+You can run Jellyfin, PKVault, and ntfy together seamlessly in your server's `docker-compose.yml`:
 
 ```yaml
 services:
   jellyfin:
     image: jellyfin/jellyfin:latest
     container_name: jellyfin
-    # ... your existing jellyfin configuration ...
+    restart: unless-stopped
+    volumes:
+      - /opt/jellyfin/config:/config
+      - /opt/jellyfin/cache:/cache
+      - /media:/media
+    ports:
+      - "8096:8096"
+    networks:
+      - internal-net
 
   pkvault:
     image: ghcr.io/glowseedstudio/pkvault:latest
@@ -237,6 +246,22 @@ services:
       - PORT=5000
     volumes:
       - /opt/pkvault/data:/app/data
+    networks:
+      - internal-net
+
+  ntfy:
+    image: binwiederhier/ntfy:latest
+    container_name: ntfy
+    restart: unless-stopped
+    command: serve
+    environment:
+      - NTFY_BASE_URL=https://ntfy.yourdomain.com  # or http://your-server-ip:8080
+      - NTFY_BEHIND_PROXY=true
+    volumes:
+      - /opt/ntfy/cache:/var/cache/ntfy
+      - /opt/ntfy/etc:/etc/ntfy
+    ports:
+      - "8080:80"
     networks:
       - internal-net
 
@@ -292,12 +317,56 @@ The Companion Plugin runs natively inside Jellyfin (supporting both **Jellyfin 1
 
 ---
 
+## 🔔 UnifiedPush & ntfy: Real-Time Notifications
+
+Traditional Android streaming apps either drain device battery by running aggressive background polling loops or rely on proprietary Google Play Services (Firebase Cloud Messaging / FCM), which compromises user privacy and fails entirely on de-Googled devices.
+
+Vantafyn uses the **[UnifiedPush](https://unifiedpush.org/)** open standard paired with **[ntfy](https://ntfy.sh/)** to deliver instant, battery-friendly push notifications with zero third-party telemetry:
+
+```
+┌─────────────────────────────────┐
+│     Vantafyn Mobile App         │
+└────────────────┬────────────────┘
+                 │ 1. Registers with distributor
+                 ▼
+┌─────────────────────────────────┐
+│     ntfy Android App            │  (Free on F-Droid & Google Play)
+│   (UnifiedPush Distributor)     │
+└────────────────┬────────────────┘
+                 │ 2. Issues unique webhook endpoint URL
+                 ▼
+┌─────────────────────────────────┐
+│  Vantafyn Companion Plugin      │  (Jellyfin Server)
+└────────────────┬────────────────┘
+                 │ 3. Dispatches event via HTTP POST
+                 ▼
+┌─────────────────────────────────┐
+│        ntfy Server              │  (Self-Hosted Docker or ntfy.sh)
+└─────────────────────────────────┘
+```
+
+### How It Works
+
+1. **Self-Hosted ntfy Server**: Runs as a lightweight Docker container alongside Jellyfin (or you can use the public `https://ntfy.sh` service).
+2. **ntfy Android Distributor**: Install the open-source **ntfy** app on your phone or tablet (available on **F-Droid** and **Google Play**). In the ntfy app settings, add your self-hosted server URL (e.g., `https://ntfy.yourdomain.com` or `http://your-server-ip:8080`).
+3. **Automatic Pairing**: When you launch Vantafyn and log into Jellyfin, Vantafyn discovers ntfy as your active UnifiedPush distributor, acquires a secure, randomized endpoint token, and registers it with the **Vantafyn Companion Plugin**.
+4. **Instant Event Dispatching**: Whenever events occur on your Jellyfin server, the Companion Plugin instantly sends a webhook payload to your ntfy server:
+   - 💬 **Direct Messages**: Real-time chat messages and emoji reactions from server friends.
+   - 🍿 **Watch Party Invites**: Instant notifications when invited to a SyncPlay group session.
+   - 🤝 **Pokémon Trades**: Alerts when a friend initiates a trade or sends a Pokémon transfer.
+   - 🏆 **Achievement Badges**: Celebrations when unlocking milestone achievements.
+   - 📢 **Server Broadcasts**: Maintenance alerts and server notifications.
+5. **Zero Battery Drain**: Vantafyn maintains **zero active background polling loops** when minimized. Your device maintains only a single, hyper-efficient persistent connection through the ntfy distributor app, preserving your battery and memory.
+
+---
+
 ## 🔌 Recommended Server Plugins & Ecosystem Services
 
 | Service / Plugin | What It Unlocks | Requirement | Source |
 | :--- | :--- | :---: | :---: |
-| **Vantafyn Companion** | ROM streaming, cloud saves/SRAM sync, Pokémon Vault gateway, Pokémon cries, UnifiedPush, settings sync, and Watch Parties | **Essential** | [Repository](#installing-the-vantafyn-companion-plugin) |
-| **PKVault Server** | Self-hosted Pokémon backend for 30-box cloud storage, legality checking, and cross-generation transfers | Required for Cloud Vault | [Docker / GitHub](#quick-pkvault-deployment-docker-compose) |
+| **Vantafyn Companion** | ROM streaming, cloud saves/SRAM sync, Pokémon Vault gateway, Pokémon cries, UnifiedPush dispatcher, settings sync, and Watch Parties | **Essential** | [Repository](#installing-the-vantafyn-companion-plugin) |
+| **PKVault Server** | Self-hosted Pokémon backend for 30-box cloud storage, legality checking, and cross-generation transfers | Required for Cloud Vault | [Docker / GitHub](#complete-self-hosted-ecosystem-docker-compose) |
+| **ntfy Server** | Lightweight push notification broker for instant chats, trades, watch parties, and achievements without Google services | Required for Push Alerts | [ntfy.sh / GitHub](https://github.com/binwiederhier/ntfy) |
 | **Achievement Badges** | Milestone badges, rank tiers, server member friends list, and 1-to-1 direct messaging | Recommended | [GitHub](https://github.com/ZL154/AchievementBadges_for_Jellyfin) |
 | **Playback Reporting** | Server analytics, watch time breakdowns, and Most Watched media trends in Admin | Optional | [GitHub](https://github.com/jellyfin/jellyfin-plugin-playbackreporting) |
 | **Intro Skipper** | Automatic audio fingerprint analysis to show seamless "Skip Intro" & "Skip Credits" buttons | Optional | [GitHub](https://github.com/Intro-Skipper/intro-skipper) |
