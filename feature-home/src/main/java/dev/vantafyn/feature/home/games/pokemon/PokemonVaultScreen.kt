@@ -42,6 +42,7 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.SwapHoriz
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -68,6 +69,7 @@ import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDepositRequest
+import dev.vantafyn.core.jellyfin.PokemonExternalSavePreview
 import dev.vantafyn.core.jellyfin.PokemonDetailsDto
 import dev.vantafyn.core.jellyfin.PokemonDirectTransferRequest
 import dev.vantafyn.core.jellyfin.PokemonIntegrationStatus
@@ -88,6 +90,9 @@ import dev.vantafyn.feature.home.games.GameScreenReveal
 import dev.vantafyn.feature.home.games.gamesTabTransitionSpec
 import dev.vantafyn.feature.home.rememberReducedMotionPreference
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -159,6 +164,8 @@ fun PokemonVaultScreen(
     var isValidatingCompatibility by remember { mutableStateOf(false) }
     var isExecutingTransfer by remember { mutableStateOf(false) }
     var operationResultMessage by remember { mutableStateOf<String?>(null) }
+    var externalSavePreview by remember { mutableStateOf<PokemonExternalSavePreview?>(null) }
+    var selectedExternalPokemonIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var isTradeModalOpen by remember { mutableStateOf(false) }
     var isBackupRestoreModalOpen by remember { mutableStateOf(false) }
     var isPokedexModalOpen by remember { mutableStateOf(false) }
@@ -646,6 +653,54 @@ fun PokemonVaultScreen(
         map.values.toList()
     }
 
+    val importSaveLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null || session == null) return@rememberLauncherForActivityResult
+        coroutineScope.launch {
+            operationResultMessage = "Reading your save…"
+            pokemonRepository.previewExternalSave(session, context.contentResolver, uri).fold(
+                onSuccess = { preview ->
+                    externalSavePreview = preview
+                    selectedExternalPokemonIds = (preview.party + preview.boxes.flatMap { it.entries }).map { it.id }.toSet()
+                    operationResultMessage = null
+                },
+                onFailure = { operationResultMessage = it.message ?: "Could not read that save." },
+            )
+        }
+    }
+
+    if (externalSavePreview != null) {
+        val preview = externalSavePreview!!
+        val pokemon = preview.party + preview.boxes.flatMap { it.entries }
+        AlertDialog(
+            onDismissRequest = { externalSavePreview = null },
+            title = { Text("Choose Pokémon to import", color = VantafynColors.Ink, fontWeight = FontWeight.Bold) },
+            text = { Column(Modifier.height(360.dp).verticalScroll(rememberScrollState())) {
+                Text("Gen ${preview.generation}${preview.trainerName?.let { " • $it" } ?: ""}", color = VantafynColors.Muted, fontSize = 12.sp)
+                TextButton(onClick = { selectedExternalPokemonIds = pokemon.map { it.id }.toSet() }) { Text("Select all", color = Color(0xFF00E5FF)) }
+                preview.party.forEach { p -> Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(p.id in selectedExternalPokemonIds, { selectedExternalPokemonIds = selectedExternalPokemonIds.let { if (p.id in it) it - p.id else it + p.id } }); Text("${p.nickname.ifBlank { p.species }} • Lv ${p.level}", color = VantafynColors.Ink, fontSize = 13.sp) } }
+                preview.boxes.forEach { box -> Column { TextButton(onClick = { val ids = box.entries.map { it.id }.toSet(); selectedExternalPokemonIds = if (ids.all { it in selectedExternalPokemonIds }) selectedExternalPokemonIds - ids else selectedExternalPokemonIds + ids }) { Text(box.name.ifBlank { "Box ${box.boxIndex}" }, color = Color(0xFFB8A4FF)) }; box.entries.forEach { p -> Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(p.id in selectedExternalPokemonIds, { selectedExternalPokemonIds = selectedExternalPokemonIds.let { if (p.id in it) it - p.id else it + p.id } }); Text("${p.nickname.ifBlank { p.species }} • Lv ${p.level}", color = VantafynColors.Ink, fontSize = 13.sp) } } } }
+            } },
+            confirmButton = {
+                TextButton(onClick = {
+                    externalSavePreview = null
+                    coroutineScope.launch {
+                        val activeSession = session ?: return@launch
+                        operationResultMessage = "Importing ${selectedExternalPokemonIds.size} Pokémon…"
+                        pokemonRepository.commitExternalSavePreview(activeSession, preview.previewId, selectedExternalPokemonIds).fold(
+                            onSuccess = { result ->
+                                operationResultMessage = result.message
+                                loadAll()
+                            },
+                            onFailure = { error -> operationResultMessage = error.message ?: "Could not import that save." },
+                        )
+                    }
+                }, enabled = selectedExternalPokemonIds.isNotEmpty()) { Text("Import ${selectedExternalPokemonIds.size}", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { externalSavePreview = null }) { Text("Cancel", color = VantafynColors.Muted) } },
+            containerColor = Color(0xFF1B1E2B),
+        )
+    }
+
     CompositionLocalProvider(LocalPokemonModalBackground provides customBackgroundUrl) {
         GameScreenReveal(
             key = "pokemon_vault_screen_root",
@@ -677,6 +732,7 @@ fun PokemonVaultScreen(
                             isLoading = isLoadingInitial,
                             isRefreshing = isRefreshing,
                             onMovePokemon = { subScreen = VaultSubScreen.BoxTransfer },
+                            onImportSave = { importSaveLauncher.launch(arrayOf("application/octet-stream", "application/x-spss-sav", "*/*")) },
                             onSelectGameForTransfer = { game ->
                                 lowerState = lowerState.copy(
                                     containerType = StorageContainerType.GameCartridge(game),

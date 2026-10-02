@@ -119,6 +119,29 @@ data class PokemonDepositRequest(
     val targetVaultSlotIndex: Int? = null,
 ) : Serializable
 
+data class PokemonExternalSaveImportResponse(
+    val success: Boolean = false,
+    val message: String = "",
+    val importedCount: Int = 0,
+    val generation: Int = 0,
+    val trainerName: String? = null,
+) : Serializable
+
+data class PokemonExternalSavePreview(
+    val previewId: String = "",
+    val generation: Int = 0,
+    val trainerName: String? = null,
+    val party: List<PokemonSummaryDto> = emptyList(),
+    val boxes: List<PokemonBoxDto> = emptyList(),
+) : Serializable
+
+data class PokemonDexMetadataDto(
+    val speciesId: Int = 0, val category: String = "", val flavorText: String = "",
+    val heightMeters: Float = 0f, val weightKg: Float = 0f,
+    val hp: Int = 0, val attack: Int = 0, val defense: Int = 0, val spAtk: Int = 0, val spDef: Int = 0, val speed: Int = 0,
+    val primaryType: String = "", val secondaryType: String? = null,
+) : Serializable
+
 data class PokemonWithdrawRequest(
     val vaultEntryId: String,
     val targetGameId: String,
@@ -353,4 +376,3 @@ data class PokemonAchievementsSummaryDto(
     val totalCount: Int = 0,
     val achievements: List<PokemonAchievementDto> = emptyList(),
 ) : Serializable
-

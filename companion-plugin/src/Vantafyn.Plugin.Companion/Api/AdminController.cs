@@ -15,6 +15,7 @@ public sealed class AdminController(
     IPokemonProviderFactory pokemonProviderFactory,
     IPokemonGameDetector pokemonGameDetector) : ControllerBase
 {
+    private static readonly HttpClient NarrationTestClient = new();
     [HttpGet("Configuration")]
     public IActionResult GetConfiguration()
     {
@@ -86,6 +87,26 @@ public sealed class AdminController(
         {
             config.Pokemon.ModalBackgroundPath = string.IsNullOrWhiteSpace(request.PokemonModalBackgroundPath) ? null : request.PokemonModalBackgroundPath.Trim();
         }
+        if (request.PokemonNarrationEnabled.HasValue)
+        {
+            config.Pokemon.NarrationEnabled = request.PokemonNarrationEnabled.Value;
+        }
+        if (request.PokemonNarrationBaseUrl != null)
+        {
+            config.Pokemon.NarrationBaseUrl = string.IsNullOrWhiteSpace(request.PokemonNarrationBaseUrl) ? null : request.PokemonNarrationBaseUrl.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(request.PokemonNarrationVoice))
+        {
+            config.Pokemon.NarrationVoice = request.PokemonNarrationVoice.Trim();
+        }
+        if (request.PokemonNarrationSpeed.HasValue)
+        {
+            config.Pokemon.NarrationSpeed = Math.Clamp(request.PokemonNarrationSpeed.Value, 0.75m, 1.35m);
+        }
+        if (request.PokemonNarrationTimeoutSeconds.HasValue)
+        {
+            config.Pokemon.NarrationTimeoutSeconds = Math.Clamp(request.PokemonNarrationTimeoutSeconds.Value, 5, 60);
+        }
 
         plugin.SaveConfiguration();
         return Ok(GetConfigurationPayload(config));
@@ -136,6 +157,36 @@ public sealed class AdminController(
         var provider = pokemonProviderFactory.Create(testConfig);
         var result = await provider.TestConnectionAsync(cancellationToken).ConfigureAwait(false);
         return Ok(result);
+    }
+
+    [HttpPost("Pokemon/Narration/TestConnection")]
+    public async Task<IActionResult> TestPokemonNarrationConnection(
+        [FromBody] PokemonNarrationTestConnectionRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var enabled = request?.Enabled ?? config.Pokemon.NarrationEnabled;
+        var baseUrl = request?.BaseUrl ?? config.Pokemon.NarrationBaseUrl;
+        var timeoutSeconds = Math.Clamp(request?.TimeoutSeconds ?? config.Pokemon.NarrationTimeoutSeconds, 5, 60);
+        if (!enabled) return Ok(new { isSuccess = false, message = "Pokédex narration is disabled." });
+        if (!Uri.TryCreate(baseUrl?.TrimEnd('/') + "/v1/audio/voices", UriKind.Absolute, out var endpoint) || endpoint.Scheme is not ("http" or "https"))
+            return Ok(new { isSuccess = false, message = "Enter a valid local TTS service URL." });
+
+        try
+        {
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            using var response = await NarrationTestClient.GetAsync(endpoint, timeout.Token).ConfigureAwait(false);
+            return Ok(new { isSuccess = response.IsSuccessStatusCode, message = response.IsSuccessStatusCode ? "Kokoro TTS service is reachable." : $"TTS service returned HTTP {(int)response.StatusCode}." });
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return Ok(new { isSuccess = false, message = "TTS service timed out." });
+        }
+        catch
+        {
+            return Ok(new { isSuccess = false, message = "TTS service could not be reached from the Jellyfin server." });
+        }
     }
 
     [HttpGet("Pokemon/Overrides")]
@@ -204,7 +255,12 @@ public sealed class AdminController(
             config.Pokemon.AllowTrading,
             config.Pokemon.AllowEditing,
             config.Pokemon.AutoBackups,
-            config.Pokemon.ModalBackgroundPath
+            config.Pokemon.ModalBackgroundPath,
+            config.Pokemon.NarrationEnabled,
+            config.Pokemon.NarrationBaseUrl,
+            config.Pokemon.NarrationVoice,
+            config.Pokemon.NarrationSpeed,
+            config.Pokemon.NarrationTimeoutSeconds
         }
     };
 }
@@ -231,9 +287,19 @@ public sealed record AdminConfigurationRequest(
     bool? PokemonAllowTrading = null,
     bool? PokemonAllowEditing = null,
     bool? PokemonAutoBackups = null,
-    string? PokemonModalBackgroundPath = null);
+    string? PokemonModalBackgroundPath = null,
+    bool? PokemonNarrationEnabled = null,
+    string? PokemonNarrationBaseUrl = null,
+    string? PokemonNarrationVoice = null,
+    decimal? PokemonNarrationSpeed = null,
+    int? PokemonNarrationTimeoutSeconds = null);
 
 public sealed record PokemonTestConnectionRequest(
+    string? BaseUrl = null,
+    bool? Enabled = null,
+    int? TimeoutSeconds = null);
+
+public sealed record PokemonNarrationTestConnectionRequest(
     string? BaseUrl = null,
     bool? Enabled = null,
     int? TimeoutSeconds = null);

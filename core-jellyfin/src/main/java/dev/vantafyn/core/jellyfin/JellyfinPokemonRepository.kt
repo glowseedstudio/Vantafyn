@@ -1,5 +1,7 @@
 package dev.vantafyn.core.jellyfin
 
+import android.content.ContentResolver
+import android.net.Uri
 import java.net.HttpURLConnection
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +12,7 @@ import org.json.JSONObject
 interface JellyfinPokemonRepository {
     suspend fun isPokemonAvailable(session: JellyfinSession): Result<Boolean>
     suspend fun getStatus(session: JellyfinSession): Result<PokemonIntegrationStatus>
+    suspend fun getDexMetadata(session: JellyfinSession, speciesId: Int): Result<PokemonDexMetadataDto>
     suspend fun getPokemonGames(session: JellyfinSession): Result<List<GameSummary>>
     suspend fun getVaultSummary(session: JellyfinSession): Result<PokemonVaultSummary>
     suspend fun getVaultBoxes(session: JellyfinSession): Result<List<PokemonVaultBoxSummary>>
@@ -19,6 +22,9 @@ interface JellyfinPokemonRepository {
     suspend fun getGameSave(session: JellyfinSession, libraryId: String, gameId: String): Result<PokemonGameSaveDto>
     suspend fun getGameLockState(session: JellyfinSession, libraryId: String, gameId: String): Result<SaveLockStateDto>
     suspend fun depositPokemon(session: JellyfinSession, request: PokemonDepositRequest): Result<PokemonOperationResponse>
+    suspend fun importExternalSave(session: JellyfinSession, contentResolver: ContentResolver, uri: Uri): Result<PokemonExternalSaveImportResponse>
+    suspend fun previewExternalSave(session: JellyfinSession, contentResolver: ContentResolver, uri: Uri): Result<PokemonExternalSavePreview>
+    suspend fun commitExternalSavePreview(session: JellyfinSession, previewId: String, pokemonIds: Set<String>): Result<PokemonExternalSaveImportResponse>
     suspend fun withdrawPokemon(session: JellyfinSession, request: PokemonWithdrawRequest): Result<PokemonOperationResponse>
     suspend fun directTransferPokemon(session: JellyfinSession, request: PokemonDirectTransferRequest): Result<PokemonOperationResponse>
     suspend fun validateTransfer(session: JellyfinSession, request: PokemonTransferValidateRequest): Result<PokemonTransferCompatibilityResult>
@@ -78,12 +84,30 @@ interface JellyfinPokemonRepository {
             }
             return "https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/$style/$speciesId.ogg"
         }
+
+        /**
+         * Narration is always streamed from the authenticated Companion endpoint. The
+         * TTS container address remains private to the Jellyfin server.
+         */
+        fun getPokemonNarrationUrl(session: JellyfinSession?, speciesId: Int): String? {
+            session ?: return null
+            val base = session.server.url.trimEnd('/')
+            val token = session.accessToken
+            return "$base/Vantafyn/Pokemon/Narration/$speciesId" +
+                if (token.isNotBlank()) "?api_key=$token" else ""
+        }
     }
 }
 
 class DefaultJellyfinPokemonRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : JellyfinPokemonRepository {
+
+    override suspend fun getDexMetadata(session: JellyfinSession, speciesId: Int): Result<PokemonDexMetadataDto> = withContext(ioDispatcher) { runCatching {
+        val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Dex/$speciesId")
+        checkResponseCode(conn); val json = conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
+        PokemonDexMetadataDto(json.optInt("speciesId"), json.optString("category"), json.optString("flavorText"), json.optDouble("heightMeters").toFloat(), json.optDouble("weightKg").toFloat(), json.optInt("hp"), json.optInt("attack"), json.optInt("defense"), json.optInt("spAtk"), json.optInt("spDef"), json.optInt("speed"), json.optString("primaryType"), json.optString("secondaryType").ifBlank { null })
+    } }
 
     override suspend fun isPokemonAvailable(session: JellyfinSession): Result<Boolean> =
         withContext(ioDispatcher) {
@@ -317,6 +341,70 @@ class DefaultJellyfinPokemonRepository(
                 parseOperationResponse(JSONObject(body))
             }
         }
+
+    override suspend fun importExternalSave(
+        session: JellyfinSession,
+        contentResolver: ContentResolver,
+        uri: Uri,
+    ): Result<PokemonExternalSaveImportResponse> = withContext(ioDispatcher) {
+        runCatching {
+            val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                val maxBytes = 64 * 1024 * 1024
+                val output = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(8 * 1024)
+                while (true) {
+                    val read = input.read(chunk)
+                    if (read < 0) break
+                    require(output.size() + read <= maxBytes) { "Save files larger than 64 MB are not supported." }
+                    output.write(chunk, 0, read)
+                }
+                output.toByteArray()
+            } ?: error("Unable to open the selected save file.")
+            val boundary = "VantafynImport${System.currentTimeMillis()}"
+            val conn = session.openAuthenticatedConnection(
+                pathAndQuery = "Vantafyn/Pokemon/Vault/ImportSave",
+                method = "POST",
+            )
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            conn.outputStream.use { output ->
+                output.write("--$boundary\\r\\nContent-Disposition: form-data; name=\\\"saveFile\\\"; filename=\\\"emulator-save.sav\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n".toByteArray())
+                output.write(bytes)
+                output.write("\\r\\n--$boundary--\\r\\n".toByteArray())
+            }
+            checkResponseCode(conn)
+            val json = conn.inputStream.bufferedReader().use { it.readText() }.let(::JSONObject)
+            PokemonExternalSaveImportResponse(
+                success = json.optBoolean("success", false),
+                message = json.optString("message", ""),
+                importedCount = json.optInt("importedCount", 0),
+                generation = json.optInt("generation", 0),
+                trainerName = json.optString("trainerName", "").ifBlank { null },
+            )
+        }
+    }
+
+    override suspend fun previewExternalSave(session: JellyfinSession, contentResolver: ContentResolver, uri: Uri): Result<PokemonExternalSavePreview> = withContext(ioDispatcher) {
+        runCatching {
+            val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                val output = java.io.ByteArrayOutputStream(); val chunk = ByteArray(8 * 1024); val max = 64 * 1024 * 1024
+                while (true) { val read = input.read(chunk); if (read < 0) break; require(output.size() + read <= max) { "Save files larger than 64 MB are not supported." }; output.write(chunk, 0, read) }
+                output.toByteArray()
+            } ?: error("Unable to open the selected save file.")
+            val boundary = "VantafynPreview${System.currentTimeMillis()}"
+            val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/ImportSave/Preview", "POST")
+            conn.doOutput = true; conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            conn.outputStream.use { out -> out.write("--$boundary\\r\\nContent-Disposition: form-data; name=\\\"saveFile\\\"; filename=\\\"emulator-save.sav\\\"\\r\\nContent-Type: application/octet-stream\\r\\n\\r\\n".toByteArray()); out.write(bytes); out.write("\\r\\n--$boundary--\\r\\n".toByteArray()) }
+            checkResponseCode(conn); val json = conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
+            PokemonExternalSavePreview(json.optString("previewId"), json.optInt("generation"), json.optString("trainerName").ifBlank { null }, parseGameSaveDto(json).party, parseGameSaveDto(json).boxes)
+        }
+    }
+
+    override suspend fun commitExternalSavePreview(session: JellyfinSession, previewId: String, pokemonIds: Set<String>): Result<PokemonExternalSaveImportResponse> = withContext(ioDispatcher) { runCatching {
+        val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/ImportSave/Commit", "POST"); conn.doOutput = true; conn.setRequestProperty("Content-Type", "application/json")
+        conn.outputStream.bufferedWriter().use { it.write(JSONObject().put("previewId", previewId).put("pokemonIds", JSONArray(pokemonIds.toList())).toString()) }; checkResponseCode(conn)
+        val json = conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }; PokemonExternalSaveImportResponse(json.optBoolean("success"), json.optString("message"), json.optInt("importedCount"), json.optInt("generation"), json.optString("trainerName").ifBlank { null })
+    } }
 
     override suspend fun withdrawPokemon(
         session: JellyfinSession,

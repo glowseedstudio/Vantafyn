@@ -64,4 +64,26 @@ public sealed class PokemonConfiguration
     /// Defaults to the official PokeAPI cries repository on GitHub.
     /// </summary>
     public string CrySourceUrlTemplate { get; set; } = "https://raw.githubusercontent.com/PokeAPI/cries/main/cries/pokemon/{style}/{speciesId}.ogg";
+
+    /// <summary>
+    /// Enables optional Pokédex narration through a private, server-side TTS service.
+    /// This is deliberately opt-in so clients continue to work normally when no TTS
+    /// container has been installed.
+    /// </summary>
+    public bool NarrationEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Base URL reachable by the Jellyfin/Companion process, usually a Docker service
+    /// name such as http://kokoro-tts:8880. This URL is never returned to clients.
+    /// </summary>
+    public string? NarrationBaseUrl { get; set; }
+
+    /// <summary>Voice identifier understood by the configured Kokoro-compatible service.</summary>
+    public string NarrationVoice { get; set; } = "am_michael";
+
+    /// <summary>Speech rate sent to the TTS service, clamped to a safe range.</summary>
+    public decimal NarrationSpeed { get; set; } = 1.08m;
+
+    /// <summary>Timeout for a narration generation request.</summary>
+    public int NarrationTimeoutSeconds { get; set; } = 15;
 }

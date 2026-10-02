@@ -349,7 +349,47 @@
           <div id="pokemonStatus" class="statusBox"></div>
         </div>
 
-        <!-- 7. Companion Diagnostics -->
+        <!-- 7. Pokédex Narration -->
+        <div class="paperList">
+          <h2>Pokédex Narration (Kokoro)</h2>
+          <div class="checkboxContainer checkboxContainer-withDescription">
+            <label class="emby-checkbox-label">
+              <input is="emby-checkbox" type="checkbox" id="pokemonNarrationEnabled" />
+              <span>Enable Pokédex Narration</span>
+            </label>
+            <div class="fieldDescription checkboxFieldDescription">
+              Lets the Companion generate and cache optional Pokédex narration through a private TTS service. Leave disabled until the local service is ready; mobile and TV clients will keep using cries normally.
+            </div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonNarrationBaseUrl">Local TTS Service Base URL</label>
+            <input is="emby-input" type="text" id="pokemonNarrationBaseUrl" placeholder="http://kokoro-tts:8880" />
+            <div class="fieldDescription">Docker-internal URL reachable by the Jellyfin container, for example <code>http://kokoro-tts:8880</code>. This address is stored only on the server and is never exposed to Vantafyn clients.</div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonNarrationVoice">Kokoro Voice</label>
+            <input is="emby-input" type="text" id="pokemonNarrationVoice" placeholder="am_michael" />
+            <div class="fieldDescription">Starts with <code>am_michael</code>, an American English male announcer voice. You can switch to another installed Kokoro voice later.</div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonNarrationSpeed">Narration Speed</label>
+            <input is="emby-input" type="number" id="pokemonNarrationSpeed" min="0.75" max="1.35" step="0.01" value="1.08" />
+            <div class="fieldDescription">0.75 to 1.35. The default is lightly brisk for a synthetic Pokédex feel.</div>
+          </div>
+
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonNarrationTimeoutSeconds">TTS Timeout (Seconds)</label>
+            <input is="emby-input" type="number" id="pokemonNarrationTimeoutSeconds" min="5" max="60" value="15" />
+            <div class="fieldDescription">How long the Companion waits for a new narration before safely falling back to cry-only playback.</div>
+          </div>
+          <button is="emby-button" type="button" class="actionButton secondary" id="testPokemonNarration">Test Local TTS Connection</button>
+          <div id="pokemonNarrationStatus" class="statusBox"></div>
+        </div>
+
+        <!-- 8. Companion Diagnostics -->
         <div class="paperList">
           <h2>Companion Diagnostics</h2>
           <div class="fieldDescription">Server diagnostic snapshot and registered UnifiedPush client status.</div>
@@ -494,6 +534,11 @@
             page.querySelector('#pokemonAllowCrossGenerationTransfers').checked = !!getVal(pokemon, 'allowCrossGenerationTransfers', 'AllowCrossGenerationTransfers', false);
             page.querySelector('#pokemonAutoBackups').checked = !!getVal(pokemon, 'autoBackups', 'AutoBackups', true);
             page.querySelector('#pokemonModalBackgroundPath').value = getVal(pokemon, 'modalBackgroundPath', 'ModalBackgroundPath', '') || '';
+            page.querySelector('#pokemonNarrationEnabled').checked = !!getVal(pokemon, 'narrationEnabled', 'NarrationEnabled', false);
+            page.querySelector('#pokemonNarrationBaseUrl').value = getVal(pokemon, 'narrationBaseUrl', 'NarrationBaseUrl', '') || '';
+            page.querySelector('#pokemonNarrationVoice').value = getVal(pokemon, 'narrationVoice', 'NarrationVoice', 'am_michael') || 'am_michael';
+            page.querySelector('#pokemonNarrationSpeed').value = getVal(pokemon, 'narrationSpeed', 'NarrationSpeed', 1.08);
+            page.querySelector('#pokemonNarrationTimeoutSeconds').value = getVal(pokemon, 'narrationTimeoutSeconds', 'NarrationTimeoutSeconds', 15);
 
             const diagnostics = await api('Vantafyn/Admin/Diagnostics').catch(() => null);
             if (diagnostics) {
@@ -539,7 +584,12 @@
                 pokemonAllowTransfers: page.querySelector('#pokemonAllowTransfers').checked,
                 pokemonAllowCrossGenerationTransfers: page.querySelector('#pokemonAllowCrossGenerationTransfers').checked,
                 pokemonAutoBackups: page.querySelector('#pokemonAutoBackups').checked,
-                pokemonModalBackgroundPath: page.querySelector('#pokemonModalBackgroundPath').value.trim()
+                pokemonModalBackgroundPath: page.querySelector('#pokemonModalBackgroundPath').value.trim(),
+                pokemonNarrationEnabled: page.querySelector('#pokemonNarrationEnabled').checked,
+                pokemonNarrationBaseUrl: page.querySelector('#pokemonNarrationBaseUrl').value.trim(),
+                pokemonNarrationVoice: page.querySelector('#pokemonNarrationVoice').value.trim(),
+                pokemonNarrationSpeed: parseFloat(page.querySelector('#pokemonNarrationSpeed').value || '1.08'),
+                pokemonNarrationTimeoutSeconds: parseInt(page.querySelector('#pokemonNarrationTimeoutSeconds').value || '15', 10)
               };
 
               await api('Vantafyn/Admin/Configuration', {
@@ -632,6 +682,30 @@
               setStatus('pokemonStatus', '✗ PKVault connection failed: ' + formatError(err), 'error');
             } finally {
               testPokemonBtn.disabled = false;
+            }
+          });
+        }
+
+        const testPokemonNarrationBtn = page.querySelector('#testPokemonNarration');
+        if (testPokemonNarrationBtn) {
+          testPokemonNarrationBtn.addEventListener('click', async () => {
+            testPokemonNarrationBtn.disabled = true;
+            setStatus('pokemonNarrationStatus', 'Testing local TTS connection...', 'info');
+            try {
+              const result = await api('Vantafyn/Admin/Pokemon/Narration/TestConnection', {
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                  enabled: page.querySelector('#pokemonNarrationEnabled').checked,
+                  baseUrl: page.querySelector('#pokemonNarrationBaseUrl').value.trim(),
+                  timeoutSeconds: parseInt(page.querySelector('#pokemonNarrationTimeoutSeconds').value || '15', 10)
+                })
+              });
+              setStatus('pokemonNarrationStatus', (result.isSuccess ? '✓ ' : '✗ ') + (result.message || 'Connection test finished.'), result.isSuccess ? 'success' : 'error');
+            } catch (err) {
+              setStatus('pokemonNarrationStatus', '✗ Local TTS connection failed: ' + formatError(err), 'error');
+            } finally {
+              testPokemonNarrationBtn.disabled = false;
             }
           });
         }

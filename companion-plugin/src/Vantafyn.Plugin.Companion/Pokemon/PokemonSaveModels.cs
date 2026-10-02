@@ -327,6 +327,10 @@ public sealed class PokemonSaveParseResult
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
 
+    /// <summary>The generation identified by the save provider, when available.</summary>
+    [JsonPropertyName("detectedGeneration")]
+    public int? DetectedGeneration { get; set; }
+
     [JsonPropertyName("trainerName")]
     public string? TrainerName { get; set; }
 

@@ -29,6 +29,54 @@ public sealed class PokemonDepositRequest
     public int? TargetVaultSlotIndex { get; set; }
 }
 
+/// <summary>Result of copying a user-selected external emulator save into the personal vault.</summary>
+public sealed class PokemonExternalSaveImportResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("importedCount")]
+    public int ImportedCount { get; set; }
+
+    [JsonPropertyName("generation")]
+    public int Generation { get; set; }
+
+    [JsonPropertyName("trainerName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TrainerName { get; set; }
+}
+
+/// <summary>A short-lived, user-scoped preview of an external emulator save.</summary>
+public sealed class PokemonExternalSavePreview
+{
+    [JsonPropertyName("previewId")]
+    public string PreviewId { get; set; } = string.Empty;
+
+    [JsonPropertyName("generation")]
+    public int Generation { get; set; }
+
+    [JsonPropertyName("trainerName")]
+    public string? TrainerName { get; set; }
+
+    [JsonPropertyName("party")]
+    public IReadOnlyList<PokemonSummaryDto> Party { get; set; } = Array.Empty<PokemonSummaryDto>();
+
+    [JsonPropertyName("boxes")]
+    public IReadOnlyList<PokemonBoxDto> Boxes { get; set; } = Array.Empty<PokemonBoxDto>();
+}
+
+public sealed class PokemonExternalSaveCommitRequest
+{
+    [JsonPropertyName("previewId")]
+    public string PreviewId { get; set; } = string.Empty;
+
+    [JsonPropertyName("pokemonIds")]
+    public List<string> PokemonIds { get; set; } = [];
+}
+
 /// <summary>
 /// Request to withdraw a Pokémon from the user's personal vault back into a compatible game save.
 /// </summary>
@@ -279,4 +327,3 @@ public sealed class PokemonDiagnosticsDto
     [JsonPropertyName("activeTrades")]
     public int ActiveTrades { get; set; }
 }
-

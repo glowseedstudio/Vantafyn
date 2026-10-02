@@ -1,5 +1,9 @@
 using System.IO;
 using System.Net.Mime;
+using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using MediaBrowser.Controller.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -14,6 +18,7 @@ namespace Vantafyn.Plugin.Companion.Pokemon;
 [Route("Vantafyn/Pokemon")]
 public sealed class PokemonController : ControllerBase
 {
+    private static readonly ConcurrentDictionary<string, (Guid UserId, DateTimeOffset ExpiresAt, PokemonSaveParseResult Parsed, int Generation)> ExternalSavePreviews = new();
     private readonly IGamesService _gamesService;
     private readonly IGameSavesService _gameSavesService;
     private readonly IPokemonGameDetector _detector;
@@ -29,6 +34,9 @@ public sealed class PokemonController : ControllerBase
     private readonly IPokemonCryService? _cryService;
     private readonly IAuthorizationContext _authorizationContext;
     private readonly PokemonConfiguration? _overrideConfig;
+    private readonly ICompanionPaths? _paths;
+    private static readonly HttpClient PokeApiClient = new() { Timeout = TimeSpan.FromSeconds(12) };
+    private static readonly HttpClient NarrationClient = new();
 
     public PokemonController(
         IGamesService gamesService,
@@ -45,7 +53,8 @@ public sealed class PokemonController : ControllerBase
         IPokemonTradingService? tradingService = null,
         IPokemonJourneyService? journeyService = null,
         IPokemonSocialService? socialService = null,
-        IPokemonCryService? cryService = null)
+        IPokemonCryService? cryService = null,
+        ICompanionPaths? paths = null)
     {
         _gamesService = gamesService;
         _gameSavesService = gameSavesService;
@@ -62,6 +71,7 @@ public sealed class PokemonController : ControllerBase
         _journeyService = journeyService;
         _socialService = socialService;
         _cryService = cryService;
+        _paths = paths;
     }
 
     private PokemonConfiguration Configuration =>
@@ -69,6 +79,203 @@ public sealed class PokemonController : ControllerBase
 
     private bool IsPokemonIntegrationEnabled() =>
         Configuration.Enabled;
+
+    /// <summary>
+    /// Returns canonical Pokédex metadata. Responses are shared, persisted server-side and
+    /// populated from PokéAPI only when a species is first requested.
+    /// </summary>
+    [HttpGet("Dex/{speciesId:int}")]
+    [Produces(MediaTypeNames.Application.Json)]
+    public async Task<ActionResult<PokemonDexMetadataDto>> GetDexMetadata(int speciesId, CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (speciesId is < 1 or > 1025) return BadRequest(new { error = "SpeciesId must be between 1 and 1025." });
+        try
+        {
+            return Ok(await GetDexMetadataAsync(speciesId, cancellationToken).ConfigureAwait(false));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = $"Pokédex metadata is unavailable: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Streams cached Pokédex narration. The companion is the only component which can
+    /// reach the TTS service; the service URL and its Docker network stay private.
+    /// </summary>
+    [HttpGet("Narration/{speciesId:int}")]
+    [Produces("audio/mpeg")]
+    public async Task<IActionResult> GetNarration(int speciesId, CancellationToken cancellationToken)
+    {
+        var config = Configuration;
+        if (!IsPokemonIntegrationEnabled() || !config.NarrationEnabled)
+        {
+            return NotFound(new { error = "Pokédex narration is disabled." });
+        }
+        if (speciesId is < 1 or > 1025) return BadRequest(new { error = "SpeciesId must be between 1 and 1025." });
+        if (!TryGetNarrationEndpoint(config.NarrationBaseUrl, out var endpoint))
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Pokédex narration is not configured." });
+        }
+
+        try
+        {
+            var metadata = await GetDexMetadataAsync(speciesId, cancellationToken).ConfigureAwait(false);
+            var script = BuildNarrationScript(metadata);
+            var cachePath = NarrationCachePath(speciesId, script, config);
+            if (System.IO.File.Exists(cachePath)) return PhysicalFile(cachePath, "audio/mpeg", enableRangeProcessing: true);
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    model = "kokoro",
+                    input = script,
+                    voice = config.NarrationVoice,
+                    speed = (double)Math.Clamp(config.NarrationSpeed, 0.75m, 1.35m),
+                    response_format = "mp3"
+                }), Encoding.UTF8, "application/json")
+            };
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(config.NarrationTimeoutSeconds, 5, 60)));
+            using var response = await NarrationClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Pokédex narration service did not generate audio." });
+            }
+            if (response.Content.Headers.ContentLength is > 25L * 1024L * 1024L)
+            {
+                return StatusCode(StatusCodes.Status502BadGateway, new { error = "Pokédex narration response was too large." });
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+            var tempPath = cachePath + ".tmp";
+            await using (var source = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false))
+            await using (var target = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                var buffer = new byte[81920];
+                long total = 0;
+                int read;
+                while ((read = await source.ReadAsync(buffer, timeout.Token).ConfigureAwait(false)) > 0)
+                {
+                    total += read;
+                    if (total > 25L * 1024L * 1024L) throw new InvalidDataException("Narration response was too large.");
+                    await target.WriteAsync(buffer.AsMemory(0, read), timeout.Token).ConfigureAwait(false);
+                }
+            }
+            System.IO.File.Move(tempPath, cachePath, true);
+            return PhysicalFile(cachePath, "audio/mpeg", enableRangeProcessing: true);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Pokédex narration service timed out." });
+        }
+        catch
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "Pokédex narration is temporarily unavailable." });
+        }
+    }
+
+    private async Task<PokemonDexMetadataDto> GetDexMetadataAsync(int speciesId, CancellationToken cancellationToken)
+    {
+        var root = _paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon");
+        var path = Path.Combine(root, "pokedex-metadata", $"{speciesId}.json");
+        var cached = await JsonFile.ReadAsync<PokemonDexMetadataDto>(path, cancellationToken).ConfigureAwait(false);
+        if (cached != null && !string.IsNullOrWhiteSpace(cached.Name)) return cached;
+        using var speciesDoc = JsonDocument.Parse(await PokeApiClient.GetStringAsync($"https://pokeapi.co/api/v2/pokemon-species/{speciesId}/", cancellationToken).ConfigureAwait(false));
+        using var pokemonDoc = JsonDocument.Parse(await PokeApiClient.GetStringAsync($"https://pokeapi.co/api/v2/pokemon/{speciesId}/", cancellationToken).ConfigureAwait(false));
+        var species = speciesDoc.RootElement; var pokemon = pokemonDoc.RootElement;
+        static string Name(JsonElement item, string property) => item.GetProperty(property).GetProperty("name").GetString() ?? string.Empty;
+        static string StringValue(JsonElement item, string property) => item.ValueKind != JsonValueKind.Undefined && item.TryGetProperty(property, out var value) ? value.GetString() ?? string.Empty : string.Empty;
+        var genus = StringValue(species.GetProperty("genera").EnumerateArray().LastOrDefault(x => Name(x, "language") == "en"), "genus");
+        var flavor = StringValue(species.GetProperty("flavor_text_entries").EnumerateArray().LastOrDefault(x => Name(x, "language") == "en"), "flavor_text");
+        var stats = pokemon.GetProperty("stats").EnumerateArray().ToDictionary(x => Name(x, "stat"), x => x.GetProperty("base_stat").GetInt32());
+        var types = pokemon.GetProperty("types").EnumerateArray().OrderBy(x => x.GetProperty("slot").GetInt32()).Select(x => Name(x, "type")).ToList();
+        var dto = new PokemonDexMetadataDto { SpeciesId = speciesId, Name = HumanizeSpeciesName(species.GetProperty("name").GetString()), Category = genus, FlavorText = string.Join(" ", flavor.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)), HeightMeters = pokemon.GetProperty("height").GetDecimal() / 10m, WeightKg = pokemon.GetProperty("weight").GetDecimal() / 10m, Hp = stats.GetValueOrDefault("hp"), Attack = stats.GetValueOrDefault("attack"), Defense = stats.GetValueOrDefault("defense"), SpAtk = stats.GetValueOrDefault("special-attack"), SpDef = stats.GetValueOrDefault("special-defense"), Speed = stats.GetValueOrDefault("speed"), PrimaryType = types.ElementAtOrDefault(0) ?? string.Empty, SecondaryType = types.ElementAtOrDefault(1) };
+        await JsonFile.WriteAtomicAsync(path, dto, cancellationToken).ConfigureAwait(false);
+        return dto;
+    }
+
+    private string NarrationCachePath(int speciesId, string script, PokemonConfiguration config)
+    {
+        var root = _paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon");
+        var key = $"v1|{config.NarrationVoice}|{config.NarrationSpeed:0.00}|{script}";
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))).ToLowerInvariant()[..16];
+        return Path.Combine(root, "pokedex-narration", speciesId.ToString(), $"{hash}.mp3");
+    }
+
+    private static bool TryGetNarrationEndpoint(string? baseUrl, out Uri endpoint)
+    {
+        endpoint = null!;
+        if (!Uri.TryCreate(baseUrl?.TrimEnd('/') + "/v1/audio/speech", UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme is not ("http" or "https") || string.IsNullOrWhiteSpace(uri.Host)) return false;
+        endpoint = uri;
+        return true;
+    }
+
+    private static string BuildNarrationScript(PokemonDexMetadataDto metadata)
+    {
+        var category = string.IsNullOrWhiteSpace(metadata.Category) ? "Pokémon" : metadata.Category;
+        var flavor = string.IsNullOrWhiteSpace(metadata.FlavorText) ? "No Pokédex entry is available." : metadata.FlavorText;
+        return $"{metadata.Name}. The {category}. {flavor}";
+    }
+
+    private static string HumanizeSpeciesName(string? name) => string.Join(" ", (name ?? "Pokémon")
+        .Split('-', StringSplitOptions.RemoveEmptyEntries)
+        .Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+
+    /// <summary>
+    /// Reads an external Gen 6–9 save into a short-lived, user-scoped selection preview.
+    /// </summary>
+    [HttpPost("Vault/ImportSave/Preview")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<PokemonExternalSavePreview>> PreviewExternalSave([FromForm] IFormFile? saveFile, CancellationToken cancellationToken)
+    {
+        const long maxSaveBytes = 64L * 1024L * 1024L;
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (saveFile == null || saveFile.Length == 0 || saveFile.Length > maxSaveBytes) return BadRequest(new { error = "Choose a save file no larger than 64 MB." });
+        await using var input = saveFile.OpenReadStream();
+        using var bytes = new MemoryStream((int)saveFile.Length);
+        await input.CopyToAsync(bytes, cancellationToken).ConfigureAwait(false);
+        var provider = _providerFactory.Create(Configuration);
+        var capabilities = await provider.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+        if (!capabilities.CanReadSaves || !capabilities.SupportedGenerations.Any(g => g is "6" or "7" or "8" or "9")) return BadRequest(new { error = "PKVault Gen 6–9 support is required." });
+        var parsed = await provider.ParseSaveAsync(bytes.ToArray(), "external-emulator-save", "external", 0, cancellationToken).ConfigureAwait(false);
+        var generation = parsed.DetectedGeneration.GetValueOrDefault();
+        if (!parsed.IsSuccess) return BadRequest(new { error = parsed.ErrorMessage ?? "The selected file is not a readable Pokémon save." });
+        if (generation is < 6 or > 9) return BadRequest(new { error = "This importer accepts Gen 6–9 emulator saves only." });
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var previewId = Guid.NewGuid().ToString("N");
+        ExternalSavePreviews.Where(p => p.Value.ExpiresAt <= DateTimeOffset.UtcNow).Select(p => p.Key).ToList().ForEach(k => ExternalSavePreviews.TryRemove(k, out _));
+        ExternalSavePreviews[previewId] = (userId, DateTimeOffset.UtcNow.AddMinutes(10), parsed, generation);
+        return Ok(new PokemonExternalSavePreview { PreviewId = previewId, Generation = generation, TrainerName = parsed.TrainerName, Party = parsed.Party, Boxes = parsed.Boxes });
+    }
+
+    [HttpPost("Vault/ImportSave/Commit")]
+    public async Task<ActionResult<PokemonExternalSaveImportResponse>> CommitExternalSavePreview([FromBody] PokemonExternalSaveCommitRequest request, CancellationToken cancellationToken)
+    {
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(request.PreviewId) || !ExternalSavePreviews.TryRemove(request.PreviewId, out var preview) || preview.UserId != userId || preview.ExpiresAt <= DateTimeOffset.UtcNow)
+            return BadRequest(new { error = "This save preview has expired. Choose the save again." });
+        var selectedIds = request.PokemonIds.Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.Ordinal);
+        var all = preview.Parsed.Party.Concat(preview.Parsed.Boxes.SelectMany(b => b.Entries)).Where(p => p.SpeciesId > 0).ToList();
+        var selected = all.Where(p => selectedIds.Contains(p.Id)).ToList();
+        if (selected.Count == 0) return BadRequest(new { error = "Select at least one Pokémon to import." });
+        if (selected.Count != selectedIds.Count) return BadRequest(new { error = "The selection does not match this save preview." });
+        var vault = await _vaultStore.GetOrCreateVaultAsync(userId, cancellationToken).ConfigureAwait(false);
+        var slots = vault.Boxes.OrderBy(b => b.BoxIndex).SelectMany(b => Enumerable.Range(1, b.Capacity).Where(s => b.Entries.All(e => e.SlotIndex != s)).Select(s => (Box: b, Slot: s))).Take(selected.Count).ToList();
+        if (slots.Count != selected.Count) return BadRequest(new { error = "There are not enough free Vault slots for this selection." });
+        var now = DateTimeOffset.UtcNow;
+        for (var i = 0; i < selected.Count; i++)
+        {
+            var p = selected[i]; preview.Parsed.Details.TryGetValue(p.Id, out var details); var target = slots[i];
+            target.Box.Entries.Add(new PokemonVaultEntry { Id = Guid.NewGuid().ToString("N"), BoxIndex = target.Box.BoxIndex, SlotIndex = target.Slot, Species = p.Species, SpeciesId = p.SpeciesId, Form = p.Form, Nickname = string.IsNullOrWhiteSpace(p.Nickname) ? p.Species : p.Nickname, Level = p.Level, Gender = p.Gender, IsShiny = p.IsShiny, Generation = preview.Generation, OriginalTrainer = p.OriginalTrainer ?? preview.Parsed.TrainerName ?? string.Empty, OriginalTrainerId = p.OriginalTrainerId ?? preview.Parsed.TrainerId, OriginGame = p.OriginGame ?? $"Imported Gen {preview.Generation} emulator save", OriginGameId = "external-import", CurrentLocation = $"Vault Box {target.Box.BoxIndex}, Slot {target.Slot}", CreatedAtUtc = now, UpdatedAtUtc = now, RawData = details?.RawData, Details = details, LegalityStatus = details?.LegalityStatus ?? p.LegalityStatus });
+        }
+        await _vaultStore.SaveVaultAsync(userId, vault, cancellationToken).ConfigureAwait(false);
+        if (_journeyService != null) try { await _journeyService.RecordBatchEncountersAsync(userId, selected, $"Imported Gen {preview.Generation} emulator save", true, cancellationToken).ConfigureAwait(false); } catch { }
+        return Ok(new PokemonExternalSaveImportResponse { Success = true, ImportedCount = selected.Count, Generation = preview.Generation, TrainerName = preview.Parsed.TrainerName, Message = $"Imported {selected.Count} Pokémon. Your original save was not changed." });
+    }
 
     /// <summary>
     /// Lists all detected Pokémon games across all available libraries on this server for the current user,
@@ -762,6 +969,92 @@ public sealed class PokemonController : ControllerBase
         }
 
         return Ok(txResult.Value);
+    }
+
+    /// <summary>
+    /// Copies every Pokémon from a Gen 6–9 emulator save into the current user's vault.
+    /// The uploaded file is never written back or otherwise changed; PKVault's temporary parse copy is cleaned up after reading.
+    /// </summary>
+    [HttpPost("Vault/ImportSave")]
+    [Consumes("multipart/form-data")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PokemonExternalSaveImportResponse>> ImportExternalSave(
+        [FromForm] IFormFile? saveFile,
+        CancellationToken cancellationToken)
+    {
+        const long maxSaveBytes = 64L * 1024L * 1024L;
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (saveFile == null || saveFile.Length == 0) return BadRequest(new { error = "Choose a non-empty emulator save file." });
+        if (saveFile.Length > maxSaveBytes) return BadRequest(new { error = "Save files larger than 64 MB are not supported." });
+
+        await using var input = saveFile.OpenReadStream();
+        using var buffer = new MemoryStream((int)Math.Min(saveFile.Length, maxSaveBytes));
+        await input.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+
+        var provider = _providerFactory.Create(Configuration);
+        var capabilities = await provider.GetCapabilitiesAsync(cancellationToken).ConfigureAwait(false);
+        if (!capabilities.CanReadSaves || !capabilities.SupportedGenerations.Any(g => g is "6" or "7" or "8" or "9"))
+        {
+            return BadRequest(new { error = "A PKVault provider with Gen 6–9 support is required for external save import." });
+        }
+
+        // PKVault identifies the save itself. These placeholders are only used as safe origin labels.
+        var parsed = await provider.ParseSaveAsync(buffer.ToArray(), "external-emulator-save", "external", 0, cancellationToken).ConfigureAwait(false);
+        var generation = parsed.DetectedGeneration.GetValueOrDefault();
+        if (!parsed.IsSuccess) return BadRequest(new { error = parsed.ErrorMessage ?? "The selected file is not a readable Pokémon save." });
+        if (generation is < 6 or > 9) return BadRequest(new { error = "This importer accepts Gen 6–9 emulator saves only." });
+
+        var sourcePokemon = parsed.Party.Concat(parsed.Boxes.SelectMany(b => b.Entries))
+            .Where(p => p.SpeciesId > 0).ToList();
+        if (sourcePokemon.Count == 0) return BadRequest(new { error = "No Pokémon were found in this save." });
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var vault = await _vaultStore.GetOrCreateVaultAsync(userId, cancellationToken).ConfigureAwait(false);
+        var freeSlots = vault.Boxes.Sum(b => Math.Max(0, b.Capacity - b.Entries.Count));
+        if (freeSlots < sourcePokemon.Count)
+        {
+            return BadRequest(new { error = $"Vault needs {sourcePokemon.Count} free slots, but only {freeSlots} are available." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var slots = vault.Boxes.OrderBy(b => b.BoxIndex)
+            .SelectMany(b => Enumerable.Range(1, b.Capacity).Where(slot => b.Entries.All(e => e.SlotIndex != slot)).Select(slot => (Box: b, Slot: slot)))
+            .Take(sourcePokemon.Count).ToList();
+        for (var i = 0; i < sourcePokemon.Count; i++)
+        {
+            var summary = sourcePokemon[i];
+            parsed.Details.TryGetValue(summary.Id, out var details);
+            var target = slots[i];
+            target.Box.Entries.Add(new PokemonVaultEntry
+            {
+                Id = Guid.NewGuid().ToString("N"), BoxIndex = target.Box.BoxIndex, SlotIndex = target.Slot,
+                Species = summary.Species, SpeciesId = summary.SpeciesId, Form = summary.Form,
+                Nickname = string.IsNullOrWhiteSpace(summary.Nickname) ? summary.Species : summary.Nickname,
+                Level = summary.Level, Gender = summary.Gender, IsShiny = summary.IsShiny, Generation = generation,
+                OriginalTrainer = summary.OriginalTrainer ?? parsed.TrainerName ?? string.Empty,
+                OriginalTrainerId = summary.OriginalTrainerId ?? parsed.TrainerId,
+                OriginGame = summary.OriginGame ?? $"Imported Gen {generation} emulator save",
+                OriginGameId = "external-import", CurrentLocation = $"Vault Box {target.Box.BoxIndex}, Slot {target.Slot}",
+                CreatedAtUtc = now, UpdatedAtUtc = now, RawData = details?.RawData, Details = details,
+                LegalityStatus = details?.LegalityStatus ?? summary.LegalityStatus
+            });
+        }
+        await _vaultStore.SaveVaultAsync(userId, vault, cancellationToken).ConfigureAwait(false);
+
+        if (_journeyService != null)
+        {
+            try
+            {
+                await _journeyService.RecordBatchEncountersAsync(userId, sourcePokemon, $"Imported Gen {generation} emulator save", true, cancellationToken).ConfigureAwait(false);
+                if (parsed.CaughtSpeciesIds.Count > 0 || parsed.SeenSpeciesIds.Count > 0)
+                    await _journeyService.RecordSpeciesIdsAsync(userId, parsed.CaughtSpeciesIds, parsed.SeenSpeciesIds, $"Imported Gen {generation} emulator save", false, cancellationToken).ConfigureAwait(false);
+            }
+            catch { /* Vault import succeeded; Pokédex sync will retry on the next vault refresh. */ }
+        }
+
+        return Ok(new PokemonExternalSaveImportResponse { Success = true, ImportedCount = sourcePokemon.Count, Generation = generation, TrainerName = parsed.TrainerName, Message = $"Imported {sourcePokemon.Count} Pokémon. Your original save was not changed." });
     }
 
     /// <summary>
@@ -2417,5 +2710,3 @@ public sealed class PokemonController : ControllerBase
         return Ok(events);
     }
 }
-
-

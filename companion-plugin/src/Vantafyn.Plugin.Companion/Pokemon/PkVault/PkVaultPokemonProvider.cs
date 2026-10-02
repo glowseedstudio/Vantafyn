@@ -358,6 +358,7 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             var result = new PokemonSaveParseResult
             {
                 IsSuccess = true,
+                DetectedGeneration = saveInfo.Generation,
                 TrainerName = saveInfo.TrainerName,
                 TrainerId = saveInfo.Tid > 0 ? saveInfo.Tid.ToString() : null,
                 PokedexSeen = saveInfo.DexSeenCount,

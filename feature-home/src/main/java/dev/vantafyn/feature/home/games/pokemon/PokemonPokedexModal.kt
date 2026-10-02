@@ -120,9 +120,9 @@ fun PokemonPokedexModal(
         }
     }
 
-    // Duck ambient background music to 20% so Pokémon cries are crisp and clear
+    // Keep the Vault theme audible while leaving enough headroom for Pokémon cries.
     DisposableEffect(Unit) {
-        GameHubSoundManager.duck(context, duckFactor = 0.20f, durationMs = 500L)
+        GameHubSoundManager.duck(context, duckFactor = 0.45f, durationMs = 500L)
         onDispose {
             GameHubSoundManager.unduck(context, durationMs = 500L)
         }

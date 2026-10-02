@@ -35,6 +35,7 @@ import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.ImageSearch
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TouchApp
@@ -127,6 +128,9 @@ fun GamesSettingsScreen(
     }
     var pokemonCryStyle by remember {
         mutableStateOf(prefs.getString("pokemon_cry_style", "latest") ?: "latest")
+    }
+    var pokemonNarrationAutoplay by remember {
+        mutableStateOf(prefs.getBoolean("pokemon_narration_autoplay", false))
     }
     var romCacheSize by remember { mutableLongStateOf(0L) }
     var romFileCount by remember { mutableStateOf(0) }
@@ -796,6 +800,41 @@ fun GamesSettingsScreen(
                     }
                 }
 
+                // Pokédex Narration Auto-Play
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val newVal = !pokemonNarrationAutoplay
+                            pokemonNarrationAutoplay = newVal
+                            prefs.edit().putBoolean("pokemon_narration_autoplay", newVal).apply()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.RecordVoiceOver,
+                        contentDescription = null,
+                        tint = Color(0xFFA855F7),
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Pokédex Auto-Narration", color = VantafynColors.Ink, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Read the name, classification, and entry after its cry. Requires a configured Companion TTS service.", color = VantafynColors.Muted, fontSize = 12.sp)
+                    }
+                    VantafynSwitch(
+                        checked = pokemonNarrationAutoplay,
+                        onCheckedChange = { checked ->
+                            pokemonNarrationAutoplay = checked
+                            prefs.edit().putBoolean("pokemon_narration_autoplay", checked).apply()
+                        },
+                    )
+                }
+
                 // Fast Forward Speed
                 Box(
                     modifier = Modifier
@@ -980,4 +1019,3 @@ fun GamesSettingsScreen(
     }
     }
 }
-

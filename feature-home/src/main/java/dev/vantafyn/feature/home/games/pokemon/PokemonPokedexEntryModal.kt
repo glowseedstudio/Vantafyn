@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CatchingPokemon
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Public
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Scale
 import androidx.compose.material.icons.rounded.Straighten
 import androidx.compose.material.icons.rounded.Visibility
@@ -54,6 +55,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,6 +80,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
+import dev.vantafyn.core.jellyfin.DefaultJellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonBoxDto
 import dev.vantafyn.core.jellyfin.PokemonDetailsDto
@@ -111,10 +114,11 @@ fun PokemonPokedexEntryModal(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
+    val metadataRepository = remember { DefaultJellyfinPokemonRepository() }
 
     // Duck ambient background music so audio cries are heard with clarity
     DisposableEffect(Unit) {
-        GameHubSoundManager.duck(context, duckFactor = 0.20f, durationMs = 400L)
+        GameHubSoundManager.duck(context, duckFactor = 0.45f, durationMs = 400L)
         onDispose {
             GameHubSoundManager.unduck(context, durationMs = 400L)
         }
@@ -126,6 +130,9 @@ fun PokemonPokedexEntryModal(
     }
     var cryStyle by remember {
         mutableStateOf(prefs.getString("pokemon_cry_style", "latest") ?: "latest")
+    }
+    var autoPlayNarration by remember {
+        mutableStateOf(prefs.getBoolean("pokemon_narration_autoplay", false))
     }
 
     var currentSpeciesId by remember(entry.speciesId) {
@@ -142,12 +149,19 @@ fun PokemonPokedexEntryModal(
     val isSeen = currentEntry?.isSeen == true || isCaught
     val hasShiny = currentEntry?.hasShiny == true
 
-    val dexData = remember(currentSpeciesId) {
+    val fallbackDexData = remember(currentSpeciesId) {
         PokemonPokedexCatalog.getPokedexData(currentSpeciesId)
     }
-    val (primaryType, secondaryType) = remember(currentSpeciesId, dexData.name) {
+    var fetchedDexMetadata by remember(currentSpeciesId) { mutableStateOf<PokedexMetadata?>(null) }
+    LaunchedEffect(currentSpeciesId) {
+        fetchedDexMetadata = PokeApiPokedexRepository.load(context, currentSpeciesId, fallbackDexData, session, metadataRepository)
+    }
+    val dexData = fetchedDexMetadata?.applyTo(fallbackDexData) ?: fallbackDexData
+    val (fallbackPrimaryType, fallbackSecondaryType) = remember(currentSpeciesId, dexData.name) {
         PokemonTypeCatalog.getTypes(currentSpeciesId, dexData.name)
     }
+    val primaryType = fetchedDexMetadata?.primaryType ?: fallbackPrimaryType
+    val secondaryType = fetchedDexMetadata?.secondaryType ?: fallbackSecondaryType
 
     val cardBorderBrush = remember(primaryType, secondaryType, isRegistered) {
         if (isRegistered) {
@@ -189,6 +203,60 @@ fun PokemonPokedexEntryModal(
 
     var isPlayingCry by remember { mutableStateOf(false) }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var isPlayingNarration by remember { mutableStateOf(false) }
+    var narrationPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+
+    val stopNarration: () -> Unit = {
+        narrationPlayer?.let { player ->
+            try { if (player.isPlaying) player.stop() } catch (_: Throwable) {}
+            try { player.release() } catch (_: Throwable) {}
+        }
+        narrationPlayer = null
+        isPlayingNarration = false
+    }
+
+    val playNarration: () -> Unit = {
+        val narrationUrl = JellyfinPokemonRepository.getPokemonNarrationUrl(session, currentSpeciesId)
+        if (narrationUrl != null && isRegistered) {
+            stopNarration()
+            try {
+                val player = MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .build(),
+                    )
+                    setDataSource(narrationUrl)
+                    setVolume(0.82f, 0.82f)
+                    isLooping = false
+                    setOnPreparedListener { mediaPlayer ->
+                        try {
+                            mediaPlayer.start()
+                            isPlayingNarration = true
+                        } catch (_: Throwable) {
+                            isPlayingNarration = false
+                        }
+                    }
+                    setOnCompletionListener { mediaPlayer ->
+                        isPlayingNarration = false
+                        try { mediaPlayer.release() } catch (_: Throwable) {}
+                        if (narrationPlayer === mediaPlayer) narrationPlayer = null
+                    }
+                    setOnErrorListener { mediaPlayer, _, _ ->
+                        isPlayingNarration = false
+                        try { mediaPlayer.release() } catch (_: Throwable) {}
+                        if (narrationPlayer === mediaPlayer) narrationPlayer = null
+                        true
+                    }
+                    prepareAsync()
+                }
+                narrationPlayer = player
+            } catch (_: Throwable) {
+                isPlayingNarration = false
+            }
+        }
+    }
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -204,6 +272,7 @@ fun PokemonPokedexEntryModal(
                     } catch (_: Throwable) {}
                     activePlayer = null
                     isPlayingCry = false
+                    stopNarration()
                 }
                 androidx.lifecycle.Lifecycle.Event.ON_RESUME -> GameHubSoundManager.resume(context)
                 else -> {}
@@ -215,8 +284,9 @@ fun PokemonPokedexEntryModal(
         }
     }
 
-    val playCry: (String) -> Unit = { style ->
+    val playCry: (String, Boolean) -> Unit = { style, narrateAfter ->
         try {
+            stopNarration()
             activePlayer?.let { mp ->
                 try { if (mp.isPlaying) mp.stop() } catch (_: Throwable) {}
                 try { mp.release() } catch (_: Throwable) {}
@@ -248,6 +318,7 @@ fun PokemonPokedexEntryModal(
                     isPlayingCry = false
                     try { mp.release() } catch (_: Throwable) {}
                     if (activePlayer === mp) activePlayer = null
+                    if (narrateAfter && autoPlayNarration && isRegistered) playNarration()
                 }
                 setOnErrorListener { mp, _, _ ->
                     isPlayingCry = false
@@ -265,7 +336,9 @@ fun PokemonPokedexEntryModal(
 
     DisposableEffect(currentSpeciesId) {
         if (autoPlayCries && isRegistered) {
-            playCry(cryStyle)
+            playCry(cryStyle, true)
+        } else if (autoPlayNarration && isRegistered) {
+            playNarration()
         }
         onDispose {
             try {
@@ -276,6 +349,7 @@ fun PokemonPokedexEntryModal(
             } catch (_: Throwable) {}
             activePlayer = null
             isPlayingCry = false
+            stopNarration()
         }
     }
 
@@ -840,7 +914,7 @@ fun PokemonPokedexEntryModal(
                                     if (isPlayingCry) primaryType.accentColor else Color(0xFF38405E),
                                     CircleShape
                                 )
-                                .clickable { playCry(cryStyle) },
+                                .clickable { playCry(cryStyle, false) },
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
@@ -969,7 +1043,7 @@ fun PokemonPokedexEntryModal(
                                 val nextStyle = if (cryStyle == "latest") "legacy" else "latest"
                                 cryStyle = nextStyle
                                 prefs.edit().putString("pokemon_cry_style", nextStyle).apply()
-                                playCry(nextStyle)
+                                playCry(nextStyle, false)
                             }
                             .padding(horizontal = 10.dp, vertical = 5.dp),
                     ) {

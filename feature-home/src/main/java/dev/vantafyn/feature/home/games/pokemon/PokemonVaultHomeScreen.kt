@@ -50,6 +50,7 @@ import androidx.compose.material.icons.rounded.Security
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.SwapHoriz
+import androidx.compose.material.icons.rounded.UploadFile
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -108,6 +109,7 @@ fun PokemonVaultHomeScreen(
     isLoading: Boolean,
     isRefreshing: Boolean,
     onMovePokemon: () -> Unit,
+    onImportSave: () -> Unit,
     onSelectGameForTransfer: (GameSummary) -> Unit,
     onOpenTradeCenter: () -> Unit,
     onOpenPokedex: () -> Unit,
@@ -272,6 +274,7 @@ fun PokemonVaultHomeScreen(
             // Primary Feature Actions
             VaultPrimaryFeatures(
                 onMovePokemon = onMovePokemon,
+                onImportSave = onImportSave,
                 onOpenTradeCenter = onOpenTradeCenter,
                 onOpenPokedex = onOpenPokedex,
                 onOpenBadges = onOpenBadges,
@@ -942,6 +945,7 @@ private fun VaultStatTile(
 @Composable
 private fun VaultPrimaryFeatures(
     onMovePokemon: () -> Unit,
+    onImportSave: () -> Unit,
     onOpenTradeCenter: () -> Unit,
     onOpenPokedex: () -> Unit,
     onOpenBadges: () -> Unit,
@@ -1043,6 +1047,33 @@ private fun VaultPrimaryFeatures(
                         )
                     }
                 }
+            }
+        }
+
+        // External Gen 6–9 emulator saves are copied into the Vault; the selected file is never changed.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(Color(0xFF171C2C))
+                .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                .clickable { onImportSave() }
+                .padding(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF8B5CF6).copy(alpha = 0.22f)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Rounded.UploadFile, "Import emulator save", tint = Color(0xFFB8A4FF), modifier = Modifier.size(24.dp)) }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("Import emulator save", color = VantafynColors.Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    Text("Copy Pokémon from a Gen 6–9 save without changing the original file", color = VantafynColors.Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                }
+                Icon(Icons.Rounded.ChevronRight, null, tint = Color(0xFFB8A4FF), modifier = Modifier.size(18.dp))
             }
         }
 

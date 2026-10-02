@@ -58,9 +58,7 @@ object PokemonPokedexCatalog {
     fun getPokedexData(speciesId: Int): SpeciesPokedexData {
         val safeId = speciesId.coerceIn(1, 1025)
         val curated = CURATED_ENTRIES[safeId]
-        if (curated != null) return curated
-
-        return generatePokedexData(safeId)
+        return curated ?: generatePokedexData(safeId)
     }
 
     private fun getGenAndRegion(speciesId: Int): Pair<String, String> = when {
@@ -134,7 +132,7 @@ object PokemonPokedexCatalog {
         val weight = (5.0f + ((seed % 95) * 1.2f)).coerceAtLeast(1.0f)
 
         val typeLabel = if (secondaryType != null) "${primaryType.displayName}/${secondaryType.displayName}" else primaryType.displayName
-        val category = "${primaryType.displayName} Pokémon"
+        val category = " Pokémon"
         val flavor = "Discovered in the $regionName region. This $typeLabel species channels elemental energy to thrive in its natural environment and demonstrates remarkable loyalty to its Trainer."
 
         return SpeciesPokedexData(

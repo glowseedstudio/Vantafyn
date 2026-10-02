@@ -41,6 +41,9 @@ object GameHubSoundManager {
     private var musicObserverJob: Job? = null
 
     private var mediaPlayer: MediaPlayer? = null
+    // The outgoing player during a crossfade must remain owned by the manager. Without this,
+    // an interrupted crossfade cancels its coroutine and leaves the old track playing.
+    private var fadingOutPlayer: MediaPlayer? = null
     @Volatile
     var activeTrack: GameHubTrack = GameHubTrack.GAME_HUB
         private set
@@ -51,6 +54,8 @@ object GameHubSoundManager {
     private var isPlayingOrFadingIn = false
     @Volatile
     private var duckCount = 0
+    @Volatile
+    private var duckFactor = 1.0f
 
     /**
      * Checks if standard music playback is currently active in Vantafyn.
@@ -87,9 +92,9 @@ object GameHubSoundManager {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putFloat(KEY_BGM_VOLUME, clamped).apply()
         if (isPlayingOrFadingIn) {
-            currentVolume = clamped
+            currentVolume = effectiveTargetVolume(context, clamped)
             try {
-                mediaPlayer?.setVolume(clamped, clamped)
+                mediaPlayer?.setVolume(currentVolume, currentVolume)
             } catch (e: Exception) {
                 Log.w(TAG, "Error setting volume: ${e.message}")
             }
@@ -118,9 +123,13 @@ object GameHubSoundManager {
             return
         }
 
-        val targetVol = getTargetVolume(appContext)
+        val targetVol = effectiveTargetVolume(appContext)
         val outgoingPlayer = mediaPlayer
         val outgoingVol = currentVolume
+
+        fadeJob?.cancel()
+        fadingOutPlayer?.takeIf { it !== outgoingPlayer }?.stopAndRelease()
+        fadingOutPlayer = outgoingPlayer
 
         val incomingPlayer = try {
             createPlayer(appContext, targetTrack.assetName)
@@ -139,7 +148,6 @@ object GameHubSoundManager {
         activeTrack = targetTrack
         isPlayingOrFadingIn = true
 
-        fadeJob?.cancel()
         fadeJob = scope.launch {
             try {
                 incomingPlayer.setVolume(0f, 0f)
@@ -175,11 +183,8 @@ object GameHubSoundManager {
             } catch (_: Exception) { }
 
             try {
-                outgoingPlayer?.setVolume(0f, 0f)
-                if (outgoingPlayer?.isPlaying == true) {
-                    outgoingPlayer.pause()
-                }
-                outgoingPlayer?.release()
+                outgoingPlayer?.stopAndRelease()
+                if (fadingOutPlayer === outgoingPlayer) fadingOutPlayer = null
             } catch (_: Exception) { }
         }
     }
@@ -206,7 +211,7 @@ object GameHubSoundManager {
             return
         }
 
-        val target = (targetVolume ?: getTargetVolume(appContext)).coerceIn(0.0f, 1.0f)
+        val target = effectiveTargetVolume(appContext, targetVolume ?: getTargetVolume(appContext))
         isPlayingOrFadingIn = true
 
         val player = try {
@@ -269,8 +274,11 @@ object GameHubSoundManager {
     fun fadeOut(durationMs: Long = 600L, onComplete: (() -> Unit)? = null) {
         isPlayingOrFadingIn = false
         duckCount = 0
+        duckFactor = 1.0f
         musicObserverJob?.cancel()
         musicObserverJob = null
+        fadingOutPlayer?.stopAndRelease()
+        fadingOutPlayer = null
         val player = mediaPlayer ?: return
 
         fadeJob?.cancel()
@@ -303,7 +311,7 @@ object GameHubSoundManager {
     }
 
     /**
-     * Ducks (smoothly lowers) ambient background music down to a lower percentage (e.g. 20% of target volume)
+     * Ducks (smoothly lowers) ambient background music down to a lower percentage of target volume
      * so that foreground sound effects (like Pokémon cries) can be clearly heard.
      * Uses reference counting so nested screens don't unduck prematurely.
      */
@@ -311,12 +319,12 @@ object GameHubSoundManager {
     fun duck(context: Context, duckFactor: Float = 0.20f, durationMs: Long = 400L) {
         val appContext = context.applicationContext
         duckCount++
-        if (duckCount > 1) return // Already ducked
+        this.duckFactor = minOf(this.duckFactor, duckFactor.coerceIn(0.01f, 1.0f))
+        if (duckCount > 1) return // Already ducked at an equal or lower level
         val player = mediaPlayer ?: return
         if (!player.isPlaying && !isPlayingOrFadingIn) return
 
-        val baseTarget = getTargetVolume(appContext)
-        val duckTarget = (baseTarget * duckFactor).coerceIn(0.01f, 1.0f)
+        val duckTarget = effectiveTargetVolume(appContext)
 
         fadeJob?.cancel()
         fadeJob = scope.launch {
@@ -351,6 +359,7 @@ object GameHubSoundManager {
         val appContext = context.applicationContext
         duckCount = (duckCount - 1).coerceAtLeast(0)
         if (duckCount > 0) return // Still nested
+        duckFactor = 1.0f
         val player = mediaPlayer ?: return
         if (!player.isPlaying && !isPlayingOrFadingIn) return
 
@@ -388,10 +397,13 @@ object GameHubSoundManager {
     fun stop(instant: Boolean = true) {
         isPlayingOrFadingIn = false
         duckCount = 0
+        duckFactor = 1.0f
         musicObserverJob?.cancel()
         musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
+        fadingOutPlayer?.stopAndRelease()
+        fadingOutPlayer = null
 
         val player = mediaPlayer ?: return
         try {
@@ -419,7 +431,6 @@ object GameHubSoundManager {
      */
     @Synchronized
     fun pause() {
-        duckCount = 0
         musicObserverJob?.cancel()
         musicObserverJob = null
         fadeJob?.cancel()
@@ -428,6 +439,10 @@ object GameHubSoundManager {
             mediaPlayer?.setVolume(0f, 0f)
             if (mediaPlayer?.isPlaying == true) {
                 mediaPlayer?.pause()
+            }
+            fadingOutPlayer?.setVolume(0f, 0f)
+            if (fadingOutPlayer?.isPlaying == true) {
+                fadingOutPlayer?.pause()
             }
         } catch (e: Exception) {
             Log.w(TAG, "Error pausing Game Hub audio: ${e.message}")
@@ -459,9 +474,22 @@ object GameHubSoundManager {
         fadeJob = null
         try {
             mediaPlayer?.release()
+            fadingOutPlayer?.release()
         } catch (_: Exception) { }
         mediaPlayer = null
+        fadingOutPlayer = null
         currentVolume = 0.0f
+    }
+
+    private fun effectiveTargetVolume(context: Context, baseVolume: Float = getTargetVolume(context)): Float =
+        (baseVolume * duckFactor).coerceIn(0.0f, 1.0f)
+
+    private fun MediaPlayer.stopAndRelease() {
+        try {
+            setVolume(0f, 0f)
+            if (isPlaying) pause()
+            release()
+        } catch (_: Exception) { }
     }
 
     @Synchronized

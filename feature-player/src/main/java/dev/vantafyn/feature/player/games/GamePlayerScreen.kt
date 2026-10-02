@@ -238,6 +238,13 @@ fun GamePlayerScreen(
                 statusMessage = "Downloading ROM: ${(progress * 100).toInt()}%"
             }
 
+            // Ensure the exact EmulatorJS runtime and core are available before the WebView
+            // starts. NDS is intentionally resolved to DeSmuME below: EmulatorJS's generic
+            // "nds" selector otherwise defaults to melonDS, which is less reliable for a
+            // number of commercial DS titles.
+            statusMessage = "Preparing emulation core..."
+            storageManager.preCacheEmulatorCore(game.systemId, game.core)
+
             // Check save synchronization between cloud and local
             val syncInfo = storageManager.checkSaveSync(session, game.id, GameSaveKind.Sram)
             if (syncInfo.status == SaveSyncStatus.CLOUD_NEWER || syncInfo.status == SaveSyncStatus.CONFLICT) {
@@ -809,7 +816,11 @@ private fun generateEmulatorHtml(
         key == "nes" || key.contains("famicom") || ext == "nes" -> "nes"
         key == "segamd" || key.contains("genesis") || key.contains("sega") || key.contains("megadrive") || ext == "gen" || ext == "smd" || ext == "md" -> "segaMD"
         key == "n64" || key.contains("nintendo 64") || ext == "z64" || ext == "n64" || ext == "v64" -> "n64"
-        key == "nds" || key.contains("ds") || ext == "nds" -> "nds"
+        // Do not pass the generic "nds" system selector to EmulatorJS. Its current default
+        // is melonDS, whereas the app prepares DeSmuME and Pokémon Black/White 2-family ROMs
+        // are demonstrably more reliable with it. Keeping this explicit also makes the
+        // requested core archive and the core that actually launches identical.
+        key == "nds" || key.contains("ds") || ext == "nds" -> "desmume"
         key == "psx" || key == "ps1" || key.contains("playstation") || ext == "chd" || ext == "pbp" || ext == "cue" -> "psx"
         else -> key
     }
@@ -819,6 +830,11 @@ private fun generateEmulatorHtml(
     val safeGameTitle = gameTitle.replace("'", "\\'").replace("\"", "\\\"")
     val safeGameName = safeRomStem.ifBlank { safeGameTitle }
     val gameIdHash = Math.abs(gameTitle.hashCode()).coerceAtLeast(1)
+    val dsLayoutOption = if (systemCoreName == "desmume") {
+        "'desmume_screens_layout': (window.innerWidth > window.innerHeight ? 'left/right' : 'top/bottom'),"
+    } else {
+        ""
+    }
 
     return """
         <!DOCTYPE html>
@@ -898,7 +914,8 @@ private fun generateEmulatorHtml(
                     'menu-bar-button': 'hidden',
                     'save-save-interval': '1',
                     'save-state-location': 'browser',
-                    'fps-limit': '60'
+                    'fps-limit': '60',
+                    $dsLayoutOption
                 };
 
                 // Keep WebView compositor and VSync active even when no touch input occurs
