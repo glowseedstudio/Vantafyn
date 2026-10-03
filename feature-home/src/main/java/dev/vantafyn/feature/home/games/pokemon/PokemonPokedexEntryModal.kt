@@ -82,7 +82,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
-import androidx.media3.common.audio.SonicAudioProcessor
 import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
@@ -286,14 +285,15 @@ fun PokemonPokedexEntryModal(
                 val player = VantafynExoPlayerFactory.musicBuilder(
                     context,
                     audioProcessors = arrayOf(
-                        // Raise pitch independently of narration speed. The restrained lift gives
-                        // the narrator a brighter synthetic-device character without imitating a
-                        // particular proprietary voice.
-                        SonicAudioProcessor().apply {
-                            setSpeed(1f)
-                            setPitch(1.16f)
-                        },
-                        PokedexVoiceAudioProcessor(),
+                        PokedexVoiceAudioProcessor(
+                            debugDirectory = if (
+                                context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0
+                            ) {
+                                File(context.cacheDir, "pokedex-voice-debug/$speciesId")
+                            } else {
+                                null
+                            },
+                        ),
                     ),
                 ).build().apply {
                     volume = 0.82f
