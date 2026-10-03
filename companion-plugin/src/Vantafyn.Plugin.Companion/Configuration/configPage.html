@@ -345,6 +345,14 @@
             </div>
           </div>
 
+          <div class="inputContainer">
+            <label class="inputLabel" for="pokemonBadgeArtPath">Gym Badge Artwork Folder (Optional)</label>
+            <input is="emby-input" type="text" id="pokemonBadgeArtPath" placeholder="e.g. /mnt/storage/pokemon-badges" />
+            <div class="fieldDescription">
+              Local folder path on this server containing badge images by region, for example <code>kanto/boulder.png</code>, <code>johto/zephyr.png</code>, and <code>hoenn/stone.png</code>. Leave blank to use the Companion data folder default.
+            </div>
+          </div>
+
           <button is="emby-button" type="button" class="actionButton secondary" id="testPokemon">Test PKVault Connection</button>
           <div id="pokemonStatus" class="statusBox"></div>
         </div>
@@ -545,6 +553,7 @@
             page.querySelector('#pokemonAllowCrossGenerationTransfers').checked = !!getVal(pokemon, 'allowCrossGenerationTransfers', 'AllowCrossGenerationTransfers', false);
             page.querySelector('#pokemonAutoBackups').checked = !!getVal(pokemon, 'autoBackups', 'AutoBackups', true);
             page.querySelector('#pokemonModalBackgroundPath').value = getVal(pokemon, 'modalBackgroundPath', 'ModalBackgroundPath', '') || '';
+            page.querySelector('#pokemonBadgeArtPath').value = getVal(pokemon, 'badgeArtPath', 'BadgeArtPath', '') || '';
             page.querySelector('#pokemonNarrationEnabled').checked = !!getVal(pokemon, 'narrationEnabled', 'NarrationEnabled', false);
             page.querySelector('#pokemonNarrationBaseUrl').value = getVal(pokemon, 'narrationBaseUrl', 'NarrationBaseUrl', '') || '';
             const narrationVoice = getVal(pokemon, 'narrationVoice', 'NarrationVoice', 'am_puck') || 'am_puck';
@@ -597,6 +606,7 @@
                 pokemonAllowCrossGenerationTransfers: page.querySelector('#pokemonAllowCrossGenerationTransfers').checked,
                 pokemonAutoBackups: page.querySelector('#pokemonAutoBackups').checked,
                 pokemonModalBackgroundPath: page.querySelector('#pokemonModalBackgroundPath').value.trim(),
+                pokemonBadgeArtPath: page.querySelector('#pokemonBadgeArtPath').value.trim(),
                 pokemonNarrationEnabled: page.querySelector('#pokemonNarrationEnabled').checked,
                 pokemonNarrationBaseUrl: page.querySelector('#pokemonNarrationBaseUrl').value.trim(),
                 pokemonNarrationVoice: page.querySelector('#pokemonNarrationVoice').value.trim(),

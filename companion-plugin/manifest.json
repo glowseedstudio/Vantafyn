@@ -12,16 +12,16 @@
         "changelog": "Adds the Pokémon Badge Case, Gen 1-3 gym badge save parsing, configurable badge art folders, and a premium game-specific badge collection screen.",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.50/Vantafyn.Plugin.Companion_0.2.16_net9.zip",
-        "checksum": "824fdba94d5363ca9c384c8a5d8708e9",
-        "timestamp": "2026-10-03T08:20:17Z"
+        "checksum": "005113c7adbb926490ab7b17df4ffa05",
+        "timestamp": "2026-10-03T08:53:26Z"
       },
       {
         "version": "0.2.16.1",
         "changelog": "Adds the Pokémon Badge Case, Gen 1-3 gym badge save parsing, configurable badge art folders, and a premium game-specific badge collection screen.",
         "targetAbi": "12.0.0.0",
         "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.50/Vantafyn.Plugin.Companion_0.2.16_net10.zip",
-        "checksum": "f6838d49e6794c8ad2d617fee99b85c0",
-        "timestamp": "2026-10-03T08:20:17Z"
+        "checksum": "aba0770b835b4502c6027045134225b7",
+        "timestamp": "2026-10-03T08:53:26Z"
       },
       {
         "version": "0.2.6.0",
