@@ -38,6 +38,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -56,6 +57,8 @@ import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.JellyfinSession
+import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
+import dev.vantafyn.core.jellyfin.PokemonBadgeArtCatalogDto
 import dev.vantafyn.core.jellyfin.PokemonGameSaveDto
 import dev.vantafyn.core.jellyfin.PokemonGymBadgeDto
 import dev.vantafyn.core.jellyfin.PokemonGymBadgeRegionDto
@@ -74,6 +77,7 @@ private data class BadgeCaseGame(
 @Composable
 fun PokemonBadgeCaseScreen(
     session: JellyfinSession?,
+    pokemonRepository: JellyfinPokemonRepository,
     availableGames: List<GameSummary>,
     detectedSaves: List<PokemonGameSaveDto>,
     onBack: () -> Unit,
@@ -104,6 +108,24 @@ fun PokemonBadgeCaseScreen(
     var selectedIndex by remember { mutableIntStateOf(0) }
     LaunchedEffect(games.size) {
         if (selectedIndex > games.lastIndex) selectedIndex = 0
+    }
+
+    var badgeArtCatalog by remember { mutableStateOf<PokemonBadgeArtCatalogDto?>(null) }
+    LaunchedEffect(session, pokemonRepository) {
+        badgeArtCatalog = session?.let { pokemonRepository.getBadgeArtCatalog(it).getOrNull() }
+    }
+    val badgeImageUrls = remember(session, badgeArtCatalog) {
+        buildMap {
+            val activeSession = session ?: return@buildMap
+            badgeArtCatalog?.regions.orEmpty().forEach { region ->
+                region.badges.forEach { badge ->
+                    val imageUrl = badge.imageUrl
+                    if (badge.available && !imageUrl.isNullOrBlank()) {
+                        put("${badge.region}:${badge.id}", activeSession.toAuthenticatedBadgeArtUrl(imageUrl))
+                    }
+                }
+            }
+        }
     }
 
     GameScreenReveal(
@@ -137,8 +159,8 @@ fun PokemonBadgeCaseScreen(
                         BadgeCaseHero(game = game)
                         game.save.gymBadges.forEach { region ->
                             BadgeRegionCase(
-                                session = session,
                                 region = region,
+                                badgeImageUrls = badgeImageUrls,
                             )
                         }
                     }
@@ -396,8 +418,8 @@ private fun BadgeCaseMetric(
 
 @Composable
 private fun BadgeRegionCase(
-    session: JellyfinSession?,
     region: PokemonGymBadgeRegionDto,
+    badgeImageUrls: Map<String, String>,
 ) {
     val earned = region.badges.count { it.isEarned }
     val total = region.badges.size.coerceAtLeast(1)
@@ -438,8 +460,8 @@ private fun BadgeRegionCase(
                 ) {
                     rowBadges.forEach { badge ->
                         BadgeSlot(
-                            session = session,
                             badge = badge,
+                            imageUrl = badgeImageUrls["${badge.region}:${badge.id}"],
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -454,15 +476,10 @@ private fun BadgeRegionCase(
 
 @Composable
 private fun BadgeSlot(
-    session: JellyfinSession?,
     badge: PokemonGymBadgeDto,
+    imageUrl: String?,
     modifier: Modifier = Modifier,
 ) {
-    val imageUrl = remember(session, badge.region, badge.id) {
-        session?.let {
-            "${it.server.url.trimEnd('/')}/Vantafyn/Pokemon/Badges/${badge.region}/${badge.id}/Image?api_key=${it.accessToken}"
-        }
-    }
     val earnedAlpha = if (badge.isEarned) 1f else 0.36f
 
     Column(
@@ -647,5 +664,19 @@ private fun BadgeCaseEmptyState() {
                 textAlign = TextAlign.Center,
             )
         }
+    }
+}
+
+private fun JellyfinSession.toAuthenticatedBadgeArtUrl(rawImageUrl: String): String {
+    val base = server.url.trimEnd('/')
+    val url = if (rawImageUrl.startsWith("http://", ignoreCase = true) || rawImageUrl.startsWith("https://", ignoreCase = true)) {
+        rawImageUrl
+    } else {
+        "$base/${rawImageUrl.trimStart('/')}"
+    }
+    return if (accessToken.isBlank() || url.contains("api_key=", ignoreCase = false)) {
+        url
+    } else {
+        "$url${if (url.contains("?")) "&" else "?"}api_key=$accessToken"
     }
 }

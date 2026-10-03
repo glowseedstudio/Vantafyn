@@ -778,6 +778,7 @@ fun PokemonVaultScreen(
                     VaultSubScreen.BadgeCase -> {
                         PokemonBadgeCaseScreen(
                             session = session,
+                            pokemonRepository = pokemonRepository,
                             availableGames = availableGames,
                             detectedSaves = allDetectedSaves,
                             onBack = { subScreen = VaultSubScreen.Home },

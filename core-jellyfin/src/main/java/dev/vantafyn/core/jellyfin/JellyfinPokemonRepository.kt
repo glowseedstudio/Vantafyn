@@ -56,6 +56,7 @@ interface JellyfinPokemonRepository {
     ): Result<PokemonDetailsDto>
     suspend fun getAchievements(session: JellyfinSession): Result<PokemonAchievementsSummaryDto>
     suspend fun getSocialActivity(session: JellyfinSession, limit: Int = 30): Result<List<PokemonSocialActivityEvent>>
+    suspend fun getBadgeArtCatalog(session: JellyfinSession): Result<PokemonBadgeArtCatalogDto>
     suspend fun updateVaultEntryMoves(
         session: JellyfinSession,
         entryId: String,
@@ -1187,6 +1188,50 @@ class DefaultJellyfinPokemonRepository(
         )
     }
 
+    private fun parseBadgeArtCatalog(json: JSONObject): PokemonBadgeArtCatalogDto {
+        val regionsArray = json.optJSONArray("regions")
+        val regions = mutableListOf<PokemonBadgeArtRegionDto>()
+        if (regionsArray != null) {
+            for (i in 0 until regionsArray.length()) {
+                val regionObj = regionsArray.getJSONObject(i)
+                val badgesArray = regionObj.optJSONArray("badges")
+                val badges = mutableListOf<PokemonBadgeArtDto>()
+                if (badgesArray != null) {
+                    for (j in 0 until badgesArray.length()) {
+                        val badgeObj = badgesArray.getJSONObject(j)
+                        badges.add(
+                            PokemonBadgeArtDto(
+                                id = badgeObj.optString("id", ""),
+                                name = badgeObj.optString("name", ""),
+                                region = badgeObj.optString("region", regionObj.optString("id", "")),
+                                generation = badgeObj.optInt("generation", regionObj.optInt("generation", 0)),
+                                order = badgeObj.optInt("order", j + 1),
+                                available = badgeObj.optBoolean("available", false),
+                                imageUrl = badgeObj.optString("imageUrl", "").ifBlank { null },
+                            )
+                        )
+                    }
+                }
+                regions.add(
+                    PokemonBadgeArtRegionDto(
+                        id = regionObj.optString("id", ""),
+                        name = regionObj.optString("name", ""),
+                        generation = regionObj.optInt("generation", 0),
+                        availableCount = regionObj.optInt("availableCount", badges.count { it.available }),
+                        totalCount = regionObj.optInt("totalCount", badges.size),
+                        badges = badges,
+                    )
+                )
+            }
+        }
+        return PokemonBadgeArtCatalogDto(
+            configured = json.optBoolean("configured", false),
+            availableCount = json.optInt("availableCount", regions.sumOf { it.availableCount }),
+            totalCount = json.optInt("totalCount", regions.sumOf { it.totalCount }),
+            regions = regions,
+        )
+    }
+
     override suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto> =
         withContext(ioDispatcher) {
             runCatching {
@@ -1310,6 +1355,16 @@ class DefaultJellyfinPokemonRepository(
                     totalCount = json.optInt("totalCount", 0),
                     achievements = achievements,
                 )
+            }
+        }
+
+    override suspend fun getBadgeArtCatalog(session: JellyfinSession): Result<PokemonBadgeArtCatalogDto> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Badges")
+                checkResponseCode(conn)
+                val json = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                parseBadgeArtCatalog(json)
             }
         }
 

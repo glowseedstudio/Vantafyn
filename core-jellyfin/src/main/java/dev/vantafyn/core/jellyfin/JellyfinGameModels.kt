@@ -217,6 +217,32 @@ data class PokemonGymBadgeDto(
     val isEarned: Boolean = false,
 ) : Serializable
 
+data class PokemonBadgeArtCatalogDto(
+    val configured: Boolean = false,
+    val availableCount: Int = 0,
+    val totalCount: Int = 0,
+    val regions: List<PokemonBadgeArtRegionDto> = emptyList(),
+) : Serializable
+
+data class PokemonBadgeArtRegionDto(
+    val id: String = "",
+    val name: String = "",
+    val generation: Int = 0,
+    val availableCount: Int = 0,
+    val totalCount: Int = 0,
+    val badges: List<PokemonBadgeArtDto> = emptyList(),
+) : Serializable
+
+data class PokemonBadgeArtDto(
+    val id: String = "",
+    val name: String = "",
+    val region: String = "",
+    val generation: Int = 0,
+    val order: Int = 0,
+    val available: Boolean = false,
+    val imageUrl: String? = null,
+) : Serializable
+
 data class PokemonGameSaveDto(
     val gameId: String = "",
     val title: String = "",
