@@ -18,6 +18,9 @@ namespace Vantafyn.Plugin.Companion.Pokemon;
 [Route("Vantafyn/Pokemon")]
 public sealed class PokemonController : ControllerBase
 {
+    // Bump this whenever the synthesis prompt or client-side narration profile changes in a
+    // way that should not reuse previously rendered species audio.
+    private const string NarrationRenderProfile = "pokedex-voice-v2";
     private static readonly ConcurrentDictionary<string, (Guid UserId, DateTimeOffset ExpiresAt, PokemonSaveParseResult Parsed, int Generation)> ExternalSavePreviews = new();
     private readonly IGamesService _gamesService;
     private readonly IGameSavesService _gameSavesService;
@@ -212,7 +215,7 @@ public sealed class PokemonController : ControllerBase
     private string NarrationCachePath(int speciesId, string script, PokemonConfiguration config)
     {
         var root = _paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon");
-        var key = $"v1|{config.NarrationVoice}|{config.NarrationSpeed:0.00}|{script}";
+        var key = $"{NarrationRenderProfile}|{config.NarrationVoice}|{config.NarrationSpeed:0.00}|{script}";
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(key))).ToLowerInvariant()[..16];
         return Path.Combine(root, "pokedex-narration", speciesId.ToString(), $"{hash}.mp3");
     }

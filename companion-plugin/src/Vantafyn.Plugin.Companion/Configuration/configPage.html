@@ -386,6 +386,8 @@
             <div class="fieldDescription">How long the Companion waits for a new narration before safely falling back to cry-only playback.</div>
           </div>
           <button is="emby-button" type="button" class="actionButton secondary" id="testPokemonNarration">Test Local TTS Connection</button>
+          <button is="emby-button" type="button" class="actionButton secondary" id="regeneratePokemonNarration">Regenerate Pokédex Narrations</button>
+          <div class="fieldDescription">Removes only generated narration audio so every Pokémon is recreated with the current voice profile. This does not touch saves, vaults, Pokédex progress, metadata, or cries.</div>
           <div id="pokemonNarrationStatus" class="statusBox"></div>
         </div>
 
@@ -706,6 +708,26 @@
               setStatus('pokemonNarrationStatus', '✗ Local TTS connection failed: ' + formatError(err), 'error');
             } finally {
               testPokemonNarrationBtn.disabled = false;
+            }
+          });
+        }
+
+        const regeneratePokemonNarrationBtn = page.querySelector('#regeneratePokemonNarration');
+        if (regeneratePokemonNarrationBtn) {
+          regeneratePokemonNarrationBtn.addEventListener('click', async () => {
+            if (!window.confirm('Regenerate all Pokédex narrations? This removes only cached narration audio. Pokémon saves, vaults, Pokédex progress, metadata, and cries are not affected.')) return;
+            regeneratePokemonNarrationBtn.disabled = true;
+            setStatus('pokemonNarrationStatus', 'Removing cached Pokédex narrations...', 'info');
+            try {
+              const result = await api('Vantafyn/Admin/Pokemon/Narration/Regenerate', {
+                type: 'POST',
+                contentType: 'application/json'
+              });
+              setStatus('pokemonNarrationStatus', (result.success ? '✓ ' : '✗ ') + (result.message || 'Narration cache operation finished.'), result.success ? 'success' : 'error');
+            } catch (err) {
+              setStatus('pokemonNarrationStatus', '✗ Could not remove cached narrations: ' + formatError(err), 'error');
+            } finally {
+              regeneratePokemonNarrationBtn.disabled = false;
             }
           });
         }

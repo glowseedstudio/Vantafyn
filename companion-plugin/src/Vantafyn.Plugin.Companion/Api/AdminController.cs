@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Vantafyn.Plugin.Companion.Core;
 using Vantafyn.Plugin.Companion.Pokemon;
@@ -13,7 +14,8 @@ public sealed class AdminController(
     ICompanionDiagnostics diagnostics,
     IOmbiClientFactory ombiClientFactory,
     IPokemonProviderFactory pokemonProviderFactory,
-    IPokemonGameDetector pokemonGameDetector) : ControllerBase
+    IPokemonGameDetector pokemonGameDetector,
+    ICompanionPaths companionPaths) : ControllerBase
 {
     private static readonly HttpClient NarrationTestClient = new();
     [HttpGet("Configuration")]
@@ -191,6 +193,31 @@ public sealed class AdminController(
         catch
         {
             return Ok(new { isSuccess = false, message = "TTS service could not be reached from the Jellyfin server." });
+        }
+    }
+
+    /// <summary>
+    /// Removes only generated narration audio. Pokémon saves, vaults, metadata, cries and all
+    /// other Companion data live in separate directories and are never included here.
+    /// </summary>
+    [HttpPost("Pokemon/Narration/Regenerate")]
+    public IActionResult RegeneratePokemonNarrations()
+    {
+        var narrationDirectory = Path.Combine(companionPaths.PokemonRoot, "pokedex-narration");
+        if (!Directory.Exists(narrationDirectory))
+        {
+            return Ok(new { success = true, deletedCount = 0, message = "There were no cached Pokédex narrations to remove." });
+        }
+
+        try
+        {
+            var deletedCount = Directory.EnumerateFiles(narrationDirectory, "*.mp3", SearchOption.AllDirectories).Count();
+            Directory.Delete(narrationDirectory, recursive: true);
+            return Ok(new { success = true, deletedCount, message = $"Removed {deletedCount} cached Pokédex narration file(s). They will regenerate using the current voice profile." });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, message = $"Could not remove cached Pokédex narrations: {ex.Message}" });
         }
     }
 

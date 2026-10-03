@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.13.0",
-        "changelog": "Measured male Pokédex narration baseline, zero global pitch shifting, bright presence processing, and a restrained parallel electronic texture.",
+        "version": "0.2.14.0",
+        "changelog": "Versioned Pokédex narration cache profile and a safe admin action to regenerate only cached narration audio.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.48/Vantafyn.Plugin.Companion_0.2.13_net9.zip",
-        "checksum": "f929da645fbde156b136b6601b01819e",
-        "timestamp": "2026-10-03T02:18:37Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.48-companion.1/Vantafyn.Plugin.Companion_0.2.14_net9.zip",
+        "checksum": "26053ac3e0208f450f2b3eefdb73e53a",
+        "timestamp": "2026-10-03T02:28:12Z"
       },
       {
-        "version": "0.2.13.1",
-        "changelog": "Measured male Pokédex narration baseline, zero global pitch shifting, bright presence processing, and a restrained parallel electronic texture.",
+        "version": "0.2.14.1",
+        "changelog": "Versioned Pokédex narration cache profile and a safe admin action to regenerate only cached narration audio.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.48/Vantafyn.Plugin.Companion_0.2.13_net10.zip",
-        "checksum": "5cdcdf3baffd3152a8682c52d1522ebe",
-        "timestamp": "2026-10-03T02:18:37Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.48-companion.1/Vantafyn.Plugin.Companion_0.2.14_net10.zip",
+        "checksum": "ecab46c2b0913b4f236035a32d4ce738",
+        "timestamp": "2026-10-03T02:28:12Z"
       },
       {
         "version": "0.2.6.0",
