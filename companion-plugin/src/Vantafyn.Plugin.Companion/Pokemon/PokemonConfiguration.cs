@@ -86,4 +86,21 @@ public sealed class PokemonConfiguration
 
     /// <summary>Timeout for a narration generation request.</summary>
     public int NarrationTimeoutSeconds { get; set; } = 15;
+
+    /// <summary>
+    /// Upgrades the original shipped narration default to the deliberately lower,
+    /// synthetic narrator profile. Only the exact former default pair is changed, so
+    /// a voice or speed chosen by an administrator remains untouched.
+    /// </summary>
+    public bool MigrateLegacyNarrationDefault()
+    {
+        if (!string.Equals(NarrationVoice, "am_michael", StringComparison.OrdinalIgnoreCase) || NarrationSpeed != 1.08m)
+        {
+            return false;
+        }
+
+        NarrationVoice = "bm_george";
+        NarrationSpeed = 0.92m;
+        return true;
+    }
 }

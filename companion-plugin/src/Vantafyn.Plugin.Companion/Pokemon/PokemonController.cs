@@ -74,8 +74,20 @@ public sealed class PokemonController : ControllerBase
         _paths = paths;
     }
 
-    private PokemonConfiguration Configuration =>
-        _overrideConfig ?? Plugin.Instance?.Configuration?.Pokemon ?? new PokemonConfiguration();
+    private PokemonConfiguration Configuration
+    {
+        get
+        {
+            if (_overrideConfig != null) return _overrideConfig;
+            var plugin = Plugin.Instance;
+            var config = plugin?.Configuration?.Pokemon ?? new PokemonConfiguration();
+            if (plugin != null && config.MigrateLegacyNarrationDefault())
+            {
+                plugin.SaveConfiguration();
+            }
+            return config;
+        }
+    }
 
     private bool IsPokemonIntegrationEnabled() =>
         Configuration.Enabled;

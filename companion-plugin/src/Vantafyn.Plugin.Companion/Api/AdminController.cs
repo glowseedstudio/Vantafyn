@@ -19,7 +19,12 @@ public sealed class AdminController(
     [HttpGet("Configuration")]
     public IActionResult GetConfiguration()
     {
-        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var plugin = Plugin.Instance;
+        var config = plugin?.Configuration ?? new PluginConfiguration();
+        if (plugin != null && config.Pokemon.MigrateLegacyNarrationDefault())
+        {
+            plugin.SaveConfiguration();
+        }
         return Ok(GetConfigurationPayload(config));
     }
 
