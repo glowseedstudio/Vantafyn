@@ -127,7 +127,7 @@ fun PokemonDetailModal(
         mutableStateOf(initialDetails == null && session != null && pokemonRepository != null && pokemon.id.isNotBlank() && !pokemon.id.startsWith("dex-"))
     }
     var selectedStatTab by remember { mutableStateOf(StatAppraisalTab.JudgeIVs) }
-    var statDisplayFormat by remember { mutableStateOf(StatDisplayFormat.Bars) }
+    var statDisplayFormat by remember { mutableStateOf(StatDisplayFormat.Radar) }
     var showLegalityDialog by remember { mutableStateOf(false) }
     var showMoveRelearnerModal by remember { mutableStateOf(false) }
     var selectedRibbon by remember { mutableStateOf<PokemonRibbonDto?>(null) }
@@ -363,6 +363,7 @@ fun PokemonDetailModal(
                 PokemonHeroTypeAtmosphere(
                     primaryType = primaryType,
                     secondaryType = secondaryType,
+                    verticalPresentation = true,
                     modifier = Modifier.matchParentSize(),
                 )
 
@@ -668,7 +669,7 @@ fun PokemonDetailModal(
                         }
                     }
 
-                    // View Format Toggle: Bars vs Hexagon
+                    // View Format Toggle: Hexagon vs Bars
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
@@ -680,22 +681,6 @@ fun PokemonDetailModal(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (statDisplayFormat == StatDisplayFormat.Bars) Color.White.copy(alpha = 0.16f) else Color.Transparent)
-                                .clickable { statDisplayFormat = StatDisplayFormat.Bars }
-                                .padding(horizontal = 8.dp, vertical = 5.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                text = "Bars",
-                                color = if (statDisplayFormat == StatDisplayFormat.Bars) Color.White else VantafynColors.Muted,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
                                 .background(if (statDisplayFormat == StatDisplayFormat.Radar) (if (selectedStatTab == StatAppraisalTab.JudgeIVs) Color(0xFF00E5FF) else Color(0xFFF59E0B)).copy(alpha = 0.25f) else Color.Transparent)
                                 .clickable { statDisplayFormat = StatDisplayFormat.Radar }
                                 .padding(horizontal = 8.dp, vertical = 5.dp),
@@ -704,6 +689,22 @@ fun PokemonDetailModal(
                             Text(
                                 text = "Hexagon",
                                 color = if (statDisplayFormat == StatDisplayFormat.Radar) (if (selectedStatTab == StatAppraisalTab.JudgeIVs) Color(0xFF00E5FF) else Color(0xFFF59E0B)) else VantafynColors.Muted,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (statDisplayFormat == StatDisplayFormat.Bars) Color.White.copy(alpha = 0.16f) else Color.Transparent)
+                                .clickable { statDisplayFormat = StatDisplayFormat.Bars }
+                                .padding(horizontal = 8.dp, vertical = 5.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                text = "Bars",
+                                color = if (statDisplayFormat == StatDisplayFormat.Bars) Color.White else VantafynColors.Muted,
                                 fontSize = 10.5.sp,
                                 fontWeight = FontWeight.Bold,
                             )

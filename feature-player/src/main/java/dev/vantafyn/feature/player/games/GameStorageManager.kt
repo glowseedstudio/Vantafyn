@@ -23,6 +23,7 @@ class GameStorageManager(
 ) {
     companion object {
         val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        private const val MAX_BATTERY_SAVE_BYTES = 32 * 1024 * 1024
     }
 
     val persistentRomsDir: File
@@ -327,6 +328,68 @@ class GameStorageManager(
             null
         }
     }
+
+    /**
+     * Stores an emulator battery save using the same local/cloud pathway as normal gameplay.
+     * The existing local save is backed up first; if a cloud save exists it is backed up too
+     * before it can be replaced. A cloud failure deliberately leaves the imported local save
+     * intact so the normal sync workflow can retry later.
+     */
+    suspend fun importBatterySave(
+        session: JellyfinSession?,
+        gameId: String,
+        data: ByteArray,
+    ): Result<BatterySaveImportResult> = withContext(Dispatchers.IO) {
+        runCatching {
+            require(data.size in 512..MAX_BATTERY_SAVE_BYTES) {
+                "That file is not a supported battery save (must be between 512 bytes and 32 MB)."
+            }
+
+            val localFile = getLocalSaveFile(gameId, GameSaveKind.Sram)
+            backupSave(gameId, GameSaveKind.Sram)
+
+            // Preserve a cloud-only save as well, so importing from a new device cannot erase
+            // the only recoverable copy of existing progress.
+            val cloudData = session?.let {
+                gamesRepository.getCloudSave(it, gameId, GameSaveKind.Sram).getOrNull()
+            }
+            if (cloudData != null && cloudData.isNotEmpty()) {
+                backupSaveBytes(gameId, GameSaveKind.Sram, cloudData, "cloud")
+            }
+
+            localFile.parentFile?.mkdirs()
+            val tempFile = File(localFile.parentFile, "${localFile.name}.importing")
+            tempFile.writeBytes(data)
+            if (localFile.exists() && !localFile.delete()) {
+                throw IllegalStateException("Could not replace the existing local battery save.")
+            }
+            if (!tempFile.renameTo(localFile)) {
+                throw IllegalStateException("Could not finalize the imported battery save.")
+            }
+
+            val cloudSynced = session?.let {
+                gamesRepository.uploadCloudSave(it, gameId, GameSaveKind.Sram, data).isSuccess
+            } ?: false
+            if (cloudSynced) {
+                markSynced(gameId, GameSaveKind.Sram, computeHash(data), localFile.lastModified())
+            }
+            BatterySaveImportResult(cloudSynced = cloudSynced)
+        }
+    }
+
+    private fun backupSaveBytes(gameId: String, kind: GameSaveKind, data: ByteArray, source: String): File? {
+        val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        return runCatching {
+            val backupFile = File(savesBackupDir, "${safeId}_${System.currentTimeMillis()}_${source}.${kind.value}.bak")
+            backupFile.writeBytes(data)
+            backupFile
+        }.onFailure {
+            android.util.Log.w("GameStorageManager", "Could not create $source backup for $safeId", it)
+        }.getOrNull()
+    }
+
+    data class BatterySaveImportResult(val cloudSynced: Boolean)
+
 
     fun computeHash(bytes: ByteArray): String {
         val digest = MessageDigest.getInstance("SHA-256")

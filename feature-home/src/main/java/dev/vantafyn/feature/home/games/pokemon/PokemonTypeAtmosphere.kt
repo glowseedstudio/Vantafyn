@@ -296,6 +296,7 @@ object PokemonTypeCatalog {
 fun PokemonHeroTypeAtmosphere(
     primaryType: PokemonType,
     secondaryType: PokemonType?,
+    verticalPresentation: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -338,8 +339,8 @@ fun PokemonHeroTypeAtmosphere(
                         primaryType.bgGradientMid,
                         primaryType.bgGradientEnd,
                     ),
-                    start = Offset(0f, 0f),
-                    end = Offset(width, height),
+                    start = if (verticalPresentation) Offset(width / 2f, 0f) else Offset(0f, 0f),
+                    end = if (verticalPresentation) Offset(width / 2f, height) else Offset(width, height),
                 )
             )
 
@@ -370,22 +371,33 @@ fun PokemonHeroTypeAtmosphere(
             }
         }
 
-        // Layer 2: High-Legibility Dark Scrim Overlay (Left-heavy dark for text, clear for artwork)
+        // Layer 2: protect the artwork without flattening the full-card type atmosphere.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Brush.horizontalGradient(
-                        colorStops = arrayOf(
-                            0.00f to Color(0xFF06080E).copy(alpha = 0.94f),
-                            0.45f to Color(0xFF06080E).copy(alpha = 0.86f),
-                            0.65f to Color(0xFF06080E).copy(alpha = 0.50f),
-                            0.82f to Color(0xFF06080E).copy(alpha = 0.16f),
-                            1.00f to Color(0xFF06080E).copy(alpha = 0.06f),
-                        ),
-                        startX = 0f,
-                        endX = Float.POSITIVE_INFINITY,
-                    )
+                    if (verticalPresentation) {
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color(0xFF06080E).copy(alpha = 0.10f),
+                                0.38f to Color(0xFF06080E).copy(alpha = 0.18f),
+                                0.70f to Color(0xFF06080E).copy(alpha = 0.50f),
+                                1.00f to Color(0xFF06080E).copy(alpha = 0.78f),
+                            ),
+                        )
+                    } else {
+                        Brush.horizontalGradient(
+                            colorStops = arrayOf(
+                                0.00f to Color(0xFF06080E).copy(alpha = 0.94f),
+                                0.45f to Color(0xFF06080E).copy(alpha = 0.86f),
+                                0.65f to Color(0xFF06080E).copy(alpha = 0.50f),
+                                0.82f to Color(0xFF06080E).copy(alpha = 0.16f),
+                                1.00f to Color(0xFF06080E).copy(alpha = 0.06f),
+                            ),
+                            startX = 0f,
+                            endX = Float.POSITIVE_INFINITY,
+                        )
+                    }
                 )
         )
 

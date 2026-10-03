@@ -370,14 +370,14 @@
 
           <div class="inputContainer">
             <label class="inputLabel" for="pokemonNarrationVoice">Kokoro Voice</label>
-            <input is="emby-input" type="text" id="pokemonNarrationVoice" placeholder="bm_george" />
-            <div class="fieldDescription">Recommended: <code>bm_george</code>, a lower, authoritative male narrator. It gives a deliberately synthetic, Pokédex-like feel without imitating the original Pokémon voice. You can switch to another installed Kokoro voice later.</div>
+            <input is="emby-input" type="text" id="pokemonNarrationVoice" placeholder="am_puck" />
+            <div class="fieldDescription">Recommended: <code>am_puck</code>, a brighter male narrator. Vantafyn applies a modest local pitch lift and device treatment so it feels like a synthetic Pokédex narrator without imitating the original Pokémon voice. You can switch to another installed Kokoro voice later.</div>
           </div>
 
           <div class="inputContainer">
             <label class="inputLabel" for="pokemonNarrationSpeed">Narration Speed</label>
-            <input is="emby-input" type="number" id="pokemonNarrationSpeed" min="0.75" max="1.35" step="0.01" value="0.92" />
-            <div class="fieldDescription">0.75 to 1.35. Recommended: <code>0.92</code>. The slower delivery is clearer and avoids the artifacts Kokoro can produce at faster male speech rates.</div>
+            <input is="emby-input" type="number" id="pokemonNarrationSpeed" min="0.75" max="1.35" step="0.01" value="0.98" />
+            <div class="fieldDescription">0.75 to 1.35. Recommended: <code>0.98</code>. The app keeps pitch independent of this control, so speech stays clear and naturally paced.</div>
           </div>
 
           <div class="inputContainer">
@@ -536,8 +536,8 @@
             page.querySelector('#pokemonModalBackgroundPath').value = getVal(pokemon, 'modalBackgroundPath', 'ModalBackgroundPath', '') || '';
             page.querySelector('#pokemonNarrationEnabled').checked = !!getVal(pokemon, 'narrationEnabled', 'NarrationEnabled', false);
             page.querySelector('#pokemonNarrationBaseUrl').value = getVal(pokemon, 'narrationBaseUrl', 'NarrationBaseUrl', '') || '';
-            page.querySelector('#pokemonNarrationVoice').value = getVal(pokemon, 'narrationVoice', 'NarrationVoice', 'bm_george') || 'bm_george';
-            page.querySelector('#pokemonNarrationSpeed').value = getVal(pokemon, 'narrationSpeed', 'NarrationSpeed', 0.92);
+            page.querySelector('#pokemonNarrationVoice').value = getVal(pokemon, 'narrationVoice', 'NarrationVoice', 'am_puck') || 'am_puck';
+            page.querySelector('#pokemonNarrationSpeed').value = getVal(pokemon, 'narrationSpeed', 'NarrationSpeed', 0.98);
             page.querySelector('#pokemonNarrationTimeoutSeconds').value = getVal(pokemon, 'narrationTimeoutSeconds', 'NarrationTimeoutSeconds', 15);
 
             const diagnostics = await api('Vantafyn/Admin/Diagnostics').catch(() => null);

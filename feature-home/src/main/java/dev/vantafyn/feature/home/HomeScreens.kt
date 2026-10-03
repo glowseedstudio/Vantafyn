@@ -3982,6 +3982,8 @@ private fun MobileShellScreen(
                         },
                         onDownloadOffline = viewModel::downloadGameForOffline,
                         onDeleteOffline = viewModel::deleteOfflineGame,
+                        session = state.session,
+                        gamesRepository = viewModel.gamesRepository,
                     )
                 }
                 MobileDestination.GamePlayer -> {
@@ -11403,6 +11405,15 @@ private fun AdminSessionCard(
             ) {
                 AdminSessionProgress(session)
                 AdminSessionTechnicalLine(session)
+                if (session.isTranscoding && session.transcodeReasons.isNotEmpty()) {
+                    Text(
+                        text = "Reason: " + session.transcodeReasons.joinToString(", "),
+                        color = Color(0xFFFBBF24),
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(VantafynSpacing.sm), verticalAlignment = Alignment.CenterVertically) {
                     ProfileAvatar(name = session.userName ?: "User", imageUrl = session.userImageUrl, modifier = Modifier.size(38.dp))
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -24243,7 +24254,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.42"
+private const val VANTAFYN_APP_VERSION = "0.9.47"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

@@ -80,6 +80,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.audio.SonicAudioProcessor
+import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.DefaultJellyfinPokemonRepository
@@ -92,6 +96,8 @@ import dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
 import dev.vantafyn.core.jellyfin.openAuthenticatedConnection
 import dev.vantafyn.core.media.games.GameHubSoundManager
+import dev.vantafyn.core.media.games.PokedexVoiceAudioProcessor
+import dev.vantafyn.core.media.VantafynExoPlayerFactory
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.feature.home.CompactBackButton
@@ -212,14 +218,14 @@ fun PokemonPokedexEntryModal(
     var isPlayingCry by remember { mutableStateOf(false) }
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var isPlayingNarration by remember { mutableStateOf(false) }
-    var narrationPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var narrationPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
     var isNarrationLoading by remember { mutableStateOf(false) }
     var narrationRequestId by remember { mutableIntStateOf(0) }
 
     val stopNarration: () -> Unit = {
         narrationRequestId += 1
         narrationPlayer?.let { player ->
-            try { if (player.isPlaying) player.stop() } catch (_: Throwable) {}
+            try { player.stop() } catch (_: Throwable) {}
             try { player.release() } catch (_: Throwable) {}
         }
         narrationPlayer = null
@@ -277,44 +283,44 @@ fun PokemonPokedexEntryModal(
 
             if (requestId != narrationRequestId || currentSpeciesId != speciesId) return@launch
             try {
-                val player = MediaPlayer().apply {
-                    setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .build(),
-                    )
-                    setDataSource(narrationFile.absolutePath)
-                    setVolume(0.82f, 0.82f)
-                    isLooping = false
-                    setOnPreparedListener { mediaPlayer ->
-                        if (requestId != narrationRequestId) {
-                            mediaPlayer.release()
-                            return@setOnPreparedListener
+                val player = VantafynExoPlayerFactory.musicBuilder(
+                    context,
+                    audioProcessors = arrayOf(
+                        // Raise pitch independently of narration speed. The restrained lift gives
+                        // the narrator a brighter synthetic-device character without imitating a
+                        // particular proprietary voice.
+                        SonicAudioProcessor().apply {
+                            setSpeed(1f)
+                            setPitch(1.16f)
+                        },
+                        PokedexVoiceAudioProcessor(),
+                    ),
+                ).build().apply {
+                    volume = 0.82f
+                    addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(state: Int) {
+                            if (state == Player.STATE_READY && requestId == narrationRequestId) {
+                                isNarrationLoading = false
+                                isPlayingNarration = true
+                            } else if (state == Player.STATE_ENDED) {
+                                isNarrationLoading = false
+                                isPlayingNarration = false
+                                release()
+                                if (narrationPlayer === this@apply) narrationPlayer = null
+                            }
                         }
-                        isNarrationLoading = false
-                        try {
-                            mediaPlayer.start()
-                            isPlayingNarration = true
-                        } catch (error: Throwable) {
-                            Log.w("VantafynNarration", "Could not play Pokédex narration for species $speciesId", error)
+
+                        override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                            Log.w("VantafynNarration", "Pokédex narration playback failed for species $speciesId", error)
+                            isNarrationLoading = false
                             isPlayingNarration = false
+                            release()
+                            if (narrationPlayer === this@apply) narrationPlayer = null
                         }
-                    }
-                    setOnCompletionListener { mediaPlayer ->
-                        isPlayingNarration = false
-                        try { mediaPlayer.release() } catch (_: Throwable) {}
-                        if (narrationPlayer === mediaPlayer) narrationPlayer = null
-                    }
-                    setOnErrorListener { mediaPlayer, what, extra ->
-                        Log.w("VantafynNarration", "Pokédex narration playback failed for species $speciesId (what=$what, extra=$extra)")
-                        isNarrationLoading = false
-                        isPlayingNarration = false
-                        try { mediaPlayer.release() } catch (_: Throwable) {}
-                        if (narrationPlayer === mediaPlayer) narrationPlayer = null
-                        true
-                    }
-                    prepareAsync()
+                    })
+                    setMediaItem(MediaItem.fromUri(narrationFile.toURI().toString()))
+                    prepare()
+                    playWhenReady = true
                 }
                 narrationPlayer = player
             } catch (error: Throwable) {
@@ -587,11 +593,14 @@ fun PokemonPokedexEntryModal(
                     .clip(RoundedCornerShape(20.dp))
                     .background(
                         if (isRegistered) {
-                            Brush.radialGradient(
+                            // Registered species own the entire hero card: the type atmosphere
+                            // is a full surface treatment, not a small glow behind the artwork.
+                            Brush.linearGradient(
                                 colors = listOf(
-                                    primaryType.accentColor.copy(alpha = 0.35f),
-                                    (secondaryType?.accentColor ?: primaryType.secondaryAccent).copy(alpha = 0.15f),
-                                    Color(0xFF121420),
+                                    primaryType.accentColor.copy(alpha = 0.70f),
+                                    (secondaryType?.accentColor ?: primaryType.secondaryAccent).copy(alpha = 0.52f),
+                                    primaryType.glowColor.copy(alpha = 0.34f),
+                                    Color(0xFF111522).copy(alpha = 0.92f),
                                 ),
                             )
                         } else {

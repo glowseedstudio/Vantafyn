@@ -4,6 +4,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import android.content.res.Configuration
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,11 +34,16 @@ import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.DownloadDone
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SportsEsports
+import androidx.compose.material.icons.rounded.UploadFile
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import dev.vantafyn.core.ui.VantafynGradientProgressBar
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -52,14 +59,28 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.TextStyle
 import android.content.Context
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GameDetail
+import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
+import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradientIcon
 import dev.vantafyn.core.ui.VantafynGradients
+import dev.vantafyn.feature.player.games.GameStorageManager
+import dev.vantafyn.feature.player.games.BatterySaveImportNormalizer
+import java.io.ByteArrayOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+private data class PendingBatterySaveImport(val fileName: String, val bytes: ByteArray)
 
 @Composable
 fun GameDetailModal(
@@ -72,9 +93,35 @@ fun GameDetailModal(
     downloadProgress: Float = 0f,
     onDownloadOffline: ((GameDetail) -> Unit)? = null,
     onDeleteOffline: ((GameDetail) -> Unit)? = null,
+    session: JellyfinSession? = null,
+    gamesRepository: JellyfinGamesRepository? = null,
     modifier: Modifier = Modifier,
 ) {
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val storageManager = remember(gamesRepository) { gamesRepository?.let { GameStorageManager(context, it) } }
+    var pendingImport by remember { mutableStateOf<PendingBatterySaveImport?>(null) }
+    var importMessage by remember { mutableStateOf<String?>(null) }
+    var isImporting by remember { mutableStateOf(false) }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val detail = game
+        if (uri == null || detail == null || storageManager == null) return@rememberLauncherForActivityResult
+        scope.launch(Dispatchers.IO) {
+            val fileName = displayNameForUri(context, uri) ?: "selected save"
+            val readResult = runCatching { readBatterySaveUri(context, uri) }
+            val prepared = readResult.getOrNull()?.let {
+                BatterySaveImportNormalizer.normalize(fileName, it, detail.systemId, detail.core)
+            }
+            withContext(Dispatchers.Main) {
+                when {
+                    prepared == null -> importMessage = readResult.exceptionOrNull()?.message ?: "Could not read that save file."
+                    prepared.isFailure -> importMessage = prepared.exceptionOrNull()?.message ?: "That battery save is not compatible with this game."
+                    else -> pendingImport = PendingBatterySaveImport(fileName, prepared.getOrThrow().bytes)
+                }
+            }
+        }
+    }
 
     AnimatedVisibility(
         visible = game != null,
@@ -382,6 +429,41 @@ fun GameDetailModal(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
+                    // Import happens before launch so EmulatorJS never runs while its battery save is replaced.
+                    if (storageManager != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (isLandscape) 40.dp else 46.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
+                                .border(1.dp, Color(0xFFB8A4FF).copy(alpha = 0.45f), RoundedCornerShape(14.dp))
+                                .clickable { importLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.UploadFile,
+                                    contentDescription = null,
+                                    tint = Color(0xFFB8A4FF),
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Text(
+                                    text = "IMPORT BATTERY SAVE",
+                                    color = Color(0xFFDED3FF),
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    letterSpacing = 0.6.sp,
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     // Play Button
                     Box(
                         modifier = Modifier
@@ -415,6 +497,81 @@ fun GameDetailModal(
             }
         }
     }
+
+    pendingImport?.let { pending ->
+        AlertDialog(
+            onDismissRequest = { if (!isImporting) pendingImport = null },
+            title = { Text("Import battery save") },
+            text = {
+                Text(
+                    "Import ${pending.fileName} for ${game?.cleanTitle?.ifEmpty { game.title }}? " +
+                        "Your current local save and any cloud save will be backed up first. " +
+                        "Only continue if this is for the exact same game and region.",
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = !isImporting,
+                    onClick = {
+                        val detail = game
+                        val manager = storageManager
+                        if (detail == null || manager == null) return@TextButton
+                        isImporting = true
+                        scope.launch(Dispatchers.IO) {
+                            val result = manager.importBatterySave(session, detail.id, pending.bytes)
+                            withContext(Dispatchers.Main) {
+                                isImporting = false
+                                pendingImport = null
+                                importMessage = result.fold(
+                                    onSuccess = { imported ->
+                                        if (session == null) "Save imported on this device. It will sync when you next play while connected."
+                                        else if (imported.cloudSynced) "Save imported, backed up, and synced. You can now launch the game."
+                                        else "Save imported and backed up locally. Cloud sync will retry automatically when available."
+                                    },
+                                    onFailure = { it.message ?: "Could not import that battery save." },
+                                )
+                            }
+                        }
+                    },
+                ) { Text(if (isImporting) "Importing…" else "Import") }
+            },
+            dismissButton = {
+                TextButton(enabled = !isImporting, onClick = { pendingImport = null }) { Text("Cancel") }
+            },
+        )
+    }
+
+    importMessage?.let { message ->
+        AlertDialog(
+            onDismissRequest = { importMessage = null },
+            title = { Text("Battery save") },
+            text = { Text(message) },
+            confirmButton = { TextButton(onClick = { importMessage = null }) { Text("OK") } },
+        )
+    }
+}
+
+private fun displayNameForUri(context: Context, uri: Uri): String? = runCatching {
+    context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)) else null
+    }
+}.getOrNull()
+
+private fun readBatterySaveUri(context: Context, uri: Uri): ByteArray {
+    val maximumBytes = 32 * 1024 * 1024
+    return context.contentResolver.openInputStream(uri)?.use { input ->
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val count = input.read(buffer)
+            if (count <= 0) break
+            if (output.size() + count > maximumBytes) {
+                throw IllegalArgumentException("That battery save exceeds the 32 MB import limit.")
+            }
+            output.write(buffer, 0, count)
+        }
+        output.toByteArray()
+    } ?: throw IllegalArgumentException("Android could not open that file.")
 }
 
 private fun formatFileSize(bytes: Long): String {

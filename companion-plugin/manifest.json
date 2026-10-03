@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.10.0",
-        "changelog": "Correctly migrates the original Kokoro male default to the lower Pokédex-style narrator preset, while preserving custom narrator choices.",
+        "version": "0.2.12.0",
+        "changelog": "Safe external battery-save import, refined robotic Pokédex narration, corrected narrator-profile migration, and reliable Game Hub music hand-off.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.45/Vantafyn.Plugin.Companion_0.2.10_net9.zip",
-        "checksum": "66c1d879771f2d811fe486cfb169dc70",
-        "timestamp": "2026-10-03T00:44:22Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.47/Vantafyn.Plugin.Companion_0.2.12_net9.zip",
+        "checksum": "b5c60bfff48b8404d1379d7d6b421efa",
+        "timestamp": "2026-10-03T01:38:30Z"
       },
       {
-        "version": "0.2.10.1",
-        "changelog": "Correctly migrates the original Kokoro male default to the lower Pokédex-style narrator preset, while preserving custom narrator choices.",
+        "version": "0.2.12.1",
+        "changelog": "Safe external battery-save import, refined robotic Pokédex narration, corrected narrator-profile migration, and reliable Game Hub music hand-off.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.45/Vantafyn.Plugin.Companion_0.2.10_net10.zip",
-        "checksum": "b7d3395558ff0a68691855b92d674f29",
-        "timestamp": "2026-10-03T00:44:22Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.47/Vantafyn.Plugin.Companion_0.2.12_net10.zip",
+        "checksum": "85ab9c1561eeecbab049eb9c0325440d",
+        "timestamp": "2026-10-03T01:38:30Z"
       },
       {
         "version": "0.2.6.0",

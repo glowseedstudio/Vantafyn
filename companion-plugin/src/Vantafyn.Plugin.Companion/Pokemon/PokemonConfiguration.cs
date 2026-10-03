@@ -79,28 +79,29 @@ public sealed class PokemonConfiguration
     public string? NarrationBaseUrl { get; set; }
 
     /// <summary>Voice identifier understood by the configured Kokoro-compatible service.</summary>
-    public string NarrationVoice { get; set; } = "bm_george";
+    public string NarrationVoice { get; set; } = "am_puck";
 
     /// <summary>Speech rate sent to the TTS service, clamped to a safe range.</summary>
-    public decimal NarrationSpeed { get; set; } = 0.92m;
+    public decimal NarrationSpeed { get; set; } = 0.98m;
 
     /// <summary>Timeout for a narration generation request.</summary>
     public int NarrationTimeoutSeconds { get; set; } = 15;
 
     /// <summary>
-    /// Upgrades the original shipped narration default to the deliberately lower,
-    /// synthetic narrator profile. Only the exact former default pair is changed, so
-    /// a voice or speed chosen by an administrator remains untouched.
+    /// Upgrades only the exact shipped narrator defaults to the brighter synthetic profile.
+    /// A voice or speed chosen by an administrator remains untouched.
     /// </summary>
     public bool MigrateLegacyNarrationDefault()
     {
-        if (!string.Equals(NarrationVoice, "am_michael", StringComparison.OrdinalIgnoreCase) || NarrationSpeed != 1.08m)
+        var isFormerMichaelDefault = string.Equals(NarrationVoice, "am_michael", StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 1.08m;
+        var isFormerGeorgeDefault = string.Equals(NarrationVoice, "bm_george", StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 0.92m;
+        if (!isFormerMichaelDefault && !isFormerGeorgeDefault)
         {
             return false;
         }
 
-        NarrationVoice = "bm_george";
-        NarrationSpeed = 0.92m;
+        NarrationVoice = "am_puck";
+        NarrationSpeed = 0.98m;
         return true;
     }
 }

@@ -38,6 +38,11 @@ object GameHubSoundManager {
 
     private val scope = CoroutineScope(Dispatchers.Main.immediate + SupervisorJob())
     private var fadeJob: Job? = null
+    // Crossfades are intentionally independent from volume fades. Pokédex entry screens
+    // duck the active track; cancelling a shared job there used to strand the outgoing
+    // Game Hub player and let both ambient tracks continue playing.
+    private var crossfadeJob: Job? = null
+    private var crossfadeGeneration = 0L
     private var musicObserverJob: Job? = null
 
     private var mediaPlayer: MediaPlayer? = null
@@ -127,7 +132,8 @@ object GameHubSoundManager {
         val outgoingPlayer = mediaPlayer
         val outgoingVol = currentVolume
 
-        fadeJob?.cancel()
+        crossfadeJob?.cancel()
+        val transitionGeneration = ++crossfadeGeneration
         fadingOutPlayer?.takeIf { it !== outgoingPlayer }?.stopAndRelease()
         fadingOutPlayer = outgoingPlayer
 
@@ -148,15 +154,16 @@ object GameHubSoundManager {
         activeTrack = targetTrack
         isPlayingOrFadingIn = true
 
-        fadeJob = scope.launch {
+        crossfadeJob = scope.launch {
             try {
-                incomingPlayer.setVolume(0f, 0f)
-                incomingPlayer.start()
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to start incoming player: ${e.message}")
-                resetPlayer()
-                return@launch
-            }
+                try {
+                    incomingPlayer.setVolume(0f, 0f)
+                    incomingPlayer.start()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to start incoming player: ${e.message}")
+                    resetPlayer()
+                    return@launch
+                }
 
             val stepMs = 25L
             val stepCount = (durationMs / stepMs).coerceAtLeast(1)
@@ -182,10 +189,15 @@ object GameHubSoundManager {
                 incomingPlayer.setVolume(targetVol, targetVol)
             } catch (_: Exception) { }
 
-            try {
-                outgoingPlayer?.stopAndRelease()
-                if (fadingOutPlayer === outgoingPlayer) fadingOutPlayer = null
-            } catch (_: Exception) { }
+            } finally {
+                // This also runs when another navigation/duck operation interrupts the
+                // crossfade, so an outgoing loop can never be orphaned.
+                if (fadingOutPlayer === outgoingPlayer) {
+                    outgoingPlayer?.stopAndRelease()
+                    fadingOutPlayer = null
+                }
+                if (transitionGeneration == crossfadeGeneration) crossfadeJob = null
+            }
         }
     }
 
@@ -277,6 +289,9 @@ object GameHubSoundManager {
         duckFactor = 1.0f
         musicObserverJob?.cancel()
         musicObserverJob = null
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadeGeneration += 1
         fadingOutPlayer?.stopAndRelease()
         fadingOutPlayer = null
         val player = mediaPlayer ?: return
@@ -402,6 +417,9 @@ object GameHubSoundManager {
         musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadeGeneration += 1
         fadingOutPlayer?.stopAndRelease()
         fadingOutPlayer = null
 
@@ -435,6 +453,9 @@ object GameHubSoundManager {
         musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadeGeneration += 1
         try {
             mediaPlayer?.setVolume(0f, 0f)
             if (mediaPlayer?.isPlaying == true) {
@@ -472,6 +493,9 @@ object GameHubSoundManager {
         musicObserverJob = null
         fadeJob?.cancel()
         fadeJob = null
+        crossfadeJob?.cancel()
+        crossfadeJob = null
+        crossfadeGeneration += 1
         try {
             mediaPlayer?.release()
             fadingOutPlayer?.release()
