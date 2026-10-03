@@ -312,12 +312,15 @@ fun PokemonVaultScreen(
                                     dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(
                                         saveBytes = saveBytes,
                                         gameTitle = target.game.title,
-                                        gameId = gameId,
+                                        gameId = target.game.pokemon?.pokemonGameId?.ifBlank { null } ?: gameId,
                                     )
                                 }
                             }
                             if (localParsed != null && (localParsed.party.isNotEmpty() || localParsed.boxes.any { it.entries.isNotEmpty() } || localParsed.gymBadges.isNotEmpty())) {
-                                saveDto = localParsed
+                                saveDto = localParsed.copy(
+                                    gameId = gameId,
+                                    title = target.game.title,
+                                )
                                 errorMsg = null
                             }
                         }
@@ -641,7 +644,11 @@ fun PokemonVaultScreen(
                                 dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(bytes, game.title, game.id)
                             dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(bytes, game.title) ->
                                 dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(bytes, game.title, game.id)
-                            else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(bytes, game.title, game.id)
+                            else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(
+                                bytes,
+                                game.title,
+                                game.pokemon?.pokemonGameId?.ifBlank { null } ?: game.id,
+                            )
                         }
                         val hasSaveContent = parsed != null && (
                             parsed.party.isNotEmpty() ||
@@ -650,7 +657,10 @@ fun PokemonVaultScreen(
                                 parsed.gymBadges.isNotEmpty()
                             )
                         if (hasSaveContent) {
-                            map[game.id] = parsed!!
+                            map[game.id] = parsed!!.copy(
+                                gameId = game.id,
+                                title = game.title,
+                            )
                         }
                     }
                 }

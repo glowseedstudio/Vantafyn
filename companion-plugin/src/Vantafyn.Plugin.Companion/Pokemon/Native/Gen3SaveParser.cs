@@ -303,9 +303,14 @@ public static class Gen3SaveParser
             return 0;
         }
 
-        var isFrLg = gameId.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
-                     gameId.Contains("leaf", StringComparison.OrdinalIgnoreCase);
-        var isEmerald = gameId.Contains("emerald", StringComparison.OrdinalIgnoreCase);
+        var key = gameId.ToLowerInvariant();
+        var isFrLg = key.Contains("firered", StringComparison.Ordinal) ||
+                     key.Contains("fire_red", StringComparison.Ordinal) ||
+                     key.Contains("fire red", StringComparison.Ordinal) ||
+                     key.Contains("leafgreen", StringComparison.Ordinal) ||
+                     key.Contains("leaf_green", StringComparison.Ordinal) ||
+                     key.Contains("leaf green", StringComparison.Ordinal);
+        var isEmerald = key.Contains("emerald", StringComparison.Ordinal);
 
         if (isFrLg)
         {

@@ -51,8 +51,13 @@ public static class PokemonGymBadgeCatalog
 
     public static List<PokemonGymBadgeRegionDto> ForGen3(string gameId, byte badgeFlags)
     {
-        var isFrLg = gameId.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
-                     gameId.Contains("leaf", StringComparison.OrdinalIgnoreCase);
+        var key = gameId.ToLowerInvariant();
+        var isFrLg = key.Contains("firered", StringComparison.Ordinal) ||
+                     key.Contains("fire_red", StringComparison.Ordinal) ||
+                     key.Contains("fire red", StringComparison.Ordinal) ||
+                     key.Contains("leafgreen", StringComparison.Ordinal) ||
+                     key.Contains("leaf_green", StringComparison.Ordinal) ||
+                     key.Contains("leaf green", StringComparison.Ordinal);
 
         return
         [

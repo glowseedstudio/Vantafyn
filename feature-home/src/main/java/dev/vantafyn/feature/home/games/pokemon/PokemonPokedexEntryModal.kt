@@ -129,9 +129,9 @@ fun PokemonPokedexEntryModal(
     val metadataRepository = remember { DefaultJellyfinPokemonRepository() }
     val narrationScope = rememberCoroutineScope()
 
-    // Duck ambient background music so audio cries are heard with clarity
+    // Duck ambient background music so audio cries and Pokédex narration are heard clearly.
     DisposableEffect(Unit) {
-        GameHubSoundManager.duck(context, duckFactor = 0.45f, durationMs = 400L)
+        GameHubSoundManager.duck(context, duckFactor = 0.20f, durationMs = 400L)
         onDispose {
             GameHubSoundManager.unduck(context, durationMs = 400L)
         }

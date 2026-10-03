@@ -286,8 +286,13 @@ object PokemonGymBadgeCatalog {
         )
 
     fun forGen3(gameId: String, badgeFlags: Int): List<PokemonGymBadgeRegionDto> {
-        val isFrLg = gameId.contains("fire", ignoreCase = true) ||
-            gameId.contains("leaf", ignoreCase = true)
+        val key = gameId.lowercase()
+        val isFrLg = key.contains("firered") ||
+            key.contains("fire_red") ||
+            key.contains("fire red") ||
+            key.contains("leafgreen") ||
+            key.contains("leaf_green") ||
+            key.contains("leaf green")
         return listOf(
             if (isFrLg) createRegion("kanto", "Kanto", 1, kanto, badgeFlags)
             else createRegion("hoenn", "Hoenn", 3, hoenn, badgeFlags)
@@ -380,4 +385,3 @@ data class PokemonLearnableMoveDto(
     val levelLearned: Int? = null,
     val description: String? = null,
 ) : Serializable
-

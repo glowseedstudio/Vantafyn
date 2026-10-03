@@ -57,9 +57,7 @@ object GameHubSoundManager {
     private var currentVolume = 0.0f
     @Volatile
     private var isPlayingOrFadingIn = false
-    @Volatile
-    private var duckCount = 0
-    @Volatile
+    private val activeDuckFactors = mutableListOf<Float>()
     private var duckFactor = 1.0f
 
     /**
@@ -285,7 +283,7 @@ object GameHubSoundManager {
     @Synchronized
     fun fadeOut(durationMs: Long = 600L, onComplete: (() -> Unit)? = null) {
         isPlayingOrFadingIn = false
-        duckCount = 0
+        activeDuckFactors.clear()
         duckFactor = 1.0f
         musicObserverJob?.cancel()
         musicObserverJob = null
@@ -328,66 +326,45 @@ object GameHubSoundManager {
     /**
      * Ducks (smoothly lowers) ambient background music down to a lower percentage of target volume
      * so that foreground sound effects (like Pokémon cries) can be clearly heard.
-     * Uses reference counting so nested screens don't unduck prematurely.
+     * Tracks nested duck requests so a detail screen can duck lower than its parent and
+     * restore to the parent's quieter level when it closes.
      */
     @Synchronized
     fun duck(context: Context, duckFactor: Float = 0.20f, durationMs: Long = 400L) {
         val appContext = context.applicationContext
-        duckCount++
-        this.duckFactor = minOf(this.duckFactor, duckFactor.coerceIn(0.01f, 1.0f))
-        if (duckCount > 1) return // Already ducked at an equal or lower level
+        activeDuckFactors.add(duckFactor.coerceIn(0.01f, 1.0f))
+        this.duckFactor = activeDuckFactors.minOrNull() ?: 1.0f
         val player = mediaPlayer ?: return
         if (!player.isPlaying && !isPlayingOrFadingIn) return
 
-        val duckTarget = effectiveTargetVolume(appContext)
-
-        fadeJob?.cancel()
-        fadeJob = scope.launch {
-            val stepMs = 25L
-            val stepCount = (durationMs / stepMs).coerceAtLeast(1)
-            val startVol = currentVolume
-            val volumeDelta = (duckTarget - startVol) / stepCount
-            val minV = minOf(startVol, duckTarget)
-            val maxV = maxOf(startVol, duckTarget)
-
-            for (i in 1..stepCount) {
-                delay(stepMs)
-                currentVolume = (startVol + volumeDelta * i).coerceIn(minV, maxV)
-                try {
-                    player.setVolume(currentVolume, currentVolume)
-                } catch (e: Exception) {
-                    break
-                }
-            }
-            currentVolume = duckTarget
-            try {
-                player.setVolume(currentVolume, currentVolume)
-            } catch (_: Exception) { }
-        }
+        fadeToTarget(player, effectiveTargetVolume(appContext), durationMs)
     }
 
     /**
-     * Restores ambient background music from ducked volume back to the target volume.
+     * Restores ambient background music from ducked volume back to the next active level.
      */
     @Synchronized
     fun unduck(context: Context, durationMs: Long = 400L) {
         val appContext = context.applicationContext
-        duckCount = (duckCount - 1).coerceAtLeast(0)
-        if (duckCount > 0) return // Still nested
-        duckFactor = 1.0f
+        if (activeDuckFactors.isNotEmpty()) {
+            activeDuckFactors.removeAt(activeDuckFactors.lastIndex)
+        }
+        duckFactor = activeDuckFactors.minOrNull() ?: 1.0f
         val player = mediaPlayer ?: return
         if (!player.isPlaying && !isPlayingOrFadingIn) return
 
-        val baseTarget = getTargetVolume(appContext)
+        fadeToTarget(player, effectiveTargetVolume(appContext), durationMs)
+    }
 
+    private fun fadeToTarget(player: MediaPlayer, targetVolume: Float, durationMs: Long) {
         fadeJob?.cancel()
         fadeJob = scope.launch {
             val stepMs = 25L
             val stepCount = (durationMs / stepMs).coerceAtLeast(1)
             val startVol = currentVolume
-            val volumeDelta = (baseTarget - startVol) / stepCount
-            val minV = minOf(startVol, baseTarget)
-            val maxV = maxOf(startVol, baseTarget)
+            val volumeDelta = (targetVolume - startVol) / stepCount
+            val minV = minOf(startVol, targetVolume)
+            val maxV = maxOf(startVol, targetVolume)
 
             for (i in 1..stepCount) {
                 delay(stepMs)
@@ -398,7 +375,7 @@ object GameHubSoundManager {
                     break
                 }
             }
-            currentVolume = baseTarget
+            currentVolume = targetVolume
             try {
                 player.setVolume(currentVolume, currentVolume)
             } catch (_: Exception) { }
@@ -411,7 +388,7 @@ object GameHubSoundManager {
     @Synchronized
     fun stop(instant: Boolean = true) {
         isPlayingOrFadingIn = false
-        duckCount = 0
+        activeDuckFactors.clear()
         duckFactor = 1.0f
         musicObserverJob?.cancel()
         musicObserverJob = null
@@ -489,6 +466,8 @@ object GameHubSoundManager {
     @Synchronized
     fun release() {
         isPlayingOrFadingIn = false
+        activeDuckFactors.clear()
+        duckFactor = 1.0f
         musicObserverJob?.cancel()
         musicObserverJob = null
         fadeJob?.cancel()
