@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.14.0",
-        "changelog": "Versioned Pokédex narration cache profile and a safe admin action to regenerate only cached narration audio.",
+        "version": "0.2.15.0",
+        "changelog": "Restored Puck as the Pokédex narration default, added three fixed voice choices, and added uncached admin voice previews.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.48-companion.1/Vantafyn.Plugin.Companion_0.2.14_net9.zip",
-        "checksum": "26053ac3e0208f450f2b3eefdb73e53a",
-        "timestamp": "2026-10-03T02:28:12Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.49/Vantafyn.Plugin.Companion_0.2.15_net9.zip",
+        "checksum": "dd23385f816eff9cd93ced4474a7102a",
+        "timestamp": "2026-10-03T02:56:12Z"
       },
       {
-        "version": "0.2.14.1",
-        "changelog": "Versioned Pokédex narration cache profile and a safe admin action to regenerate only cached narration audio.",
+        "version": "0.2.15.1",
+        "changelog": "Restored Puck as the Pokédex narration default, added three fixed voice choices, and added uncached admin voice previews.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.48-companion.1/Vantafyn.Plugin.Companion_0.2.14_net10.zip",
-        "checksum": "ecab46c2b0913b4f236035a32d4ce738",
-        "timestamp": "2026-10-03T02:28:12Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.49/Vantafyn.Plugin.Companion_0.2.15_net10.zip",
+        "checksum": "b68058ee78ad29c96872d2b5e308a771",
+        "timestamp": "2026-10-03T02:56:12Z"
       },
       {
         "version": "0.2.6.0",

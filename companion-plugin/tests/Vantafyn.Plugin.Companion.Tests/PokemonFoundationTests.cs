@@ -23,6 +23,33 @@ public sealed class PokemonFoundationTests
         Assert.False(config.AllowEditing);
         Assert.True(config.AutoBackups);
         Assert.Null(config.ModalBackgroundPath);
+        Assert.Equal(PokemonConfiguration.PuckNarrationVoice, config.NarrationVoice);
+        Assert.Equal(0.98m, config.NarrationSpeed);
+    }
+
+    [Theory]
+    [InlineData("am_puck", true)]
+    [InlineData("am_michael", true)]
+    [InlineData("bm_george", true)]
+    [InlineData("unknown_voice", false)]
+    [InlineData(null, false)]
+    public void NarrationVoice_OnlyAllowsTheThreeSupportedChoices(string? voice, bool supported)
+    {
+        Assert.Equal(supported, PokemonConfiguration.IsSupportedNarrationVoice(voice));
+    }
+
+    [Fact]
+    public void MigrateLegacyNarrationDefault_RestoresPuckFromMichaelBaseline()
+    {
+        var config = new PokemonConfiguration
+        {
+            NarrationVoice = PokemonConfiguration.MichaelNarrationVoice,
+            NarrationSpeed = 0.93m
+        };
+
+        Assert.True(config.MigrateLegacyNarrationDefault());
+        Assert.Equal(PokemonConfiguration.PuckNarrationVoice, config.NarrationVoice);
+        Assert.Equal(0.98m, config.NarrationSpeed);
     }
 
     [Theory]

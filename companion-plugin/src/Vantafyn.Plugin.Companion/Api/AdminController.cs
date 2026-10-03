@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Text;
+using System.Text.Json;
 using Vantafyn.Plugin.Companion.Core;
 using Vantafyn.Plugin.Companion.Pokemon;
 using Vantafyn.Plugin.Companion.Requests;
@@ -18,6 +20,7 @@ public sealed class AdminController(
     ICompanionPaths companionPaths) : ControllerBase
 {
     private static readonly HttpClient NarrationTestClient = new();
+    private const string NarrationPreviewScript = "Pikachu. The Mouse Poh-kay-mon. It stores electricity in the pouches on its cheeks.";
     [HttpGet("Configuration")]
     public IActionResult GetConfiguration()
     {
@@ -102,7 +105,7 @@ public sealed class AdminController(
         {
             config.Pokemon.NarrationBaseUrl = string.IsNullOrWhiteSpace(request.PokemonNarrationBaseUrl) ? null : request.PokemonNarrationBaseUrl.Trim();
         }
-        if (!string.IsNullOrWhiteSpace(request.PokemonNarrationVoice))
+        if (!string.IsNullOrWhiteSpace(request.PokemonNarrationVoice) && PokemonConfiguration.IsSupportedNarrationVoice(request.PokemonNarrationVoice))
         {
             config.Pokemon.NarrationVoice = request.PokemonNarrationVoice.Trim();
         }
@@ -196,6 +199,63 @@ public sealed class AdminController(
         }
     }
 
+    /// <summary>Generates a short, uncached sample through the private TTS service for an administrator.</summary>
+    [HttpPost("Pokemon/Narration/Preview")]
+    [Produces("audio/mpeg")]
+    public async Task<IActionResult> PreviewPokemonNarration(
+        [FromBody] PokemonNarrationPreviewRequest? request = null,
+        CancellationToken cancellationToken = default)
+    {
+        var config = Plugin.Instance?.Configuration ?? new PluginConfiguration();
+        var voice = request?.Voice?.Trim() ?? config.Pokemon.NarrationVoice;
+        var baseUrl = request?.BaseUrl ?? config.Pokemon.NarrationBaseUrl;
+        var speed = Math.Clamp(request?.Speed ?? config.Pokemon.NarrationSpeed, 0.75m, 1.35m);
+        var timeoutSeconds = Math.Clamp(request?.TimeoutSeconds ?? config.Pokemon.NarrationTimeoutSeconds, 5, 60);
+        if (!PokemonConfiguration.IsSupportedNarrationVoice(voice)) return BadRequest(new { error = "Choose a supported Pokédex voice." });
+        if (!TryGetNarrationSpeechEndpoint(baseUrl, out var endpoint)) return BadRequest(new { error = "Enter a valid local TTS service URL." });
+
+        try
+        {
+            using var narrationRequest = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(new
+                {
+                    model = "kokoro",
+                    input = NarrationPreviewScript,
+                    voice,
+                    speed = (double)speed,
+                    response_format = "mp3"
+                }), Encoding.UTF8, "application/json")
+            };
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+            using var response = await NarrationTestClient.SendAsync(narrationRequest, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode) return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "The TTS service did not generate a preview." });
+            if (response.Content.Headers.ContentLength is > 4L * 1024L * 1024L) return StatusCode(StatusCodes.Status502BadGateway, new { error = "The TTS preview was too large." });
+
+            await using var source = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            await using var audio = new MemoryStream();
+            var buffer = new byte[81920];
+            long total = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer, timeout.Token).ConfigureAwait(false)) > 0)
+            {
+                total += read;
+                if (total > 4L * 1024L * 1024L) return StatusCode(StatusCodes.Status502BadGateway, new { error = "The TTS preview was too large." });
+                await audio.WriteAsync(buffer.AsMemory(0, read), timeout.Token).ConfigureAwait(false);
+            }
+            return File(audio.ToArray(), "audio/mpeg");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "The TTS preview timed out." });
+        }
+        catch
+        {
+            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { error = "The TTS preview could not be generated." });
+        }
+    }
+
     /// <summary>
     /// Removes only generated narration audio. Pokémon saves, vaults, metadata, cries and all
     /// other Companion data live in separate directories and are never included here.
@@ -219,6 +279,15 @@ public sealed class AdminController(
         {
             return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, message = $"Could not remove cached Pokédex narrations: {ex.Message}" });
         }
+    }
+
+    private static bool TryGetNarrationSpeechEndpoint(string? baseUrl, out Uri endpoint)
+    {
+        endpoint = null!;
+        if (!Uri.TryCreate(baseUrl?.TrimEnd('/') + "/v1/audio/speech", UriKind.Absolute, out var uri)) return false;
+        if (uri.Scheme is not ("http" or "https") || string.IsNullOrWhiteSpace(uri.Host)) return false;
+        endpoint = uri;
+        return true;
     }
 
     [HttpGet("Pokemon/Overrides")]
@@ -334,4 +403,10 @@ public sealed record PokemonTestConnectionRequest(
 public sealed record PokemonNarrationTestConnectionRequest(
     string? BaseUrl = null,
     bool? Enabled = null,
+    int? TimeoutSeconds = null);
+
+public sealed record PokemonNarrationPreviewRequest(
+    string? BaseUrl = null,
+    string? Voice = null,
+    decimal? Speed = null,
     int? TimeoutSeconds = null);

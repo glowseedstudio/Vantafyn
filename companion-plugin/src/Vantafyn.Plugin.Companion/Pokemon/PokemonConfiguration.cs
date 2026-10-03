@@ -5,6 +5,13 @@ namespace Vantafyn.Plugin.Companion.Pokemon;
 /// </summary>
 public sealed class PokemonConfiguration
 {
+    public const string PuckNarrationVoice = "am_puck";
+    public const string MichaelNarrationVoice = "am_michael";
+    public const string GeorgeNarrationVoice = "bm_george";
+
+    public static bool IsSupportedNarrationVoice(string? voice) =>
+        voice is PuckNarrationVoice or MichaelNarrationVoice or GeorgeNarrationVoice;
+
     /// <summary>
     /// Master toggle for the Pokémon integration. Default is false (opt-in).
     /// </summary>
@@ -79,30 +86,30 @@ public sealed class PokemonConfiguration
     public string? NarrationBaseUrl { get; set; }
 
     /// <summary>Voice identifier understood by the configured Kokoro-compatible service.</summary>
-    public string NarrationVoice { get; set; } = "am_michael";
+    public string NarrationVoice { get; set; } = PuckNarrationVoice;
 
     /// <summary>Speech rate sent to the TTS service, clamped to a safe range.</summary>
-    public decimal NarrationSpeed { get; set; } = 0.93m;
+    public decimal NarrationSpeed { get; set; } = 0.98m;
 
     /// <summary>Timeout for a narration generation request.</summary>
     public int NarrationTimeoutSeconds { get; set; } = 15;
 
     /// <summary>
-    /// Upgrades only the exact previously shipped narrator defaults to the measured male baseline.
-    /// A voice or speed chosen by an administrator remains untouched.
+    /// Restores Puck for exact formerly shipped defaults. Deliberately chosen voice settings
+    /// remain untouched.
     /// </summary>
     public bool MigrateLegacyNarrationDefault()
     {
-        var isFormerPuckDefault = string.Equals(NarrationVoice, "am_puck", StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 0.98m;
-        var isFormerMichaelDefault = string.Equals(NarrationVoice, "am_michael", StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 1.08m;
-        var isFormerGeorgeDefault = string.Equals(NarrationVoice, "bm_george", StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 0.92m;
-        if (!isFormerPuckDefault && !isFormerMichaelDefault && !isFormerGeorgeDefault)
+        var isFormerMichaelBaseline = string.Equals(NarrationVoice, MichaelNarrationVoice, StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 0.93m;
+        var isFormerMichaelDefault = string.Equals(NarrationVoice, MichaelNarrationVoice, StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 1.08m;
+        var isFormerGeorgeDefault = string.Equals(NarrationVoice, GeorgeNarrationVoice, StringComparison.OrdinalIgnoreCase) && NarrationSpeed == 0.92m;
+        if (!isFormerMichaelBaseline && !isFormerMichaelDefault && !isFormerGeorgeDefault)
         {
             return false;
         }
 
-        NarrationVoice = "am_michael";
-        NarrationSpeed = 0.93m;
+        NarrationVoice = PuckNarrationVoice;
+        NarrationSpeed = 0.98m;
         return true;
     }
 }

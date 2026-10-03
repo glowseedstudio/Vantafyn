@@ -369,15 +369,19 @@
           </div>
 
           <div class="inputContainer">
-            <label class="inputLabel" for="pokemonNarrationVoice">Kokoro Voice</label>
-            <input is="emby-input" type="text" id="pokemonNarrationVoice" placeholder="am_michael" />
-            <div class="fieldDescription">Recommended: <code>am_michael</code>, the measured male baseline. Vantafyn preserves its natural fundamental, adds brightness and a quiet electronic layer locally, and does not globally pitch-shift the voice.</div>
+            <label class="inputLabel" for="pokemonNarrationVoice">Pokédex Voice</label>
+            <select is="emby-select" id="pokemonNarrationVoice" class="emby-select-withcolor">
+              <option value="am_puck">Puck — bright synthetic</option>
+              <option value="am_michael">Michael — male narrator</option>
+              <option value="bm_george">George — lower male narrator</option>
+            </select>
+            <div class="fieldDescription">Puck is the default. Voice previews are not saved and are never added to the narration cache.</div>
           </div>
 
           <div class="inputContainer">
             <label class="inputLabel" for="pokemonNarrationSpeed">Narration Speed</label>
-            <input is="emby-input" type="number" id="pokemonNarrationSpeed" min="0.75" max="1.35" step="0.01" value="0.93" />
-            <div class="fieldDescription">0.75 to 1.35. Recommended: <code>0.93</code> for clipped factual delivery. The app keeps pitch independent of this control.</div>
+            <input is="emby-input" type="number" id="pokemonNarrationSpeed" min="0.75" max="1.35" step="0.01" value="0.98" />
+            <div class="fieldDescription">0.75 to 1.35. Puck’s default delivery is <code>0.98</code>.</div>
           </div>
 
           <div class="inputContainer">
@@ -386,6 +390,11 @@
             <div class="fieldDescription">How long the Companion waits for a new narration before safely falling back to cry-only playback.</div>
           </div>
           <button is="emby-button" type="button" class="actionButton secondary" id="testPokemonNarration">Test Local TTS Connection</button>
+          <div class="buttonRow" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
+            <button is="emby-button" type="button" class="actionButton secondary narrationPreview" data-voice="am_puck">Play Puck</button>
+            <button is="emby-button" type="button" class="actionButton secondary narrationPreview" data-voice="am_michael">Play Michael</button>
+            <button is="emby-button" type="button" class="actionButton secondary narrationPreview" data-voice="bm_george">Play George</button>
+          </div>
           <button is="emby-button" type="button" class="actionButton secondary" id="regeneratePokemonNarration">Regenerate Pokédex Narrations</button>
           <div class="fieldDescription">Removes only generated narration audio so every Pokémon is recreated with the current voice profile. This does not touch saves, vaults, Pokédex progress, metadata, or cries.</div>
           <div id="pokemonNarrationStatus" class="statusBox"></div>
@@ -538,8 +547,9 @@
             page.querySelector('#pokemonModalBackgroundPath').value = getVal(pokemon, 'modalBackgroundPath', 'ModalBackgroundPath', '') || '';
             page.querySelector('#pokemonNarrationEnabled').checked = !!getVal(pokemon, 'narrationEnabled', 'NarrationEnabled', false);
             page.querySelector('#pokemonNarrationBaseUrl').value = getVal(pokemon, 'narrationBaseUrl', 'NarrationBaseUrl', '') || '';
-            page.querySelector('#pokemonNarrationVoice').value = getVal(pokemon, 'narrationVoice', 'NarrationVoice', 'am_michael') || 'am_michael';
-            page.querySelector('#pokemonNarrationSpeed').value = getVal(pokemon, 'narrationSpeed', 'NarrationSpeed', 0.93);
+            const narrationVoice = getVal(pokemon, 'narrationVoice', 'NarrationVoice', 'am_puck') || 'am_puck';
+            page.querySelector('#pokemonNarrationVoice').value = ['am_puck', 'am_michael', 'bm_george'].includes(narrationVoice) ? narrationVoice : 'am_puck';
+            page.querySelector('#pokemonNarrationSpeed').value = getVal(pokemon, 'narrationSpeed', 'NarrationSpeed', 0.98);
             page.querySelector('#pokemonNarrationTimeoutSeconds').value = getVal(pokemon, 'narrationTimeoutSeconds', 'NarrationTimeoutSeconds', 15);
 
             const diagnostics = await api('Vantafyn/Admin/Diagnostics').catch(() => null);
@@ -590,7 +600,7 @@
                 pokemonNarrationEnabled: page.querySelector('#pokemonNarrationEnabled').checked,
                 pokemonNarrationBaseUrl: page.querySelector('#pokemonNarrationBaseUrl').value.trim(),
                 pokemonNarrationVoice: page.querySelector('#pokemonNarrationVoice').value.trim(),
-                pokemonNarrationSpeed: parseFloat(page.querySelector('#pokemonNarrationSpeed').value || '0.93'),
+                pokemonNarrationSpeed: parseFloat(page.querySelector('#pokemonNarrationSpeed').value || '0.98'),
                 pokemonNarrationTimeoutSeconds: parseInt(page.querySelector('#pokemonNarrationTimeoutSeconds').value || '15', 10)
               };
 
@@ -731,6 +741,50 @@
             }
           });
         }
+
+        let narrationPreviewAudio = null;
+        let narrationPreviewUrl = null;
+        async function playNarrationPreview(voice, button) {
+          button.disabled = true;
+          setStatus('pokemonNarrationStatus', 'Generating ' + voice + ' preview…', 'info');
+          try {
+            const token = typeof ApiClient.accessToken === 'function' ? ApiClient.accessToken() : '';
+            const response = await fetch(ApiClient.getUrl('Vantafyn/Admin/Pokemon/Narration/Preview'), {
+              method: 'POST',
+              headers: {
+                'Authorization': 'MediaBrowser Client="Vantafyn", Device="Web", DeviceId="VantafynWeb", Version="1.0.0", Token="' + token + '"',
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg'
+              },
+              body: JSON.stringify({
+                baseUrl: page.querySelector('#pokemonNarrationBaseUrl').value.trim(),
+                voice: voice,
+                speed: parseFloat(page.querySelector('#pokemonNarrationSpeed').value || '0.98'),
+                timeoutSeconds: parseInt(page.querySelector('#pokemonNarrationTimeoutSeconds').value || '15', 10)
+              })
+            });
+            if (!response.ok) {
+              const body = await response.text().catch(() => '');
+              throw new Error('HTTP ' + response.status + (body ? ': ' + body : ''));
+            }
+            if (narrationPreviewAudio) narrationPreviewAudio.pause();
+            if (narrationPreviewUrl) URL.revokeObjectURL(narrationPreviewUrl);
+            narrationPreviewUrl = URL.createObjectURL(await response.blob());
+            narrationPreviewAudio = new Audio(narrationPreviewUrl);
+            await narrationPreviewAudio.play();
+            setStatus('pokemonNarrationStatus', 'Playing ' + voice + ' preview. This has not changed the saved voice.', 'success');
+          } catch (err) {
+            setStatus('pokemonNarrationStatus', 'Could not play voice preview: ' + formatError(err), 'error');
+          } finally {
+            button.disabled = false;
+          }
+        }
+
+        page.querySelectorAll('.narrationPreview').forEach(function (button) {
+          button.addEventListener('click', function () {
+            playNarrationPreview(button.dataset.voice, button);
+          });
+        });
 
         // Copy Diagnostics
         const copyDiagBtn = page.querySelector('#copyDiagnostics');
