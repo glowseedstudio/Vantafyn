@@ -1,5 +1,6 @@
 package dev.vantafyn.feature.home.games.pokemon
 
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -68,6 +69,8 @@ import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.feature.home.CompactBackButton
 import dev.vantafyn.feature.home.games.GameScreenReveal
 
+private const val BadgeCaseLogTag = "PokemonBadgeCase"
+
 private data class BadgeCaseGame(
     val save: PokemonGameSaveDto,
     val title: String,
@@ -112,7 +115,20 @@ fun PokemonBadgeCaseScreen(
 
     var badgeArtCatalog by remember { mutableStateOf<PokemonBadgeArtCatalogDto?>(null) }
     LaunchedEffect(session, pokemonRepository) {
-        badgeArtCatalog = session?.let { pokemonRepository.getBadgeArtCatalog(it).getOrNull() }
+        badgeArtCatalog = session?.let { activeSession ->
+            pokemonRepository.getBadgeArtCatalog(activeSession)
+                .onSuccess { catalog ->
+                    Log.d(
+                        BadgeCaseLogTag,
+                        "Badge art catalog configured=${catalog.configured} available=${catalog.availableCount}/${catalog.totalCount} " +
+                            "regions=${catalog.regions.joinToString { "${it.id}:${it.availableCount}/${it.totalCount}" }}",
+                    )
+                }
+                .onFailure { error ->
+                    Log.w(BadgeCaseLogTag, "Badge art catalog failed: ${error.message}", error)
+                }
+                .getOrNull()
+        }
     }
     val badgeImageUrls = remember(session, badgeArtCatalog) {
         buildMap {
@@ -121,7 +137,7 @@ fun PokemonBadgeCaseScreen(
                 region.badges.forEach { badge ->
                     val imageUrl = badge.imageUrl
                     if (badge.available && !imageUrl.isNullOrBlank()) {
-                        put("${badge.region}:${badge.id}", activeSession.toAuthenticatedBadgeArtUrl(imageUrl))
+                        put(badgeArtKey(badge.region, badge.id), activeSession.toAuthenticatedBadgeArtUrl(imageUrl))
                     }
                 }
             }
@@ -423,6 +439,17 @@ private fun BadgeRegionCase(
 ) {
     val earned = region.badges.count { it.isEarned }
     val total = region.badges.size.coerceAtLeast(1)
+    LaunchedEffect(region.region, region.badges, badgeImageUrls) {
+        val missing = region.badges
+            .filter { badgeImageUrls[badgeArtKey(it.region, it.id)] == null }
+            .joinToString { "${it.region}:${it.id}" }
+        if (missing.isNotBlank()) {
+            Log.d(
+                BadgeCaseLogTag,
+                "Missing badge art urls for ${region.region}: $missing; loadedKeys=${badgeImageUrls.keys.joinToString()}",
+            )
+        }
+    }
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -461,7 +488,7 @@ private fun BadgeRegionCase(
                     rowBadges.forEach { badge ->
                         BadgeSlot(
                             badge = badge,
-                            imageUrl = badgeImageUrls["${badge.region}:${badge.id}"],
+                            imageUrl = badgeImageUrls[badgeArtKey(badge.region, badge.id)],
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -674,9 +701,19 @@ private fun JellyfinSession.toAuthenticatedBadgeArtUrl(rawImageUrl: String): Str
     } else {
         "$base/${rawImageUrl.trimStart('/')}"
     }
-    return if (accessToken.isBlank() || url.contains("api_key=", ignoreCase = false)) {
+    if (accessToken.isBlank()) return url
+
+    val queryParams = buildList {
+        if (!url.contains("api_key=", ignoreCase = true)) add("api_key=$accessToken")
+        if (!url.contains("X-Emby-Token=", ignoreCase = true)) add("X-Emby-Token=$accessToken")
+    }
+
+    return if (queryParams.isEmpty()) {
         url
     } else {
-        "$url${if (url.contains("?")) "&" else "?"}api_key=$accessToken"
+        "$url${if (url.contains("?")) "&" else "?"}${queryParams.joinToString("&")}"
     }
 }
+
+private fun badgeArtKey(region: String, badgeId: String): String =
+    "${region.trim().lowercase()}:${badgeId.trim().lowercase()}"
