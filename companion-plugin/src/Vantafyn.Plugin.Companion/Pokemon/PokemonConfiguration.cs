@@ -79,10 +79,10 @@ public sealed class PokemonConfiguration
     public string? NarrationBaseUrl { get; set; }
 
     /// <summary>Voice identifier understood by the configured Kokoro-compatible service.</summary>
-    public string NarrationVoice { get; set; } = "am_michael";
+    public string NarrationVoice { get; set; } = "bm_george";
 
     /// <summary>Speech rate sent to the TTS service, clamped to a safe range.</summary>
-    public decimal NarrationSpeed { get; set; } = 1.08m;
+    public decimal NarrationSpeed { get; set; } = 0.92m;
 
     /// <summary>Timeout for a narration generation request.</summary>
     public int NarrationTimeoutSeconds { get; set; } = 15;

@@ -216,9 +216,41 @@ public sealed class PokemonController : ControllerBase
 
     private static string BuildNarrationScript(PokemonDexMetadataDto metadata)
     {
+        var name = FormatNarrationName(metadata.Name);
         var category = string.IsNullOrWhiteSpace(metadata.Category) ? "Pokémon" : metadata.Category;
         var flavor = string.IsNullOrWhiteSpace(metadata.FlavorText) ? "No Pokédex entry is available." : metadata.FlavorText;
-        return $"{metadata.Name}. The {category}. {flavor}";
+        return $"{name}. The {FormatNarrationText(category)}. {FormatNarrationText(flavor)}";
+    }
+
+    // Kokoro is a general English narrator, rather than a Pokémon-specific voice model.
+    // Use plain phonetic spellings here instead of engine-specific markup: this works with
+    // every OpenAI-compatible service supported by the Companion and keeps the spoken
+    // wording independent of the on-screen canonical spelling.
+    private static string FormatNarrationText(string text) => text
+        .Replace("Pokémon", "Poh-kay-mon", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokédex", "Poh-kay-dex", StringComparison.OrdinalIgnoreCase);
+
+    private static string FormatNarrationName(string? name)
+    {
+        var displayName = string.IsNullOrWhiteSpace(name) ? "Unknown Pokémon" : name.Trim();
+        var phoneticName = displayName switch
+        {
+            "Mr Mime" => "Mister Mime",
+            "Mime Jr" => "Mime Junior",
+            "Farfetch D" => "Far-fetched",
+            "Sirfetch D" => "Sir-fetched",
+            "Nidoran F" => "Nidoran female",
+            "Nidoran M" => "Nidoran male",
+            "Type Null" => "Type Null",
+            "Jangmo O" => "Jang-mo-oh",
+            "Hakamo O" => "Ha-ka-mo-oh",
+            "Kommo O" => "Kom-mo-oh",
+            "Ho Oh" => "Ho-oh",
+            "Porygon Z" => "Porygon Zee",
+            "Great Tusk" => "Great Tusk",
+            _ => displayName
+        };
+        return FormatNarrationText(phoneticName);
     }
 
     private static string HumanizeSpeciesName(string? name) => string.Join(" ", (name ?? "Pokémon")

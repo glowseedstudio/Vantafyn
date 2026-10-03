@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.8.0",
-        "changelog": "Pokédex narration through a private local Kokoro TTS service, server-side narration caching, male voice defaults, Gen 6–9 external-save batch import, corrected server-cached Pokédex metadata, and game audio/emulation fixes.",
+        "version": "0.2.9.0",
+        "changelog": "Reliable cached Pokédex narration playback, a lower synthetic narrator preset, phonetic Pokémon and Pokédex wording, and corrected pronunciations for special-form species names.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.43/Vantafyn.Plugin.Companion_0.2.8_net9.zip",
-        "checksum": "d52cb09f8355bbb5b50310a4611692fb",
-        "timestamp": "2026-10-02T23:45:48Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.44/Vantafyn.Plugin.Companion_0.2.9_net9.zip",
+        "checksum": "a90968f6ae08c1cc0eb2acb1622721d7",
+        "timestamp": "2026-10-03T00:32:29Z"
       },
       {
-        "version": "0.2.8.1",
-        "changelog": "Pokédex narration through a private local Kokoro TTS service, server-side narration caching, male voice defaults, Gen 6–9 external-save batch import, corrected server-cached Pokédex metadata, and game audio/emulation fixes.",
+        "version": "0.2.9.1",
+        "changelog": "Reliable cached Pokédex narration playback, a lower synthetic narrator preset, phonetic Pokémon and Pokédex wording, and corrected pronunciations for special-form species names.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.43/Vantafyn.Plugin.Companion_0.2.8_net10.zip",
-        "checksum": "40ce63ec1ce8625a5c24711b43e5100d",
-        "timestamp": "2026-10-02T23:45:48Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.44/Vantafyn.Plugin.Companion_0.2.9_net10.zip",
+        "checksum": "66a1e6004347fc4a36a7a510d7433f3b",
+        "timestamp": "2026-10-03T00:32:29Z"
       },
       {
         "version": "0.2.6.0",

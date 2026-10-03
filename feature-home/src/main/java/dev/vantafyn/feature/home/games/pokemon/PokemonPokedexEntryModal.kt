@@ -3,6 +3,7 @@ package dev.vantafyn.feature.home.games.pokemon
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.util.Log
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
@@ -60,6 +61,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -88,11 +90,16 @@ import dev.vantafyn.core.jellyfin.PokemonGameSaveDto
 import dev.vantafyn.core.jellyfin.PokemonPokedexEntryDto
 import dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog
 import dev.vantafyn.core.jellyfin.PokemonSummaryDto
+import dev.vantafyn.core.jellyfin.openAuthenticatedConnection
 import dev.vantafyn.core.media.games.GameHubSoundManager
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.feature.home.CompactBackButton
 import dev.vantafyn.feature.home.games.GameScreenReveal
+import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Authentic, encyclopedic Pokédex Entry screen presenting Pokémon species lore, physical stats,
@@ -115,6 +122,7 @@ fun PokemonPokedexEntryModal(
 ) {
     val context = LocalContext.current
     val metadataRepository = remember { DefaultJellyfinPokemonRepository() }
+    val narrationScope = rememberCoroutineScope()
 
     // Duck ambient background music so audio cries are heard with clarity
     DisposableEffect(Unit) {
@@ -205,20 +213,69 @@ fun PokemonPokedexEntryModal(
     var activePlayer by remember { mutableStateOf<MediaPlayer?>(null) }
     var isPlayingNarration by remember { mutableStateOf(false) }
     var narrationPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var isNarrationLoading by remember { mutableStateOf(false) }
+    var narrationRequestId by remember { mutableIntStateOf(0) }
 
     val stopNarration: () -> Unit = {
+        narrationRequestId += 1
         narrationPlayer?.let { player ->
             try { if (player.isPlaying) player.stop() } catch (_: Throwable) {}
             try { player.release() } catch (_: Throwable) {}
         }
         narrationPlayer = null
         isPlayingNarration = false
+        isNarrationLoading = false
     }
 
-    val playNarration: () -> Unit = {
-        val narrationUrl = JellyfinPokemonRepository.getPokemonNarrationUrl(session, currentSpeciesId)
-        if (narrationUrl != null && isRegistered) {
-            stopNarration()
+    val playNarration: () -> Unit = playNarration@{
+        val targetSession = session ?: return@playNarration
+        if (!isRegistered || isNarrationLoading) return@playNarration
+
+        stopNarration()
+        val requestId = narrationRequestId
+        val speciesId = currentSpeciesId
+        isNarrationLoading = true
+        narrationScope.launch {
+            val narrationFile = runCatching {
+                withContext(Dispatchers.IO) {
+                    val connection = targetSession.openAuthenticatedConnection(
+                        "Vantafyn/Pokemon/Narration/$speciesId",
+                    )
+                    connection.connectTimeout = 20_000
+                    connection.readTimeout = 70_000
+                    try {
+                        val status = connection.responseCode
+                        check(status in 200..299) {
+                            "Narration request returned HTTP $status"
+                        }
+                        val cacheDirectory = File(context.cacheDir, "pokedex-narration")
+                        check(cacheDirectory.exists() || cacheDirectory.mkdirs()) {
+                            "Could not create narration cache directory"
+                        }
+                        val destination = File(cacheDirectory, "$speciesId.mp3")
+                        val temporaryFile = File(cacheDirectory, "$speciesId-${System.nanoTime()}.tmp")
+                        connection.inputStream.use { input ->
+                            temporaryFile.outputStream().use { output -> input.copyTo(output) }
+                        }
+                        check(temporaryFile.length() > 0L) { "Narration response was empty" }
+                        if (!temporaryFile.renameTo(destination)) {
+                            temporaryFile.copyTo(destination, overwrite = true)
+                            temporaryFile.delete()
+                        }
+                        destination
+                    } finally {
+                        connection.disconnect()
+                    }
+                }
+            }.getOrElse { error ->
+                if (requestId == narrationRequestId) {
+                    isNarrationLoading = false
+                    Log.w("VantafynNarration", "Could not download Pokédex narration for species $speciesId", error)
+                }
+                return@launch
+            }
+
+            if (requestId != narrationRequestId || currentSpeciesId != speciesId) return@launch
             try {
                 val player = MediaPlayer().apply {
                     setAudioAttributes(
@@ -227,14 +284,20 @@ fun PokemonPokedexEntryModal(
                             .setUsage(AudioAttributes.USAGE_MEDIA)
                             .build(),
                     )
-                    setDataSource(narrationUrl)
+                    setDataSource(narrationFile.absolutePath)
                     setVolume(0.82f, 0.82f)
                     isLooping = false
                     setOnPreparedListener { mediaPlayer ->
+                        if (requestId != narrationRequestId) {
+                            mediaPlayer.release()
+                            return@setOnPreparedListener
+                        }
+                        isNarrationLoading = false
                         try {
                             mediaPlayer.start()
                             isPlayingNarration = true
-                        } catch (_: Throwable) {
+                        } catch (error: Throwable) {
+                            Log.w("VantafynNarration", "Could not play Pokédex narration for species $speciesId", error)
                             isPlayingNarration = false
                         }
                     }
@@ -243,7 +306,9 @@ fun PokemonPokedexEntryModal(
                         try { mediaPlayer.release() } catch (_: Throwable) {}
                         if (narrationPlayer === mediaPlayer) narrationPlayer = null
                     }
-                    setOnErrorListener { mediaPlayer, _, _ ->
+                    setOnErrorListener { mediaPlayer, what, extra ->
+                        Log.w("VantafynNarration", "Pokédex narration playback failed for species $speciesId (what=$what, extra=$extra)")
+                        isNarrationLoading = false
                         isPlayingNarration = false
                         try { mediaPlayer.release() } catch (_: Throwable) {}
                         if (narrationPlayer === mediaPlayer) narrationPlayer = null
@@ -252,7 +317,9 @@ fun PokemonPokedexEntryModal(
                     prepareAsync()
                 }
                 narrationPlayer = player
-            } catch (_: Throwable) {
+            } catch (error: Throwable) {
+                Log.w("VantafynNarration", "Could not prepare Pokédex narration for species $speciesId", error)
+                isNarrationLoading = false
                 isPlayingNarration = false
             }
         }
@@ -324,13 +391,16 @@ fun PokemonPokedexEntryModal(
                     isPlayingCry = false
                     try { mp.release() } catch (_: Throwable) {}
                     if (activePlayer === mp) activePlayer = null
+                    if (narrateAfter && autoPlayNarration && isRegistered) playNarration()
                     true
                 }
                 prepareAsync()
             }
             activePlayer = player
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            Log.w("VantafynNarration", "Could not start Pokémon cry for species $currentSpeciesId", error)
             isPlayingCry = false
+            if (narrateAfter && autoPlayNarration && isRegistered) playNarration()
         }
     }
 
@@ -799,6 +869,7 @@ fun PokemonPokedexEntryModal(
                                 modifier = Modifier.padding(start = 8.dp),
                             )
                         }
+
                     }
 
                     Row(
@@ -921,6 +992,34 @@ fun PokemonPokedexEntryModal(
                                 imageVector = Icons.AutoMirrored.Rounded.VolumeUp,
                                 contentDescription = "Replay Pokémon Cry",
                                 tint = if (isPlayingCry) primaryType.accentColor else Color(0xFFCBD5E1),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+
+                        // Manual narration control also makes the feature available when
+                        // auto-play is off, and provides an immediate, visible retry path.
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (isPlayingNarration || isNarrationLoading) Color(0xFFA855F7).copy(alpha = 0.26f)
+                                    else Color(0xFF1B1E2E),
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isPlayingNarration || isNarrationLoading) Color(0xFFC084FC) else Color(0xFF38405E),
+                                    CircleShape,
+                                )
+                                .clickable {
+                                    if (isPlayingNarration || isNarrationLoading) stopNarration() else playNarration()
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.RecordVoiceOver,
+                                contentDescription = if (isPlayingNarration || isNarrationLoading) "Stop Pokédex Narration" else "Play Pokédex Narration",
+                                tint = if (isPlayingNarration || isNarrationLoading) Color(0xFFC084FC) else Color(0xFFCBD5E1),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
