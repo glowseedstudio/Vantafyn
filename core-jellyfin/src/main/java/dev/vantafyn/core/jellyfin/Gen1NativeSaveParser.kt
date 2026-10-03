@@ -238,6 +238,7 @@ object Gen1NativeSaveParser {
             pokemonDetails = pokemonDetails,
             caughtSpeciesIds = caughtIds.sorted(),
             seenSpeciesIds = seenIds.sorted(),
+            gymBadges = PokemonGymBadgeCatalog.forGen1(saveBytes[0x2602].toInt() and 0xFF),
         )
     }
 

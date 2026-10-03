@@ -113,7 +113,8 @@ fun PokemonVaultHomeScreen(
     onSelectGameForTransfer: (GameSummary) -> Unit,
     onOpenTradeCenter: () -> Unit,
     onOpenPokedex: () -> Unit,
-    onOpenBadges: () -> Unit,
+    onOpenBadgeCase: () -> Unit,
+    onOpenAchievements: () -> Unit,
     onOpenBackups: () -> Unit,
     onInspectPokemon: (PokemonSummaryDto, PokemonDetailsDto?, String?, Boolean, List<PokemonSummaryDto>, Int) -> Unit,
     onRefresh: () -> Unit,
@@ -277,7 +278,8 @@ fun PokemonVaultHomeScreen(
                 onImportSave = onImportSave,
                 onOpenTradeCenter = onOpenTradeCenter,
                 onOpenPokedex = onOpenPokedex,
-                onOpenBadges = onOpenBadges,
+                onOpenBadgeCase = onOpenBadgeCase,
+                onOpenAchievements = onOpenAchievements,
                 onOpenBackups = onOpenBackups,
             )
 
@@ -948,7 +950,8 @@ private fun VaultPrimaryFeatures(
     onImportSave: () -> Unit,
     onOpenTradeCenter: () -> Unit,
     onOpenPokedex: () -> Unit,
-    onOpenBadges: () -> Unit,
+    onOpenBadgeCase: () -> Unit,
+    onOpenAchievements: () -> Unit,
     onOpenBackups: () -> Unit,
 ) {
     Column(
@@ -1179,6 +1182,107 @@ private fun VaultPrimaryFeatures(
             }
         }
 
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF2A2418),
+                            Color(0xFF171827),
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            Color(0xFFF59E0B).copy(alpha = 0.48f),
+                            Color(0xFF00E5FF).copy(alpha = 0.24f),
+                        )
+                    ),
+                    shape = RoundedCornerShape(18.dp),
+                )
+                .clickable { onOpenBadgeCase() }
+                .padding(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        Color(0xFFF59E0B),
+                                        Color(0xFF38BDF8),
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = "Badge Case",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Badge Case",
+                            color = VantafynColors.Ink,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Showcase gym badges earned across linked cartridge saves",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFFF59E0B).copy(alpha = 0.16f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = "View",
+                            color = Color(0xFFFBBF24),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
+            }
+        }
+
         // 3. Grid of Secondary Actions: Pokédex, Badges, Backups
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -1197,11 +1301,11 @@ private fun VaultPrimaryFeatures(
             // Badges Card
             VaultActionTile(
                 modifier = Modifier.weight(1f),
-                title = "Badges",
-                subtitle = "Gyms & Hall",
+                title = "Achievements",
+                subtitle = "Trainer Hub",
                 icon = Icons.Rounded.Star,
                 accentColor = Color(0xFFF59E0B),
-                onClick = onOpenBadges,
+                onClick = onOpenAchievements,
             )
 
             // Backups & Safety Card

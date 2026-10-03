@@ -65,6 +65,8 @@ public static class Gen2SaveParser
         ushort tid = (ushort)((saveBytes[0x2002] << 8) | saveBytes[0x2003]);
         result.TrainerId = tid.ToString();
 
+        result.GymBadges = PokemonGymBadgeCatalog.ForGen2(saveBytes[0x23E5], saveBytes[0x23E6]);
+
         // Money BCD at 0x23DB..0x23DD
         byte m0 = saveBytes[0x23DB];
         byte m1 = saveBytes[0x23DC];

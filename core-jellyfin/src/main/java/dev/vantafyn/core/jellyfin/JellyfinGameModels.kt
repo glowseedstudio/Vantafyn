@@ -201,6 +201,22 @@ data class PokemonBoxDto(
     val entries: List<PokemonSummaryDto> = emptyList(),
 ) : Serializable
 
+data class PokemonGymBadgeRegionDto(
+    val region: String = "",
+    val displayName: String = "",
+    val generation: Int = 0,
+    val badges: List<PokemonGymBadgeDto> = emptyList(),
+) : Serializable
+
+data class PokemonGymBadgeDto(
+    val id: String = "",
+    val name: String = "",
+    val region: String = "",
+    val generation: Int = 0,
+    val order: Int = 0,
+    val isEarned: Boolean = false,
+) : Serializable
+
 data class PokemonGameSaveDto(
     val gameId: String = "",
     val title: String = "",
@@ -221,7 +237,86 @@ data class PokemonGameSaveDto(
     val pokemonDetails: Map<String, PokemonDetailsDto> = emptyMap(),
     val caughtSpeciesIds: List<Int> = emptyList(),
     val seenSpeciesIds: List<Int> = emptyList(),
+    val gymBadges: List<PokemonGymBadgeRegionDto> = emptyList(),
 ) : Serializable
+
+object PokemonGymBadgeCatalog {
+    private data class BadgeDef(val id: String, val name: String)
+
+    private val kanto = listOf(
+        BadgeDef("boulder", "Boulder Badge"),
+        BadgeDef("cascade", "Cascade Badge"),
+        BadgeDef("thunder", "Thunder Badge"),
+        BadgeDef("rainbow", "Rainbow Badge"),
+        BadgeDef("soul", "Soul Badge"),
+        BadgeDef("marsh", "Marsh Badge"),
+        BadgeDef("volcano", "Volcano Badge"),
+        BadgeDef("earth", "Earth Badge"),
+    )
+
+    private val johto = listOf(
+        BadgeDef("zephyr", "Zephyr Badge"),
+        BadgeDef("hive", "Hive Badge"),
+        BadgeDef("plain", "Plain Badge"),
+        BadgeDef("fog", "Fog Badge"),
+        BadgeDef("storm", "Storm Badge"),
+        BadgeDef("mineral", "Mineral Badge"),
+        BadgeDef("glacier", "Glacier Badge"),
+        BadgeDef("rising", "Rising Badge"),
+    )
+
+    private val hoenn = listOf(
+        BadgeDef("stone", "Stone Badge"),
+        BadgeDef("knuckle", "Knuckle Badge"),
+        BadgeDef("dynamo", "Dynamo Badge"),
+        BadgeDef("heat", "Heat Badge"),
+        BadgeDef("balance", "Balance Badge"),
+        BadgeDef("feather", "Feather Badge"),
+        BadgeDef("mind", "Mind Badge"),
+        BadgeDef("rain", "Rain Badge"),
+    )
+
+    fun forGen1(kantoFlags: Int): List<PokemonGymBadgeRegionDto> =
+        listOf(createRegion("kanto", "Kanto", 1, kanto, kantoFlags))
+
+    fun forGen2(johtoFlags: Int, kantoFlags: Int): List<PokemonGymBadgeRegionDto> =
+        listOf(
+            createRegion("johto", "Johto", 2, johto, johtoFlags),
+            createRegion("kanto", "Kanto", 1, kanto, kantoFlags),
+        )
+
+    fun forGen3(gameId: String, badgeFlags: Int): List<PokemonGymBadgeRegionDto> {
+        val isFrLg = gameId.contains("fire", ignoreCase = true) ||
+            gameId.contains("leaf", ignoreCase = true)
+        return listOf(
+            if (isFrLg) createRegion("kanto", "Kanto", 1, kanto, badgeFlags)
+            else createRegion("hoenn", "Hoenn", 3, hoenn, badgeFlags)
+        )
+    }
+
+    private fun createRegion(
+        region: String,
+        displayName: String,
+        generation: Int,
+        badges: List<BadgeDef>,
+        flags: Int,
+    ): PokemonGymBadgeRegionDto =
+        PokemonGymBadgeRegionDto(
+            region = region,
+            displayName = displayName,
+            generation = generation,
+            badges = badges.mapIndexed { index, badge ->
+                PokemonGymBadgeDto(
+                    id = badge.id,
+                    name = badge.name,
+                    region = region,
+                    generation = generation,
+                    order = index + 1,
+                    isEarned = (flags and (1 shl index)) != 0,
+                )
+            },
+        )
+}
 
 data class PokemonStatsDto(
     val hp: Int = 0,
@@ -285,5 +380,4 @@ data class PokemonLearnableMoveDto(
     val levelLearned: Int? = null,
     val description: String? = null,
 ) : Serializable
-
 

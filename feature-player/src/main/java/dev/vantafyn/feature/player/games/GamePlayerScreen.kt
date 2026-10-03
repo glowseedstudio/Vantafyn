@@ -435,7 +435,7 @@ fun GamePlayerScreen(
 
                                 val cleanGameName = game.cleanTitle.ifEmpty { game.title }.replace(Regex("[^a-zA-Z0-9._ -]"), "_").trim()
                                 val ext = game.extension.ifEmpty { romFile?.extension ?: "rom" }.removePrefix(".")
-                                val friendlyRomFileName = "$cleanGameName.$ext"
+                                val friendlyRomFileName = romFile?.name ?: "$cleanGameName.$ext"
 
                                 val corsHeaders = mapOf(
                                     "Access-Control-Allow-Origin" to "*",

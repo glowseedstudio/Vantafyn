@@ -611,6 +611,103 @@ public sealed class PokemonSaveReaderTests
         Assert.True(charmander.IsInParty);
     }
 
+    [Fact]
+    public void ParseGen1Save_ReadsKantoGymBadges()
+    {
+        var bytes = CreateGen1Save();
+        bytes[0x2602] = 0b1000_0101;
+        WriteGen1Checksum(bytes);
+
+        var result = Gen1SaveParser.Parse(bytes, "pokemon_red", new PkVaultStaticCatalog());
+
+        Assert.True(result.IsSuccess);
+        var kanto = Assert.Single(result.GymBadges);
+        Assert.Equal("kanto", kanto.Region);
+        Assert.True(kanto.Badges.Single(b => b.Id == "boulder").IsEarned);
+        Assert.True(kanto.Badges.Single(b => b.Id == "thunder").IsEarned);
+        Assert.True(kanto.Badges.Single(b => b.Id == "earth").IsEarned);
+        Assert.False(kanto.Badges.Single(b => b.Id == "cascade").IsEarned);
+    }
+
+    [Fact]
+    public void ParseGen2Save_ReadsJohtoAndKantoGymBadges()
+    {
+        var bytes = new byte[32768];
+        bytes[0x23E5] = 0b0000_0011;
+        bytes[0x23E6] = 0b1000_0000;
+
+        var result = Gen2SaveParser.Parse(bytes, "pokemon_crystal", new PkVaultStaticCatalog());
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(["johto", "kanto"], result.GymBadges.Select(r => r.Region));
+        var johto = result.GymBadges.Single(r => r.Region == "johto");
+        var kanto = result.GymBadges.Single(r => r.Region == "kanto");
+        Assert.True(johto.Badges.Single(b => b.Id == "zephyr").IsEarned);
+        Assert.True(johto.Badges.Single(b => b.Id == "hive").IsEarned);
+        Assert.True(kanto.Badges.Single(b => b.Id == "earth").IsEarned);
+        Assert.False(kanto.Badges.Single(b => b.Id == "boulder").IsEarned);
+    }
+
+    [Fact]
+    public void ParseGen3Save_ReadsGameSpecificBadgeRegion()
+    {
+        var emerald = CreateGen3Save();
+        emerald[(2 * 4096) + 0x3FC] = 0x80;
+        emerald[(2 * 4096) + 0x3FD] = 0x40;
+
+        var emeraldResult = Gen3SaveParser.Parse(emerald, "pokemon_emerald", new PkVaultStaticCatalog());
+
+        Assert.True(emeraldResult.IsSuccess);
+        var hoenn = Assert.Single(emeraldResult.GymBadges);
+        Assert.Equal("hoenn", hoenn.Region);
+        Assert.True(hoenn.Badges.Single(b => b.Id == "stone").IsEarned);
+        Assert.True(hoenn.Badges.Single(b => b.Id == "rain").IsEarned);
+        Assert.False(hoenn.Badges.Single(b => b.Id == "knuckle").IsEarned);
+
+        var fireRed = CreateGen3Save();
+        fireRed[(2 * 4096) + 0x64] = 0b0010_0001;
+
+        var fireRedResult = Gen3SaveParser.Parse(fireRed, "pokemon_firered", new PkVaultStaticCatalog());
+
+        Assert.True(fireRedResult.IsSuccess);
+        var kanto = Assert.Single(fireRedResult.GymBadges);
+        Assert.Equal("kanto", kanto.Region);
+        Assert.True(kanto.Badges.Single(b => b.Id == "boulder").IsEarned);
+        Assert.True(kanto.Badges.Single(b => b.Id == "marsh").IsEarned);
+        Assert.False(kanto.Badges.Single(b => b.Id == "cascade").IsEarned);
+    }
+
+    private static byte[] CreateGen1Save()
+    {
+        var bytes = new byte[32768];
+        bytes[0x2598] = 0x50;
+        bytes[0x2F2C] = 0;
+        return bytes;
+    }
+
+    private static void WriteGen1Checksum(byte[] bytes)
+    {
+        var sum = 0;
+        for (var i = 0x2598; i <= 0x3522; i++)
+        {
+            sum = (sum + bytes[i]) & 0xFF;
+        }
+        bytes[0x3523] = (byte)((0xFF - sum) & 0xFF);
+    }
+
+    private static byte[] CreateGen3Save()
+    {
+        var bytes = new byte[4096 * 14];
+        for (var sectionId = 0; sectionId < 14; sectionId++)
+        {
+            var offset = sectionId * 4096;
+            BitConverter.GetBytes((ushort)sectionId).CopyTo(bytes, offset + 0x0FF4);
+            BitConverter.GetBytes(0x08012025u).CopyTo(bytes, offset + 0x0FF8);
+            BitConverter.GetBytes(1u).CopyTo(bytes, offset + 0x0FFC);
+        }
+        return bytes;
+    }
+
     private sealed class TestHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name)

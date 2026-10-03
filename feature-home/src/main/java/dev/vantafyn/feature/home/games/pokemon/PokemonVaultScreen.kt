@@ -100,6 +100,7 @@ import kotlinx.coroutines.withContext
 enum class VaultSubScreen {
     Home,
     BoxTransfer,
+    BadgeCase,
 }
 
 @Composable
@@ -118,7 +119,7 @@ fun PokemonVaultScreen(
 
     var subScreen by remember { mutableStateOf(VaultSubScreen.Home) }
 
-    BackHandler(enabled = subScreen == VaultSubScreen.BoxTransfer) {
+    BackHandler(enabled = subScreen != VaultSubScreen.Home) {
         subScreen = VaultSubScreen.Home
     }
 
@@ -315,7 +316,7 @@ fun PokemonVaultScreen(
                                     )
                                 }
                             }
-                            if (localParsed != null && (localParsed.party.isNotEmpty() || localParsed.boxes.any { it.entries.isNotEmpty() })) {
+                            if (localParsed != null && (localParsed.party.isNotEmpty() || localParsed.boxes.any { it.entries.isNotEmpty() } || localParsed.gymBadges.isNotEmpty())) {
                                 saveDto = localParsed
                                 errorMsg = null
                             }
@@ -642,8 +643,13 @@ fun PokemonVaultScreen(
                                 dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(bytes, game.title, game.id)
                             else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(bytes, game.title, game.id)
                         }
-                        val hasRealPokemon = parsed != null && (parsed.party.isNotEmpty() || parsed.boxes.any { it.entries.isNotEmpty() } || parsed.totalPokemonCount > 0)
-                        if (hasRealPokemon) {
+                        val hasSaveContent = parsed != null && (
+                            parsed.party.isNotEmpty() ||
+                                parsed.boxes.any { it.entries.isNotEmpty() } ||
+                                parsed.totalPokemonCount > 0 ||
+                                parsed.gymBadges.isNotEmpty()
+                            )
+                        if (hasSaveContent) {
                             map[game.id] = parsed!!
                         }
                     }
@@ -744,7 +750,8 @@ fun PokemonVaultScreen(
                             },
                             onOpenTradeCenter = { subScreen = VaultSubScreen.BoxTransfer },
                             onOpenPokedex = { isPokedexModalOpen = true },
-                            onOpenBadges = { isAchievementsModalOpen = true },
+                            onOpenBadgeCase = { subScreen = VaultSubScreen.BadgeCase },
+                            onOpenAchievements = { isAchievementsModalOpen = true },
                             onOpenBackups = { isBackupRestoreModalOpen = true },
                             onInspectPokemon = { pkm, details, gameId, isVault, summaries, idx ->
                                 inspectedPokemon = pkm
@@ -756,6 +763,15 @@ fun PokemonVaultScreen(
                             },
                             onRefresh = { loadAll() },
                             onBack = onBack,
+                        )
+                    }
+                    VaultSubScreen.BadgeCase -> {
+                        PokemonBadgeCaseScreen(
+                            session = session,
+                            availableGames = availableGames,
+                            detectedSaves = allDetectedSaves,
+                            onBack = { subScreen = VaultSubScreen.Home },
+                            onRefresh = { loadAll() },
                         )
                     }
                     VaultSubScreen.BoxTransfer -> {

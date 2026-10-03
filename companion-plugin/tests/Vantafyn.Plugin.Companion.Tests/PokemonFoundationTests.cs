@@ -23,6 +23,7 @@ public sealed class PokemonFoundationTests
         Assert.False(config.AllowEditing);
         Assert.True(config.AutoBackups);
         Assert.Null(config.ModalBackgroundPath);
+        Assert.Null(config.BadgeArtPath);
         Assert.Equal(PokemonConfiguration.PuckNarrationVoice, config.NarrationVoice);
         Assert.Equal(0.98m, config.NarrationSpeed);
     }

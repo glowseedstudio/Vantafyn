@@ -436,7 +436,26 @@ object Gen3NativeSaveParser {
             pokemonDetails = pokemonDetails,
             caughtSpeciesIds = caughtIds.sorted(),
             seenSpeciesIds = seenIds.sorted(),
+            gymBadges = PokemonGymBadgeCatalog.forGen3(gameId, readBadgeFlags(sections, gameId)),
         )
+    }
+
+    private fun readBadgeFlags(sections: Array<ByteArray?>, gameId: String): Int {
+        val sec2 = sections.getOrNull(2) ?: return 0
+        val isFrLg = gameId.contains("fire", ignoreCase = true) ||
+            gameId.contains("leaf", ignoreCase = true)
+        val isEmerald = gameId.contains("emerald", ignoreCase = true)
+
+        if (isFrLg) {
+            return if (sec2.size > 0x64) sec2[0x64].toInt() and 0xFF else 0
+        }
+
+        val firstFlagOffset = if (isEmerald) 0x3FC else 0x3A0
+        if (sec2.size <= firstFlagOffset + 1) return 0
+
+        val first = sec2[firstFlagOffset].toInt() and 0xFF
+        val second = sec2[firstFlagOffset + 1].toInt() and 0xFF
+        return ((first ushr 7) and 0x01) or ((second and 0x7F) shl 1)
     }
 
     private fun extractActiveSections(saveBytes: ByteArray): Array<ByteArray?>? {

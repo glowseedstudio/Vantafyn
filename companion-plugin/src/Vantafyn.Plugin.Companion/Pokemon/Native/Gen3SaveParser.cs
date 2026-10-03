@@ -118,6 +118,8 @@ public static class Gen3SaveParser
         var sid = BitConverter.ToUInt16(sec0, 0x0C);
         result.TrainerId = tid.ToString();
 
+        result.GymBadges = PokemonGymBadgeCatalog.ForGen3(gameId, ReadBadgeFlags(sections, gameId));
+
         // Pokedex bitfields (Section 0: 0x0028 caught, 0x005C seen)
         var caughtIds = new HashSet<int>();
         var seenIds = new HashSet<int>();
@@ -291,6 +293,34 @@ public static class Gen3SaveParser
 
         result.IsSuccess = true;
         return result;
+    }
+
+    private static byte ReadBadgeFlags(byte[][] sections, string gameId)
+    {
+        var sec2 = sections.Length > 2 ? sections[2] : null;
+        if (sec2 == null)
+        {
+            return 0;
+        }
+
+        var isFrLg = gameId.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
+                     gameId.Contains("leaf", StringComparison.OrdinalIgnoreCase);
+        var isEmerald = gameId.Contains("emerald", StringComparison.OrdinalIgnoreCase);
+
+        if (isFrLg)
+        {
+            return sec2.Length > 0x64 ? sec2[0x64] : (byte)0;
+        }
+
+        var firstFlagOffset = isEmerald ? 0x3FC : 0x3A0;
+        if (sec2.Length <= firstFlagOffset + 1)
+        {
+            return 0;
+        }
+
+        var first = sec2[firstFlagOffset];
+        var second = sec2[firstFlagOffset + 1];
+        return (byte)(((first >> 7) & 0x01) | ((second & 0x7F) << 1));
     }
 
     public static PokemonDetailsDto? ParsePokemon(
@@ -849,4 +879,3 @@ public static class Gen3SaveParser
         };
     }
 }
-

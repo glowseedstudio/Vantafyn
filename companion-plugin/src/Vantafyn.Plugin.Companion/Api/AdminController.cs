@@ -97,6 +97,10 @@ public sealed class AdminController(
         {
             config.Pokemon.ModalBackgroundPath = string.IsNullOrWhiteSpace(request.PokemonModalBackgroundPath) ? null : request.PokemonModalBackgroundPath.Trim();
         }
+        if (request.PokemonBadgeArtPath != null)
+        {
+            config.Pokemon.BadgeArtPath = string.IsNullOrWhiteSpace(request.PokemonBadgeArtPath) ? null : request.PokemonBadgeArtPath.Trim();
+        }
         if (request.PokemonNarrationEnabled.HasValue)
         {
             config.Pokemon.NarrationEnabled = request.PokemonNarrationEnabled.Value;
@@ -357,6 +361,7 @@ public sealed class AdminController(
             config.Pokemon.AllowEditing,
             config.Pokemon.AutoBackups,
             config.Pokemon.ModalBackgroundPath,
+            config.Pokemon.BadgeArtPath,
             config.Pokemon.NarrationEnabled,
             config.Pokemon.NarrationBaseUrl,
             config.Pokemon.NarrationVoice,
@@ -389,6 +394,7 @@ public sealed record AdminConfigurationRequest(
     bool? PokemonAllowEditing = null,
     bool? PokemonAutoBackups = null,
     string? PokemonModalBackgroundPath = null,
+    string? PokemonBadgeArtPath = null,
     bool? PokemonNarrationEnabled = null,
     string? PokemonNarrationBaseUrl = null,
     string? PokemonNarrationVoice = null,

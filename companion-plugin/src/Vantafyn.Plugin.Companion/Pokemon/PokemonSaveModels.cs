@@ -293,6 +293,9 @@ public sealed class PokemonGameSaveDto
     [JsonPropertyName("seenSpeciesIds")]
     public List<int> SeenSpeciesIds { get; set; } = [];
 
+    [JsonPropertyName("gymBadges")]
+    public IReadOnlyList<PokemonGymBadgeRegionDto> GymBadges { get; set; } = Array.Empty<PokemonGymBadgeRegionDto>();
+
     [JsonPropertyName("saveFound")]
     public bool SaveFound { get; set; }
 
@@ -314,6 +317,42 @@ public sealed class PokemonGameSaveDto
 
     [JsonPropertyName("shinyCount")]
     public int ShinyCount { get; set; }
+}
+
+public sealed class PokemonGymBadgeRegionDto
+{
+    [JsonPropertyName("region")]
+    public string Region { get; set; } = string.Empty;
+
+    [JsonPropertyName("displayName")]
+    public string DisplayName { get; set; } = string.Empty;
+
+    [JsonPropertyName("generation")]
+    public int Generation { get; set; }
+
+    [JsonPropertyName("badges")]
+    public IReadOnlyList<PokemonGymBadgeDto> Badges { get; set; } = Array.Empty<PokemonGymBadgeDto>();
+}
+
+public sealed class PokemonGymBadgeDto
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("region")]
+    public string Region { get; set; } = string.Empty;
+
+    [JsonPropertyName("generation")]
+    public int Generation { get; set; }
+
+    [JsonPropertyName("order")]
+    public int Order { get; set; }
+
+    [JsonPropertyName("isEarned")]
+    public bool IsEarned { get; set; }
 }
 
 /// <summary>
@@ -357,6 +396,9 @@ public sealed class PokemonSaveParseResult
 
     [JsonPropertyName("seenSpeciesIds")]
     public List<int> SeenSpeciesIds { get; set; } = [];
+
+    [JsonPropertyName("gymBadges")]
+    public List<PokemonGymBadgeRegionDto> GymBadges { get; set; } = [];
 
     [JsonPropertyName("details")]
     public Dictionary<string, PokemonDetailsDto> Details { get; set; } = [];

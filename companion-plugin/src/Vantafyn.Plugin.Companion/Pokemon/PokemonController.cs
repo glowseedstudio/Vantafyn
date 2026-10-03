@@ -35,6 +35,7 @@ public sealed class PokemonController : ControllerBase
     private readonly IPokemonJourneyService? _journeyService;
     private readonly IPokemonSocialService? _socialService;
     private readonly IPokemonCryService? _cryService;
+    private readonly IPokemonBadgeArtService? _badgeArtService;
     private readonly IAuthorizationContext _authorizationContext;
     private readonly PokemonConfiguration? _overrideConfig;
     private readonly ICompanionPaths? _paths;
@@ -57,6 +58,7 @@ public sealed class PokemonController : ControllerBase
         IPokemonJourneyService? journeyService = null,
         IPokemonSocialService? socialService = null,
         IPokemonCryService? cryService = null,
+        IPokemonBadgeArtService? badgeArtService = null,
         ICompanionPaths? paths = null)
     {
         _gamesService = gamesService;
@@ -74,6 +76,7 @@ public sealed class PokemonController : ControllerBase
         _journeyService = journeyService;
         _socialService = socialService;
         _cryService = cryService;
+        _badgeArtService = badgeArtService;
         _paths = paths;
     }
 
@@ -420,6 +423,7 @@ public sealed class PokemonController : ControllerBase
         var config = Configuration;
         var bgPath = config.ModalBackgroundPath?.Trim('\"', '\'').Trim();
         var hasBackground = !string.IsNullOrEmpty(bgPath);
+        var hasBadgeArt = (_badgeArtService?.GetCatalog(config, "/Vantafyn/Pokemon/Badges").AvailableCount ?? 0) > 0;
 
         if (!config.Enabled)
         {
@@ -434,7 +438,8 @@ public sealed class PokemonController : ControllerBase
                 TransfersAvailable = false,
                 CrossGenerationAvailable = false,
                 TradingAvailable = false,
-                HasCustomBackground = hasBackground
+                HasCustomBackground = hasBackground,
+                HasBadgeArt = hasBadgeArt
             });
         }
 
@@ -455,7 +460,8 @@ public sealed class PokemonController : ControllerBase
                 TransfersAvailable = config.AllowTransfers && capabilities.CanTransferSameGeneration,
                 CrossGenerationAvailable = config.AllowCrossGenerationTransfers && capabilities.CanTransferCrossGeneration,
                 TradingAvailable = config.AllowTrading,
-                HasCustomBackground = hasBackground
+                HasCustomBackground = hasBackground,
+                HasBadgeArt = hasBadgeArt
             });
         }
         catch (Exception ex)
@@ -471,9 +477,39 @@ public sealed class PokemonController : ControllerBase
                 TransfersAvailable = config.AllowTransfers,
                 CrossGenerationAvailable = config.AllowCrossGenerationTransfers,
                 TradingAvailable = config.AllowTrading,
-                HasCustomBackground = hasBackground
+                HasCustomBackground = hasBackground,
+                HasBadgeArt = hasBadgeArt
             });
         }
+    }
+
+    /// <summary>
+    /// Returns the Gen 1-3 Gym Badge artwork catalog and which configured files are available.
+    /// Earned/unearned state is intentionally not included here; that comes from save parsing.
+    /// </summary>
+    [HttpGet("Badges")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<PokemonBadgeArtCatalogDto> GetBadgeArtCatalog()
+    {
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (_badgeArtService == null) return NotFound(new { error = "Badge art service is unavailable." });
+
+        return Ok(_badgeArtService.GetCatalog(Configuration, "/Vantafyn/Pokemon/Badges"));
+    }
+
+    /// <summary>
+    /// Streams one configured Gym Badge image. Only known region/badge slugs can be resolved.
+    /// </summary>
+    [HttpGet("Badges/{regionId}/{badgeId}/Image")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetBadgeArtImage([FromRoute] string regionId, [FromRoute] string badgeId)
+    {
+        if (_badgeArtService == null) return NotFound();
+        var file = _badgeArtService.ResolveImage(Configuration, regionId, badgeId);
+        return file == null ? NotFound() : PhysicalFile(file.Path, file.ContentType);
     }
 
     /// <summary>
@@ -1830,6 +1866,7 @@ public sealed class PokemonController : ControllerBase
             PokedexCaught = parseResult.PokedexCaught,
             CaughtSpeciesIds = parseResult.CaughtSpeciesIds,
             SeenSpeciesIds = parseResult.SeenSpeciesIds,
+            GymBadges = parseResult.GymBadges,
             SaveFound = true,
             ProviderAvailable = true,
             Party = parseResult.Party,

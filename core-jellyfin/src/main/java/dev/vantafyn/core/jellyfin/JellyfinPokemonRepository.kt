@@ -998,6 +998,39 @@ class DefaultJellyfinPokemonRepository(
             }
         }
 
+        val gymBadges = mutableListOf<PokemonGymBadgeRegionDto>()
+        val gymBadgesArr = json.optJSONArray("gymBadges")
+        if (gymBadgesArr != null) {
+            for (i in 0 until gymBadgesArr.length()) {
+                val regionObj = gymBadgesArr.getJSONObject(i)
+                val badgesArr = regionObj.optJSONArray("badges")
+                val badges = mutableListOf<PokemonGymBadgeDto>()
+                if (badgesArr != null) {
+                    for (j in 0 until badgesArr.length()) {
+                        val badgeObj = badgesArr.getJSONObject(j)
+                        badges.add(
+                            PokemonGymBadgeDto(
+                                id = badgeObj.optString("id", ""),
+                                name = badgeObj.optString("name", ""),
+                                region = badgeObj.optString("region", regionObj.optString("region", "")),
+                                generation = badgeObj.optInt("generation", regionObj.optInt("generation", 0)),
+                                order = badgeObj.optInt("order", j + 1),
+                                isEarned = badgeObj.optBoolean("isEarned", false),
+                            )
+                        )
+                    }
+                }
+                gymBadges.add(
+                    PokemonGymBadgeRegionDto(
+                        region = regionObj.optString("region", ""),
+                        displayName = regionObj.optString("displayName", ""),
+                        generation = regionObj.optInt("generation", 0),
+                        badges = badges,
+                    )
+                )
+            }
+        }
+
         return PokemonGameSaveDto(
             gameId = json.optString("gameId", ""),
             title = json.optString("title", ""),
@@ -1015,6 +1048,7 @@ class DefaultJellyfinPokemonRepository(
             boxes = boxesList,
             totalPokemonCount = json.optInt("totalPokemonCount", 0),
             shinyCount = json.optInt("shinyCount", 0),
+            gymBadges = gymBadges,
         )
     }
 

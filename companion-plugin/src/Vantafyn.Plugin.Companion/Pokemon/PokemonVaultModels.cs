@@ -277,4 +277,7 @@ public sealed class PokemonIntegrationStatusDto
 
     [JsonPropertyName("hasCustomBackground")]
     public bool HasCustomBackground { get; set; }
+
+    [JsonPropertyName("hasBadgeArt")]
+    public bool HasBadgeArt { get; set; }
 }

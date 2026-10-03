@@ -66,6 +66,13 @@ public sealed class PokemonConfiguration
     public string? ModalBackgroundPath { get; set; }
 
     /// <summary>
+    /// Optional local filesystem folder containing user-provided Gym Badge artwork.
+    /// Expected layout: kanto/boulder.png, johto/zephyr.png, hoenn/stone.png, etc.
+    /// Artwork is never bundled with the plugin; administrators provide their own files.
+    /// </summary>
+    public string? BadgeArtPath { get; set; }
+
+    /// <summary>
     /// URL template for resolving Pokémon cry audio (.ogg).
     /// Placeholders {style} (latest or legacy) and {speciesId} are supported.
     /// Defaults to the official PokeAPI cries repository on GitHub.
