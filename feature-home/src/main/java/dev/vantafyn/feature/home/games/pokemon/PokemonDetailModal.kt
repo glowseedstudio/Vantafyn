@@ -618,7 +618,7 @@ fun PokemonDetailModal(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFF161925))
+                    .background(pokemonCardAtmosphereBrush(Color(0xFF00E5FF)))
                     .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                     .padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -830,7 +830,7 @@ fun PokemonDetailModal(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF181B26))
+                        .background(pokemonCompactCardAtmosphereBrush(Color(0xFF00E5FF)))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(12.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -854,7 +854,7 @@ fun PokemonDetailModal(
                     modifier = Modifier
                         .weight(1f)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF181B26))
+                        .background(pokemonCompactCardAtmosphereBrush(Color(0xFFF59E0B)))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(12.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -879,7 +879,7 @@ fun PokemonDetailModal(
                     modifier = Modifier
                         .weight(0.9f)
                         .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF181B26))
+                        .background(pokemonCompactCardAtmosphereBrush(Color(0xFF8B5CF6)))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(12.dp))
                         .padding(10.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -905,7 +905,7 @@ fun PokemonDetailModal(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF161925))
+                    .background(pokemonCardAtmosphereBrush(Color(0xFF00E5FF)))
                     .border(1.dp, cardBorderBrush, RoundedCornerShape(14.dp))
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -979,7 +979,7 @@ fun PokemonDetailModal(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xFF181B26))
+                    .background(pokemonCardAtmosphereBrush(Color(0xFF38BDF8)))
                     .border(1.dp, cardBorderBrush, RoundedCornerShape(14.dp))
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -1006,7 +1006,7 @@ fun PokemonDetailModal(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0xFF1B1E2B))
+                        .background(pokemonCardAtmosphereBrush(Color(0xFF00E5FF)))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(14.dp))
                         .padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),

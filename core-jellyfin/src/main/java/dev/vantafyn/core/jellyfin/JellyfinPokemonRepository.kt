@@ -1324,35 +1324,35 @@ class DefaultJellyfinPokemonRepository(
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
 
-                val achArray = json.optJSONArray("achievements")
+                val achArray = json.optJSONArrayAny("achievements", "Achievements")
                 val achievements = mutableListOf<PokemonAchievementDto>()
                 if (achArray != null) {
                     for (i in 0 until achArray.length()) {
                         val a = achArray.getJSONObject(i)
                         achievements.add(
                             PokemonAchievementDto(
-                                id = a.optString("id", ""),
-                                title = a.optString("title", ""),
-                                description = a.optString("description", ""),
-                                category = a.optString("category", "Pokemon"),
-                                rarity = a.optString("rarity", "Common"),
-                                score = a.optInt("score", 0),
-                                iconName = a.optString("iconName", "catching_pokemon"),
-                                isUnlocked = a.optBoolean("isUnlocked", false),
-                                unlockedAtUtc = a.optString("unlockedAtUtc", "").ifEmpty { null },
-                                currentProgress = a.optInt("currentProgress", 0),
-                                maxProgress = a.optInt("maxProgress", 0),
-                                progressPercentage = a.optDouble("progressPercentage", 0.0),
+                                id = a.optStringAny("id", "Id"),
+                                title = a.optStringAny("title", "Title"),
+                                description = a.optStringAny("description", "Description"),
+                                category = a.optStringAny("category", "Category", default = "Pokemon"),
+                                rarity = a.optStringAny("rarity", "Rarity", default = "Common"),
+                                score = a.optIntAny("score", "Score"),
+                                iconName = a.optStringAny("iconName", "IconName", default = "catching_pokemon"),
+                                isUnlocked = a.optBooleanAny("isUnlocked", "IsUnlocked"),
+                                unlockedAtUtc = a.optStringAny("unlockedAtUtc", "UnlockedAtUtc").ifEmpty { null },
+                                currentProgress = a.optIntAny("currentProgress", "CurrentProgress"),
+                                maxProgress = a.optIntAny("maxProgress", "MaxProgress"),
+                                progressPercentage = a.optDoubleAny("progressPercentage", "ProgressPercentage"),
                             )
                         )
                     }
                 }
 
                 PokemonAchievementsSummaryDto(
-                    userId = json.optString("userId", ""),
-                    totalScore = json.optInt("totalScore", 0),
-                    unlockedCount = json.optInt("unlockedCount", 0),
-                    totalCount = json.optInt("totalCount", 0),
+                    userId = json.optStringAny("userId", "UserId"),
+                    totalScore = json.optIntAny("totalScore", "TotalScore"),
+                    unlockedCount = json.optIntAny("unlockedCount", "UnlockedCount"),
+                    totalCount = json.optIntAny("totalCount", "TotalCount"),
                     achievements = achievements,
                 )
             }
@@ -1379,20 +1379,20 @@ class DefaultJellyfinPokemonRepository(
                 val list = mutableListOf<PokemonSocialActivityEvent>()
                 for (i in 0 until array.length()) {
                     val e = array.getJSONObject(i)
-                    val rawId = e.optString("id", "").trim()
+                    val rawId = e.optStringAny("id", "Id").trim()
                     val safeId = if (rawId.isNotEmpty()) rawId else "event_${i}_${System.currentTimeMillis()}_${java.util.UUID.randomUUID()}"
                     list.add(
                         PokemonSocialActivityEvent(
                             id = safeId,
-                            userId = e.optString("userId", ""),
-                            userName = e.optString("userName", ""),
-                            eventType = e.optString("eventType", ""),
-                            title = e.optString("title", ""),
-                            description = e.optString("description", ""),
-                            speciesId = if (e.has("speciesId") && !e.isNull("speciesId")) e.optInt("speciesId") else null,
-                            speciesName = e.optString("speciesName", "").ifEmpty { null },
-                            isShiny = e.optBoolean("isShiny", false),
-                            timestampUtc = e.optString("timestampUtc", ""),
+                            userId = e.optStringAny("userId", "UserId"),
+                            userName = e.optStringAny("userName", "UserName"),
+                            eventType = e.optStringAny("eventType", "EventType"),
+                            title = e.optStringAny("title", "Title"),
+                            description = e.optStringAny("description", "Description"),
+                            speciesId = e.optIntOrNullAny("speciesId", "SpeciesId"),
+                            speciesName = e.optStringAny("speciesName", "SpeciesName").ifEmpty { null },
+                            isShiny = e.optBooleanAny("isShiny", "IsShiny"),
+                            timestampUtc = e.optStringAny("timestampUtc", "TimestampUtc"),
                         )
                     )
                 }
@@ -1451,5 +1451,51 @@ class DefaultJellyfinPokemonRepository(
             }.getOrNull()
             throw IllegalStateException("Companion Pokémon API call failed with HTTP $code: ${errorBody ?: conn.responseMessage}")
         }
+    }
+
+    private fun JSONObject.optJSONArrayAny(vararg keys: String): JSONArray? {
+        for (key in keys) {
+            val value = optJSONArray(key)
+            if (value != null) return value
+        }
+        return null
+    }
+
+    private fun JSONObject.optStringAny(vararg keys: String, default: String = ""): String {
+        for (key in keys) {
+            if (!isNull(key)) {
+                val value = optString(key, "")
+                if (value.isNotBlank() && value != "null") return value
+            }
+        }
+        return default
+    }
+
+    private fun JSONObject.optIntAny(vararg keys: String, default: Int = 0): Int {
+        for (key in keys) {
+            if (!isNull(key)) return optInt(key, default)
+        }
+        return default
+    }
+
+    private fun JSONObject.optIntOrNullAny(vararg keys: String): Int? {
+        for (key in keys) {
+            if (!isNull(key)) return optInt(key)
+        }
+        return null
+    }
+
+    private fun JSONObject.optBooleanAny(vararg keys: String, default: Boolean = false): Boolean {
+        for (key in keys) {
+            if (!isNull(key)) return optBoolean(key, default)
+        }
+        return default
+    }
+
+    private fun JSONObject.optDoubleAny(vararg keys: String, default: Double = 0.0): Double {
+        for (key in keys) {
+            if (!isNull(key)) return optDouble(key, default)
+        }
+        return default
     }
 }

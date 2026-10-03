@@ -1183,7 +1183,7 @@ fun PokemonPokedexEntryModal(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF141724))
+                        .background(pokemonCardAtmosphereBrush(primaryType.accentColor))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                         .padding(vertical = 12.dp, horizontal = 8.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
@@ -1236,7 +1236,7 @@ fun PokemonPokedexEntryModal(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF141724))
+                        .background(pokemonCardAtmosphereBrush(primaryType.accentColor))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1277,7 +1277,7 @@ fun PokemonPokedexEntryModal(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF141724))
+                        .background(pokemonCardAtmosphereBrush(primaryType.accentColor))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1319,7 +1319,7 @@ fun PokemonPokedexEntryModal(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF141724))
+                        .background(pokemonCardAtmosphereBrush(primaryType.accentColor))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1397,7 +1397,7 @@ fun PokemonPokedexEntryModal(
                         .fillMaxWidth()
                         .padding(horizontal = 18.dp)
                         .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0xFF141724))
+                        .background(pokemonCardAtmosphereBrush(Color(0xFF00E5FF)))
                         .border(1.dp, cardBorderBrush, RoundedCornerShape(16.dp))
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -1559,7 +1559,7 @@ fun PokemonPokedexEntryModal(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(18.dp))
-                            .background(Color(0xFF141724))
+                            .background(pokemonCardAtmosphereBrush(Color(0xFF64748B), accentLift = 0.035f))
                             .border(1.dp, cardBorderBrush, RoundedCornerShape(18.dp))
                             .padding(20.dp),
                     ) {

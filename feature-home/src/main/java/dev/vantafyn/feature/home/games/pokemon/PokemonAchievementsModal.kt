@@ -180,7 +180,7 @@ fun PokemonAchievementsModal(
 
             if (achResult.isSuccess) {
                 val netSummary = achResult.getOrNull()
-                if (netSummary != null) {
+                if (netSummary != null && netSummary.achievements.isNotEmpty()) {
                     val totalOwned = vaultBoxes.sumOf { it.entries.size } + localSaves.sumOf { it.totalPokemonCount }
                     val mergedList = netSummary.achievements.map { netAch ->
                         val localMatch = currentLocal.achievements.firstOrNull { it.id.equals(netAch.id, ignoreCase = true) }
@@ -266,7 +266,7 @@ fun PokemonAchievementsModal(
                     }
                     Column {
                         Text(
-                            text = "Trainer Hub & Badges",
+                            text = "Trainer Hub & Achievements",
                             color = Color.White,
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
@@ -342,7 +342,7 @@ fun PokemonAchievementsModal(
                             modifier = Modifier.size(15.dp),
                         )
                         Text(
-                            text = "Badges (${summary?.unlockedCount ?: 0}/${summary?.totalCount ?: 10})",
+                            text = "Achievements (${summary?.unlockedCount ?: 0}/${summary?.totalCount ?: 10})",
                             color = if (selectedTab == 0) Color.White else Color(0xFF94A3B8),
                             fontSize = 11.5.sp,
                             fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal,
@@ -609,6 +609,20 @@ private fun PokemonSocialActivityCard(event: PokemonSocialActivityEvent) {
         "PokemonWithdrawn" -> Color(0xFF6366F1)
         else -> Color(0xFF94A3B8)
     }
+    val fallbackTitle = when (event.eventType) {
+        "ShinyAdded" -> event.speciesName?.let { "Shiny $it discovered" } ?: "Shiny Pokémon discovered"
+        "CrossGenerationTransferCompleted" -> event.speciesName?.let { "$it crossed generations" } ?: "Cross-generation transfer"
+        "PokemonTransferred" -> event.speciesName?.let { "$it transferred" } ?: "Pokémon transferred"
+        "TradeCompleted" -> "Trade completed"
+        "AchievementUnlocked" -> "Achievement unlocked"
+        "PokemonDeposited" -> event.speciesName?.let { "$it deposited" } ?: "Pokémon deposited"
+        "PokemonWithdrawn" -> event.speciesName?.let { "$it withdrawn" } ?: "Pokémon withdrawn"
+        else -> "Trainer activity"
+    }
+    val title = event.title.ifBlank { fallbackTitle }
+    val description = event.description.ifBlank {
+        event.userName.ifBlank { "A trainer" } + " recorded ${title.lowercase()}."
+    }
 
     Box(
         modifier = Modifier
@@ -650,7 +664,7 @@ private fun PokemonSocialActivityCard(event: PokemonSocialActivityEvent) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
-                        text = event.title,
+                        text = title,
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -666,7 +680,7 @@ private fun PokemonSocialActivityCard(event: PokemonSocialActivityEvent) {
                 }
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = event.description,
+                    text = description,
                     color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     lineHeight = 15.sp,

@@ -958,7 +958,40 @@ private fun VaultPrimaryFeatures(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // 1. Move Pokémon (Primary Action Card)
+        // Quick links stay visible before the larger action cards.
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            VaultActionTile(
+                modifier = Modifier.weight(1f),
+                title = "Pokédex",
+                subtitle = "Gens 1-9",
+                icon = Icons.AutoMirrored.Rounded.MenuBook,
+                accentColor = Color(0xFFF43F5E),
+                onClick = onOpenPokedex,
+            )
+
+            VaultActionTile(
+                modifier = Modifier.weight(1f),
+                title = "Achievements",
+                subtitle = "Trainer Hub",
+                icon = Icons.Rounded.Star,
+                accentColor = Color(0xFFF59E0B),
+                onClick = onOpenAchievements,
+            )
+
+            VaultActionTile(
+                modifier = Modifier.weight(1f),
+                title = "Backups",
+                subtitle = "Snapshots",
+                icon = Icons.Rounded.Security,
+                accentColor = Color(0xFF10B981),
+                onClick = onOpenBackups,
+            )
+        }
+
+        // Move Pokémon (Primary Action Card)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1058,25 +1091,99 @@ private fun VaultPrimaryFeatures(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
-                .background(Color(0xFF171C2C))
-                .border(1.dp, Color(0xFF8B5CF6).copy(alpha = 0.35f), RoundedCornerShape(18.dp))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            Color(0xFF201B38),
+                            Color(0xFF151827),
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            Color(0xFF8B5CF6).copy(alpha = 0.44f),
+                            Color(0xFF38BDF8).copy(alpha = 0.24f),
+                        )
+                    ),
+                    shape = RoundedCornerShape(18.dp)
+                )
                 .clickable { onImportSave() }
                 .padding(16.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Box(
-                    modifier = Modifier.size(46.dp).clip(RoundedCornerShape(12.dp)).background(Color(0xFF8B5CF6).copy(alpha = 0.22f)),
-                    contentAlignment = Alignment.Center,
-                ) { Icon(Icons.Rounded.UploadFile, "Import emulator save", tint = Color(0xFFB8A4FF), modifier = Modifier.size(24.dp)) }
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text("Import emulator save", color = VantafynColors.Ink, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                    Text("Copy Pokémon from a Gen 6–9 save without changing the original file", color = VantafynColors.Muted, fontSize = 11.sp, lineHeight = 15.sp)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        Color(0xFF8B5CF6),
+                                        Color(0xFF38BDF8),
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.UploadFile,
+                            contentDescription = "Import emulator save",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Import emulator save",
+                            color = VantafynColors.Ink,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Copy Pokémon from a Gen 6-9 save without changing the original file",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                        )
+                    }
                 }
-                Icon(Icons.Rounded.ChevronRight, null, tint = Color(0xFFB8A4FF), modifier = Modifier.size(18.dp))
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF8B5CF6).copy(alpha = 0.18f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = "Import",
+                            color = Color(0xFFB8A4FF),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = Color(0xFFB8A4FF),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
             }
         }
 
@@ -1283,41 +1390,6 @@ private fun VaultPrimaryFeatures(
             }
         }
 
-        // 3. Grid of Secondary Actions: Pokédex, Badges, Backups
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            // Pokédex Card
-            VaultActionTile(
-                modifier = Modifier.weight(1f),
-                title = "Pokédex",
-                subtitle = "Gens 1–9",
-                icon = Icons.AutoMirrored.Rounded.MenuBook,
-                accentColor = Color(0xFFF43F5E),
-                onClick = onOpenPokedex,
-            )
-
-            // Badges Card
-            VaultActionTile(
-                modifier = Modifier.weight(1f),
-                title = "Achievements",
-                subtitle = "Trainer Hub",
-                icon = Icons.Rounded.Star,
-                accentColor = Color(0xFFF59E0B),
-                onClick = onOpenAchievements,
-            )
-
-            // Backups & Safety Card
-            VaultActionTile(
-                modifier = Modifier.weight(1f),
-                title = "Backups",
-                subtitle = "Snapshots",
-                icon = Icons.Rounded.Security,
-                accentColor = Color(0xFF10B981),
-                onClick = onOpenBackups,
-            )
-        }
     }
 }
 

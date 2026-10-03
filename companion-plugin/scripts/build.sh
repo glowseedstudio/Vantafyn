@@ -7,7 +7,7 @@ PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
 VERSION="${1:-0.2.18}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.50-companion.2}"
+TAG="${2:-v0.9.51}"
 CHANGELOG="Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants."
 
 rm -rf "$ARTIFACTS"
