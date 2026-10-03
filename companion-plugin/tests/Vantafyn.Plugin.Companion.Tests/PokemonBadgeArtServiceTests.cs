@@ -57,6 +57,25 @@ public sealed class PokemonBadgeArtServiceTests : IDisposable
     }
 
     [Fact]
+    public void ResolveImage_ToleratesCaseAndPrettyBadgeFileNames()
+    {
+        var root = Path.Combine(_tempDir, "badges");
+        Directory.CreateDirectory(Path.Combine(root, "Kanto"));
+        var expected = Path.Combine(root, "Kanto", "Boulder Badge.png");
+        File.WriteAllBytes(expected, [0x89, 0x50, 0x4E, 0x47]);
+
+        var service = new FilePokemonBadgeArtService(_paths);
+        var config = new PokemonConfiguration { BadgeArtPath = root };
+
+        var catalog = service.GetCatalog(config, "/Vantafyn/Pokemon/Badges");
+        var resolved = service.ResolveImage(config, "kanto", "boulder");
+
+        Assert.Equal(1, catalog.AvailableCount);
+        Assert.NotNull(resolved);
+        Assert.Equal(expected, resolved.Path);
+    }
+
+    [Fact]
     public void ResolveImage_OnlyAllowsKnownBadgeSlugsInsideConfiguredRoot()
     {
         var root = Path.Combine(_tempDir, "badges");

@@ -51,7 +51,7 @@ public sealed partial class FilePokemonBadgeArtService(ICompanionPaths paths) : 
                     .OrderBy(d => d.Order)
                     .Select(d =>
                     {
-                        var available = configured && ResolveImagePath(root!, d.RegionId, d.Id) != null;
+                        var available = configured && ResolveImagePath(root!, d) != null;
                         return new PokemonBadgeArtDto
                         {
                             Id = d.Id,
@@ -104,7 +104,8 @@ public sealed partial class FilePokemonBadgeArtService(ICompanionPaths paths) : 
             return null;
         }
 
-        var path = ResolveImagePath(root, regionId, badgeId);
+        var definition = Definitions.First(d => d.RegionId == regionId && d.Id == badgeId);
+        var path = ResolveImagePath(root, definition);
         if (path == null)
         {
             return null;
@@ -131,22 +132,74 @@ public sealed partial class FilePokemonBadgeArtService(ICompanionPaths paths) : 
         }
     }
 
-    private static string? ResolveImagePath(string root, string regionId, string badgeId)
+    private static string? ResolveImagePath(string root, PokemonBadgeDefinition definition)
     {
         var rootFull = Path.GetFullPath(root);
-        foreach (var ext in ImageExtensions)
+        var regionDirectory = ResolveChildDirectory(rootFull, definition.RegionId);
+        if (regionDirectory == null)
         {
-            var candidate = Path.GetFullPath(Path.Combine(rootFull, regionId, badgeId + ext));
-            if (!IsInside(candidate, rootFull) || !File.Exists(candidate))
-            {
-                continue;
-            }
-
-            return candidate;
+            return null;
         }
 
-        return null;
+        foreach (var candidateName in BadgeFileNameCandidates(definition))
+        {
+            foreach (var ext in ImageExtensions)
+            {
+                var candidate = Path.GetFullPath(Path.Combine(regionDirectory, candidateName + ext));
+                if (IsInside(candidate, rootFull) && File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        var expectedNames = BadgeFileNameCandidates(definition)
+            .Select(NormalizeFileStem)
+            .ToHashSet(StringComparer.Ordinal);
+
+        return Directory.EnumerateFiles(regionDirectory)
+            .Where(path => ImageExtensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
+            .FirstOrDefault(path =>
+                IsInside(Path.GetFullPath(path), rootFull) &&
+                expectedNames.Contains(NormalizeFileStem(Path.GetFileNameWithoutExtension(path))));
     }
+
+    private static string? ResolveChildDirectory(string root, string name)
+    {
+        var exact = Path.Combine(root, name);
+        if (Directory.Exists(exact))
+        {
+            return exact;
+        }
+
+        try
+        {
+            return Directory.EnumerateDirectories(root)
+                .FirstOrDefault(path => string.Equals(Path.GetFileName(path), name, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<string> BadgeFileNameCandidates(PokemonBadgeDefinition definition)
+    {
+        yield return definition.Id;
+        yield return definition.Id.Replace("-", "_", StringComparison.Ordinal);
+        yield return definition.Id.Replace("-", " ", StringComparison.Ordinal);
+        yield return $"{definition.Id}-badge";
+        yield return $"{definition.Id}_badge";
+        yield return $"{definition.Id} badge";
+        yield return definition.Name;
+        yield return definition.Name.Replace(" ", "-", StringComparison.Ordinal);
+        yield return definition.Name.Replace(" ", "_", StringComparison.Ordinal);
+    }
+
+    private static string NormalizeFileStem(string value) =>
+        SlugCharsRegex()
+            .Replace(value.ToLowerInvariant(), string.Empty)
+            .Replace("badge", string.Empty, StringComparison.Ordinal);
 
     private static bool IsInside(string candidate, string root)
     {
@@ -167,6 +220,9 @@ public sealed partial class FilePokemonBadgeArtService(ICompanionPaths paths) : 
 
     [GeneratedRegex("^[a-z0-9-]{1,40}$", RegexOptions.CultureInvariant)]
     private static partial Regex SlugRegex();
+
+    [GeneratedRegex("[^a-z0-9]", RegexOptions.CultureInvariant)]
+    private static partial Regex SlugCharsRegex();
 
     private sealed record PokemonBadgeDefinition(
         string RegionId,

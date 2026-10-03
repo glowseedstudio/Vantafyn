@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonGameSaveDto
@@ -500,13 +501,23 @@ private fun BadgeSlot(
             contentAlignment = Alignment.Center,
         ) {
             if (imageUrl != null) {
-                AsyncImage(
+                SubcomposeAsyncImage(
                     model = imageUrl,
                     contentDescription = badge.name,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
                         .fillMaxSize()
                         .alpha(earnedAlpha),
+                    error = {
+                        Icon(
+                            imageVector = Icons.Rounded.Star,
+                            contentDescription = badge.name,
+                            tint = if (badge.isEarned) Color(0xFFFBBF24) else VantafynColors.Muted,
+                            modifier = Modifier
+                                .size(30.dp)
+                                .alpha(earnedAlpha),
+                        )
+                    },
                 )
             } else {
                 Icon(

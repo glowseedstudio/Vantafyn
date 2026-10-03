@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.17}"
+VERSION="${1:-0.2.18}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.50-companion.1}"
-CHANGELOG="Fixes Gen 3 Hoenn gym badge save parsing, exposes the badge artwork folder path in Companion settings, and keeps badge catalog alignment with client parsing."
+TAG="${2:-v0.9.50-companion.2}"
+CHANGELOG="Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.17.0",
+        "changelog": "Fixes Gen 3 Hoenn gym badge save parsing, exposes the badge artwork folder path in Companion settings, and keeps badge catalog alignment with client parsing.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.50-companion.1/Vantafyn.Plugin.Companion_0.2.17_net9.zip",
+        "checksum": "d92e3d93082e873104392a578f3df4fe",
+        "timestamp": "2026-10-03T08:59:26Z"
+      },
+      {
+        "version": "0.2.17.1",
+        "changelog": "Fixes Gen 3 Hoenn gym badge save parsing, exposes the badge artwork folder path in Companion settings, and keeps badge catalog alignment with client parsing.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.50-companion.1/Vantafyn.Plugin.Companion_0.2.17_net10.zip",
+        "checksum": "58d1d1011027f51f73e9a55fc499026a",
+        "timestamp": "2026-10-03T08:59:26Z"
       },
       {
         "version": "0.2.16.0",

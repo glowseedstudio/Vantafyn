@@ -8,20 +8,36 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.18.0",
+        "changelog": "Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.50-companion.2/Vantafyn.Plugin.Companion_0.2.18_net9.zip",
+        "checksum": "495f1657b9e8c65f7d54f1bd214641ee",
+        "timestamp": "2026-10-03T12:24:14Z"
+      },
+      {
+        "version": "0.2.18.1",
+        "changelog": "Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.50-companion.2/Vantafyn.Plugin.Companion_0.2.18_net10.zip",
+        "checksum": "c8bf7e99d1908bc6e4c628ac483a63c2",
+        "timestamp": "2026-10-03T12:24:14Z"
+      },
+      {
         "version": "0.2.17.0",
         "changelog": "Fixes Gen 3 Hoenn gym badge save parsing, exposes the badge artwork folder path in Companion settings, and keeps badge catalog alignment with client parsing.",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.50-companion.1/Vantafyn.Plugin.Companion_0.2.17_net9.zip",
-        "checksum": "bd6bebb6312c35f4b1aad8c1efa5d574",
-        "timestamp": "2026-10-03T08:59:15Z"
+        "checksum": "d92e3d93082e873104392a578f3df4fe",
+        "timestamp": "2026-10-03T08:59:26Z"
       },
       {
         "version": "0.2.17.1",
         "changelog": "Fixes Gen 3 Hoenn gym badge save parsing, exposes the badge artwork folder path in Companion settings, and keeps badge catalog alignment with client parsing.",
         "targetAbi": "12.0.0.0",
         "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.50-companion.1/Vantafyn.Plugin.Companion_0.2.17_net10.zip",
-        "checksum": "6d43574d5b2fae2ec2d3440b974ca4e8",
-        "timestamp": "2026-10-03T08:59:15Z"
+        "checksum": "58d1d1011027f51f73e9a55fc499026a",
+        "timestamp": "2026-10-03T08:59:26Z"
       },
       {
         "version": "0.2.16.0",
