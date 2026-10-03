@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.16}"
+VERSION="${1:-0.2.17}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.50}"
-CHANGELOG="Adds the Pokémon Badge Case, Gen 1-3 gym badge save parsing, configurable badge art folders, and a premium game-specific badge collection screen."
+TAG="${2:-v0.9.50-companion.1}"
+CHANGELOG="Fixes Gen 3 Hoenn gym badge save parsing, exposes the badge artwork folder path in Companion settings, and keeps badge catalog alignment with client parsing."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.16.0",
+        "changelog": "Adds the Pokémon Badge Case, Gen 1-3 gym badge save parsing, configurable badge art folders, and a premium game-specific badge collection screen.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.50/Vantafyn.Plugin.Companion_0.2.16_net9.zip",
+        "checksum": "005113c7adbb926490ab7b17df4ffa05",
+        "timestamp": "2026-10-03T08:53:26Z"
+      },
+      {
+        "version": "0.2.16.1",
+        "changelog": "Adds the Pokémon Badge Case, Gen 1-3 gym badge save parsing, configurable badge art folders, and a premium game-specific badge collection screen.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.50/Vantafyn.Plugin.Companion_0.2.16_net10.zip",
+        "checksum": "aba0770b835b4502c6027045134225b7",
+        "timestamp": "2026-10-03T08:53:26Z"
       },
       {
         "version": "0.2.6.0",
