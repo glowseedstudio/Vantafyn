@@ -57,6 +57,15 @@ interface JellyfinPokemonRepository {
     suspend fun getAchievements(session: JellyfinSession): Result<PokemonAchievementsSummaryDto>
     suspend fun getSocialActivity(session: JellyfinSession, limit: Int = 30): Result<List<PokemonSocialActivityEvent>>
     suspend fun getBadgeArtCatalog(session: JellyfinSession): Result<PokemonBadgeArtCatalogDto>
+    suspend fun getDiplomaProofs(session: JellyfinSession): Result<List<PokemonDiplomaProofDto>>
+    suspend fun uploadDiplomaProof(
+        session: JellyfinSession,
+        contentResolver: ContentResolver,
+        uri: Uri,
+        gameId: String,
+        certificateId: String,
+        title: String,
+    ): Result<PokemonDiplomaProofDto>
     suspend fun updateVaultEntryMoves(
         session: JellyfinSession,
         entryId: String,
@@ -1049,6 +1058,8 @@ class DefaultJellyfinPokemonRepository(
             boxes = boxesList,
             totalPokemonCount = json.optInt("totalPokemonCount", 0),
             shinyCount = json.optInt("shinyCount", 0),
+            caughtSpeciesIds = json.optJSONArray("caughtSpeciesIds").toIntList(),
+            seenSpeciesIds = json.optJSONArray("seenSpeciesIds").toIntList(),
             gymBadges = gymBadges,
         )
     }
@@ -1232,6 +1243,17 @@ class DefaultJellyfinPokemonRepository(
         )
     }
 
+    private fun parseDiplomaProof(obj: JSONObject): PokemonDiplomaProofDto =
+        PokemonDiplomaProofDto(
+            gameId = obj.optString("gameId", ""),
+            certificateId = obj.optString("certificateId", ""),
+            title = obj.optString("title", ""),
+            uploadedAtUtc = obj.optString("uploadedAtUtc", ""),
+            contentType = obj.optString("contentType", "image/png"),
+            sizeBytes = obj.optLong("sizeBytes", 0L),
+            imageUrl = obj.optString("imageUrl", ""),
+        )
+
     override suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto> =
         withContext(ioDispatcher) {
             runCatching {
@@ -1368,6 +1390,73 @@ class DefaultJellyfinPokemonRepository(
             }
         }
 
+    override suspend fun getDiplomaProofs(session: JellyfinSession): Result<List<PokemonDiplomaProofDto>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Diplomas/Proofs")
+                checkResponseCode(conn)
+                val array = JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
+                buildList {
+                    for (i in 0 until array.length()) {
+                        val obj = array.getJSONObject(i)
+                        add(
+                            PokemonDiplomaProofDto(
+                                gameId = obj.optString("gameId", ""),
+                                certificateId = obj.optString("certificateId", ""),
+                                title = obj.optString("title", ""),
+                                uploadedAtUtc = obj.optString("uploadedAtUtc", ""),
+                                contentType = obj.optString("contentType", "image/png"),
+                                sizeBytes = obj.optLong("sizeBytes", 0L),
+                                imageUrl = obj.optString("imageUrl", ""),
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+    override suspend fun uploadDiplomaProof(
+        session: JellyfinSession,
+        contentResolver: ContentResolver,
+        uri: Uri,
+        gameId: String,
+        certificateId: String,
+        title: String,
+    ): Result<PokemonDiplomaProofDto> = withContext(ioDispatcher) {
+        runCatching {
+            val bytes = contentResolver.openInputStream(uri)?.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val chunk = ByteArray(8 * 1024)
+                val maxBytes = 8 * 1024 * 1024
+                while (true) {
+                    val read = input.read(chunk)
+                    if (read < 0) break
+                    require(output.size() + read <= maxBytes) { "Diploma screenshots larger than 8 MB are not supported." }
+                    output.write(chunk, 0, read)
+                }
+                output.toByteArray()
+            } ?: error("Unable to open the selected diploma screenshot.")
+            val boundary = "VantafynDiploma${System.currentTimeMillis()}"
+            val safeGameId = java.net.URLEncoder.encode(gameId, "UTF-8")
+            val safeCertificateId = java.net.URLEncoder.encode(certificateId, "UTF-8")
+            val conn = session.openAuthenticatedConnection(
+                "Vantafyn/Pokemon/Diplomas/Proofs/$safeGameId/$safeCertificateId",
+                "POST",
+            )
+            conn.doOutput = true
+            conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+            conn.outputStream.use { output ->
+                fun write(value: String) = output.write(value.toByteArray())
+                write("--$boundary\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\n$title\r\n")
+                write("--$boundary\r\nContent-Disposition: form-data; name=\"proofImage\"; filename=\"diploma-proof.png\"\r\nContent-Type: image/png\r\n\r\n")
+                output.write(bytes)
+                write("\r\n--$boundary--\r\n")
+            }
+            checkResponseCode(conn)
+            parseDiplomaProof(JSONObject(conn.inputStream.bufferedReader().use { it.readText() }))
+        }
+    }
+
     override suspend fun getSocialActivity(session: JellyfinSession, limit: Int): Result<List<PokemonSocialActivityEvent>> =
         withContext(ioDispatcher) {
             runCatching {
@@ -1497,5 +1586,12 @@ class DefaultJellyfinPokemonRepository(
             if (!isNull(key)) return optDouble(key, default)
         }
         return default
+    }
+
+    private fun JSONArray?.toIntList(): List<Int> {
+        if (this == null) return emptyList()
+        return buildList {
+            for (i in 0 until length()) add(optInt(i))
+        }
     }
 }

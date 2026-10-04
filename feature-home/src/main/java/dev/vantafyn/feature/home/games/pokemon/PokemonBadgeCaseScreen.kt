@@ -595,6 +595,7 @@ private fun RegionCompletionPill(
     val isComplete = earned >= total && total > 0
     Row(
         modifier = Modifier
+            .height(32.dp)
             .clip(RoundedCornerShape(999.dp))
             .background(if (isComplete) Color(0xFF10B981).copy(alpha = 0.16f) else Color(0xFFF59E0B).copy(alpha = 0.13f))
             .border(
@@ -602,21 +603,21 @@ private fun RegionCompletionPill(
                 if (isComplete) Color(0xFF10B981).copy(alpha = 0.42f) else Color(0xFFF59E0B).copy(alpha = 0.35f),
                 RoundedCornerShape(999.dp),
             )
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
     ) {
         Text(
             text = if (isComplete) "Complete" else "$earned/$total",
             color = if (isComplete) Color(0xFF34D399) else Color(0xFFFBBF24),
-            fontSize = 10.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
         )
         Icon(
             imageVector = Icons.Rounded.ChevronRight,
             contentDescription = null,
             tint = if (isComplete) Color(0xFF34D399) else Color(0xFFFBBF24),
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier.size(11.dp),
         )
     }
 }

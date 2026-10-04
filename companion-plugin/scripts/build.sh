@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.18}"
+VERSION="${1:-0.2.19}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.51}"
-CHANGELOG="Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants."
+TAG="${2:-v0.9.52}"
+CHANGELOG="Adds Pokémon Diploma Case proof uploads and premium certificate viewing alongside Badge Case and vault UI refinements."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.18.0",
+        "changelog": "Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.51/Vantafyn.Plugin.Companion_0.2.18_net9.zip",
+        "checksum": "141dfd1e57ff165e95209f542751a0b0",
+        "timestamp": "2026-10-03T12:46:29Z"
+      },
+      {
+        "version": "0.2.18.1",
+        "changelog": "Fixes Gym Badge artwork resolution with case-insensitive folders and common badge filename variants.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.51/Vantafyn.Plugin.Companion_0.2.18_net10.zip",
+        "checksum": "d72dcf87089cdad3a2e685c4029f0bce",
+        "timestamp": "2026-10-03T12:46:29Z"
       },
       {
         "version": "0.2.17.0",

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.Cable
 import androidx.compose.material.icons.rounded.CatchingPokemon
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.EmojiEvents
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Refresh
@@ -114,6 +115,7 @@ fun PokemonVaultHomeScreen(
     onOpenTradeCenter: () -> Unit,
     onOpenPokedex: () -> Unit,
     onOpenBadgeCase: () -> Unit,
+    onOpenDiplomaCase: () -> Unit,
     onOpenAchievements: () -> Unit,
     onOpenBackups: () -> Unit,
     onInspectPokemon: (PokemonSummaryDto, PokemonDetailsDto?, String?, Boolean, List<PokemonSummaryDto>, Int) -> Unit,
@@ -279,6 +281,7 @@ fun PokemonVaultHomeScreen(
                 onOpenTradeCenter = onOpenTradeCenter,
                 onOpenPokedex = onOpenPokedex,
                 onOpenBadgeCase = onOpenBadgeCase,
+                onOpenDiplomaCase = onOpenDiplomaCase,
                 onOpenAchievements = onOpenAchievements,
                 onOpenBackups = onOpenBackups,
             )
@@ -951,6 +954,7 @@ private fun VaultPrimaryFeatures(
     onOpenTradeCenter: () -> Unit,
     onOpenPokedex: () -> Unit,
     onOpenBadgeCase: () -> Unit,
+    onOpenDiplomaCase: () -> Unit,
     onOpenAchievements: () -> Unit,
     onOpenBackups: () -> Unit,
 ) {
@@ -1383,6 +1387,107 @@ private fun VaultPrimaryFeatures(
                             imageVector = Icons.Rounded.ChevronRight,
                             contentDescription = null,
                             tint = Color(0xFFFBBF24),
+                            modifier = Modifier.size(13.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(
+                    Brush.linearGradient(
+                        listOf(
+                            Color(0xFF17251F),
+                            Color(0xFF111827),
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(
+                            Color(0xFF34D399).copy(alpha = 0.46f),
+                            Color(0xFFFBBF24).copy(alpha = 0.26f),
+                        )
+                    ),
+                    shape = RoundedCornerShape(18.dp),
+                )
+                .clickable { onOpenDiplomaCase() }
+                .padding(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(
+                                        Color(0xFF34D399),
+                                        Color(0xFFFBBF24),
+                                    )
+                                )
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.EmojiEvents,
+                            contentDescription = "Diploma Case",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "Diploma Case",
+                            color = VantafynColors.Ink,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Archive completed Pokédex certificates and proof screenshots",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                            lineHeight = 15.sp,
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF34D399).copy(alpha = 0.15f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Text(
+                            text = "View",
+                            color = Color(0xFF34D399),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = Color(0xFF34D399),
                             modifier = Modifier.size(13.dp),
                         )
                     }

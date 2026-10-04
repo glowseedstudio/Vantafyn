@@ -243,6 +243,16 @@ data class PokemonBadgeArtDto(
     val imageUrl: String? = null,
 ) : Serializable
 
+data class PokemonDiplomaProofDto(
+    val gameId: String = "",
+    val certificateId: String = "",
+    val title: String = "",
+    val uploadedAtUtc: String = "",
+    val contentType: String = "image/png",
+    val sizeBytes: Long = 0L,
+    val imageUrl: String = "",
+) : Serializable
+
 data class PokemonGameSaveDto(
     val gameId: String = "",
     val title: String = "",

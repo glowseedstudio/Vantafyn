@@ -68,3 +68,27 @@ public sealed class PokemonBadgeArtDto
 }
 
 public sealed record PokemonBadgeArtFile(string Path, string ContentType);
+
+public sealed class PokemonDiplomaProofDto
+{
+    [JsonPropertyName("gameId")]
+    public string GameId { get; set; } = string.Empty;
+
+    [JsonPropertyName("certificateId")]
+    public string CertificateId { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("uploadedAtUtc")]
+    public DateTimeOffset UploadedAtUtc { get; set; }
+
+    [JsonPropertyName("contentType")]
+    public string ContentType { get; set; } = "image/png";
+
+    [JsonPropertyName("sizeBytes")]
+    public long SizeBytes { get; set; }
+
+    [JsonPropertyName("imageUrl")]
+    public string ImageUrl { get; set; } = string.Empty;
+}

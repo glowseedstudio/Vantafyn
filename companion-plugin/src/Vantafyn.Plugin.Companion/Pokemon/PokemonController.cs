@@ -512,6 +512,98 @@ public sealed class PokemonController : ControllerBase
         return file == null ? NotFound() : PhysicalFile(file.Path, file.ContentType);
     }
 
+    [HttpGet("Diplomas/Proofs")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<PokemonDiplomaProofDto>>> GetDiplomaProofs(CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (_paths == null) return NotFound(new { error = "Companion storage is unavailable." });
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        return Ok(await ListDiplomaProofsAsync(userId, cancellationToken).ConfigureAwait(false));
+    }
+
+    [HttpPost("Diplomas/Proofs/{gameId}/{certificateId}")]
+    [Consumes("multipart/form-data")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<PokemonDiplomaProofDto>> UploadDiplomaProof(
+        [FromRoute] string gameId,
+        [FromRoute] string certificateId,
+        [FromForm] IFormFile? proofImage,
+        [FromForm] string? title,
+        CancellationToken cancellationToken)
+    {
+        const long maxImageBytes = 8L * 1024L * 1024L;
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (_paths == null) return NotFound(new { error = "Companion storage is unavailable." });
+        if (!IsSafeDiplomaSlug(gameId) || !IsSafeDiplomaSlug(certificateId)) return BadRequest(new { error = "Invalid diploma identifier." });
+        if (proofImage == null || proofImage.Length == 0) return BadRequest(new { error = "Choose a non-empty diploma screenshot." });
+        if (proofImage.Length > maxImageBytes) return BadRequest(new { error = "Diploma screenshots larger than 8 MB are not supported." });
+
+        var contentType = NormalizeDiplomaImageContentType(proofImage.ContentType, proofImage.FileName);
+        if (contentType == null) return BadRequest(new { error = "Diploma proof must be a PNG, JPEG, or WebP image." });
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var root = DiplomaProofDirectory(userId, gameId);
+        Directory.CreateDirectory(root);
+        var extension = contentType switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/webp" => ".webp",
+            _ => ".png"
+        };
+
+        foreach (var old in Directory.GetFiles(root, $"{certificateId}.*").Where(path => !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+        {
+            System.IO.File.Delete(old);
+        }
+
+        var imagePath = Path.Combine(root, certificateId + extension);
+        await using (var input = proofImage.OpenReadStream())
+        await using (var output = System.IO.File.Create(imagePath))
+        {
+            await input.CopyToAsync(output, cancellationToken).ConfigureAwait(false);
+        }
+
+        var proof = new PokemonDiplomaProofDto
+        {
+            GameId = gameId,
+            CertificateId = certificateId,
+            Title = string.IsNullOrWhiteSpace(title) ? "Pokédex Diploma" : title.Trim(),
+            UploadedAtUtc = DateTimeOffset.UtcNow,
+            ContentType = contentType,
+            SizeBytes = proofImage.Length,
+            ImageUrl = $"/Vantafyn/Pokemon/Diplomas/Proofs/{gameId}/{certificateId}/Image"
+        };
+        await System.IO.File.WriteAllTextAsync(
+            Path.Combine(root, $"{certificateId}.json"),
+            JsonSerializer.Serialize(proof),
+            cancellationToken).ConfigureAwait(false);
+        return Ok(proof);
+    }
+
+    [HttpGet("Diplomas/Proofs/{gameId}/{certificateId}/Image")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetDiplomaProofImage([FromRoute] string gameId, [FromRoute] string certificateId)
+    {
+        if (!IsPokemonIntegrationEnabled()) return NotFound();
+        if (_paths == null || !IsSafeDiplomaSlug(gameId) || !IsSafeDiplomaSlug(certificateId)) return NotFound();
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var root = DiplomaProofDirectory(userId, gameId);
+        if (!Directory.Exists(root)) return NotFound();
+        var imagePath = Directory.GetFiles(root, $"{certificateId}.*")
+            .FirstOrDefault(path => !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
+        if (imagePath == null) return NotFound();
+
+        var contentType = NormalizeDiplomaImageContentType(null, imagePath) ?? "image/png";
+        return PhysicalFile(imagePath, contentType, enableRangeProcessing: true);
+    }
+
     /// <summary>
     /// Serves or redirects to the custom Pokémon modal/vault background image if configured.
     /// </summary>
@@ -2792,5 +2884,57 @@ public sealed class PokemonController : ControllerBase
 
         var events = await _socialService.GetRecentActivityAsync(limit, cancellationToken).ConfigureAwait(false);
         return Ok(events);
+    }
+
+    private async Task<IReadOnlyList<PokemonDiplomaProofDto>> ListDiplomaProofsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var root = DiplomaProofRoot(userId);
+        if (!Directory.Exists(root)) return Array.Empty<PokemonDiplomaProofDto>();
+
+        var proofs = new List<PokemonDiplomaProofDto>();
+        foreach (var metaPath in Directory.GetFiles(root, "*.json", SearchOption.AllDirectories))
+        {
+            try
+            {
+                var json = await System.IO.File.ReadAllTextAsync(metaPath, cancellationToken).ConfigureAwait(false);
+                var proof = JsonSerializer.Deserialize<PokemonDiplomaProofDto>(json);
+                if (proof != null && IsSafeDiplomaSlug(proof.GameId) && IsSafeDiplomaSlug(proof.CertificateId))
+                {
+                    proof.ImageUrl = $"/Vantafyn/Pokemon/Diplomas/Proofs/{proof.GameId}/{proof.CertificateId}/Image";
+                    proofs.Add(proof);
+                }
+            }
+            catch
+            {
+                // Ignore a single corrupt metadata file instead of breaking the whole case.
+            }
+        }
+
+        return proofs.OrderByDescending(p => p.UploadedAtUtc).ToList();
+    }
+
+    private string DiplomaProofRoot(Guid userId) =>
+        Path.Combine(_paths!.PokemonRoot, "diploma-proofs", userId.ToString("N"));
+
+    private string DiplomaProofDirectory(Guid userId, string gameId) =>
+        Path.Combine(DiplomaProofRoot(userId), gameId);
+
+    private static bool IsSafeDiplomaSlug(string value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= 96 &&
+        value.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.');
+
+    private static string? NormalizeDiplomaImageContentType(string? contentType, string fileName)
+    {
+        var lowerType = contentType?.Trim().ToLowerInvariant();
+        if (lowerType is "image/png" or "image/jpeg" or "image/webp") return lowerType;
+
+        return Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => null
+        };
     }
 }

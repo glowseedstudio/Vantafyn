@@ -101,6 +101,7 @@ enum class VaultSubScreen {
     Home,
     BoxTransfer,
     BadgeCase,
+    DiplomaCase,
 }
 
 @Composable
@@ -761,6 +762,7 @@ fun PokemonVaultScreen(
                             onOpenTradeCenter = { subScreen = VaultSubScreen.BoxTransfer },
                             onOpenPokedex = { isPokedexModalOpen = true },
                             onOpenBadgeCase = { subScreen = VaultSubScreen.BadgeCase },
+                            onOpenDiplomaCase = { subScreen = VaultSubScreen.DiplomaCase },
                             onOpenAchievements = { isAchievementsModalOpen = true },
                             onOpenBackups = { isBackupRestoreModalOpen = true },
                             onInspectPokemon = { pkm, details, gameId, isVault, summaries, idx ->
@@ -777,6 +779,16 @@ fun PokemonVaultScreen(
                     }
                     VaultSubScreen.BadgeCase -> {
                         PokemonBadgeCaseScreen(
+                            session = session,
+                            pokemonRepository = pokemonRepository,
+                            availableGames = availableGames,
+                            detectedSaves = allDetectedSaves,
+                            onBack = { subScreen = VaultSubScreen.Home },
+                            onRefresh = { loadAll() },
+                        )
+                    }
+                    VaultSubScreen.DiplomaCase -> {
+                        PokemonDiplomaCaseScreen(
                             session = session,
                             pokemonRepository = pokemonRepository,
                             availableGames = availableGames,

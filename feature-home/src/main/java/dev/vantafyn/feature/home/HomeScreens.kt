@@ -192,6 +192,7 @@ import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Replay
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.SwitchAccount
 import androidx.compose.material.icons.rounded.SkipNext
@@ -23561,6 +23562,24 @@ private fun SelectedNavWaterFill() {
 
 @Composable
 private fun MiniNavIcon(destination: MobileDestination, selected: Boolean, activePulse: Boolean = false) {
+    if (destination == MobileDestination.Profile) {
+        if (selected) {
+            dev.vantafyn.core.ui.VantafynGradientIcon(
+                imageVector = Icons.Rounded.Settings,
+                contentDescription = "Settings",
+                modifier = Modifier.size(23.dp),
+                brush = VantafynNavSelectedBrush(),
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Rounded.Settings,
+                contentDescription = "Settings",
+                tint = Color.White.copy(alpha = 0.78f),
+                modifier = Modifier.size(23.dp),
+            )
+        }
+        return
+    }
     val color = if (selected) Color(0xFF8FE7FF) else Color.White.copy(alpha = 0.78f)
     val lifecycleOwner = LocalLifecycleOwner.current
     var lifecycleState by remember { mutableStateOf(lifecycleOwner.lifecycle.currentState) }
