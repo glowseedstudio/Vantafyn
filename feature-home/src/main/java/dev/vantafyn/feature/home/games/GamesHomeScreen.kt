@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -52,6 +53,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.ExperimentalFoundationApi
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GamePlayTracker
@@ -77,6 +79,7 @@ fun GamesHomeScreen(
     isRefreshing: Boolean = false,
     onRefresh: () -> Unit = {},
     onOpenGame: (GameSummary) -> Unit,
+    onRemoveRecentGame: (String) -> Unit = {},
     onSelectSystem: (GameSystem) -> Unit,
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -323,6 +326,7 @@ fun GamesHomeScreen(
                             RecentGameCard(
                                 record = record,
                                 onClick = { onOpenGame(record.toGameSummary()) },
+                                onLongPress = { onRemoveRecentGame(record.id) },
                             )
                         }
                     }
@@ -566,15 +570,20 @@ private fun GamerStatCard(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun RecentGameCard(
     record: RecentGameRecord,
     onClick: () -> Unit,
+    onLongPress: () -> Unit,
 ) {
     Column(
         modifier = Modifier
             .width(130.dp)
             .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongPress,
+            ),
     ) {
         val context = androidx.compose.ui.platform.LocalContext.current
         val effectiveBoxart = remember(record.id, record.boxartUrl) {

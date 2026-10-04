@@ -7,6 +7,7 @@ data class PokemonFormModel(
     val name: String,
     val spriteKey: String, // e.g. "676-heart" or "10001"
     val description: String? = null,
+    val isMega: Boolean = false,
 )
 
 /**
@@ -23,12 +24,85 @@ object PokemonFormsCatalog {
         return FORMS_BY_SPECIES[speciesId] ?: emptyList()
     }
 
+    fun getMegaForms(speciesId: Int): List<PokemonFormModel> {
+        return getForms(speciesId).filter { it.isMega }
+    }
+
     fun isSpinda(speciesId: Int): Boolean = speciesId == 327
 
     const val SPINDA_LORE: String =
         "4,294,967,296 Spot Patterns: Spinda's facial spots are procedurally placed by a 32-bit personality value, rendering virtually every specimen uniquely distinct."
 
+    private fun base(speciesId: Int) = PokemonFormModel("Base", speciesId.toString(), "Standard Pokédex form")
+
+    private fun mega(name: String, spriteKey: String, description: String) =
+        PokemonFormModel(name, spriteKey, description, isMega = true)
+
+    private fun singleMega(speciesId: Int, spriteKey: String, stone: String) = listOf(
+        base(speciesId),
+        mega("Mega", spriteKey, "Mega Evolution awakened by $stone"),
+    )
+
     private val FORMS_BY_SPECIES: Map<Int, List<PokemonFormModel>> = mapOf(
+        // Mega Evolution
+        3 to singleMega(3, "10033", "Venusaurite"),
+        6 to listOf(
+            base(6),
+            mega("Mega X", "10034", "Mega Evolution awakened by Charizardite X"),
+            mega("Mega Y", "10035", "Mega Evolution awakened by Charizardite Y"),
+        ),
+        9 to singleMega(9, "10036", "Blastoisinite"),
+        15 to singleMega(15, "10090", "Beedrillite"),
+        18 to singleMega(18, "10073", "Pidgeotite"),
+        65 to singleMega(65, "10037", "Alakazite"),
+        80 to singleMega(80, "10071", "Slowbronite"),
+        94 to singleMega(94, "10038", "Gengarite"),
+        115 to singleMega(115, "10039", "Kangaskhanite"),
+        127 to singleMega(127, "10040", "Pinsirite"),
+        130 to singleMega(130, "10041", "Gyaradosite"),
+        142 to singleMega(142, "10042", "Aerodactylite"),
+        150 to listOf(
+            base(150),
+            mega("Mega X", "10043", "Mega Evolution awakened by Mewtwonite X"),
+            mega("Mega Y", "10044", "Mega Evolution awakened by Mewtwonite Y"),
+        ),
+        181 to singleMega(181, "10045", "Ampharosite"),
+        208 to singleMega(208, "10072", "Steelixite"),
+        212 to singleMega(212, "10046", "Scizorite"),
+        214 to singleMega(214, "10047", "Heracronite"),
+        229 to singleMega(229, "10048", "Houndoominite"),
+        248 to singleMega(248, "10049", "Tyranitarite"),
+        254 to singleMega(254, "10065", "Sceptilite"),
+        257 to singleMega(257, "10050", "Blazikenite"),
+        260 to singleMega(260, "10064", "Swampertite"),
+        282 to singleMega(282, "10051", "Gardevoirite"),
+        302 to singleMega(302, "10066", "Sablenite"),
+        303 to singleMega(303, "10052", "Mawilite"),
+        306 to singleMega(306, "10053", "Aggronite"),
+        308 to singleMega(308, "10054", "Medichamite"),
+        310 to singleMega(310, "10055", "Manectite"),
+        319 to singleMega(319, "10070", "Sharpedonite"),
+        323 to singleMega(323, "10087", "Cameruptite"),
+        334 to singleMega(334, "10067", "Altarianite"),
+        354 to singleMega(354, "10056", "Banettite"),
+        359 to singleMega(359, "10057", "Absolite"),
+        362 to singleMega(362, "10074", "Glalitite"),
+        373 to singleMega(373, "10089", "Salamencite"),
+        376 to singleMega(376, "10076", "Metagrossite"),
+        380 to singleMega(380, "10062", "Latiasite"),
+        381 to singleMega(381, "10063", "Latiosite"),
+        384 to listOf(
+            base(384),
+            mega("Mega", "10079", "Mega Evolution unleashed through Dragon Ascent"),
+        ),
+        428 to singleMega(428, "10088", "Lopunnite"),
+        445 to singleMega(445, "10058", "Garchompite"),
+        448 to singleMega(448, "10059", "Lucarionite"),
+        460 to singleMega(460, "10060", "Abomasite"),
+        475 to singleMega(475, "10068", "Galladite"),
+        531 to singleMega(531, "10069", "Audinite"),
+        719 to singleMega(719, "10075", "Diancite"),
+
         // Furfrou
         676 to listOf(
             PokemonFormModel("Natural", "676", "Untrimmed natural coat"),

@@ -512,6 +512,20 @@ public sealed class PokemonController : ControllerBase
         return file == null ? NotFound() : PhysicalFile(file.Path, file.ContentType);
     }
 
+    /// <summary>
+    /// Streams the optional Mega Evolution symbol from the configured badge-art folder.
+    /// Expected location: {BadgeArtPath}/mega/mega-evolution-symbol.png
+    /// </summary>
+    [HttpGet("MegaEvolution/Symbol")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetMegaEvolutionSymbol()
+    {
+        var file = ResolveMegaEvolutionSymbolPath(Configuration);
+        return file == null ? NotFound() : PhysicalFile(file.Value.Path, file.Value.ContentType);
+    }
+
     [HttpGet("Diplomas/Proofs")]
     [Produces(MediaTypeNames.Application.Json)]
     [ProducesResponseType(StatusCodes.Status200OK)]
@@ -2937,4 +2951,55 @@ public sealed class PokemonController : ControllerBase
             _ => null
         };
     }
+
+    private (string Path, string ContentType)? ResolveMegaEvolutionSymbolPath(PokemonConfiguration config)
+    {
+        var root = config.BadgeArtPath?.Trim('\"', '\'').Trim();
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            root = Path.Combine(_paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon"), "badge-art");
+        }
+
+        var fullRoot = Path.GetFullPath(root);
+        var megaRoot = Path.GetFullPath(Path.Combine(fullRoot, "mega"));
+        if (!IsPathInside(megaRoot, fullRoot) || !Directory.Exists(megaRoot)) return null;
+
+        var names = new[]
+        {
+            "mega-evolution-symbol",
+            "mega-evolution",
+            "mega-evolution-icon",
+            "mega-symbol",
+            "mega_icon",
+            "mega"
+        };
+        var extensions = new[] { ".png", ".webp", ".jpg", ".jpeg", ".svg" };
+
+        foreach (var name in names)
+        {
+            foreach (var extension in extensions)
+            {
+                var candidate = Path.GetFullPath(Path.Combine(megaRoot, name + extension));
+                if (!IsPathInside(candidate, megaRoot) || !System.IO.File.Exists(candidate)) continue;
+                return (candidate, ImageContentType(candidate));
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsPathInside(string childPath, string parentPath)
+    {
+        var parent = parentPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return childPath.StartsWith(parent, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string ImageContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".webp" => "image/webp",
+        ".svg" => "image/svg+xml",
+        _ => MediaTypeNames.Application.Octet
+    };
 }

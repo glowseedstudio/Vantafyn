@@ -438,6 +438,19 @@ fun PokemonPokedexEntryModal(
     var showFemaleArtwork by remember(currentSpeciesId) { mutableStateOf(initialFemale) }
 
     var selectedFormKey by remember(currentSpeciesId) { mutableStateOf<String?>(null) }
+    val megaForms = remember(currentSpeciesId) {
+        PokemonFormsCatalog.getMegaForms(currentSpeciesId)
+    }
+    val selectedMegaIndex = remember(selectedFormKey, megaForms) {
+        megaForms.indexOfFirst { it.spriteKey == selectedFormKey }
+    }
+    val isMegaArtwork = selectedMegaIndex >= 0
+    val activeMegaName = megaForms.getOrNull(selectedMegaIndex)?.name ?: "Mega"
+    val megaSymbolUrl = remember(session) {
+        session?.let {
+            "${it.server.url.trimEnd('/')}/Vantafyn/Pokemon/MegaEvolution/Symbol?api_key=${it.accessToken}"
+        }
+    }
 
     val hasGenderDiff = remember(currentSpeciesId, selectedFormKey) {
         if (selectedFormKey != null) false else PokemonGenderCatalog.hasGenderDifferences(currentSpeciesId)
@@ -630,6 +643,28 @@ fun PokemonPokedexEntryModal(
                             .padding(8.dp),
                         contentScale = ContentScale.Fit,
                     )
+
+                    if (megaForms.isNotEmpty()) {
+                        MegaEvolutionQuickToggle(
+                            symbolUrl = megaSymbolUrl,
+                            isActive = isMegaArtwork,
+                            label = activeMegaName,
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .padding(
+                                    top = if (hasShiny) 48.dp else 10.dp,
+                                    end = 10.dp,
+                                ),
+                            onClick = {
+                                selectedFormKey = when {
+                                    selectedMegaIndex < 0 -> megaForms.first().spriteKey
+                                    selectedMegaIndex < megaForms.lastIndex -> megaForms[selectedMegaIndex + 1].spriteKey
+                                    else -> null
+                                }
+                                showFemaleArtwork = false
+                            },
+                        )
+                    }
 
                     // Gender toggle chip (for species with visual gender differences)
                     if (hasGenderDiff) {
@@ -847,6 +882,8 @@ fun PokemonPokedexEntryModal(
             }
 
             if (alternateForms.isNotEmpty()) {
+                val activeForm = alternateForms.firstOrNull { it.spriteKey == selectedFormKey }
+                    ?: alternateForms.firstOrNull()
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -859,14 +896,12 @@ fun PokemonPokedexEntryModal(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            text = "FORMS & VARIATIONS",
-                            color = VantafynColors.Muted,
+                            text = if (alternateForms.any { it.isMega }) "FORMS & MEGA EVOLUTION" else "FORMS & VARIATIONS",
+                            color = if (alternateForms.any { it.isMega }) Color(0xFFFF6FE5) else VantafynColors.Muted,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp,
                         )
-                        val activeForm = alternateForms.firstOrNull { it.spriteKey == selectedFormKey }
-                            ?: alternateForms.firstOrNull()
                         if (activeForm != null && !activeForm.description.isNullOrBlank()) {
                             Text(
                                 text = activeForm.description,
@@ -890,17 +925,20 @@ fun PokemonPokedexEntryModal(
                         alternateForms.forEach { form ->
                             val isSelected = (selectedFormKey == form.spriteKey) ||
                                 (selectedFormKey == null && form == alternateForms.first())
+                            val formAccent = if (form.isMega) Color(0xFFFF4FD8) else primaryType.accentColor
 
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(
-                                        if (isSelected) primaryType.accentColor.copy(alpha = 0.25f)
+                                        if (isSelected) formAccent.copy(alpha = if (form.isMega) 0.30f else 0.25f)
                                         else Color(0xFF141726)
                                     )
                                     .border(
                                         1.dp,
-                                        if (isSelected) primaryType.accentColor else Color(0xFF282F48),
+                                        if (isSelected) formAccent
+                                        else if (form.isMega) Color(0xFFFF4FD8).copy(alpha = 0.45f)
+                                        else Color(0xFF282F48),
                                         RoundedCornerShape(12.dp),
                                     )
                                     .clickable {
@@ -911,10 +949,67 @@ fun PokemonPokedexEntryModal(
                             ) {
                                 Text(
                                     text = form.name,
-                                    color = if (isSelected) Color.White else Color(0xFF94A3B8),
+                                    color = if (isSelected) Color.White else if (form.isMega) Color(0xFFF0ABFC) else Color(0xFF94A3B8),
                                     fontSize = 11.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 )
+                            }
+                        }
+                    }
+
+                    if (activeForm?.isMega == true && !activeForm.description.isNullOrBlank()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            Color(0xFFFF4FD8).copy(alpha = 0.18f),
+                                            Color(0xFF7C3AED).copy(alpha = 0.12f),
+                                            Color(0xFF22D3EE).copy(alpha = 0.10f),
+                                            Color(0xFF121625),
+                                        ),
+                                    ),
+                                )
+                                .border(1.dp, Color(0xFFFF4FD8).copy(alpha = 0.38f), RoundedCornerShape(16.dp))
+                                .padding(12.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.Black.copy(alpha = 0.24f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFF7AD),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "MEGA EVOLUTION",
+                                        color = Color(0xFFFF6FE5),
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        letterSpacing = 1.sp,
+                                    )
+                                    Text(
+                                        text = activeForm.description,
+                                        color = Color.White.copy(alpha = 0.88f),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        lineHeight = 16.sp,
+                                    )
+                                }
                             }
                         }
                     }
@@ -1621,6 +1716,73 @@ fun PokemonPokedexEntryModal(
             Spacer(modifier = Modifier.height(120.dp))
         }
     }
+    }
+}
+
+@Composable
+private fun MegaEvolutionQuickToggle(
+    symbolUrl: String?,
+    isActive: Boolean,
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    val shellBrush = Brush.linearGradient(
+        colors = if (isActive) {
+            listOf(Color(0xFFFF4FD8), Color(0xFF7C3AED), Color(0xFF22D3EE))
+        } else {
+            listOf(Color(0xFF26213D), Color(0xFF181B2C), Color(0xFF123247))
+        },
+    )
+    val text = if (isActive) label else "Mega"
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(15.dp))
+            .background(shellBrush)
+            .border(
+                1.dp,
+                if (isActive) Color.White.copy(alpha = 0.46f) else Color(0xFFFF4FD8).copy(alpha = 0.55f),
+                RoundedCornerShape(15.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(start = 6.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .background(Color.Black.copy(alpha = 0.28f))
+                .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.AutoAwesome,
+                contentDescription = null,
+                tint = Color(0xFFFFF7AD),
+                modifier = Modifier.size(14.dp),
+            )
+            if (!symbolUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = symbolUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.ExtraBold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

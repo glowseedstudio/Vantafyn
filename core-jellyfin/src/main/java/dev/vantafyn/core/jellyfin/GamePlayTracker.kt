@@ -66,6 +66,12 @@ class GamePlayTracker(context: Context) {
         }
     }
 
+    fun removeRecentGame(gameId: String) {
+        if (gameId.isBlank()) return
+        val updated = getRecentGames(20).filterNot { it.id == gameId }
+        saveRecentGames(updated)
+    }
+
     fun recordGameLaunched(game: GameDetail) {
         val now = System.currentTimeMillis()
         val currentRecent = getRecentGames(20).toMutableList()

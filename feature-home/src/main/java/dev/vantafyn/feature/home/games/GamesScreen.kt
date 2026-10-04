@@ -52,6 +52,7 @@ fun GamesScreen(
     onSelectTab: (GamesTab) -> Unit,
     onSelectSystem: (GameSystem?) -> Unit,
     onOpenGame: (GameSummary) -> Unit,
+    onRemoveRecentGame: (String) -> Unit = {},
     onBackToMain: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -107,6 +108,7 @@ fun GamesScreen(
                         isRefreshing = isRefreshing,
                         onRefresh = onRefresh,
                         onOpenGame = onOpenGame,
+                        onRemoveRecentGame = onRemoveRecentGame,
                         onSelectSystem = { sys ->
                             onSelectSystem(sys)
                             onSelectTab(GamesTab.Library)

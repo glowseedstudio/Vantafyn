@@ -1933,6 +1933,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    fun removeRecentGame(gameId: String) {
+        val tracker = GamePlayTracker(getApplication<Application>())
+        tracker.removeRecentGame(gameId)
+        refreshGameTrackerData()
+    }
+
     fun toggleAchievementsEnabled() {
         val profileId = _state.value.session?.profileId ?: return
         val enabled = !_state.value.achievementsEnabled

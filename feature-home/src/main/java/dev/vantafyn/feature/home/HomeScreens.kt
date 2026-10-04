@@ -3958,6 +3958,7 @@ private fun MobileShellScreen(
                         onSelectTab = viewModel::setActiveGamesTab,
                         onSelectSystem = viewModel::selectGameSystem,
                         onOpenGame = viewModel::openGameDetail,
+                        onRemoveRecentGame = viewModel::removeRecentGame,
                         onBackToMain = onNavigateBack,
                     )
 
@@ -24273,7 +24274,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.49"
+private const val VANTAFYN_APP_VERSION = "0.9.53"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable
