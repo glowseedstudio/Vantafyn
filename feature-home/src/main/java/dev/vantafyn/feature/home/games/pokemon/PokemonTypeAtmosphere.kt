@@ -251,7 +251,13 @@ object PokemonTypeCatalog {
         android.util.Base64.decode(TYPE_DATA_BASE64, android.util.Base64.DEFAULT)
     }
 
-    fun getTypes(speciesId: Int, speciesName: String = ""): Pair<PokemonType, PokemonType?> {
+    fun getTypes(
+        speciesId: Int,
+        speciesName: String = "",
+        formKey: String? = null,
+        formName: String? = null,
+    ): Pair<PokemonType, PokemonType?> {
+        resolveFormOverride(speciesId, formKey, formName)?.let { return it }
         if (speciesId in 1..1025) {
             val idx = (speciesId - 1) * 2
             if (idx + 1 < TYPE_DATA.size) {
@@ -263,6 +269,179 @@ object PokemonTypeCatalog {
         }
         return fallbackBySpeciesName(speciesName)
     }
+
+    private fun resolveFormOverride(speciesId: Int, formKey: String?, formName: String?): Pair<PokemonType, PokemonType?>? {
+        val key = formKey?.trim()?.lowercase()
+        if (!key.isNullOrBlank()) {
+            FORM_TYPE_OVERRIDES[key]?.let { return it }
+        }
+        val name = formName?.trim()?.lowercase().orEmpty()
+        if (name.isBlank()) return null
+        if ("alolan" in name || "alola" in name) {
+            ALOLAN_TYPE_OVERRIDES[speciesId]?.let { return it }
+        }
+        if (speciesId == 555 && ("zen" in name) && ("galarian" in name || "galar" in name)) {
+            return PokemonType.Ice to PokemonType.Fire
+        }
+        if ("galarian" in name || "galar" in name) {
+            GALARIAN_TYPE_OVERRIDES[speciesId]?.let { return it }
+        }
+        if ("paldean" in name || "paldea" in name) {
+            if ("blaze" in name) return PokemonType.Fighting to PokemonType.Fire
+            if ("aqua" in name) return PokemonType.Fighting to PokemonType.Water
+            PALDEAN_TYPE_OVERRIDES[speciesId]?.let { return it }
+        }
+        if ("hisuian" in name || "hisui" in name) {
+            HISUIAN_TYPE_OVERRIDES[speciesId]?.let { return it }
+        }
+        return when {
+            name.contains("alolan rattata") || name.contains("rattata-alola") -> PokemonType.Dark to PokemonType.Normal
+            name.contains("alolan raticate") || name.contains("raticate-alola") -> PokemonType.Dark to PokemonType.Normal
+            name.contains("alolan raichu") || name.contains("raichu-alola") -> PokemonType.Electric to PokemonType.Psychic
+            name.contains("alolan sandshrew") || name.contains("sandshrew-alola") -> PokemonType.Ice to PokemonType.Steel
+            name.contains("alolan sandslash") || name.contains("sandslash-alola") -> PokemonType.Ice to PokemonType.Steel
+            name.contains("alolan vulpix") || name.contains("vulpix-alola") -> PokemonType.Ice to null
+            name.contains("alolan ninetales") || name.contains("ninetales-alola") -> PokemonType.Ice to PokemonType.Fairy
+            name.contains("alolan diglett") || name.contains("diglett-alola") -> PokemonType.Ground to PokemonType.Steel
+            name.contains("alolan dugtrio") || name.contains("dugtrio-alola") -> PokemonType.Ground to PokemonType.Steel
+            name.contains("alolan meowth") || name.contains("meowth-alola") -> PokemonType.Dark to null
+            name.contains("alolan persian") || name.contains("persian-alola") -> PokemonType.Dark to null
+            name.contains("alolan geodude") || name.contains("geodude-alola") -> PokemonType.Rock to PokemonType.Electric
+            name.contains("alolan graveler") || name.contains("graveler-alola") -> PokemonType.Rock to PokemonType.Electric
+            name.contains("alolan golem") || name.contains("golem-alola") -> PokemonType.Rock to PokemonType.Electric
+            name.contains("alolan grimer") || name.contains("grimer-alola") -> PokemonType.Poison to PokemonType.Dark
+            name.contains("alolan muk") || name.contains("muk-alola") -> PokemonType.Poison to PokemonType.Dark
+            name.contains("alolan exeggutor") || name.contains("exeggutor-alola") -> PokemonType.Grass to PokemonType.Dragon
+            name.contains("alolan marowak") || name.contains("marowak-alola") -> PokemonType.Fire to PokemonType.Ghost
+            name.contains("galarian meowth") || name.contains("meowth-galar") -> PokemonType.Steel to null
+            name.contains("galarian ponyta") || name.contains("ponyta-galar") -> PokemonType.Psychic to null
+            name.contains("galarian rapidash") || name.contains("rapidash-galar") -> PokemonType.Psychic to PokemonType.Fairy
+            name.contains("galarian slowpoke") || name.contains("slowpoke-galar") -> PokemonType.Psychic to null
+            name.contains("galarian slowbro") || name.contains("slowbro-galar") -> PokemonType.Poison to PokemonType.Psychic
+            name.contains("galarian farfetch") || name.contains("farfetchd-galar") -> PokemonType.Fighting to null
+            name.contains("galarian weezing") || name.contains("weezing-galar") -> PokemonType.Poison to PokemonType.Fairy
+            name.contains("galarian mr mime") || name.contains("mr-mime-galar") -> PokemonType.Ice to PokemonType.Psychic
+            name.contains("galarian articuno") || name.contains("articuno-galar") -> PokemonType.Psychic to PokemonType.Flying
+            name.contains("galarian zapdos") || name.contains("zapdos-galar") -> PokemonType.Fighting to PokemonType.Flying
+            name.contains("galarian moltres") || name.contains("moltres-galar") -> PokemonType.Dark to PokemonType.Flying
+            name.contains("galarian slowking") || name.contains("slowking-galar") -> PokemonType.Poison to PokemonType.Psychic
+            name.contains("galarian corsola") || name.contains("corsola-galar") -> PokemonType.Ghost to null
+            name.contains("galarian zigzagoon") || name.contains("zigzagoon-galar") -> PokemonType.Dark to PokemonType.Normal
+            name.contains("galarian linoone") || name.contains("linoone-galar") -> PokemonType.Dark to PokemonType.Normal
+            name.contains("galarian darumaka") || name.contains("darumaka-galar") -> PokemonType.Ice to null
+            name.contains("galarian darmanitan zen") || name.contains("darmanitan-galar-zen") -> PokemonType.Ice to PokemonType.Fire
+            name.contains("galarian darmanitan") || name.contains("darmanitan-galar") -> PokemonType.Ice to null
+            name.contains("galarian yamask") || name.contains("yamask-galar") -> PokemonType.Ground to PokemonType.Ghost
+            name.contains("galarian stunfisk") || name.contains("stunfisk-galar") -> PokemonType.Ground to PokemonType.Steel
+            name.contains("paldean tauros blaze") || name.contains("tauros-paldea-blaze") -> PokemonType.Fighting to PokemonType.Fire
+            name.contains("paldean tauros aqua") || name.contains("tauros-paldea-aqua") -> PokemonType.Fighting to PokemonType.Water
+            name.contains("paldean tauros") || name.contains("tauros-paldea") -> PokemonType.Fighting to null
+            name.contains("paldean wooper") || name.contains("wooper-paldea") -> PokemonType.Poison to PokemonType.Ground
+            name.contains("hisuian zoroark") || name.contains("zoroark-hisui") -> PokemonType.Normal to PokemonType.Ghost
+            name.contains("hisuian zorua") || name.contains("zorua-hisui") -> PokemonType.Normal to PokemonType.Ghost
+            else -> null
+        }
+    }
+
+    private val ALOLAN_TYPE_OVERRIDES: Map<Int, Pair<PokemonType, PokemonType?>> = mapOf(
+        19 to (PokemonType.Dark to PokemonType.Normal),
+        20 to (PokemonType.Dark to PokemonType.Normal),
+        26 to (PokemonType.Electric to PokemonType.Psychic),
+        27 to (PokemonType.Ice to PokemonType.Steel),
+        28 to (PokemonType.Ice to PokemonType.Steel),
+        37 to (PokemonType.Ice to null),
+        38 to (PokemonType.Ice to PokemonType.Fairy),
+        50 to (PokemonType.Ground to PokemonType.Steel),
+        51 to (PokemonType.Ground to PokemonType.Steel),
+        52 to (PokemonType.Dark to null),
+        53 to (PokemonType.Dark to null),
+        74 to (PokemonType.Rock to PokemonType.Electric),
+        75 to (PokemonType.Rock to PokemonType.Electric),
+        76 to (PokemonType.Rock to PokemonType.Electric),
+        88 to (PokemonType.Poison to PokemonType.Dark),
+        89 to (PokemonType.Poison to PokemonType.Dark),
+        103 to (PokemonType.Grass to PokemonType.Dragon),
+        105 to (PokemonType.Fire to PokemonType.Ghost),
+    )
+
+    private val GALARIAN_TYPE_OVERRIDES: Map<Int, Pair<PokemonType, PokemonType?>> = mapOf(
+        52 to (PokemonType.Steel to null),
+        77 to (PokemonType.Psychic to null),
+        78 to (PokemonType.Psychic to PokemonType.Fairy),
+        79 to (PokemonType.Psychic to null),
+        80 to (PokemonType.Poison to PokemonType.Psychic),
+        83 to (PokemonType.Fighting to null),
+        110 to (PokemonType.Poison to PokemonType.Fairy),
+        122 to (PokemonType.Ice to PokemonType.Psychic),
+        144 to (PokemonType.Psychic to PokemonType.Flying),
+        145 to (PokemonType.Fighting to PokemonType.Flying),
+        146 to (PokemonType.Dark to PokemonType.Flying),
+        199 to (PokemonType.Poison to PokemonType.Psychic),
+        222 to (PokemonType.Ghost to null),
+        263 to (PokemonType.Dark to PokemonType.Normal),
+        264 to (PokemonType.Dark to PokemonType.Normal),
+        554 to (PokemonType.Ice to null),
+        555 to (PokemonType.Ice to null),
+        562 to (PokemonType.Ground to PokemonType.Ghost),
+        618 to (PokemonType.Ground to PokemonType.Steel),
+    )
+
+    private val PALDEAN_TYPE_OVERRIDES: Map<Int, Pair<PokemonType, PokemonType?>> = mapOf(
+        128 to (PokemonType.Fighting to null),
+        194 to (PokemonType.Poison to PokemonType.Ground),
+    )
+
+    private val HISUIAN_TYPE_OVERRIDES: Map<Int, Pair<PokemonType, PokemonType?>> = mapOf(
+        570 to (PokemonType.Normal to PokemonType.Ghost),
+        571 to (PokemonType.Normal to PokemonType.Ghost),
+    )
+
+    private val FORM_TYPE_OVERRIDES: Map<String, Pair<PokemonType, PokemonType?>> = mapOf(
+        "10091" to (PokemonType.Dark to PokemonType.Normal),
+        "10092" to (PokemonType.Dark to PokemonType.Normal),
+        "10100" to (PokemonType.Electric to PokemonType.Psychic),
+        "10101" to (PokemonType.Ice to PokemonType.Steel),
+        "10102" to (PokemonType.Ice to PokemonType.Steel),
+        "10103" to (PokemonType.Ice to null),
+        "10104" to (PokemonType.Ice to PokemonType.Fairy),
+        "10105" to (PokemonType.Ground to PokemonType.Steel),
+        "10106" to (PokemonType.Ground to PokemonType.Steel),
+        "10107" to (PokemonType.Dark to null),
+        "10108" to (PokemonType.Dark to null),
+        "10109" to (PokemonType.Rock to PokemonType.Electric),
+        "10110" to (PokemonType.Rock to PokemonType.Electric),
+        "10111" to (PokemonType.Rock to PokemonType.Electric),
+        "10112" to (PokemonType.Poison to PokemonType.Dark),
+        "10113" to (PokemonType.Poison to PokemonType.Dark),
+        "10114" to (PokemonType.Grass to PokemonType.Dragon),
+        "10115" to (PokemonType.Fire to PokemonType.Ghost),
+        "10161" to (PokemonType.Steel to null),
+        "10162" to (PokemonType.Psychic to null),
+        "10163" to (PokemonType.Psychic to PokemonType.Fairy),
+        "10164" to (PokemonType.Psychic to null),
+        "10165" to (PokemonType.Poison to PokemonType.Psychic),
+        "10166" to (PokemonType.Fighting to null),
+        "10167" to (PokemonType.Poison to PokemonType.Fairy),
+        "10168" to (PokemonType.Ice to PokemonType.Psychic),
+        "10169" to (PokemonType.Psychic to PokemonType.Flying),
+        "10170" to (PokemonType.Fighting to PokemonType.Flying),
+        "10171" to (PokemonType.Dark to PokemonType.Flying),
+        "10172" to (PokemonType.Poison to PokemonType.Psychic),
+        "10173" to (PokemonType.Ghost to null),
+        "10174" to (PokemonType.Dark to PokemonType.Normal),
+        "10175" to (PokemonType.Dark to PokemonType.Normal),
+        "10176" to (PokemonType.Ice to null),
+        "10177" to (PokemonType.Ice to null),
+        "10178" to (PokemonType.Ice to PokemonType.Fire),
+        "10179" to (PokemonType.Ground to PokemonType.Ghost),
+        "10180" to (PokemonType.Ground to PokemonType.Steel),
+        "10250" to (PokemonType.Fighting to null),
+        "10251" to (PokemonType.Fighting to PokemonType.Fire),
+        "10252" to (PokemonType.Fighting to PokemonType.Water),
+        "10253" to (PokemonType.Poison to PokemonType.Ground),
+        "10238" to (PokemonType.Normal to PokemonType.Ghost),
+        "10239" to (PokemonType.Normal to PokemonType.Ghost),
+    )
 
     private fun fallbackBySpeciesName(name: String): Pair<PokemonType, PokemonType?> {
         val lower = name.lowercase()

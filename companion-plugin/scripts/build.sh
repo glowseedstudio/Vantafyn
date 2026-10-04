@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.21}"
+VERSION="${1:-0.2.22}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.55}"
-CHANGELOG="Adds real Gen 4/5 Pokédex save parsing, regional variant Pokédex forms, diploma/Badge Case polish, and Retroid emulator stability fixes."
+TAG="${2:-v0.9.56}"
+CHANGELOG="Adds the Pokémon Event Vault with transactional Crystal and Gen 3 mythical event unlocks, premium event UI, and safe save backups."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.21.0",
+        "changelog": "Adds real Gen 4/5 Pokédex save parsing, regional variant Pokédex forms, diploma/Badge Case polish, and Retroid emulator stability fixes.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.55/Vantafyn.Plugin.Companion_0.2.21_net9.zip",
+        "checksum": "3235c14ea7f813d843cc8582bd9d7ad6",
+        "timestamp": "2026-10-04T14:02:19Z"
+      },
+      {
+        "version": "0.2.21.1",
+        "changelog": "Adds real Gen 4/5 Pokédex save parsing, regional variant Pokédex forms, diploma/Badge Case polish, and Retroid emulator stability fixes.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.55/Vantafyn.Plugin.Companion_0.2.21_net10.zip",
+        "checksum": "59c1c6ceaa55ed67e8d32cc082f1dd24",
+        "timestamp": "2026-10-04T14:02:19Z"
       },
       {
         "version": "0.2.20.0",

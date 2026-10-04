@@ -305,8 +305,12 @@ fun PokemonDetailModal(
             }
 
             // Hero Pokémon Card with Type Atmosphere & Prominent Artwork
-            val (primaryType, secondaryType) = remember(pokemon.speciesId, resolvedSpeciesName) {
-                PokemonTypeCatalog.getTypes(pokemon.speciesId, resolvedSpeciesName)
+            val (primaryType, secondaryType) = remember(pokemon.speciesId, resolvedSpeciesName, pokemon.form) {
+                PokemonTypeCatalog.getTypes(
+                    speciesId = pokemon.speciesId,
+                    speciesName = resolvedSpeciesName,
+                    formName = pokemon.form,
+                )
             }
             val cardBorderBrush = remember(primaryType, secondaryType) {
                 Brush.horizontalGradient(

@@ -56,6 +56,9 @@ interface JellyfinPokemonRepository {
     ): Result<PokemonDetailsDto>
     suspend fun getAchievements(session: JellyfinSession): Result<PokemonAchievementsSummaryDto>
     suspend fun getSocialActivity(session: JellyfinSession, limit: Int = 30): Result<List<PokemonSocialActivityEvent>>
+    suspend fun getEventUnlockCatalog(session: JellyfinSession): Result<List<PokemonEventUnlockDto>>
+    suspend fun getEventUnlockStatus(session: JellyfinSession, gameId: String): Result<List<PokemonEventUnlockStatusDto>>
+    suspend fun unlockEvent(session: JellyfinSession, gameId: String, eventId: String): Result<PokemonEventUnlockResponse>
     suspend fun getBadgeArtCatalog(session: JellyfinSession): Result<PokemonBadgeArtCatalogDto>
     suspend fun getDiplomaProofs(session: JellyfinSession): Result<List<PokemonDiplomaProofDto>>
     suspend fun uploadDiplomaProof(
@@ -1254,6 +1257,25 @@ class DefaultJellyfinPokemonRepository(
             imageUrl = obj.optString("imageUrl", ""),
         )
 
+    private fun parseEventUnlock(obj: JSONObject): PokemonEventUnlockDto {
+        val supported = mutableListOf<String>()
+        val arr = obj.optJSONArrayAny("supportedGameIds", "SupportedGameIds")
+        if (arr != null) {
+            for (i in 0 until arr.length()) supported.add(arr.optString(i))
+        }
+        return PokemonEventUnlockDto(
+            id = obj.optStringAny("id", "Id"),
+            title = obj.optStringAny("title", "Title"),
+            subtitle = obj.optStringAny("subtitle", "Subtitle"),
+            description = obj.optStringAny("description", "Description"),
+            generation = obj.optIntAny("generation", "Generation"),
+            region = obj.optStringAny("region", "Region"),
+            legendary = obj.optStringAny("legendary", "Legendary"),
+            accent = obj.optStringAny("accent", "Accent", default = "#FBBF24"),
+            supportedGameIds = supported,
+        )
+    }
+
     override suspend fun getPokemonJourney(session: JellyfinSession, pokemonId: String): Result<PokemonJourneyDto> =
         withContext(ioDispatcher) {
             runCatching {
@@ -1486,6 +1508,80 @@ class DefaultJellyfinPokemonRepository(
                     )
                 }
                 list
+            }
+        }
+
+    override suspend fun getEventUnlockCatalog(session: JellyfinSession): Result<List<PokemonEventUnlockDto>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Events")
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                val list = mutableListOf<PokemonEventUnlockDto>()
+                for (i in 0 until array.length()) {
+                    list.add(parseEventUnlock(array.getJSONObject(i)))
+                }
+                list
+            }
+        }
+
+    override suspend fun getEventUnlockStatus(
+        session: JellyfinSession,
+        gameId: String,
+    ): Result<List<PokemonEventUnlockStatusDto>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Events/Status/$gameId")
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                val list = mutableListOf<PokemonEventUnlockStatusDto>()
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    list.add(
+                        PokemonEventUnlockStatusDto(
+                            eventId = obj.optStringAny("eventId", "EventId"),
+                            available = obj.optBooleanAny("available", "Available"),
+                            unlocked = obj.optBooleanAny("unlocked", "Unlocked"),
+                            reason = obj.optStringAny("reason", "Reason").ifBlank { null },
+                        )
+                    )
+                }
+                list
+            }
+        }
+
+    override suspend fun unlockEvent(
+        session: JellyfinSession,
+        gameId: String,
+        eventId: String,
+    ): Result<PokemonEventUnlockResponse> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Events/Unlock")
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val json = JSONObject()
+                    .put("gameId", gameId)
+                    .put("eventId", eventId)
+                conn.outputStream.bufferedWriter().use { it.write(json.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val obj = JSONObject(body)
+                val backupIds = mutableListOf<String>()
+                val backups = obj.optJSONArrayAny("backupIds", "BackupIds")
+                if (backups != null) {
+                    for (i in 0 until backups.length()) backupIds.add(backups.optString(i))
+                }
+                PokemonEventUnlockResponse(
+                    success = obj.optBooleanAny("success", "Success"),
+                    eventId = obj.optStringAny("eventId", "EventId"),
+                    gameId = obj.optStringAny("gameId", "GameId"),
+                    message = obj.optStringAny("message", "Message"),
+                    backupIds = backupIds,
+                )
             }
         }
 

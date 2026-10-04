@@ -170,11 +170,24 @@ fun PokemonPokedexEntryModal(
         fetchedDexMetadata = PokeApiPokedexRepository.load(context, currentSpeciesId, fallbackDexData, session, metadataRepository)
     }
     val dexData = fetchedDexMetadata?.applyTo(fallbackDexData) ?: fallbackDexData
-    val (fallbackPrimaryType, fallbackSecondaryType) = remember(currentSpeciesId, dexData.name) {
-        PokemonTypeCatalog.getTypes(currentSpeciesId, dexData.name)
+    var selectedFormKey by remember(currentSpeciesId) { mutableStateOf<String?>(null) }
+    val alternateForms = remember(currentSpeciesId) {
+        PokemonFormsCatalog.getForms(currentSpeciesId)
     }
-    val primaryType = fetchedDexMetadata?.primaryType ?: fallbackPrimaryType
-    val secondaryType = fetchedDexMetadata?.secondaryType ?: fallbackSecondaryType
+    val activeForm = remember(selectedFormKey, alternateForms) {
+        alternateForms.firstOrNull { it.spriteKey == selectedFormKey }
+            ?: alternateForms.firstOrNull()
+    }
+    val (fallbackPrimaryType, fallbackSecondaryType) = remember(currentSpeciesId, dexData.name, selectedFormKey, activeForm?.name) {
+        PokemonTypeCatalog.getTypes(
+            speciesId = currentSpeciesId,
+            speciesName = dexData.name,
+            formKey = selectedFormKey,
+            formName = activeForm?.name,
+        )
+    }
+    val primaryType = if (selectedFormKey != null) fallbackPrimaryType else fetchedDexMetadata?.primaryType ?: fallbackPrimaryType
+    val secondaryType = if (selectedFormKey != null) fallbackSecondaryType else fetchedDexMetadata?.secondaryType ?: fallbackSecondaryType
 
     val cardBorderBrush = remember(primaryType, secondaryType, isRegistered) {
         if (isRegistered) {
@@ -296,7 +309,7 @@ fun PokemonPokedexEntryModal(
                         ),
                     ),
                 ).build().apply {
-                    volume = 0.82f
+                    volume = 0.90f
                     addListener(object : Player.Listener {
                         override fun onPlaybackStateChanged(state: Int) {
                             if (state == Player.STATE_READY && requestId == narrationRequestId) {
@@ -437,7 +450,6 @@ fun PokemonPokedexEntryModal(
     var showShinyArtwork by remember(currentSpeciesId, hasShiny) { mutableStateOf(hasShiny) }
     var showFemaleArtwork by remember(currentSpeciesId) { mutableStateOf(initialFemale) }
 
-    var selectedFormKey by remember(currentSpeciesId) { mutableStateOf<String?>(null) }
     val megaForms = remember(currentSpeciesId) {
         PokemonFormsCatalog.getMegaForms(currentSpeciesId)
     }
@@ -874,16 +886,11 @@ fun PokemonPokedexEntryModal(
             Spacer(modifier = Modifier.height(14.dp))
 
             // 2b. Alternate Forms & Regional Variants Carousel / Spinda Lore
-            val alternateForms = remember(currentSpeciesId) {
-                PokemonFormsCatalog.getForms(currentSpeciesId)
-            }
             val isSpinda = remember(currentSpeciesId) {
                 PokemonFormsCatalog.isSpinda(currentSpeciesId)
             }
 
             if (alternateForms.isNotEmpty()) {
-                val activeForm = alternateForms.firstOrNull { it.spriteKey == selectedFormKey }
-                    ?: alternateForms.firstOrNull()
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()

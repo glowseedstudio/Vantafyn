@@ -656,6 +656,7 @@ fun VantafynAppContent(
                 onSignInAgain = viewModel::signInAgainFromRecovery,
                 onChooseProfile = viewModel::showProfilePicker,
                 onWorkOffline = viewModel::workOfflineFromRecovery,
+                onWorkOfflineGames = viewModel::workOfflineGamesFromRecovery,
                 onBack = viewModel::navigateSetupBack,
             )
                 VantafynSetupStep.Home -> HomeScreenHost(
@@ -1682,6 +1683,7 @@ private fun ConnectionRecoveryScreen(
     onSignInAgain: () -> Unit,
     onChooseProfile: () -> Unit,
     onWorkOffline: () -> Unit,
+    onWorkOfflineGames: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -1817,14 +1819,35 @@ private fun ConnectionRecoveryScreen(
                                     }
                                 }
                             }
-                            VantafynButton(
-                                "Work offline",
-                                onClick = onWorkOffline,
-                                enabled = !state.isLoading,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(54.dp),
-                            )
+                            val hasDownloadedGames = state.downloadedGameKeys.isNotEmpty()
+                            if (hasDownloadedGames) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    VantafynButton(
+                                        "Work offline",
+                                        onClick = onWorkOffline,
+                                        enabled = !state.isLoading,
+                                        modifier = Modifier.height(54.dp).weight(1f),
+                                    )
+                                    VantafynButton(
+                                        "Play games",
+                                        onClick = onWorkOfflineGames,
+                                        enabled = !state.isLoading,
+                                        modifier = Modifier.height(54.dp).weight(1f),
+                                    )
+                                }
+                            } else {
+                                VantafynButton(
+                                    "Work offline",
+                                    onClick = onWorkOffline,
+                                    enabled = !state.isLoading,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(54.dp),
+                                )
+                            }
 
                             Row(
                                 modifier = Modifier.fillMaxWidth(),

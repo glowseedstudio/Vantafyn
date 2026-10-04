@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text;
 using Vantafyn.Plugin.Companion.Pokemon.PkVault;
 
@@ -15,6 +16,8 @@ public static class Gen3SaveParser
     private const int SlotSize = SectionSize * SectionCount; // 57,344 bytes
     private const uint Signature = 0x08012025;
     private const int FooterOffset = 4084; // 0x0FF4
+    private const int Gen3EventFlagBaseRs = 0x2A0;
+    private const int Gen3EventFlagBaseEmerald = 0x2FC;
 
     // Section data lengths for checksum calculation
     private static readonly int[] SectionDataLengths =
@@ -554,6 +557,173 @@ public static class Gen3SaveParser
 
         CommitSections(copy, sections, activeSlotOffset);
         return copy;
+    }
+
+    public static byte[] UnlockEvent(byte[] saveBytes, string gameId, string eventId)
+    {
+        var copy = (byte[])saveBytes.Clone();
+        var (sections, activeSlotOffset) = ExtractActiveSections(copy);
+        if (sections == null || sections[0] == null || sections[1] == null || sections[2] == null)
+        {
+            throw new InvalidDataException("Could not locate valid Generation 3 save sections.");
+        }
+
+        var key = gameId.ToLowerInvariant();
+        var isFrLg = key.Contains("firered", StringComparison.Ordinal) ||
+                     key.Contains("fire_red", StringComparison.Ordinal) ||
+                     key.Contains("fire red", StringComparison.Ordinal) ||
+                     key.Contains("leafgreen", StringComparison.Ordinal) ||
+                     key.Contains("leaf_green", StringComparison.Ordinal) ||
+                     key.Contains("leaf green", StringComparison.Ordinal);
+        var isEmerald = key.Contains("emerald", StringComparison.Ordinal);
+
+        ushort itemId;
+        int eventFlag;
+        switch (eventId)
+        {
+            case PokemonEventCatalog.EmeraldOldSeaMap:
+                itemId = 0x0178;
+                eventFlag = 0x08D6;
+                break;
+            case PokemonEventCatalog.EmeraldAuroraTicket:
+                itemId = 0x0173;
+                eventFlag = 0x08D5;
+                break;
+            case PokemonEventCatalog.EmeraldMysticTicket:
+                itemId = 0x0172;
+                eventFlag = 0x08E0;
+                break;
+            case PokemonEventCatalog.FrlgAuroraTicket:
+                itemId = 0x0173;
+                eventFlag = 0x084B;
+                break;
+            case PokemonEventCatalog.FrlgMysticTicket:
+                itemId = 0x0172;
+                eventFlag = 0x084A;
+                break;
+            case PokemonEventCatalog.RseEonTicket:
+                itemId = 0x0113;
+                eventFlag = 0x08B3;
+                break;
+            default:
+                throw new InvalidDataException($"Unsupported Generation 3 event id '{eventId}'.");
+        }
+
+        AddKeyItem(sections, isFrLg, isEmerald, itemId);
+        SetEventFlag(sections, eventFlag, isEmerald);
+        RecalculateSectionChecksum(sections[1], 1);
+        RecalculateSectionChecksum(sections[2], 2);
+        CommitSections(copy, sections, activeSlotOffset);
+        return copy;
+    }
+
+    public static bool IsEventUnlocked(byte[] saveBytes, string gameId, string eventId)
+    {
+        var (sections, _) = ExtractActiveSections(saveBytes);
+        if (sections == null || sections[1] == null || sections[2] == null) return false;
+        var key = gameId.ToLowerInvariant();
+        var isEmerald = key.Contains("emerald", StringComparison.Ordinal);
+        return eventId switch
+        {
+            PokemonEventCatalog.EmeraldOldSeaMap => HasEventFlag(sections, 0x08D6, isEmerald) && HasKeyItem(sections, key, 0x0178),
+            PokemonEventCatalog.EmeraldAuroraTicket => HasEventFlag(sections, 0x08D5, isEmerald) && HasKeyItem(sections, key, 0x0173),
+            PokemonEventCatalog.EmeraldMysticTicket => HasEventFlag(sections, 0x08E0, isEmerald) && HasKeyItem(sections, key, 0x0172),
+            PokemonEventCatalog.FrlgAuroraTicket => HasEventFlag(sections, 0x084B, isEmerald) && HasKeyItem(sections, key, 0x0173),
+            PokemonEventCatalog.FrlgMysticTicket => HasEventFlag(sections, 0x084A, isEmerald) && HasKeyItem(sections, key, 0x0172),
+            PokemonEventCatalog.RseEonTicket => HasEventFlag(sections, 0x08B3, isEmerald) && HasKeyItem(sections, key, 0x0113),
+            _ => false,
+        };
+    }
+
+    private static void AddKeyItem(byte[][] sections, bool isFrLg, bool isEmerald, ushort itemId)
+    {
+        var sec0 = sections[0];
+        var sec1 = sections[1];
+        int keyOffset = isFrLg ? 0x03B8 : isEmerald ? 0x05D8 : 0x05B0;
+        int slots = isFrLg || isEmerald ? 30 : 20;
+        ushort quantity = 1;
+        if (isEmerald && sec0.Length > 0x00AE)
+        {
+            quantity = (ushort)(quantity ^ BitConverter.ToUInt16(sec0, 0x00AC));
+        }
+        else if (isFrLg && sec0.Length > 0x0AFA)
+        {
+            quantity = (ushort)(quantity ^ BitConverter.ToUInt16(sec0, 0x0AF8));
+        }
+
+        int emptyOffset = -1;
+        for (int slot = 0; slot < slots; slot++)
+        {
+            int offset = keyOffset + slot * 4;
+            if (offset + 4 > sec1.Length) break;
+            ushort existing = BitConverter.ToUInt16(sec1, offset);
+            if (existing == itemId)
+            {
+                WriteUInt16(sec1, offset + 2, quantity);
+                return;
+            }
+            if (emptyOffset < 0 && existing == 0)
+            {
+                emptyOffset = offset;
+            }
+        }
+
+        if (emptyOffset < 0)
+        {
+            throw new InvalidDataException("The Key Items pocket is full. Free one slot before unlocking this event.");
+        }
+        WriteUInt16(sec1, emptyOffset, itemId);
+        WriteUInt16(sec1, emptyOffset + 2, quantity);
+    }
+
+    private static bool HasKeyItem(byte[][] sections, string gameKey, ushort itemId)
+    {
+        var isFrLg = gameKey.Contains("firered", StringComparison.Ordinal) ||
+                     gameKey.Contains("fire_red", StringComparison.Ordinal) ||
+                     gameKey.Contains("fire red", StringComparison.Ordinal) ||
+                     gameKey.Contains("leafgreen", StringComparison.Ordinal) ||
+                     gameKey.Contains("leaf_green", StringComparison.Ordinal) ||
+                     gameKey.Contains("leaf green", StringComparison.Ordinal);
+        var isEmerald = gameKey.Contains("emerald", StringComparison.Ordinal);
+        var sec1 = sections[1];
+        int keyOffset = isFrLg ? 0x03B8 : isEmerald ? 0x05D8 : 0x05B0;
+        int slots = isFrLg || isEmerald ? 30 : 20;
+        for (int slot = 0; slot < slots; slot++)
+        {
+            int offset = keyOffset + slot * 4;
+            if (offset + 2 > sec1.Length) break;
+            if (BitConverter.ToUInt16(sec1, offset) == itemId) return true;
+        }
+        return false;
+    }
+
+    private static void SetEventFlag(byte[][] sections, int flag, bool isEmerald)
+    {
+        var sec2 = sections[2];
+        int baseOffset = isEmerald ? Gen3EventFlagBaseEmerald : Gen3EventFlagBaseRs;
+        int offset = baseOffset + (flag >> 3);
+        int bit = flag & 7;
+        if (offset < 0 || offset >= sec2.Length)
+        {
+            throw new InvalidDataException($"Event flag {flag:X} is outside the supported save range.");
+        }
+        sec2[offset] = (byte)(sec2[offset] | (1 << bit));
+    }
+
+    private static bool HasEventFlag(byte[][] sections, int flag, bool isEmerald)
+    {
+        var sec2 = sections[2];
+        int baseOffset = isEmerald ? Gen3EventFlagBaseEmerald : Gen3EventFlagBaseRs;
+        int offset = baseOffset + (flag >> 3);
+        int bit = flag & 7;
+        return offset >= 0 && offset < sec2.Length && (sec2[offset] & (1 << bit)) != 0;
+    }
+
+    private static void WriteUInt16(byte[] target, int offset, ushort value)
+    {
+        var bytes = BitConverter.GetBytes(value);
+        target[offset] = bytes[0];
+        target[offset + 1] = bytes[1];
     }
 
     private static (byte[][]? sections, int slotOffset) ExtractActiveSections(byte[] saveBytes)

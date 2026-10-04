@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using Vantafyn.Plugin.Companion.Pokemon.PkVault;
 
@@ -11,6 +12,10 @@ namespace Vantafyn.Plugin.Companion.Pokemon.Native;
 /// </summary>
 public static class Gen2SaveParser
 {
+    private const int CrystalGsBallFlagOffset = 0x3E3C;
+    private const int CrystalGsBallBackupFlagOffset = 0x3E44;
+    private const byte CrystalGsBallReadyValue = 0x0B;
+
     private static readonly string[] NatureNames =
     [
         "Hardy", "Lonely", "Brave", "Adamant", "Naughty",
@@ -250,6 +255,27 @@ public static class Gen2SaveParser
         return result;
     }
 
+    public static byte[] UnlockCrystalGsBallEvent(byte[] saveBytes)
+    {
+        if (saveBytes == null || saveBytes.Length != 32768)
+        {
+            throw new InvalidDataException("Crystal GS Ball unlock requires a 32 KiB Generation 2 save.");
+        }
+
+        var copy = (byte[])saveBytes.Clone();
+        copy[CrystalGsBallFlagOffset] = CrystalGsBallReadyValue;
+        copy[CrystalGsBallBackupFlagOffset] = CrystalGsBallReadyValue;
+        RecalculateCrystalChecksums(copy);
+        return copy;
+    }
+
+    public static bool IsCrystalGsBallUnlocked(byte[] saveBytes)
+    {
+        return saveBytes.Length > CrystalGsBallBackupFlagOffset &&
+               saveBytes[CrystalGsBallFlagOffset] == CrystalGsBallReadyValue &&
+               saveBytes[CrystalGsBallBackupFlagOffset] == CrystalGsBallReadyValue;
+    }
+
     public static PokemonDetailsDto? ParsePokemon(
         byte[] buffer,
         int offset,
@@ -401,5 +427,23 @@ public static class Gen2SaveParser
             }
         }
         return sb.ToString().Trim();
+    }
+
+    private static void RecalculateCrystalChecksums(byte[] saveBytes)
+    {
+        WriteChecksum(saveBytes, 0x2009, 0x2B82, 0x2D0D);
+        WriteChecksum(saveBytes, 0x1209, 0x1D82, 0x1F0D);
+    }
+
+    private static void WriteChecksum(byte[] saveBytes, int startInclusive, int endInclusive, int checksumOffset)
+    {
+        if (endInclusive >= saveBytes.Length || checksumOffset + 1 >= saveBytes.Length) return;
+        ushort checksum = 0;
+        for (int i = startInclusive; i <= endInclusive; i++)
+        {
+            checksum += saveBytes[i];
+        }
+        saveBytes[checksumOffset] = (byte)(checksum & 0xFF);
+        saveBytes[checksumOffset + 1] = (byte)(checksum >> 8);
     }
 }

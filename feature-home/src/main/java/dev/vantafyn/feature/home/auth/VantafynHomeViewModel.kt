@@ -7596,6 +7596,65 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         openOfflineDownloads(profile, message = "Working offline")
     }
 
+    fun workOfflineGamesFromRecovery() {
+        val profile = _state.value.restoreFailureProfile
+            ?: _state.value.savedProfiles.firstOrNull { it.id == _state.value.selectedProfileId }
+            ?: _state.value.savedProfiles.firstOrNull()
+            ?: return
+        viewModelScope.launch {
+            refreshDownloadedGameKeys()
+            _state.update {
+                it.copy(
+                    step = VantafynSetupStep.Home,
+                    selectedProfileId = profile.id,
+                    isLoading = false,
+                    isStartupResolved = true,
+                    session = null,
+                    offlineProfile = profile,
+                    server = JellyfinServerConfig(
+                        url = profile.serverUrl,
+                        name = profile.serverName,
+                        localUrl = profile.localServerUrl,
+                        remoteUrl = profile.remoteServerUrl,
+                        localId = profile.serverRef,
+                    ),
+                    serverUrl = profile.serverUrl,
+                    localServerUrl = profile.localServerUrl.orEmpty(),
+                    remoteServerUrl = profile.remoteServerUrl.orEmpty(),
+                    username = profile.displayName,
+                    password = "",
+                    restoreFailureProfile = null,
+                    restoreFailureReason = null,
+                    restoreFailureMessage = null,
+                    mobileDestination = MobileDestination.Games,
+                    previousMobileDestination = MobileDestination.Profile,
+                    activeGamesTab = GamesTab.Home,
+                    selectedGameSystem = null,
+                    isLoadingGames = true,
+                    downloadsError = null,
+                    mobileMessage = "Playing downloaded games offline",
+                    homeLayout = readHomeLayout(profile.id),
+                    themeMusicEnabled = readThemeMusicEnabled(profile.id),
+                    themeMusicVolume = readThemeMusicVolume(profile.id),
+                    whatsNewEnabled = readWhatsNewEnabled(profile.id),
+                    achievementsEnabled = readAchievementsEnabled(profile.id),
+                    selectedBackground = readSelectedBackground(profile.id),
+                    bottomRailAccent = readBottomRailAccent(profile.id),
+                    bottomRailAtmosphere = readBottomRailAtmosphere(profile.id),
+                    videoPlayerPreference = readVideoPlayerPreference(profile.id),
+                    mediaSegmentBehaviors = readMediaSegmentBehaviors(profile.id),
+                    maxStreamingBitrateMbps = readMaxStreamingBitrateMbps(profile.id),
+                    configuredSmartRows = readSmartRows(profile.id),
+                    autoplayCountdownSeconds = readAutoplayCountdownSeconds(profile.id),
+                    upNextDisplayMode = readUpNextDisplayMode(profile.id),
+                    passoutProtectionEnabled = readPassoutProtectionEnabled(profile.id),
+                    passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(profile.id),
+                )
+            }
+            loadCachedOfflineGames()
+        }
+    }
+
     private fun openOfflineDownloads(profile: SavedProfile, message: String?) {
         viewModelScope.launch {
             var records = downloadRepository.listForUser(profile.serverRef, profile.jellyfinUserId.toString())

@@ -376,3 +376,30 @@ data class PokemonAchievementsSummaryDto(
     val totalCount: Int = 0,
     val achievements: List<PokemonAchievementDto> = emptyList(),
 ) : Serializable
+
+data class PokemonEventUnlockDto(
+    val id: String = "",
+    val title: String = "",
+    val subtitle: String = "",
+    val description: String = "",
+    val generation: Int = 0,
+    val region: String = "",
+    val legendary: String = "",
+    val accent: String = "#FBBF24",
+    val supportedGameIds: List<String> = emptyList(),
+) : Serializable
+
+data class PokemonEventUnlockStatusDto(
+    val eventId: String = "",
+    val available: Boolean = false,
+    val unlocked: Boolean = false,
+    val reason: String? = null,
+) : Serializable
+
+data class PokemonEventUnlockResponse(
+    val success: Boolean = false,
+    val eventId: String = "",
+    val gameId: String = "",
+    val message: String = "",
+    val backupIds: List<String> = emptyList(),
+) : Serializable

@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Vantafyn.Plugin.Companion.Core;
 using Vantafyn.Plugin.Companion.Games;
+using Vantafyn.Plugin.Companion.Pokemon.Native;
 
 namespace Vantafyn.Plugin.Companion.Pokemon;
 
@@ -20,7 +21,7 @@ public sealed class PokemonController : ControllerBase
 {
     // Bump this whenever the synthesis prompt or client-side narration profile changes in a
     // way that should not reuse previously rendered species audio.
-    private const string NarrationRenderProfile = "pokedex-voice-v2";
+    private const string NarrationRenderProfile = "pokedex-voice-v3";
     private static readonly ConcurrentDictionary<string, (Guid UserId, DateTimeOffset ExpiresAt, PokemonSaveParseResult Parsed, int Generation)> ExternalSavePreviews = new();
     private readonly IGamesService _gamesService;
     private readonly IGameSavesService _gameSavesService;
@@ -246,34 +247,295 @@ public sealed class PokemonController : ControllerBase
     // wording independent of the on-screen canonical spelling.
     private static string FormatNarrationText(string text) => text
         .Replace("Pokémon", "Poh-kay-mon", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokédex", "Poh-kay-dex", StringComparison.OrdinalIgnoreCase);
+        .Replace("Pokemon", "Poh-kay-mon", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokédex", "Poh-kay-dex", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokedex", "Poh-kay-dex", StringComparison.OrdinalIgnoreCase)
+        .Replace("TM", "T M", StringComparison.OrdinalIgnoreCase)
+        .Replace("HP", "H P", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatNarrationName(string? name)
     {
         var displayName = string.IsNullOrWhiteSpace(name) ? "Unknown Pokémon" : name.Trim();
         var phoneticName = displayName switch
         {
-            "Mr Mime" => "Mister Mime",
-            "Mime Jr" => "Mime Junior",
-            "Farfetch D" => "Far-fetched",
-            "Sirfetch D" => "Sir-fetched",
+            "Bulbasaur" => "Bul-buh-sore",
+            "Ivysaur" => "Eye-vee-sore",
+            "Venusaur" => "Vee-nuh-sore",
+            "Charmander" => "Char-man-der",
+            "Charmeleon" => "Char-meel-ee-on",
+            "Charizard" => "Char-ih-zard",
+            "Squirtle" => "Skwer-tle",
+            "Wartortle" => "War-tor-tle",
+            "Blastoise" => "Blas-toys",
+            "Rattata" => "Ruh-ta-ta",
+            "Raticate" => "Rat-ih-kate",
             "Nidoran F" => "Nidoran female",
             "Nidoran M" => "Nidoran male",
+            "Nidorina" => "Nidor-eena",
+            "Nidorino" => "Nidor-eeno",
+            "Nidoqueen" => "Nido-queen",
+            "Nidoking" => "Nido-king",
+            "Vulpix" => "Vull-pix",
+            "Ninetales" => "Nine-tails",
+            "Meowth" => "Mee-owth",
+            "Psyduck" => "Sigh-duck",
+            "Growlithe" => "Growl-ith",
+            "Arcanine" => "Ar-kuh-nine",
+            "Machop" => "Muh-chop",
+            "Machoke" => "Muh-choke",
+            "Machamp" => "Muh-champ",
+            "Geodude" => "Gee-oh-dude",
+            "Ponyta" => "Poe-nee-ta",
+            "Farfetch'd" => "Far-fetched",
+            "Farfetchd" => "Far-fetched",
+            "Doduo" => "Doh-doo-oh",
+            "Dodrio" => "Doh-dree-oh",
+            "Gyarados" => "Gare-uh-dos",
+            "Lapras" => "Lap-riss",
+            "Eevee" => "Ee-vee",
+            "Omanyte" => "Oh-muh-nite",
+            "Omastar" => "Oh-muh-star",
+            "Kabuto" => "Kah-boo-toe",
+            "Aerodactyl" => "Air-oh-dack-til",
+            "Articuno" => "Ar-tick-uno",
+            "Zapdos" => "Zap-dose",
+            "Moltres" => "Mole-trace",
+            "Dratini" => "Druh-tee-nee",
+            "Dragonair" => "Drag-on-air",
+            "Dragonite" => "Drag-oh-nite",
+            "Mewtwo" => "Mew-two",
+            "Mr Mime" => "Mister Mime",
+            "Mr. Mime" => "Mister Mime",
+            "Mime Jr" => "Mime Junior",
+            "Mime Jr." => "Mime Junior",
+            "Sirfetch'd" => "Sir-fetched",
+            "Sirfetchd" => "Sir-fetched",
+            "Pichu" => "Pee-choo",
+            "Togepi" => "Toe-guh-pee",
+            "Togetic" => "Toe-get-ick",
+            "Ampharos" => "Am-fuh-ross",
+            "Sudowoodo" => "Soo-doh-woo-doh",
+            "Wooper" => "Woo-per",
+            "Wobbuffet" => "Wob-buh-fet",
+            "Girafarig" => "Jih-raff-uh-rig",
+            "Dunsparce" => "Dun-sparse",
+            "Qwilfish" => "Quill-fish",
+            "Sneasel" => "Snee-zil",
+            "Suicune" => "Swee-koon",
+            "Treecko" => "Tree-ko",
+            "Grovyle" => "Grow-vile",
+            "Sceptile" => "Sep-tile",
+            "Torchic" => "Tor-chick",
+            "Mudkip" => "Mud-kip",
+            "Zigzagoon" => "Zig-zag-goon",
+            "Linoone" => "Lie-noon",
+            "Ralts" => "Ralts",
+            "Gardevoir" => "Gar-deh-vwar",
+            "Sableye" => "Say-bull-eye",
+            "Mawile" => "Maw-while",
+            "Aron" => "Air-on",
+            "Aggron" => "Ag-ron",
+            "Gulpin" => "Gull-pin",
+            "Wailmer" => "Wail-mer",
+            "Wailord" => "Wail-lord",
+            "Spoink" => "Spoynk",
+            "Spinda" => "Spin-duh",
+            "Swablu" => "Swah-blue",
+            "Altaria" => "Al-tair-ee-uh",
+            "Lileep" => "Lie-leep",
+            "Milotic" => "My-low-tick",
+            "Castform" => "Cast-form",
+            "Shuppet" => "Shup-pet",
+            "Banette" => "Buh-net",
+            "Duskull" => "Dusk-ull",
+            "Absol" => "Ab-soll",
+            "Wynaut" => "Why-not",
+            "Snorunt" => "Snow-runt",
+            "Bagon" => "Bay-gon",
+            "Salamence" => "Sal-uh-mence",
+            "Beldum" => "Bell-dum",
+            "Metang" => "Meh-tang",
+            "Metagross" => "Met-uh-gross",
+            "Latias" => "Lah-tee-ahs",
+            "Latios" => "Lah-tee-ohs",
+            "Kyogre" => "Kai-oh-gur",
+            "Groudon" => "Grow-don",
+            "Rayquaza" => "Ray-kway-zuh",
+            "Jirachi" => "Jih-rah-chee",
+            "Deoxys" => "Dee-ox-iss",
+            "Turtwig" => "Turt-wig",
+            "Chimchar" => "Chim-char",
+            "Piplup" => "Pip-lup",
+            "Bidoof" => "Bee-doof",
+            "Shinx" => "Shinks",
+            "Pachirisu" => "Pah-chee-ree-soo",
+            "Buizel" => "Bwee-zil",
+            "Drifloon" => "Drift-loon",
+            "Lopunny" => "Low-punny",
+            "Mismagius" => "Miss-may-jee-us",
+            "Chingling" => "Ching-ling",
+            "Bonsly" => "Bon-sly",
+            "Spiritomb" => "Speer-it-toom",
+            "Garchomp" => "Gar-chomp",
+            "Lucario" => "Loo-car-ee-oh",
+            "Hippopotas" => "Hippo-poh-tas",
+            "Drapion" => "Drap-ee-on",
+            "Croagunk" => "Crow-gunk",
+            "Finneon" => "Fin-ee-on",
+            "Snover" => "Snow-ver",
+            "Rotom" => "Row-tom",
+            "Uxie" => "Yook-see",
+            "Mesprit" => "Mess-prit",
+            "Azelf" => "Azelf",
+            "Dialga" => "Dee-al-guh",
+            "Palkia" => "Pal-kee-uh",
+            "Giratina" => "Gear-uh-tee-nuh",
+            "Cresselia" => "Cress-ell-ee-uh",
+            "Phione" => "Fee-oh-nay",
+            "Manaphy" => "Man-uh-fee",
+            "Darkrai" => "Dark-rye",
+            "Shaymin" => "Shay-min",
+            "Arceus" => "Ar-key-us",
             "Type Null" => "Type Null",
+            "Flabebe" => "Flah-bay-bay",
+            "Flabébé" => "Flah-bay-bay",
+            "Fletchling" => "Fletch-ling",
+            "Talonflame" => "Tal-on-flame",
+            "Vivillon" => "Vih-vee-yon",
+            "Honedge" => "Hon-edge",
+            "Doublade" => "Doo-blade",
+            "Aegislash" => "Ee-jih-slash",
+            "Inkay" => "In-kay",
+            "Malamar" => "Mal-uh-mar",
+            "Tyrunt" => "Tie-runt",
+            "Amaura" => "Ah-more-uh",
+            "Sylveon" => "Sil-vee-on",
+            "Hawlucha" => "Hah-loo-cha",
+            "Dedenne" => "Deh-den-nay",
+            "Carbink" => "Car-bink",
+            "Goomy" => "Goo-mee",
+            "Sliggoo" => "Slig-goo",
+            "Goodra" => "Goo-druh",
+            "Xerneas" => "Zer-nee-us",
+            "Yveltal" => "Ee-vell-tall",
+            "Zygarde" => "Zye-guard",
+            "Rowlet" => "Row-let",
+            "Litten" => "Lit-ten",
+            "Popplio" => "Pop-lee-oh",
+            "Toucannon" => "Too-cannon",
+            "Crabrawler" => "Crab-rawler",
+            "Oricorio" => "Or-ee-core-ee-oh",
+            "Lycanroc" => "Lie-can-rock",
+            "Mimikyu" => "Mim-ee-kyoo",
+            "Solgaleo" => "Sol-gah-lay-oh",
+            "Lunala" => "Loo-nah-lah",
+            "Nihilego" => "Nee-hil-ego",
+            "Pheromosa" => "Fair-oh-moe-sah",
+            "Xurkitree" => "Zerk-it-tree",
+            "Necrozma" => "Neh-croz-muh",
+            "Magearna" => "Mah-gear-nuh",
+            "Grookey" => "Groo-key",
+            "Scorbunny" => "Score-bunny",
+            "Sobble" => "Sob-bull",
+            "Corviknight" => "Core-vih-knight",
+            "Obstagoon" => "Ob-stuh-goon",
+            "Perrserker" => "Per-sirker",
+            "Sirfetch D" => "Sir-fetched",
+            "Toxel" => "Tox-ell",
+            "Toxtricity" => "Tox-triss-ih-tee",
+            "Sinistea" => "Sin-iss-tea",
+            "Hatenna" => "Hah-ten-uh",
+            "Hattrem" => "Hat-trem",
+            "Hatterene" => "Hat-uh-reen",
+            "Falinks" => "Fay-links",
+            "Snom" => "Snom",
+            "Eiscue" => "Ice-cue",
+            "Morpeko" => "More-peh-ko",
+            "Duraludon" => "Duh-ral-oo-don",
+            "Zacian" => "Zah-see-un",
+            "Zamazenta" => "Zah-mah-zen-tah",
+            "Eternatus" => "Eh-ter-nuh-tus",
+            "Kubfu" => "Koob-foo",
+            "Urshifu" => "Ur-shee-foo",
+            "Zarude" => "Zah-rood",
+            "Regieleki" => "Reh-jee-eh-lek-ee",
+            "Regidrago" => "Reh-jee-dray-go",
+            "Glastrier" => "Glass-tree-er",
+            "Spectrier" => "Speck-tree-er",
+            "Calyrex" => "Cal-ee-rex",
+            "Sprigatito" => "Spree-gah-tee-toe",
+            "Fuecoco" => "Fway-co-co",
+            "Quaxly" => "Quacks-lee",
+            "Lechonk" => "Leh-chonk",
+            "Pawmi" => "Paw-mee",
+            "Maushold" => "Mouse-hold",
+            "Fidough" => "Fye-dough",
+            "Smoliv" => "Smoll-iv",
+            "Nacli" => "Nack-lee",
+            "Charcadet" => "Char-kuh-det",
+            "Armarouge" => "Ar-muh-roozh",
+            "Ceruledge" => "Sair-oo-ledge",
+            "Tadbulb" => "Tad-bulb",
+            "Bellibolt" => "Bell-ee-bolt",
+            "Wiglett" => "Wig-let",
+            "Bombirdier" => "Bom-bur-deer",
+            "Glimmet" => "Glim-met",
+            "Glimmora" => "Glim-more-uh",
+            "Tinkatink" => "Tink-uh-tink",
+            "Tinkaton" => "Tink-uh-ton",
+            "Palafin" => "Pal-uh-fin",
+            "Cyclizar" => "Sigh-klih-zar",
+            "Gimmighoul" => "Gim-ee-gool",
+            "Gholdengo" => "Goal-den-go",
+            "Wo Chien" => "Woah Chee-en",
+            "Chien Pao" => "Chee-en Pow",
+            "Ting Lu" => "Ting Loo",
+            "Chi Yu" => "Chee Yoo",
+            "Roaring Moon" => "Roaring Moon",
+            "Iron Valiant" => "Iron Valiant",
+            "Koraidon" => "Kor-eye-don",
+            "Miraidon" => "Meer-eye-don",
+            "Ogerpon" => "Oh-ger-pon",
+            "Terapagos" => "Tair-uh-pah-gos",
             "Jangmo O" => "Jang-mo-oh",
             "Hakamo O" => "Ha-ka-mo-oh",
             "Kommo O" => "Kom-mo-oh",
             "Ho Oh" => "Ho-oh",
             "Porygon Z" => "Porygon Zee",
-            "Great Tusk" => "Great Tusk",
             _ => displayName
         };
         return FormatNarrationText(phoneticName);
     }
 
-    private static string HumanizeSpeciesName(string? name) => string.Join(" ", (name ?? "Pokémon")
-        .Split('-', StringSplitOptions.RemoveEmptyEntries)
-        .Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+    private static string HumanizeSpeciesName(string? name)
+    {
+        var normalized = (name ?? "pokemon").Trim().ToLowerInvariant();
+        var special = normalized switch
+        {
+            "farfetchd" => "Farfetch'd",
+            "sirfetchd" => "Sirfetch'd",
+            "mr-mime" => "Mr. Mime",
+            "mime-jr" => "Mime Jr.",
+            "nidoran-f" => "Nidoran F",
+            "nidoran-m" => "Nidoran M",
+            "ho-oh" => "Ho Oh",
+            "porygon-z" => "Porygon Z",
+            "jangmo-o" => "Jangmo O",
+            "hakamo-o" => "Hakamo O",
+            "kommo-o" => "Kommo O",
+            "type-null" => "Type Null",
+            "flabebe" => "Flabébé",
+            "wo-chien" => "Wo Chien",
+            "chien-pao" => "Chien Pao",
+            "ting-lu" => "Ting Lu",
+            "chi-yu" => "Chi Yu",
+            _ => null
+        };
+        if (special != null) return special;
+        return string.Join(" ", normalized
+            .Split('-', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => char.ToUpperInvariant(part[0]) + part[1..]));
+    }
 
     /// <summary>
     /// Reads an external Gen 6–9 save into a short-lived, user-scoped selection preview.
@@ -2880,6 +3142,125 @@ public sealed class PokemonController : ControllerBase
         return Ok(summary);
     }
 
+    [HttpGet("Events")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<PokemonEventUnlockDto>> GetEventUnlockCatalog()
+    {
+        if (!IsPokemonIntegrationEnabled()) return Ok(Array.Empty<PokemonEventUnlockDto>());
+        return Ok(PokemonEventCatalog.All);
+    }
+
+    [HttpGet("Events/Status/{gameId}")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<PokemonEventUnlockStatusDto>>> GetEventUnlockStatus(
+        [FromRoute] string gameId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled()) return Ok(Array.Empty<PokemonEventUnlockStatusDto>());
+        var game = FindGame(gameId);
+        if (game == null) return Ok(Array.Empty<PokemonEventUnlockStatusDto>());
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var meta = await _detector.GetMetadataAsync(userId, game.Id, game.Title, game.FileName, game.System, game.Core, cancellationToken).ConfigureAwait(false);
+        if (meta == null || !meta.IsPokemonGame) return Ok(Array.Empty<PokemonEventUnlockStatusDto>());
+
+        var saveBytes = await _gameSavesService.GetAsync(userId, game.Id, "sram", cancellationToken).ConfigureAwait(false);
+        var gameKey = $"{meta.PokemonGameId} {game.Title} {game.FileName}";
+        var statuses = PokemonEventCatalog.All
+            .Where(e => PokemonEventCatalog.SupportsGame(e, gameKey))
+            .Select(e => new PokemonEventUnlockStatusDto
+            {
+                EventId = e.Id,
+                Available = saveBytes is { Length: > 0 },
+                Unlocked = saveBytes is { Length: > 0 } && IsEventUnlocked(saveBytes, meta.Generation, gameKey, e.Id),
+                Reason = saveBytes is { Length: > 0 } ? null : "No battery save found for this game."
+            })
+            .ToList();
+        return Ok(statuses);
+    }
+
+    [HttpPost("Events/Unlock")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonEventUnlockResponse>> UnlockEvent(
+        [FromBody] PokemonEventUnlockRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (string.IsNullOrWhiteSpace(request.GameId) || string.IsNullOrWhiteSpace(request.EventId))
+        {
+            return BadRequest(new { error = "Game and event are required." });
+        }
+
+        var definition = PokemonEventCatalog.Find(request.EventId);
+        if (definition == null) return BadRequest(new { error = "Unsupported event unlock." });
+
+        var game = FindGame(request.GameId);
+        if (game == null) return NotFound(new { error = "Game not found." });
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var meta = await _detector.GetMetadataAsync(userId, game.Id, game.Title, game.FileName, game.System, game.Core, cancellationToken).ConfigureAwait(false);
+        if (meta == null || !meta.IsPokemonGame) return BadRequest(new { error = "This is not a supported Pokémon game." });
+
+        var gameKey = $"{meta.PokemonGameId} {game.Title} {game.FileName}";
+        if (!PokemonEventCatalog.SupportsGame(definition, gameKey))
+        {
+            return BadRequest(new { error = "This event is not compatible with the selected game." });
+        }
+
+        var result = await _transactionManager.ExecuteAsync(
+            userId,
+            operationType: "EventUnlock",
+            sourceGameId: game.Id,
+            destinationGameId: null,
+            pokemonId: null,
+            species: definition.Legendary,
+            nickname: definition.Title,
+            operation: context =>
+            {
+                var original = context.SourceSaveWorkingCopy;
+                if (IsEventUnlocked(original, meta.Generation, gameKey, definition.Id))
+                {
+                    return Task.FromResult(new PokemonEventUnlockResponse
+                    {
+                        Success = true,
+                        EventId = definition.Id,
+                        GameId = game.Id,
+                        Message = $"{definition.Title} is already unlocked.",
+                        BackupIds = context.BackupIds
+                    });
+                }
+
+                context.SourceSaveWorkingCopy = meta.Generation switch
+                {
+                    2 when definition.Id == PokemonEventCatalog.CrystalGsBall => Gen2SaveParser.UnlockCrystalGsBallEvent(original),
+                    3 => Gen3SaveParser.UnlockEvent(original, gameKey, definition.Id),
+                    _ => throw new InvalidDataException("This event generation is not implemented yet.")
+                };
+
+                return Task.FromResult(new PokemonEventUnlockResponse
+                {
+                    Success = true,
+                    EventId = definition.Id,
+                    GameId = game.Id,
+                    Message = $"{definition.Title} unlocked. Start the game from battery save and continue the event in-game.",
+                    BackupIds = context.BackupIds
+                });
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Success || result.Value == null)
+        {
+            return BadRequest(new { error = result.ErrorMessage ?? "Event unlock failed." });
+        }
+
+        return Ok(result.Value);
+    }
+
     /// <summary>
     /// Retrieves recent Pokémon social activity feed across the server.
     /// Safe fallback when disabled.
@@ -2926,6 +3307,14 @@ public sealed class PokemonController : ControllerBase
 
         return proofs.OrderByDescending(p => p.UploadedAtUtc).ToList();
     }
+
+    private static bool IsEventUnlocked(byte[] saveBytes, int generation, string gameKey, string eventId) =>
+        generation switch
+        {
+            2 when eventId == PokemonEventCatalog.CrystalGsBall => Gen2SaveParser.IsCrystalGsBallUnlocked(saveBytes),
+            3 => Gen3SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
+            _ => false
+        };
 
     private string DiplomaProofRoot(Guid userId) =>
         Path.Combine(_paths!.PokemonRoot, "diploma-proofs", userId.ToString("N"));
