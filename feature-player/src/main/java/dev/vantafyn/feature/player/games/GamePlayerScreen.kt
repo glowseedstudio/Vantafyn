@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -40,6 +41,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,10 +49,12 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,6 +114,8 @@ fun GamePlayerScreen(
             val controller = WindowCompat.getInsetsController(window, window.decorView)
             val previousBehavior = controller.systemBarsBehavior
             val previousKeepScreenOn = window.decorView.keepScreenOn
+            var previousDisplayModeId = 0
+            var previousRefreshRate = 0f
 
             window.decorView.keepScreenOn = true
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -120,18 +126,25 @@ fun GamePlayerScreen(
             } else {
                 controller.show(WindowInsetsCompat.Type.statusBars())
             }
-
-            var previousRefreshRate = 0f
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
-                previousRefreshRate = window.attributes.preferredRefreshRate
                 val params = window.attributes
-                params.preferredRefreshRate = 60f
-                window.attributes = params
+                previousDisplayModeId = params.preferredDisplayModeId
+                previousRefreshRate = params.preferredRefreshRate
+                val display = window.decorView.display ?: activity.windowManager.defaultDisplay
+                val stableMode = display.supportedModes
+                    .filter { it.refreshRate >= 59f }
+                    .minByOrNull { kotlin.math.abs(it.refreshRate - 60f) }
+                if (stableMode != null) {
+                    params.preferredDisplayModeId = stableMode.modeId
+                    params.preferredRefreshRate = stableMode.refreshRate
+                    window.attributes = params
+                }
             }
 
             onDispose {
                 if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
                     val params = window.attributes
+                    params.preferredDisplayModeId = previousDisplayModeId
                     params.preferredRefreshRate = previousRefreshRate
                     window.attributes = params
                 }
@@ -180,6 +193,8 @@ fun GamePlayerScreen(
     var videoFilter by remember { mutableStateOf(initialFilter) }
     var showTouchControls by remember { mutableStateOf(true) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
+    var webRendererCrashed by remember { mutableStateOf(false) }
+    var webViewReloadKey by remember { mutableIntStateOf(0) }
     var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
     var initialSramBase64 by remember { mutableStateOf<String?>(null) }
     var pendingConflict by remember { mutableStateOf<SaveSyncInfo?>(null) }
@@ -239,9 +254,8 @@ fun GamePlayerScreen(
             }
 
             // Ensure the exact EmulatorJS runtime and core are available before the WebView
-            // starts. NDS is intentionally resolved to DeSmuME below: EmulatorJS's generic
-            // "nds" selector otherwise defaults to melonDS, which is less reliable for a
-            // number of commercial DS titles.
+            // starts. NDS resolves to melonDS by default; DeSmuME crashes older Android
+            // WebView renderers on some Retroid builds.
             statusMessage = "Preparing emulation core..."
             storageManager.preCacheEmulatorCore(game.systemId, game.core)
 
@@ -345,7 +359,8 @@ fun GamePlayerScreen(
                 modifier = gameContainerModifier,
                 contentAlignment = Alignment.Center,
             ) {
-                AndroidView(
+                key(webViewReloadKey) {
+                    AndroidView(
                         factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(
@@ -444,6 +459,32 @@ fun GamePlayerScreen(
                                 )
 
                                 webViewClient = object : WebViewClient() {
+                                    override fun onRenderProcessGone(
+                                        view: WebView?,
+                                        detail: RenderProcessGoneDetail?,
+                                    ): Boolean {
+                                        android.util.Log.e(
+                                            "GamePlayerScreen",
+                                            "WebView renderer crashed while running ${game.id}; didCrash=${detail?.didCrash()} priorityAtExit=${detail?.rendererPriorityAtExit()}",
+                                        )
+                                        if (view == webViewInstance) {
+                                            webViewInstance = null
+                                        }
+                                        webRendererCrashed = true
+                                        isPaused = true
+                                        isDownloading = false
+                                        statusMessage = "Emulator renderer crashed"
+                                        try {
+                                            view?.stopLoading()
+                                            view?.loadUrl("about:blank")
+                                            view?.removeAllViews()
+                                            view?.destroy()
+                                        } catch (e: Exception) {
+                                            android.util.Log.w("GamePlayerScreen", "Error cleaning crashed WebView", e)
+                                        }
+                                        return true
+                                    }
+
                                     override fun shouldInterceptRequest(
                                         view: WebView?,
                                         request: WebResourceRequest?,
@@ -550,6 +591,7 @@ fun GamePlayerScreen(
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
+                }
 
                 // High-fidelity CRT scanline & curved tube vignette overlay
                 if (videoFilter == GameVideoFilter.Crt) {
@@ -590,6 +632,62 @@ fun GamePlayerScreen(
                         color = VantafynColors.Muted,
                         fontSize = 14.sp,
                     )
+                }
+            }
+        }
+
+        AnimatedVisibility(
+            visible = webRendererCrashed,
+            enter = fadeIn(),
+            exit = fadeOut(),
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xEE05070D)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth(0.82f)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFF151B2D),
+                                    Color(0xFF090B12),
+                                ),
+                            ),
+                        ),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    Spacer(modifier = Modifier.height(22.dp))
+                    Text(
+                        text = "Emulator renderer crashed",
+                        color = Color.White,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "The Android WebView renderer stopped while starting this game. Your app is still running.",
+                        color = VantafynColors.Muted,
+                        fontSize = 14.sp,
+                    )
+                    Button(
+                        onClick = {
+                            webRendererCrashed = false
+                            isPaused = false
+                            statusMessage = "Restarting emulation core..."
+                            webViewReloadKey++
+                        },
+                    ) {
+                        Text("Retry")
+                    }
+                    Button(onClick = onExit) {
+                        Text("Exit game")
+                    }
+                    Spacer(modifier = Modifier.height(22.dp))
                 }
             }
         }
@@ -816,11 +914,8 @@ private fun generateEmulatorHtml(
         key == "nes" || key.contains("famicom") || ext == "nes" -> "nes"
         key == "segamd" || key.contains("genesis") || key.contains("sega") || key.contains("megadrive") || ext == "gen" || ext == "smd" || ext == "md" -> "segaMD"
         key == "n64" || key.contains("nintendo 64") || ext == "z64" || ext == "n64" || ext == "v64" -> "n64"
-        // Do not pass the generic "nds" system selector to EmulatorJS. Its current default
-        // is melonDS, whereas the app prepares DeSmuME and Pokémon Black/White 2-family ROMs
-        // are demonstrably more reliable with it. Keeping this explicit also makes the
-        // requested core archive and the core that actually launches identical.
-        key == "nds" || key.contains("ds") || ext == "nds" -> "desmume"
+        key.contains("desmume") -> "desmume"
+        key == "nds" || key == "ds" || key.contains("nintendo ds") || key.contains("melonds") || ext == "nds" -> "melonds"
         key == "psx" || key == "ps1" || key.contains("playstation") || ext == "chd" || ext == "pbp" || ext == "cue" -> "psx"
         else -> key
     }

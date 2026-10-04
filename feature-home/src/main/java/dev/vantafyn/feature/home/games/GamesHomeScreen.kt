@@ -38,9 +38,14 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material3.Icon
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -93,6 +98,7 @@ fun GamesHomeScreen(
     val formattedPlaytime = remember(totalPlayTimeMs) {
         GamePlayTracker.formatPlayTime(totalPlayTimeMs)
     }
+    var pendingRecentRemoval by remember { mutableStateOf<RecentGameRecord?>(null) }
 
     val pullToRefreshState = rememberPullToRefreshState()
 
@@ -326,7 +332,7 @@ fun GamesHomeScreen(
                             RecentGameCard(
                                 record = record,
                                 onClick = { onOpenGame(record.toGameSummary()) },
-                                onLongPress = { onRemoveRecentGame(record.id) },
+                                onLongPress = { pendingRecentRemoval = record },
                             )
                         }
                     }
@@ -363,11 +369,55 @@ fun GamesHomeScreen(
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center,
                             )
-                        }
-                    }
-                }
             }
         }
+    }
+    }
+
+    pendingRecentRemoval?.let { record ->
+        AlertDialog(
+            onDismissRequest = { pendingRecentRemoval = null },
+            containerColor = Color(0xFF141827),
+            titleContentColor = Color.White,
+            textContentColor = VantafynColors.Muted,
+            title = {
+                Text(
+                    text = "Remove from Continue Playing?",
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = "${record.title} will only be hidden from this rail. Your game, save, and play history stay untouched.",
+                    lineHeight = 20.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveRecentGame(record.id)
+                        pendingRecentRemoval = null
+                    },
+                ) {
+                    Text(
+                        text = "Remove",
+                        color = Color(0xFF00E5FF),
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRecentRemoval = null }) {
+                    Text(
+                        text = "Cancel",
+                        color = VantafynColors.Muted,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+        )
+    }
+}
 
         // 4. Consoles & Systems Quick Jump Grid
         if (systems.isNotEmpty()) {

@@ -4634,6 +4634,15 @@ private fun MobileShellScreen(
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .statusBarsPadding()
+                        .then(
+                            if (isLandscape && !isImmersive) {
+                                Modifier
+                                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
+                                    .padding(start = 74.dp)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     enter = fadeIn(animationSpec = tween(300)) + slideInVertically(animationSpec = tween(300)) { -it / 2 },
                     exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(animationSpec = tween(200)) { -it / 2 },
@@ -22702,24 +22711,35 @@ private fun MobileLandscapeSideNavRail(
             .padding(start = 6.dp, top = 6.dp, bottom = 6.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        VantafynGlassDock(
+        Box(
             modifier = Modifier
-                .width(60.dp)
-                .fillMaxHeight(),
-            cornerRadius = 24.dp,
-            contentPadding = PaddingValues(vertical = 10.dp, horizontal = 2.dp),
+                .width(66.dp)
+                .fillMaxHeight()
+                .vantafynAnimatedModalBorder(
+                    cornerRadius = 30.dp,
+                    strokeWidth = 1.2.dp,
+                    durationMillis = 5600,
+                    animate = true,
+                ),
         ) {
-            RailInteriorAtmosphere(
-                mode = atmosphereMode,
-                modifier = Modifier.matchParentSize(),
-                cornerRadius = 24.dp,
-            )
-            Column(
+            VantafynGlassDock(
                 modifier = Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.SpaceEvenly,
+                cornerRadius = 30.dp,
+                contentPadding = PaddingValues(0.dp),
             ) {
-                when (currentNavKind) {
+                RailInteriorAtmosphere(
+                    mode = atmosphereMode,
+                    modifier = Modifier.matchParentSize(),
+                    cornerRadius = 30.dp,
+                )
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 3.dp, vertical = 10.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceEvenly,
+                ) {
+                    when (currentNavKind) {
                     BottomNavKind.Main -> {
                         val selected = (mode as? NavigationRailMode.Main)?.selected
                         mainTabs.forEach { destination ->
@@ -22822,8 +22842,12 @@ private fun MobileLandscapeSideNavRail(
                             }
                         }
                     }
+                    }
                 }
             }
+            BottomRailAccentBorder(
+                modifier = Modifier.matchParentSize(),
+            )
         }
     }
 }
@@ -24274,7 +24298,7 @@ private fun JellyfinMediaDetail.finishAtLabel(nowMs: Long): String? {
     return "Finishes at ${DateFormat.getTimeInstance(DateFormat.SHORT).format(finishTime)}"
 }
 
-private const val VANTAFYN_APP_VERSION = "0.9.53"
+private const val VANTAFYN_APP_VERSION = "0.9.54"
 private const val PopupSyncedLyricsTickerIntervalMs = 250L
 
 @Composable

@@ -276,6 +276,33 @@ object GameBoxartScraper {
         return null
     }
 
+    fun searchCandidates(query: String, entries: List<IndexedEntry>, limit: Int = 24): List<IndexedEntry> {
+        if (entries.isEmpty()) return emptyList()
+        val queryTokens = cleanTokens(query)
+        if (queryTokens.isEmpty()) return entries.sortedByDescending { it.scoreBias }.take(limit)
+        val querySet = queryTokens.toSet()
+        val queryJoined = queryTokens.joinToString("")
+
+        return entries.mapNotNull { entry ->
+            val overlap = querySet.count { entry.tokens.contains(it) }
+            val ratio = overlap.toFloat() / querySet.size.coerceAtLeast(1)
+            val joinedBonus = when {
+                entry.joinedTokens == queryJoined -> 120f
+                entry.joinedTokens.contains(queryJoined) || queryJoined.contains(entry.joinedTokens) -> 45f
+                else -> 0f
+            }
+            val score = (ratio * 100f) + joinedBonus + entry.scoreBias
+            if (overlap > 0 || joinedBonus > 0f) entry to score else null
+        }
+            .sortedWith(
+                compareByDescending<Pair<IndexedEntry, Float>> { it.second }
+                    .thenByDescending { it.first.scoreBias }
+                    .thenBy { it.first.rawFilename.length }
+            )
+            .map { it.first }
+            .take(limit)
+    }
+
     /**
      * Builds a fast global CDN URL for the matched box art filename.
      */

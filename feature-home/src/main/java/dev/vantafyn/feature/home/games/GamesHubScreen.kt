@@ -1,9 +1,11 @@
 package dev.vantafyn.feature.home.games
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,6 +31,7 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -53,9 +56,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,7 +72,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
 import dev.vantafyn.core.ui.VantafynColors
@@ -74,6 +79,9 @@ import dev.vantafyn.core.ui.VantafynGradientIcon
 import dev.vantafyn.core.ui.VantafynGradients
 import dev.vantafyn.core.ui.VantafynTextField
 import dev.vantafyn.feature.home.CompactBackButton
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.window.Dialog
 
 @Composable
 fun GamesHubScreen(
@@ -94,6 +102,13 @@ fun GamesHubScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
     var isOfflineFilterSelected by remember { mutableStateOf(false) }
+    var gameActionTarget by remember { mutableStateOf<GameSummary?>(null) }
+    var identifyGameTarget by remember { mutableStateOf<GameSummary?>(null) }
+    var boxartRevision by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+    val prefs = remember(context) {
+        context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+    }
 
     val basePool = if (isOfflineFilterSelected) {
         allGames.filter { g ->
@@ -451,12 +466,44 @@ fun GamesHubScreen(
                         GameCard(
                             game = game,
                             isDownloaded = isDownloaded,
+                            boxartRevision = boxartRevision,
                             onClick = { onOpenGame(game) },
+                            onLongPress = { gameActionTarget = game },
                         )
                     }
                 }
             }
         }
+    }
+
+    gameActionTarget?.let { game ->
+        GameLibraryActionSheet(
+            game = game,
+            hasCustomArtwork = prefs.contains("boxart_${game.id}"),
+            onDismiss = { gameActionTarget = null },
+            onIdentify = {
+                gameActionTarget = null
+                identifyGameTarget = game
+            },
+            onClearArtwork = {
+                prefs.edit().remove("boxart_${game.id}").apply()
+                boxartRevision++
+                gameActionTarget = null
+            },
+        )
+    }
+
+    identifyGameTarget?.let { game ->
+        IdentifyGameArtworkDialog(
+            game = game,
+            currentBoxartUrl = GameBoxartScraper.convertToCdnUrl(prefs.getString("boxart_${game.id}", null) ?: game.boxartUrl),
+            onDismiss = { identifyGameTarget = null },
+            onSelectArtwork = { url ->
+                prefs.edit().putString("boxart_${game.id}", url).apply()
+                boxartRevision++
+                identifyGameTarget = null
+            },
+        )
     }
 }
 }
@@ -548,10 +595,362 @@ private fun PokemonVaultFilterPill(
 }
 
 @Composable
+private fun GameLibraryActionSheet(
+    game: GameSummary,
+    hasCustomArtwork: Boolean,
+    onDismiss: () -> Unit,
+    onIdentify: () -> Unit,
+    onClearArtwork: () -> Unit,
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF24243A),
+                            Color(0xFF171B2B),
+                            Color(0xFF0D101B),
+                        ),
+                    ),
+                )
+                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(24.dp))
+                .padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = game.cleanTitle,
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.ExtraBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Game library actions",
+                color = VantafynColors.Muted,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+
+            GameActionRow(
+                title = "Identify game artwork",
+                subtitle = "Search Libretro covers and choose the right box art",
+                onClick = onIdentify,
+            )
+            if (hasCustomArtwork) {
+                GameActionRow(
+                    title = "Clear custom artwork",
+                    subtitle = "Return this title to the server or default cover",
+                    onClick = onClearArtwork,
+                    accent = Color(0xFFFFB020),
+                )
+            }
+            GameActionRow(
+                title = "Cancel",
+                subtitle = "Keep everything as it is",
+                onClick = onDismiss,
+                accent = VantafynColors.Muted,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GameActionRow(
+    title: String,
+    subtitle: String,
+    onClick: () -> Unit,
+    accent: Color = Color(0xFF00E5FF),
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = 0.055f))
+            .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .clip(CircleShape)
+                .background(accent.copy(alpha = 0.16f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = Icons.Rounded.Search,
+                contentDescription = null,
+                tint = accent,
+                modifier = Modifier.size(19.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text(
+                text = subtitle,
+                color = VantafynColors.Muted,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun IdentifyGameArtworkDialog(
+    game: GameSummary,
+    currentBoxartUrl: String?,
+    onDismiss: () -> Unit,
+    onSelectArtwork: (String) -> Unit,
+) {
+    var query by remember(game.id) { mutableStateOf(game.cleanTitle.ifBlank { game.title }) }
+    var catalog by remember(game.id) { mutableStateOf<List<GameBoxartScraper.IndexedEntry>>(emptyList()) }
+    var isLoading by remember(game.id) { mutableStateOf(true) }
+    var errorMessage by remember(game.id) { mutableStateOf<String?>(null) }
+    val platform = remember(game.systemId) { GameBoxartScraper.resolvePlatform(game.systemId) }
+    val candidates = remember(query, catalog) {
+        GameBoxartScraper.searchCandidates(query, catalog, limit = 30)
+    }
+
+    LaunchedEffect(game.id, platform) {
+        if (platform == null) {
+            isLoading = false
+            errorMessage = "Artwork matching is not available for ${game.systemId.uppercase()} yet."
+            return@LaunchedEffect
+        }
+        isLoading = true
+        errorMessage = null
+        catalog = withContext(Dispatchers.IO) {
+            GameBoxartScraper.getSystemIndex(platform)
+        }
+        isLoading = false
+        if (catalog.isEmpty()) errorMessage = "Could not load the ${platform.libretroName} artwork catalog."
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(26.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF20263D),
+                            Color(0xFF151A2A),
+                            Color(0xFF090C16),
+                        ),
+                    ),
+                )
+                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f), RoundedCornerShape(26.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(58.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF0D101B))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(12.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!currentBoxartUrl.isNullOrBlank()) {
+                        AsyncImage(
+                            model = currentBoxartUrl,
+                            contentDescription = game.cleanTitle,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.SportsEsports,
+                            contentDescription = null,
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier.size(28.dp),
+                        )
+                    }
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(
+                        text = "Identify Artwork",
+                        color = Color.White,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        text = game.cleanTitle,
+                        color = VantafynColors.Muted,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = VantafynColors.Muted,
+                    )
+                }
+            }
+
+            VantafynTextField(
+                value = query,
+                onValueChange = { query = it },
+                label = "Search title",
+                placeholder = "Type a game title...",
+                leadingIcon = {
+                    VantafynGradientIcon(
+                        imageVector = Icons.Rounded.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+            )
+
+            when {
+                isLoading -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(280.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            CircularProgressIndicator(color = Color(0xFF00E5FF), modifier = Modifier.size(30.dp))
+                            Text(
+                                text = "Loading ${platform?.libretroName ?: "artwork"} catalog...",
+                                color = VantafynColors.Muted,
+                                fontSize = 12.sp,
+                            )
+                        }
+                    }
+                }
+                errorMessage != null -> {
+                    Text(
+                        text = errorMessage.orEmpty(),
+                        color = Color(0xFFFFB020),
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                }
+                candidates.isEmpty() -> {
+                    Text(
+                        text = "No artwork matches found. Try a shorter title or remove region/version words.",
+                        color = VantafynColors.Muted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(vertical = 12.dp),
+                    )
+                }
+                else -> {
+                    Text(
+                        text = "Choose a cover. This only changes Vantafyn artwork for this game.",
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    LazyColumn(
+                        modifier = Modifier.height(360.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(candidates, key = { it.rawFilename }) { candidate ->
+                            val cdnUrl = platform?.let { GameBoxartScraper.buildCdnUrl(it, candidate.rawFilename) }.orEmpty()
+                            GameArtworkCandidateRow(
+                                title = candidate.rawFilename.removeSuffix(".png"),
+                                imageUrl = cdnUrl,
+                                onClick = { if (cdnUrl.isNotBlank()) onSelectArtwork(cdnUrl) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun GameArtworkCandidateRow(
+    title: String,
+    imageUrl: String,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        Color.White.copy(alpha = 0.075f),
+                        Color.White.copy(alpha = 0.035f),
+                    ),
+                ),
+            )
+            .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(16.dp))
+            .clickable(onClick = onClick)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .width(58.dp)
+                .height(76.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(Color(0xFF0D101B)),
+            contentAlignment = Alignment.Center,
+        ) {
+            AsyncImage(
+                model = imageUrl,
+                contentDescription = title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                text = title,
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = "Libretro cover art",
+                color = Color(0xFF00E5FF),
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+@Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun GameCard(
     game: GameSummary,
     isDownloaded: Boolean = false,
+    boxartRevision: Int = 0,
     onClick: () -> Unit,
+    onLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
@@ -559,11 +958,11 @@ private fun GameCard(
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF14141B).copy(alpha = 0.72f))
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
+            .combinedClickable(onClick = onClick, onLongClick = onLongPress)
             .padding(10.dp),
     ) {
         val context = LocalContext.current
-        val effectiveBoxart = remember(game.id, game.boxartUrl) {
+        val effectiveBoxart = remember(game.id, game.boxartUrl, boxartRevision) {
             val local = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
                 .getString("boxart_${game.id}", null)
             GameBoxartScraper.convertToCdnUrl(local ?: game.boxartUrl)

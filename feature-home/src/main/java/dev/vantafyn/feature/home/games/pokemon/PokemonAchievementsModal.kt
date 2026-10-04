@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -342,12 +343,19 @@ fun PokemonAchievementsModal(
                             modifier = Modifier.size(15.dp),
                         )
                         Text(
-                            text = "Achievements (${summary?.unlockedCount ?: 0}/${summary?.totalCount ?: 10})",
+                            text = "Achievements",
                             color = if (selectedTab == 0) Color.White else Color(0xFF94A3B8),
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
                             fontWeight = if (selectedTab == 0) FontWeight.Bold else FontWeight.Normal,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "${summary?.unlockedCount ?: 0}/${summary?.totalCount ?: 10}",
+                            color = if (selectedTab == 0) Color.White.copy(alpha = 0.82f) else Color(0xFF64748B),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
                         )
                     }
                 }
@@ -378,12 +386,19 @@ fun PokemonAchievementsModal(
                             modifier = Modifier.size(15.dp),
                         )
                         Text(
-                            text = "Trainer Feed (${activityFeed.size})",
+                            text = "Feed",
                             color = if (selectedTab == 1) Color.White else Color(0xFF94A3B8),
-                            fontSize = 11.5.sp,
+                            fontSize = 11.sp,
                             fontWeight = if (selectedTab == 1) FontWeight.Bold else FontWeight.Normal,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            text = "(${activityFeed.size})",
+                            color = if (selectedTab == 1) Color.White.copy(alpha = 0.82f) else Color(0xFF64748B),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
                         )
                     }
                 }
@@ -491,66 +506,90 @@ private fun PokemonAchievementCard(achievement: PokemonAchievementDto) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(if (isUnlocked) Color(0xFF1E2235) else Color(0xFF151824))
+            .defaultMinSize(minHeight = 116.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = if (isUnlocked) {
+                        listOf(
+                            rarityColor.copy(alpha = 0.24f),
+                            Color(0xFF1A2135),
+                            Color(0xFF101421),
+                        )
+                    } else {
+                        listOf(
+                            rarityColor.copy(alpha = 0.12f),
+                            Color(0xFF171B2A),
+                            Color(0xFF0F1320),
+                        )
+                    },
+                ),
+            )
             .border(
                 width = 1.dp,
-                color = if (isUnlocked) rarityColor.copy(alpha = 0.5f) else Color(0xFF262C3D),
-                shape = RoundedCornerShape(14.dp),
+                color = if (isUnlocked) rarityColor.copy(alpha = 0.52f) else Color(0xFF2A3044),
+                shape = RoundedCornerShape(16.dp),
             )
-            .padding(12.dp),
+            .padding(13.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
+            verticalAlignment = Alignment.Top,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Icon
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(46.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (isUnlocked) rarityColor.copy(alpha = 0.18f) else Color(0xFF1F2433)
-                    ),
+                    .background(if (isUnlocked) rarityColor.copy(alpha = 0.20f) else Color(0xFF22283A))
+                    .border(1.dp, rarityColor.copy(alpha = if (isUnlocked) 0.34f else 0.18f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
                     imageVector = if (isUnlocked) Icons.Rounded.CheckCircle else Icons.Rounded.Lock,
                     contentDescription = null,
-                    tint = if (isUnlocked) rarityColor else Color(0xFF64748B),
+                    tint = if (isUnlocked) rarityColor else Color(0xFF73809B),
                     modifier = Modifier.size(22.dp),
                 )
             }
 
-            // Info
-            Column(modifier = Modifier.weight(1f)) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Top,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Text(
                         text = achievement.title,
                         color = if (isUnlocked) Color.White else Color(0xFF94A3B8),
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
+                        lineHeight = 17.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
                     )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
                     ) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(rarityColor.copy(alpha = 0.15f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(rarityColor.copy(alpha = if (isUnlocked) 0.22f else 0.16f))
+                                .border(1.dp, rarityColor.copy(alpha = 0.22f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 7.dp, vertical = 4.dp),
                         ) {
                             Text(
                                 text = achievement.rarity.uppercase(),
                                 color = rarityColor,
                                 fontSize = 9.sp,
+                                lineHeight = 10.sp,
                                 fontWeight = FontWeight.Bold,
+                                maxLines = 1,
                             )
                         }
                         Text(
@@ -558,20 +597,21 @@ private fun PokemonAchievementCard(achievement: PokemonAchievementDto) {
                             color = Color(0xFFFBBF24),
                             fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = achievement.description,
-                    color = Color(0xFF64748B),
+                    color = Color(0xFF94A3B8),
                     fontSize = 11.sp,
                     lineHeight = 15.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                 )
 
                 if (achievement.maxProgress > 1 && !isUnlocked) {
-                    Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
