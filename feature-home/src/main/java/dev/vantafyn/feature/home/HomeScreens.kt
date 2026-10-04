@@ -22719,7 +22719,7 @@ private fun MobileLandscapeSideNavRail(
                     cornerRadius = 30.dp,
                     strokeWidth = 1.2.dp,
                     durationMillis = 5600,
-                    animate = true,
+                    animate = false,
                 ),
         ) {
             VantafynGlassDock(
