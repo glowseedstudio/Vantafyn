@@ -88,8 +88,9 @@ private fun computeLocalAchievements(
 
     val caughtSet = mutableSetOf<Int>()
     for (save in localSaves) {
-        // Sanity guard: Only trust caughtSpeciesIds if save actually has active pokemon and isn't uninitialized SRAM
-        if (save.totalPokemonCount > 0 && save.caughtSpeciesIds.size <= (save.totalPokemonCount + 40)) {
+        val hasStrictNativeDex = save.platform == "nds" && save.generation in 4..5 && save.pokedexCaught != null
+        // Non-native fallbacks stay bounded by current storage so empty/uninitialized saves do not inflate achievements.
+        if (hasStrictNativeDex || (save.totalPokemonCount > 0 && save.caughtSpeciesIds.size <= (save.totalPokemonCount + 40))) {
             caughtSet.addAll(save.caughtSpeciesIds)
         }
         save.party.forEach { if (it.speciesId > 0) caughtSet.add(it.speciesId) }

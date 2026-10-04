@@ -11,11 +11,25 @@ import kotlin.math.min
  */
 object Gen5NativeSaveParser {
 
+    private const val SAVE_COPY_SIZE = 0x24000
     private const val PARTY_OFFSET = 0x18E00
     private const val BOX_OFFSET = 0x400
     private const val BOX_COUNT = 24
     private const val SLOTS_PER_BOX = 30
     private const val PARTY_SLOT_SIZE = 220
+    private const val POKEDEX_FLAGS_OFFSET_IN_BLOCK = 0x08
+    private const val POKEDEX_FLAG_REGION_SIZE = 0x54
+    private const val GEN5_SPECIES_COUNT = 649
+
+    private data class Gen5VariantOffsets(
+        val pokedexOffset: Int,
+        val pokedexSize: Int,
+    )
+
+    private data class ParsedPokedexFlags(
+        val caughtSpeciesIds: List<Int>,
+        val seenSpeciesIds: List<Int>,
+    )
 
     private val BLOCK_ORDERS = arrayOf(
         intArrayOf(0, 1, 2, 3), // 00: ABCD
@@ -79,6 +93,7 @@ object Gen5NativeSaveParser {
     fun parse(saveBytes: ByteArray, gameTitle: String = "Pokemon Gen 5", gameId: String = ""): PokemonGameSaveDto? {
         if (saveBytes.size < 0x80000) return null
 
+        val pokedex = readPokedexFlags(saveBytes, variantOffsets(gameTitle))
         val partyList = mutableListOf<PokemonSummaryDto>()
         val pokemonDetails = mutableMapOf<String, PokemonDetailsDto>()
 
@@ -144,11 +159,10 @@ object Gen5NativeSaveParser {
             )
         }
 
-        val caughtIds = (partyList.map { it.speciesId } + boxesList.flatMap { b -> b.entries.map { it.speciesId } }).filter { it > 0 }.distinct().sorted()
-
         return PokemonGameSaveDto(
             gameId = gameId,
             title = gameTitle,
+            platform = "nds",
             generation = 5,
             saveFound = true,
             providerAvailable = true,
@@ -157,12 +171,79 @@ object Gen5NativeSaveParser {
             totalPokemonCount = totalCount,
             shinyCount = shinyCount,
             pokemonDetails = pokemonDetails,
-            pokedexCaught = caughtIds.size,
-            pokedexSeen = caughtIds.size,
-            caughtSpeciesIds = caughtIds,
-            seenSpeciesIds = caughtIds,
+            pokedexCaught = pokedex?.caughtSpeciesIds?.size,
+            pokedexSeen = pokedex?.seenSpeciesIds?.size,
+            caughtSpeciesIds = pokedex?.caughtSpeciesIds.orEmpty(),
+            seenSpeciesIds = pokedex?.seenSpeciesIds.orEmpty(),
         )
     }
+
+    private fun variantOffsets(gameTitle: String): Gen5VariantOffsets {
+        val lower = gameTitle.lowercase()
+        val isBlack2White2 = lower.contains("black 2") ||
+            lower.contains("white 2") ||
+            lower.contains("black2") ||
+            lower.contains("white2") ||
+            lower.contains("b2w2")
+
+        return if (isBlack2White2) {
+            Gen5VariantOffsets(pokedexOffset = 0x21400, pokedexSize = 0x04DC)
+        } else {
+            Gen5VariantOffsets(pokedexOffset = 0x21600, pokedexSize = 0x04D4)
+        }
+    }
+
+    private fun readPokedexFlags(saveBytes: ByteArray, offsets: Gen5VariantOffsets): ParsedPokedexFlags? {
+        val primary = readPokedexFlagsAt(saveBytes, baseOffset = 0, offsets)
+        if (primary != null) return primary
+
+        return readPokedexFlagsAt(saveBytes, baseOffset = SAVE_COPY_SIZE, offsets)
+    }
+
+    private fun readPokedexFlagsAt(
+        saveBytes: ByteArray,
+        baseOffset: Int,
+        offsets: Gen5VariantOffsets,
+    ): ParsedPokedexFlags? {
+        val blockStart = baseOffset + offsets.pokedexOffset
+        val blockEnd = blockStart + offsets.pokedexSize
+        if (blockStart < 0 || blockEnd > saveBytes.size) return null
+
+        val flagsStart = blockStart + POKEDEX_FLAGS_OFFSET_IN_BLOCK
+        val caughtRegion = flagsStart until (flagsStart + POKEDEX_FLAG_REGION_SIZE)
+        val seenRegion = (flagsStart + POKEDEX_FLAG_REGION_SIZE) until (flagsStart + POKEDEX_FLAG_REGION_SIZE * 2)
+        if (seenRegion.last >= saveBytes.size) return null
+        if (isErased(saveBytes, caughtRegion) && isErased(saveBytes, seenRegion)) return null
+
+        val caughtIds = mutableListOf<Int>()
+        val seenIds = mutableSetOf<Int>()
+
+        for (speciesId in 1..GEN5_SPECIES_COUNT) {
+            val bitIndex = speciesId - 1
+            if (readFlag(saveBytes, flagsStart, bitIndex)) {
+                caughtIds.add(speciesId)
+                seenIds.add(speciesId)
+            }
+            if (readFlag(saveBytes, flagsStart + POKEDEX_FLAG_REGION_SIZE, bitIndex)) {
+                seenIds.add(speciesId)
+            }
+        }
+
+        return ParsedPokedexFlags(
+            caughtSpeciesIds = caughtIds.sorted(),
+            seenSpeciesIds = seenIds.sorted(),
+        )
+    }
+
+    private fun readFlag(data: ByteArray, offset: Int, bitIndex: Int): Boolean {
+        val byteOffset = offset + (bitIndex / 8)
+        if (byteOffset !in data.indices) return false
+        val mask = 1 shl (bitIndex % 8)
+        return (data[byteOffset].toInt() and mask) != 0
+    }
+
+    private fun isErased(data: ByteArray, range: IntRange): Boolean =
+        range.all { index -> index in data.indices && (data[index].toInt() and 0xFF) == 0xFF }
 
     data class ParsedGen5Pokemon(
         val summary: PokemonSummaryDto,

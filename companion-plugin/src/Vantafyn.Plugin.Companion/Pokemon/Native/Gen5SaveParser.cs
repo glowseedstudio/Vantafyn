@@ -11,11 +11,15 @@ namespace Vantafyn.Plugin.Companion.Pokemon.Native;
 /// </summary>
 public static class Gen5SaveParser
 {
+    private const int SaveCopySize = 0x24000;
     private const int PartyOffset = 0x18E00;
     private const int BoxOffset = 0x400;
     private const int BoxCount = 24;
     private const int SlotsPerBox = 30;
     private const int PartySlotSize = 220;
+    private const int PokedexFlagsOffsetInBlock = 0x08;
+    private const int PokedexFlagRegionSize = 0x54;
+    private const int Gen5SpeciesCount = 649;
 
     private static readonly int[][] BlockOrders =
     [
@@ -63,6 +67,8 @@ public static class Gen5SaveParser
             result.ErrorMessage = "Save file size is invalid for Gen 5 (must be >= 512KB).";
             return result;
         }
+
+        var pokedex = ReadPokedexFlags(saveBytes, gameId);
 
         // 1. Party
         int partyCount = 0;
@@ -117,19 +123,87 @@ public static class Gen5SaveParser
             result.Boxes.Add(box);
         }
 
-        var caughtIds = result.Party.Select(p => p.SpeciesId)
-            .Concat(result.Boxes.SelectMany(b => b.Entries.Select(e => e.SpeciesId)))
-            .Where(id => id > 0)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToList();
-        result.PokedexCaught = caughtIds.Count;
-        result.PokedexSeen = caughtIds.Count;
-        result.CaughtSpeciesIds = caughtIds;
-        result.SeenSpeciesIds = caughtIds;
+        result.PokedexCaught = pokedex?.CaughtSpeciesIds.Count;
+        result.PokedexSeen = pokedex?.SeenSpeciesIds.Count;
+        result.CaughtSpeciesIds = pokedex?.CaughtSpeciesIds ?? [];
+        result.SeenSpeciesIds = pokedex?.SeenSpeciesIds ?? [];
 
         result.IsSuccess = true;
         return result;
+    }
+
+    private static (List<int> CaughtSpeciesIds, List<int> SeenSpeciesIds)? ReadPokedexFlags(byte[] saveBytes, string gameId)
+    {
+        var (pokedexOffset, pokedexSize) = GetPokedexBlock(gameId);
+        var primary = ReadPokedexFlagsAt(saveBytes, 0, pokedexOffset, pokedexSize);
+        return primary ?? ReadPokedexFlagsAt(saveBytes, SaveCopySize, pokedexOffset, pokedexSize);
+    }
+
+    private static (int PokedexOffset, int PokedexSize) GetPokedexBlock(string gameId)
+    {
+        var lower = (gameId ?? string.Empty).ToLowerInvariant();
+        bool isBlack2White2 = lower.Contains("black 2") ||
+                              lower.Contains("white 2") ||
+                              lower.Contains("black2") ||
+                              lower.Contains("white2") ||
+                              lower.Contains("b2w2");
+        return isBlack2White2 ? (0x21400, 0x04DC) : (0x21600, 0x04D4);
+    }
+
+    private static (List<int> CaughtSpeciesIds, List<int> SeenSpeciesIds)? ReadPokedexFlagsAt(
+        byte[] saveBytes,
+        int baseOffset,
+        int pokedexOffset,
+        int pokedexSize)
+    {
+        int blockStart = baseOffset + pokedexOffset;
+        int blockEnd = blockStart + pokedexSize;
+        if (blockStart < 0 || blockEnd > saveBytes.Length) return null;
+
+        int flagsStart = blockStart + PokedexFlagsOffsetInBlock;
+        int caughtRegion = flagsStart;
+        int seenRegion = flagsStart + PokedexFlagRegionSize;
+        if (seenRegion + PokedexFlagRegionSize > saveBytes.Length) return null;
+        if (IsErased(saveBytes, caughtRegion, PokedexFlagRegionSize) && IsErased(saveBytes, seenRegion, PokedexFlagRegionSize))
+        {
+            return null;
+        }
+
+        var caughtIds = new List<int>();
+        var seenIds = new SortedSet<int>();
+        for (int speciesId = 1; speciesId <= Gen5SpeciesCount; speciesId++)
+        {
+            int bitIndex = speciesId - 1;
+            if (ReadFlag(saveBytes, caughtRegion, bitIndex))
+            {
+                caughtIds.Add(speciesId);
+                seenIds.Add(speciesId);
+            }
+            if (ReadFlag(saveBytes, seenRegion, bitIndex))
+            {
+                seenIds.Add(speciesId);
+            }
+        }
+
+        return (caughtIds.OrderBy(id => id).ToList(), seenIds.ToList());
+    }
+
+    private static bool ReadFlag(byte[] data, int offset, int bitIndex)
+    {
+        int byteOffset = offset + (bitIndex / 8);
+        if (byteOffset < 0 || byteOffset >= data.Length) return false;
+        int mask = 1 << (bitIndex % 8);
+        return (data[byteOffset] & mask) != 0;
+    }
+
+    private static bool IsErased(byte[] data, int offset, int length)
+    {
+        if (offset < 0 || offset + length > data.Length) return false;
+        for (int i = 0; i < length; i++)
+        {
+            if (data[offset + i] != 0xFF) return false;
+        }
+        return true;
     }
 
     private static (PokemonSummaryDto Summary, PokemonDetailsDto Details)? ParsePokemon(

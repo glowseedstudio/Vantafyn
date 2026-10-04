@@ -925,10 +925,10 @@ private fun generateEmulatorHtml(
     val safeGameTitle = gameTitle.replace("'", "\\'").replace("\"", "\\\"")
     val safeGameName = safeRomStem.ifBlank { safeGameTitle }
     val gameIdHash = Math.abs(gameTitle.hashCode()).coerceAtLeast(1)
-    val dsLayoutOption = if (systemCoreName == "desmume") {
-        "'desmume_screens_layout': (window.innerWidth > window.innerHeight ? 'left/right' : 'top/bottom'),"
-    } else {
-        ""
+    val dsLayoutOption = when (systemCoreName) {
+        "desmume" -> "'desmume_screens_layout': (window.innerWidth > window.innerHeight ? 'left/right' : 'top/bottom'),"
+        "melonds" -> "'melonds_screen_layout': (window.innerWidth > window.innerHeight ? 'Left/Right' : 'Top/Bottom'),"
+        else -> ""
     }
 
     return """
@@ -1004,6 +1004,7 @@ private fun generateEmulatorHtml(
                 window.EJS_backgroundColor = '#000000';
                 window.EJS_disableUI = true;
                 window.EJS_fixedSaveInterval = 1000;
+                window.VantafynIsNintendoDsCore = ${if (systemCoreName == "melonds" || systemCoreName == "desmume") "true" else "false"};
                 window.EJS_defaultOptions = {
                     'virtual-gamepad': 'disabled',
                     'menu-bar-button': 'hidden',
@@ -1100,19 +1101,6 @@ private fun generateEmulatorHtml(
                             }
                         }
                     } catch(e) {}
-                    try {
-                        if (gm.FS && gm.FS.analyzePath("/data/saves").exists) {
-                            var list = gm.FS.readdir("/data/saves");
-                            for (var i = 0; i < list.length; i++) {
-                                var item = list[i];
-                                if (item !== "." && item !== ".." && (item.endsWith(".srm") || item.endsWith(".sav"))) {
-                                    var full = "/data/saves/" + item;
-                                    var d = gm.FS.readFile(full);
-                                    if (d && d.length > 0) return (d instanceof Uint8Array) ? d : new Uint8Array(d);
-                                }
-                            }
-                        }
-                    } catch(e) {}
                     return null;
                 }
 
@@ -1124,59 +1112,51 @@ private fun generateEmulatorHtml(
                         dirs.forEach(function(d) {
                             try { if (!fs.analyzePath(d).exists) fs.mkdir(d); } catch(e) {}
                         });
-                        var candidateStems = [
+                        var candidateStems = window.VantafynIsNintendoDsCore ? [] : [
                             "current_game",
                             "game",
-                            "$safeGameName",
-                            "$safeRomStem",
-                            "$safeGameTitle"
+                            "$safeGameName"
                         ];
-                        if (window.EJS_emulator) {
-                            if (window.EJS_emulator.fileName) {
-                                var fn = window.EJS_emulator.fileName.replace(/\.[^/.]+$/, "");
-                                candidateStems.push(fn);
-                                candidateStems.push(window.EJS_emulator.fileName);
-                            }
-                            if (typeof window.EJS_emulator.getBaseFileName === 'function') {
-                                var b = window.EJS_emulator.getBaseFileName(true);
-                                if (b) {
-                                    candidateStems.push(b.replace(/\.[^/.]+$/, ""));
-                                    candidateStems.push(b);
-                                }
-                            }
-                        }
                         var candidatePaths = [];
-                        candidateStems.forEach(function(stem) {
-                            if (!stem) return;
-                            candidatePaths.push("/data/saves/" + stem + ".srm");
-                            candidatePaths.push("/data/saves/" + stem + ".sav");
-                            candidatePaths.push("/data/saves/" + stem);
-                        });
                         try {
                             if (window.EJS_emulator && window.EJS_emulator.gameManager && typeof window.EJS_emulator.gameManager.getSaveFilePath === 'function') {
                                 var sfp = window.EJS_emulator.gameManager.getSaveFilePath();
                                 if (sfp) candidatePaths.push(sfp);
                             }
                         } catch(e) {}
-                        try {
-                            if (fs.analyzePath("/data/saves").exists) {
-                                var existing = fs.readdir("/data/saves");
-                                for (var i = 0; i < existing.length; i++) {
-                                    var ex = existing[i];
-                                    if (ex !== "." && ex !== ".." && (ex.endsWith(".srm") || ex.endsWith(".sav"))) {
-                                        candidatePaths.push("/data/saves/" + ex);
-                                    }
+                        if (window.EJS_emulator) {
+                            if (window.EJS_emulator.fileName) {
+                                var fn = window.EJS_emulator.fileName.replace(/\.[^/.]+$/, "");
+                                candidateStems.push(fn);
+                            }
+                            if (typeof window.EJS_emulator.getBaseFileName === 'function') {
+                                var b = window.EJS_emulator.getBaseFileName(true);
+                                if (b) {
+                                    candidateStems.push(b.replace(/\.[^/.]+$/, ""));
                                 }
                             }
-                        } catch(e) {}
+                        }
+                        candidateStems.forEach(function(stem) {
+                            if (!stem) return;
+                            candidatePaths.push("/data/saves/" + stem + ".srm");
+                            candidatePaths.push("/data/saves/" + stem + ".sav");
+                            candidatePaths.push("/data/saves/" + stem);
+                        });
+                        if (window.VantafynIsNintendoDsCore && candidatePaths.length === 0) {
+                            console.warn("Vantafyn: Skipping DS SRAM preload because core save path is not ready yet");
+                            return;
+                        }
 
                         var seen = {};
+                        var writes = 0;
                         candidatePaths.forEach(function(p) {
                             if (seen[p]) return;
+                            if (writes >= (window.VantafynIsNintendoDsCore ? 1 : 8)) return;
                             seen[p] = true;
                             try {
                                 if (fs.analyzePath(p).exists) fs.unlink(p);
                                 fs.writeFile(p, bytes);
+                                writes++;
                                 console.log("Vantafyn: Preloaded SRAM into " + p + " (" + bytes.length + " bytes)");
                             } catch(e) {
                                 console.warn("Vantafyn: Could not write SRAM to " + p, e);

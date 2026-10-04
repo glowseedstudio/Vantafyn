@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.20}"
+VERSION="${1:-0.2.21}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.53}"
-CHANGELOG="Adds Pokédex Mega Evolution form viewing, optional server-hosted Mega symbol support, Badge Case polish, and Games Hub recent rail cleanup."
+TAG="${2:-v0.9.55}"
+CHANGELOG="Adds real Gen 4/5 Pokédex save parsing, regional variant Pokédex forms, diploma/Badge Case polish, and Retroid emulator stability fixes."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.20.0",
+        "changelog": "Adds Pokédex Mega Evolution form viewing, optional server-hosted Mega symbol support, Badge Case polish, and Games Hub recent rail cleanup.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.53/Vantafyn.Plugin.Companion_0.2.20_net9.zip",
+        "checksum": "8a1e4cf50af2f87ea0cef51ee5c9a040",
+        "timestamp": "2026-10-04T06:23:06Z"
+      },
+      {
+        "version": "0.2.20.1",
+        "changelog": "Adds Pokédex Mega Evolution form viewing, optional server-hosted Mega symbol support, Badge Case polish, and Games Hub recent rail cleanup.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.53/Vantafyn.Plugin.Companion_0.2.20_net10.zip",
+        "checksum": "7d95a0ed59fe7bc437491aa13955e2fe",
+        "timestamp": "2026-10-04T06:23:06Z"
       },
       {
         "version": "0.2.18.0",

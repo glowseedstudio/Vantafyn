@@ -55,7 +55,11 @@ object PokemonFormsCatalog {
         15 to singleMega(15, "10090", "Beedrillite"),
         18 to singleMega(18, "10073", "Pidgeotite"),
         65 to singleMega(65, "10037", "Alakazite"),
-        80 to singleMega(80, "10071", "Slowbronite"),
+        80 to listOf(
+            PokemonFormModel("Kanto", "80", "Shellder-triggered evolved form (Water/Psychic)"),
+            PokemonFormModel("Galarian", "10165", "Shellder clamped on its arm, weaponizing psychic venom (Poison/Psychic)"),
+            mega("Mega", "10071", "Mega Evolution awakened by Slowbronite"),
+        ),
         94 to singleMega(94, "10038", "Gengarite"),
         115 to singleMega(115, "10039", "Kangaskhanite"),
         127 to singleMega(127, "10040", "Pinsirite"),
@@ -91,6 +95,14 @@ object PokemonFormsCatalog {
         376 to singleMega(376, "10076", "Metagrossite"),
         380 to singleMega(380, "10062", "Latiasite"),
         381 to singleMega(381, "10063", "Latiosite"),
+        382 to listOf(
+            base(382),
+            mega("Primal", "10077", "Primal Reversion awakened by the Blue Orb"),
+        ),
+        383 to listOf(
+            base(383),
+            mega("Primal", "10078", "Primal Reversion awakened by the Red Orb"),
+        ),
         384 to listOf(
             base(384),
             mega("Mega", "10079", "Mega Evolution unleashed through Dragon Ascent"),
@@ -314,10 +326,26 @@ object PokemonFormsCatalog {
             PokemonFormModel("Stellar", "10277", "Cosmic planetarium form manifesting pure Stellar energy"),
         ),
 
-        // Iconic Regional Variants
+        // Regional Variants
+        19 to listOf(
+            PokemonFormModel("Kanto", "19", "Small sharp-toothed city rodent (Normal)"),
+            PokemonFormModel("Alolan", "10091", "Nocturnal island scavenger with dark fur (Dark/Normal)"),
+        ),
+        20 to listOf(
+            PokemonFormModel("Kanto", "20", "Aggressive long-whiskered rodent (Normal)"),
+            PokemonFormModel("Alolan", "10092", "Heavier island boss with dark fur (Dark/Normal)"),
+        ),
         26 to listOf(
             PokemonFormModel("Kanto", "26", "Classic Electric rodent evolution"),
             PokemonFormModel("Alolan", "10100", "Surfs on its tail using psychokinesis (Electric/Psychic)"),
+        ),
+        27 to listOf(
+            PokemonFormModel("Kanto", "27", "Burrowing desert mouse (Ground)"),
+            PokemonFormModel("Alolan", "10101", "Snowfield armor plates adapted for icy peaks (Ice/Steel)"),
+        ),
+        28 to listOf(
+            PokemonFormModel("Kanto", "28", "Fast-clawing desert tunneler (Ground)"),
+            PokemonFormModel("Alolan", "10102", "Icy steel spines evolved for snowy mountains (Ice/Steel)"),
         ),
         37 to listOf(
             PokemonFormModel("Kanto", "37", "Traditional red fox kitsune (Fire)"),
@@ -327,10 +355,34 @@ object PokemonFormsCatalog {
             PokemonFormModel("Kanto", "38", "Mystic nine-tailed fire spirit (Fire)"),
             PokemonFormModel("Alolan", "10104", "Sacred mountain guardian spirit (Ice/Fairy)"),
         ),
+        50 to listOf(
+            PokemonFormModel("Kanto", "50", "Tiny burrowing mole trio scout (Ground)"),
+            PokemonFormModel("Alolan", "10105", "Island digger with metallic whiskers (Ground/Steel)"),
+        ),
+        51 to listOf(
+            PokemonFormModel("Kanto", "51", "Three-headed tunneling earth mover (Ground)"),
+            PokemonFormModel("Alolan", "10106", "Long-haired volcanic soil specialist (Ground/Steel)"),
+        ),
         52 to listOf(
             PokemonFormModel("Kanto", "52", "Lucky coin cat (Normal)"),
             PokemonFormModel("Alolan", "10107", "Pampered aristocratic feline (Dark)"),
             PokemonFormModel("Galarian", "10161", "Hardened seafaring Viking cat (Steel)"),
+        ),
+        53 to listOf(
+            PokemonFormModel("Kanto", "53", "Elegant jewel-headed feline (Normal)"),
+            PokemonFormModel("Alolan", "10108", "Refined royal feline with a proud temperament (Dark)"),
+        ),
+        74 to listOf(
+            PokemonFormModel("Kanto", "74", "Rock-bodied mountain Pokémon (Rock/Ground)"),
+            PokemonFormModel("Alolan", "10109", "Magnetized volcanic rock body (Rock/Electric)"),
+        ),
+        75 to listOf(
+            PokemonFormModel("Kanto", "75", "Boulder-armed mountain climber (Rock/Ground)"),
+            PokemonFormModel("Alolan", "10110", "Magnetic mineral body with iron-rich growths (Rock/Electric)"),
+        ),
+        76 to listOf(
+            PokemonFormModel("Kanto", "76", "Massive rolling boulder titan (Rock/Ground)"),
+            PokemonFormModel("Alolan", "10111", "Magnetic cannon-bearing volcanic golem (Rock/Electric)"),
         ),
         77 to listOf(
             PokemonFormModel("Kanto", "77", "Fiery maned thoroughbred colt (Fire)"),
@@ -339,6 +391,22 @@ object PokemonFormsCatalog {
         78 to listOf(
             PokemonFormModel("Kanto", "78", "Blazing horned steed (Fire)"),
             PokemonFormModel("Galarian", "10163", "Glimmering forest unicorn (Psychic/Fairy)"),
+        ),
+        79 to listOf(
+            PokemonFormModel("Kanto", "79", "Dopey waterfront psychic amphibian (Water/Psychic)"),
+            PokemonFormModel("Galarian", "10164", "Spicy-brained shoreline form with latent psychic power (Psychic)"),
+        ),
+        83 to listOf(
+            PokemonFormModel("Kanto", "83", "Leek-wielding wild duck duelist (Normal/Flying)"),
+            PokemonFormModel("Galarian", "10166", "Proud leek knight of Galar (Fighting)"),
+        ),
+        88 to listOf(
+            PokemonFormModel("Kanto", "88", "Living sludge born from pollution (Poison)"),
+            PokemonFormModel("Alolan", "10112", "Toxic rainbow sludge adapted to island waste (Poison/Dark)"),
+        ),
+        89 to listOf(
+            PokemonFormModel("Kanto", "89", "Massive living toxic sludge (Poison)"),
+            PokemonFormModel("Alolan", "10113", "Rainbow crystalline toxin hoarder (Poison/Dark)"),
         ),
         103 to listOf(
             PokemonFormModel("Kanto", "103", "Stout three-headed coconut palm (Grass/Psychic)"),
@@ -352,9 +420,60 @@ object PokemonFormsCatalog {
             PokemonFormModel("Kanto", "110", "Toxic twin-head pollution smog (Poison)"),
             PokemonFormModel("Galarian", "10167", "Top-hat smokestack purifying chimney (Poison/Fairy)"),
         ),
+        122 to listOf(
+            PokemonFormModel("Kanto", "122", "Pantomime barrier artist (Psychic/Fairy)"),
+            PokemonFormModel("Galarian", "10168", "Tap-dancing frozen performer (Ice/Psychic)"),
+        ),
+        128 to listOf(
+            PokemonFormModel("Kanto", "128", "Single-breed wild charging bull (Normal)"),
+            PokemonFormModel("Paldean Combat", "10250", "Black-maned Fighting breed of Paldea (Fighting)"),
+            PokemonFormModel("Paldean Blaze", "10251", "Fire-charged Paldean breed with crimson horns (Fighting/Fire)"),
+            PokemonFormModel("Paldean Aqua", "10252", "Water-charged Paldean breed with blue accents (Fighting/Water)"),
+        ),
+        144 to listOf(
+            PokemonFormModel("Kanto", "144", "Legendary ice bird of frozen skies (Ice/Flying)"),
+            PokemonFormModel("Galarian", "10169", "Psychic duelist with a chilling gaze (Psychic/Flying)"),
+        ),
+        145 to listOf(
+            PokemonFormModel("Kanto", "145", "Legendary thunder bird of storm clouds (Electric/Flying)"),
+            PokemonFormModel("Galarian", "10170", "Lightning-fast battle runner (Fighting/Flying)"),
+        ),
+        146 to listOf(
+            PokemonFormModel("Kanto", "146", "Legendary fire bird wrapped in flame (Fire/Flying)"),
+            PokemonFormModel("Galarian", "10171", "Dark flame phoenix with sinister aura (Dark/Flying)"),
+        ),
         194 to listOf(
             PokemonFormModel("Johto", "194", "Water mud fish axolotl (Water/Ground)"),
             PokemonFormModel("Paldean", "10253", "Poison mud dweller (Poison/Ground)"),
+        ),
+        199 to listOf(
+            PokemonFormModel("Johto", "199", "Royal Shellder-crowned sage (Water/Psychic)"),
+            PokemonFormModel("Galarian", "10172", "Poisonous Shellder crown channels strange spells (Poison/Psychic)"),
+        ),
+        222 to listOf(
+            PokemonFormModel("Johto", "222", "Bright coral branch Pokémon (Water/Rock)"),
+            PokemonFormModel("Galarian", "10173", "Bleached ghost coral from ancient seas (Ghost)"),
+        ),
+        263 to listOf(
+            PokemonFormModel("Hoenn", "263", "Zigzag-patterned restless raccoon Pokémon (Normal)"),
+            PokemonFormModel("Galarian", "10174", "Black-and-white wild runner (Dark/Normal)"),
+        ),
+        264 to listOf(
+            PokemonFormModel("Hoenn", "264", "Straight-line rushing evolution (Normal)"),
+            PokemonFormModel("Galarian", "10175", "Defiant dark-striped sprinter (Dark/Normal)"),
+        ),
+        554 to listOf(
+            PokemonFormModel("Unova", "554", "Fire-powered round desert spirit (Fire)"),
+            PokemonFormModel("Galarian", "10176", "Snowball-shaped cold-climate form (Ice)"),
+        ),
+        555 to listOf(
+            PokemonFormModel("Unova", "555", "Blazing ape-like powerhouse (Fire)"),
+            PokemonFormModel("Galarian", "10177", "Ice-forged snowman powerhouse (Ice)"),
+            PokemonFormModel("Galarian Zen", "10178", "Zen Mode awakened in an icy body (Ice/Fire)"),
+        ),
+        562 to listOf(
+            PokemonFormModel("Unova", "562", "Ancient mask-bearing spirit (Ghost)"),
+            PokemonFormModel("Galarian", "10179", "Cursed clay tablet spirit (Ground/Ghost)"),
         ),
         570 to listOf(
             PokemonFormModel("Unova", "570", "Tricky illusionist dark fox (Dark)"),
@@ -363,6 +482,10 @@ object PokemonFormsCatalog {
         571 to listOf(
             PokemonFormModel("Unova", "571", "Master of deceit and shadow (Dark)"),
             PokemonFormModel("Hisuian", "10239", "Vengeful spiteful spirit with billowing locks (Normal/Ghost)"),
+        ),
+        618 to listOf(
+            PokemonFormModel("Unova", "618", "Flat mud-trap fish charged with electricity (Ground/Electric)"),
+            PokemonFormModel("Galarian", "10180", "Bear-trap patterned metal mud fish (Ground/Steel)"),
         ),
     )
 }

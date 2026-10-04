@@ -212,7 +212,10 @@ fun PokemonVaultHomeScreen(
     val distinctSpeciesCount = remember(allCandidatePokemon, allDetectedSaves) {
         val fromCandidates = allCandidatePokemon.map { it.summary.speciesId }.toSet()
         val fromSaves = allDetectedSaves
-            .filter { it.totalPokemonCount > 0 && it.caughtSpeciesIds.size <= (it.totalPokemonCount + 40) }
+            .filter {
+                val hasStrictNativeDex = it.platform == "nds" && it.generation in 4..5 && it.pokedexCaught != null
+                hasStrictNativeDex || (it.totalPokemonCount > 0 && it.caughtSpeciesIds.size <= (it.totalPokemonCount + 40))
+            }
             .flatMap { it.caughtSpeciesIds }
             .toSet()
         (fromCandidates + fromSaves).filter { it in 1..1025 }.size

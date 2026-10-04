@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.21.0",
+        "changelog": "Adds real Gen 4/5 Pokédex save parsing, regional variant Pokédex forms, diploma/Badge Case polish, and Retroid emulator stability fixes.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.55/Vantafyn.Plugin.Companion_0.2.21_net9.zip",
+        "checksum": "3235c14ea7f813d843cc8582bd9d7ad6",
+        "timestamp": "2026-10-04T14:02:19Z"
+      },
+      {
+        "version": "0.2.21.1",
+        "changelog": "Adds real Gen 4/5 Pokédex save parsing, regional variant Pokédex forms, diploma/Badge Case polish, and Retroid emulator stability fixes.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.55/Vantafyn.Plugin.Companion_0.2.21_net10.zip",
+        "checksum": "59c1c6ceaa55ed67e8d32cc082f1dd24",
+        "timestamp": "2026-10-04T14:02:19Z"
+      },
+      {
         "version": "0.2.20.0",
         "changelog": "Adds Pokédex Mega Evolution form viewing, optional server-hosted Mega symbol support, Badge Case polish, and Games Hub recent rail cleanup.",
         "targetAbi": "10.11.0.0",

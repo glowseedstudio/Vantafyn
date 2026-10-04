@@ -166,8 +166,9 @@ fun PokemonPokedexModal(
     val localCaughtIds = remember(localSaves, localPokemon) {
         val set = mutableSetOf<Int>()
         for (save in localSaves) {
-            // Only trust save.caughtSpeciesIds if save actually has active pokemon and isn't uninitialized SRAM
-            if (save.totalPokemonCount > 0 && save.caughtSpeciesIds.size <= (save.totalPokemonCount + 40)) {
+            val hasStrictNativeDex = save.platform == "nds" && save.generation in 4..5 && save.pokedexCaught != null
+            // Non-native fallbacks are kept close to current storage to avoid trusting uninitialized SRAM noise.
+            if (hasStrictNativeDex || (save.totalPokemonCount > 0 && save.caughtSpeciesIds.size <= (save.totalPokemonCount + 40))) {
                 set.addAll(save.caughtSpeciesIds)
             }
         }
@@ -180,7 +181,8 @@ fun PokemonPokedexModal(
     val localSeenIds = remember(localSaves, localCaughtIds) {
         val set = mutableSetOf<Int>()
         for (save in localSaves) {
-            if (save.totalPokemonCount > 0 && save.seenSpeciesIds.size <= (save.totalPokemonCount + 80)) {
+            val hasStrictNativeDex = save.platform == "nds" && save.generation in 4..5 && save.pokedexSeen != null
+            if (hasStrictNativeDex || (save.totalPokemonCount > 0 && save.seenSpeciesIds.size <= (save.totalPokemonCount + 80))) {
                 set.addAll(save.seenSpeciesIds)
             }
         }

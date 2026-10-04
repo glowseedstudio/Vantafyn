@@ -12,6 +12,10 @@ namespace Vantafyn.Plugin.Companion.Pokemon.Native;
 public static class Gen4SaveParser
 {
     private const int PartitionSize = 0x40000; // 256 KB
+    private const int PokedexRegionSize = 0x40;
+    private const int PokedexCaughtRegion = 0;
+    private const int PokedexSeenRegion = 1;
+    private const int Gen4SpeciesCount = 493;
 
     private static readonly int[][] BlockOrders =
     [
@@ -77,6 +81,7 @@ public static class Gen4SaveParser
         int partyOffset = 0x98;
         int partyCountOffset = 0x94;
         int boxDataStart = 4;
+        int pokedexOffset = 0x12DC;
         int trainerNameOffset = 0x64;
         int tidOffset = 0x74;
 
@@ -88,6 +93,7 @@ public static class Gen4SaveParser
             partyOffset = 0xA0;
             partyCountOffset = 0x9C;
             boxDataStart = 4;
+            pokedexOffset = 0x1328;
             trainerNameOffset = 0x68;
             tidOffset = 0x78;
         }
@@ -99,6 +105,7 @@ public static class Gen4SaveParser
             partyOffset = 0x98;
             partyCountOffset = 0x94;
             boxDataStart = 0;
+            pokedexOffset = 0x12B8;
             trainerNameOffset = 0x64;
             tidOffset = 0x74;
         }
@@ -108,6 +115,7 @@ public static class Gen4SaveParser
 
         int generalBase = activeGeneral == 1 ? PartitionSize : 0;
         int storageBase = (activeStorage == 1 ? PartitionSize : 0) + storageStart;
+        var pokedex = ReadPokedexFlags(saveBytes, generalBase, pokedexOffset);
 
         string otName = DecodeUtf16String(saveBytes, generalBase + trainerNameOffset, 7);
         if (string.IsNullOrWhiteSpace(otName)) otName = "TRAINER";
@@ -123,7 +131,7 @@ public static class Gen4SaveParser
             int pkOffset = generalBase + partyOffset + (slot * 236);
             if (pkOffset + 236 <= saveBytes.Length)
             {
-                var pkm = ParsePokemon(saveBytes, pkOffset, 236, isParty: true, slot + 1, boxIndex: null, otName, tid, gameId, catalog);
+                var pkm = ParsePokemon(saveBytes, pkOffset, 236, isParty: true, slot + 1, boxIndex: null, otName, tid, gameId ?? string.Empty, catalog);
                 if (pkm != null)
                 {
                     result.Party.Add(pkm.Value.Summary);
@@ -151,7 +159,7 @@ public static class Gen4SaveParser
                 int pkOffset = boxStart + (s * 136);
                 if (pkOffset + 136 <= saveBytes.Length)
                 {
-                    var pkm = ParsePokemon(saveBytes, pkOffset, 136, isParty: false, s + 1, boxIndex: b + 1, otName, tid, gameId, catalog);
+                    var pkm = ParsePokemon(saveBytes, pkOffset, 136, isParty: false, s + 1, boxIndex: b + 1, otName, tid, gameId ?? string.Empty, catalog);
                     if (pkm != null)
                     {
                         entries.Add(pkm.Value.Summary);
@@ -164,19 +172,63 @@ public static class Gen4SaveParser
             result.Boxes.Add(box);
         }
 
-        var caughtIds = result.Party.Select(p => p.SpeciesId)
-            .Concat(result.Boxes.SelectMany(b => b.Entries.Select(e => e.SpeciesId)))
-            .Where(id => id > 0)
-            .Distinct()
-            .OrderBy(id => id)
-            .ToList();
-        result.PokedexCaught = caughtIds.Count;
-        result.PokedexSeen = caughtIds.Count;
-        result.CaughtSpeciesIds = caughtIds;
-        result.SeenSpeciesIds = caughtIds;
+        result.PokedexCaught = pokedex?.CaughtSpeciesIds.Count;
+        result.PokedexSeen = pokedex?.SeenSpeciesIds.Count;
+        result.CaughtSpeciesIds = pokedex?.CaughtSpeciesIds ?? [];
+        result.SeenSpeciesIds = pokedex?.SeenSpeciesIds ?? [];
 
         result.IsSuccess = true;
         return result;
+    }
+
+    private static (List<int> CaughtSpeciesIds, List<int> SeenSpeciesIds)? ReadPokedexFlags(byte[] saveBytes, int generalBase, int pokedexOffset)
+    {
+        int dexStart = generalBase + pokedexOffset;
+        int dexEnd = dexStart + 4 + (PokedexRegionSize * 4);
+        if (dexStart < 0 || dexEnd > saveBytes.Length) return null;
+
+        int caughtRegion = dexStart + 4 + (PokedexCaughtRegion * PokedexRegionSize);
+        int seenRegion = dexStart + 4 + (PokedexSeenRegion * PokedexRegionSize);
+        if (IsErased(saveBytes, caughtRegion, PokedexRegionSize) && IsErased(saveBytes, seenRegion, PokedexRegionSize))
+        {
+            return null;
+        }
+
+        var caughtIds = new List<int>();
+        var seenIds = new SortedSet<int>();
+        for (int speciesId = 1; speciesId <= Gen4SpeciesCount; speciesId++)
+        {
+            int bitIndex = speciesId - 1;
+            if (ReadFlag(saveBytes, caughtRegion, bitIndex))
+            {
+                caughtIds.Add(speciesId);
+                seenIds.Add(speciesId);
+            }
+            if (ReadFlag(saveBytes, seenRegion, bitIndex))
+            {
+                seenIds.Add(speciesId);
+            }
+        }
+
+        return (caughtIds.OrderBy(id => id).ToList(), seenIds.ToList());
+    }
+
+    private static bool ReadFlag(byte[] data, int offset, int bitIndex)
+    {
+        int byteOffset = offset + (bitIndex / 8);
+        if (byteOffset < 0 || byteOffset >= data.Length) return false;
+        int mask = 1 << (bitIndex % 8);
+        return (data[byteOffset] & mask) != 0;
+    }
+
+    private static bool IsErased(byte[] data, int offset, int length)
+    {
+        if (offset < 0 || offset + length > data.Length) return false;
+        for (int i = 0; i < length; i++)
+        {
+            if (data[offset + i] != 0xFF) return false;
+        }
+        return true;
     }
 
     private static (PokemonSummaryDto Summary, PokemonDetailsDto Details)? ParsePokemon(

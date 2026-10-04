@@ -83,6 +83,11 @@ private data class DiplomaCaseItem(
     val boxartUrl: String?,
 )
 
+private data class DiplomaProgress(
+    val registered: Int,
+    val isStrictSaveDex: Boolean,
+)
+
 @Composable
 fun PokemonDiplomaCaseScreen(
     session: JellyfinSession?,
@@ -265,8 +270,10 @@ private fun DiplomaStage(
     imageUrl: String?,
     onUpload: () -> Unit,
 ) {
-    val caught = item.save.pokedexCaught ?: item.save.caughtSpeciesIds.size
-    val earned = caught >= item.requiredCaught
+    val progress = item.diplomaProgress()
+    val verifiedBySave = progress.registered >= item.requiredCaught
+    val earned = verifiedBySave || proof != null
+    val canUploadProof = verifiedBySave || proof != null || !progress.isStrictSaveDex
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -342,13 +349,21 @@ private fun DiplomaStage(
                 }
                 Text(item.title, color = VantafynColors.Ink, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
                 Text(
-                    text = "${caught.coerceAtMost(item.requiredCaught)} / ${item.requiredCaught} registered",
+                    text = "${progress.registered.coerceAtMost(item.requiredCaught)} / ${item.requiredCaught} registered",
                     color = VantafynColors.Muted,
                     fontSize = 12.sp,
                 )
+                if (!progress.isStrictSaveDex) {
+                    Text(
+                        text = "Waiting for verified Pokédex data from this save",
+                        color = VantafynColors.Muted.copy(alpha = 0.72f),
+                        fontSize = 10.sp,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
 
-            if (earned) {
+            if (canUploadProof) {
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
@@ -401,10 +416,27 @@ private fun GeneratedDiploma(item: DiplomaCaseItem, earned: Boolean) {
 
 @Composable
 private fun DiplomaMiniProgress(item: DiplomaCaseItem) {
-    val caught = item.save.pokedexCaught ?: item.save.caughtSpeciesIds.size
-    val progress = (caught.toFloat() / item.requiredCaught.coerceAtLeast(1)).coerceIn(0f, 1f)
+    val progress = (item.diplomaProgress().registered.toFloat() / item.requiredCaught.coerceAtLeast(1)).coerceIn(0f, 1f)
     Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(999.dp)).background(Color.White.copy(alpha = 0.08f))) {
         Box(Modifier.fillMaxWidth(progress).height(6.dp).clip(RoundedCornerShape(999.dp)).background(item.accent))
+    }
+}
+
+private fun DiplomaCaseItem.diplomaProgress(): DiplomaProgress {
+    val caughtCount = save.pokedexCaught
+    val storageDerivedSpeciesCount = save.caughtSpeciesIds.size
+    val nativeNdsStorageFallback = save.generation in 4..5 &&
+        save.platform.isBlank() &&
+        caughtCount != null &&
+        caughtCount == storageDerivedSpeciesCount
+
+    return when {
+        caughtCount != null && !nativeNdsStorageFallback ->
+            DiplomaProgress(caughtCount, isStrictSaveDex = true)
+        save.generation in 1..3 && storageDerivedSpeciesCount > 0 ->
+            DiplomaProgress(storageDerivedSpeciesCount, isStrictSaveDex = true)
+        else ->
+            DiplomaProgress(0, isStrictSaveDex = false)
     }
 }
 
