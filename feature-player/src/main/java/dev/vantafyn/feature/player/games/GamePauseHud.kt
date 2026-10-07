@@ -92,6 +92,7 @@ fun GamePauseHud(
     onCycleVideoFilter: () -> Unit,
     showTouchControls: Boolean,
     onToggleTouchControls: () -> Unit,
+    hasPhysicalGamepad: Boolean = false,
     isTv: Boolean,
     isNativeMode: Boolean = false,
     isHandheld: Boolean = false,
@@ -213,6 +214,7 @@ fun GamePauseHud(
 
                         // Speed & Screen Layout / Aspect Ratio Row
                         val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
+                        val isGbaSystem = game.systemId.lowercase() in listOf("gba", "gameboy advance", "game boy advance") || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth(),
@@ -238,8 +240,14 @@ fun GamePauseHud(
                                     modifier = Modifier.weight(1.3f),
                                 )
                             } else {
+                                val aspectLabel = when {
+                                    isGbaSystem && aspectRatio == GameAspectRatio.Standard -> "3:2 Original"
+                                    isGbaSystem && aspectRatio == GameAspectRatio.Widescreen -> "16:9 Wide"
+                                    isGbaSystem && aspectRatio == GameAspectRatio.Square -> "1:1 Pixel"
+                                    else -> aspectRatio.label
+                                }
                                 HudMenuButton(
-                                    label = aspectRatio.label,
+                                    label = aspectLabel,
                                     icon = Icons.Rounded.AspectRatio,
                                     onClick = onCycleAspectRatio,
                                     modifier = Modifier.weight(1f),
@@ -273,7 +281,7 @@ fun GamePauseHud(
                                     syncSaveSuccess -> "Battery Save Synced to Cloud!"
                                     isSyncingSave -> "Syncing Battery Save to Cloud..."
                                     else -> "Sync Battery Save to Cloud"
-                                },
+                                    },
                                 icon = if (syncSaveSuccess) Icons.Rounded.CloudDone else Icons.Rounded.CloudUpload,
                                 isLoading = isSyncingSave,
                                 onClick = onSyncCloudSave,
@@ -282,8 +290,13 @@ fun GamePauseHud(
 
                         // Touch Controls Toggle (mobile/tablet only)
                         if (!isTv) {
+                            val padLabel = when {
+                                showTouchControls -> "Virtual Pad: Visible"
+                                hasPhysicalGamepad -> "Virtual Pad: Off (Controller Active)"
+                                else -> "Virtual Pad: Hidden"
+                            }
                             HudMenuButton(
-                                label = if (showTouchControls) "Virtual Pad: Visible" else "Virtual Pad: Hidden",
+                                label = padLabel,
                                 icon = Icons.Rounded.TouchApp,
                                 onClick = onToggleTouchControls,
                             )

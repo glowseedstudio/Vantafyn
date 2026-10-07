@@ -212,7 +212,8 @@ fun GamePlayerScreen(
     var configuredFfSpeed by remember { mutableFloatStateOf(initialFfSpeed) }
     var isMuted by remember { mutableStateOf(false) }
     var videoFilter by remember { mutableStateOf(initialFilter) }
-    var showTouchControls by remember { mutableStateOf(true) }
+    var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
+    var showTouchControls by remember { mutableStateOf(!hasPhysicalGamepad) }
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val defaultNdsLayout = if (isLandscape) NdsScreenLayout.LeftRight else NdsScreenLayout.TopBottom
@@ -223,7 +224,6 @@ fun GamePlayerScreen(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var webRendererCrashed by remember { mutableStateOf(false) }
     var webViewReloadKey by remember { mutableIntStateOf(0) }
-    var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
     var initialSramBase64 by remember { mutableStateOf<String?>(null) }
     var pendingConflict by remember { mutableStateOf<SaveSyncInfo?>(null) }
     var pendingDownloadedRom by remember { mutableStateOf<File?>(null) }
@@ -913,7 +913,7 @@ fun GamePlayerScreen(
         }
 
         // On-Screen Virtual Touchpad (Mobile/Tablet only, and hidden when physical gamepad is connected, when paused, or when disabled)
-        if (!isTv && !isDownloading && !isPaused && !hasPhysicalGamepad && showTouchControls) {
+        if (!isTv && !isDownloading && !isPaused && showTouchControls) {
             val controlsContainerModifier = if (isPortraitLayout) {
                 Modifier
                     .align(Alignment.BottomCenter)
@@ -1012,6 +1012,7 @@ fun GamePlayerScreen(
             onToggleTouchControls = {
                 showTouchControls = !showTouchControls
             },
+            hasPhysicalGamepad = hasPhysicalGamepad,
             isTv = isTv,
             isNativeMode = isNativeMode,
             isHandheld = isHandheld,
