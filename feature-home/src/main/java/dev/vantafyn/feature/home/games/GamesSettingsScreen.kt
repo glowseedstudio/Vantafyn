@@ -40,8 +40,15 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.Cable
+import androidx.compose.material.icons.rounded.CloudQueue
+import androidx.compose.material.icons.rounded.Person
+import androidx.compose.material.icons.rounded.Sensors
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Vibration
+import dev.vantafyn.core.emulator.net.LinkSessionManager
+import dev.vantafyn.core.emulator.net.LinkTransportMode
 import dev.vantafyn.core.media.games.GameHubSoundManager
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -132,6 +139,11 @@ fun GamesSettingsScreen(
     var pokemonNarrationAutoplay by remember {
         mutableStateOf(prefs.getBoolean("pokemon_narration_autoplay", false))
     }
+    val linkManager = remember { LinkSessionManager.getInstance(context) }
+    var linkTransportMode by remember { mutableStateOf(linkManager.transportMode) }
+    var linkAutoDiscovery by remember { mutableStateOf(linkManager.autoDiscoveryEnabled) }
+    var linkPlayerHandle by remember { mutableStateOf(linkManager.playerHandle) }
+    val localIp = remember { linkManager.getLocalIpAddress() ?: "Not connected" }
     var romCacheSize by remember { mutableLongStateOf(0L) }
     var romFileCount by remember { mutableStateOf(0) }
     var cacheClearedMessage by remember { mutableStateOf<String?>(null) }
@@ -586,7 +598,201 @@ fun GamesSettingsScreen(
             }
         }
 
-        // 3. Controls & Haptics
+        // 3. Wireless Communication & Link Play
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "WIRELESS COMMUNICATION & LINK PLAY",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Cable,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(22.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Multiplayer Transport Mode",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Link cable & wireless communication for trades & battles",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+                        }
+
+                        // Transport Mode selector
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(
+                                LinkTransportMode.LOCAL_WIFI to "Local Wi-Fi",
+                                LinkTransportMode.SERVER_RELAY to "Server Relay",
+                                LinkTransportMode.OFFLINE to "Offline",
+                            ).forEach { (mode, label) ->
+                                val selected = linkTransportMode == mode
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(
+                                            if (selected) VantafynGradients.accentHorizontal()
+                                            else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                        )
+                                        .clickable {
+                                            linkTransportMode = mode
+                                            linkManager.transportMode = mode
+                                        }
+                                        .padding(vertical = 10.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (selected) Color.White else VantafynColors.Muted,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                }
+                            }
+                        }
+
+                        // Explanatory badge for selected mode
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color.White.copy(alpha = 0.04f))
+                                .padding(10.dp),
+                        ) {
+                            Text(
+                                text = when (linkTransportMode) {
+                                    LinkTransportMode.LOCAL_WIFI ->
+                                        "⚡ Ultra-low latency (<2ms) peer discovery via mDNS. Perfect for Pokémon battles and trades with nearby handhelds on the same Wi-Fi or Wi-Fi Direct."
+                                    LinkTransportMode.SERVER_RELAY ->
+                                        "🌐 Relays link packets over your Vantafyn Jellyfin server. Allows trading and battling with friends anywhere in the world."
+                                    LinkTransportMode.OFFLINE ->
+                                        "🔒 Multiplayer link features disabled. Cores run in isolated single-player mode."
+                                },
+                                color = VantafynColors.Muted,
+                                fontSize = 11.sp,
+                                lineHeight = 15.sp,
+                            )
+                        }
+
+                        // Auto-Discovery Switch
+                        if (linkTransportMode != LinkTransportMode.OFFLINE) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.02f))
+                                    .clickable {
+                                        val newVal = !linkAutoDiscovery
+                                        linkAutoDiscovery = newVal
+                                        linkManager.autoDiscoveryEnabled = newVal
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Sensors,
+                                    contentDescription = null,
+                                    tint = Color(0xFF10B981),
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Nearby Peer Auto-Discovery",
+                                        color = VantafynColors.Ink,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        text = "Announce and detect nearby Vantafyn rooms automatically",
+                                        color = VantafynColors.Muted,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                                VantafynSwitch(
+                                    checked = linkAutoDiscovery,
+                                    onCheckedChange = { checked ->
+                                        linkAutoDiscovery = checked
+                                        linkManager.autoDiscoveryEnabled = checked
+                                    },
+                                )
+                            }
+
+                            // Device info / IP status pill
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.03f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.06f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Person,
+                                        contentDescription = null,
+                                        tint = Color(0xFFA855F7),
+                                        modifier = Modifier.size(16.dp),
+                                    )
+                                    Text(
+                                        text = "Host Tag: $linkPlayerHandle",
+                                        color = VantafynColors.Ink,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+                                Text(
+                                    text = "IP: $localIp",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Controls & Haptics
         item {
             Column(
                 modifier = Modifier

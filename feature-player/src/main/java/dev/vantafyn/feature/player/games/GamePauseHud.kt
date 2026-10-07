@@ -29,18 +29,31 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.FastForward
+import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Cable
+import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import dev.vantafyn.core.emulator.net.LinkSessionManager
+import dev.vantafyn.core.emulator.net.LinkTransportMode
+import dev.vantafyn.core.emulator.net.LinkSessionState
+import dev.vantafyn.core.ui.VantafynGradients
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -104,6 +117,16 @@ fun GamePauseHud(
     onSyncCloudSave: () -> Unit = {},
     isSyncingSave: Boolean = false,
     syncSaveSuccess: Boolean = false,
+    gbaColorCorrection: Boolean = true,
+    onToggleGbaColorCorrection: () -> Unit = {},
+    gbaAudioFiltering: Boolean = true,
+    onToggleGbaAudioFiltering: () -> Unit = {},
+    gbcColorCorrection: Boolean = true,
+    onToggleGbcColorCorrection: () -> Unit = {},
+    gbPalette: String = "colorized",
+    onCycleGbPalette: () -> Unit = {},
+    lcdGhosting: Boolean = false,
+    onToggleLcdGhosting: () -> Unit = {},
     onResume: () -> Unit,
     onToggleSpeed: () -> Unit,
     onCycleAspectRatio: () -> Unit,
@@ -215,6 +238,7 @@ fun GamePauseHud(
                         // Speed & Screen Layout / Aspect Ratio Row
                         val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
                         val isGbaSystem = game.systemId.lowercase() in listOf("gba", "gameboy advance", "game boy advance") || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
+                        val isGbSystem = game.systemId.lowercase() in listOf("gb", "gbc", "gameboy", "game boy", "gameboy color", "game boy color") || game.core.contains("gambatte", ignoreCase = true) || game.core.contains("tgbdual", ignoreCase = true) || game.core.contains("sameboy", ignoreCase = true)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth(),
@@ -244,6 +268,9 @@ fun GamePauseHud(
                                     isGbaSystem && aspectRatio == GameAspectRatio.Standard -> "3:2 Original"
                                     isGbaSystem && aspectRatio == GameAspectRatio.Widescreen -> "16:9 Wide"
                                     isGbaSystem && aspectRatio == GameAspectRatio.Square -> "1:1 Pixel"
+                                    isGbSystem && aspectRatio == GameAspectRatio.Standard -> "10:9 Original"
+                                    isGbSystem && aspectRatio == GameAspectRatio.Widescreen -> "4:3 Full"
+                                    isGbSystem && aspectRatio == GameAspectRatio.Square -> "1:1 Pixel"
                                     else -> aspectRatio.label
                                 }
                                 HudMenuButton(
@@ -272,6 +299,74 @@ fun GamePauseHud(
                                 onClick = onCycleVideoFilter,
                                 modifier = Modifier.weight(1f),
                             )
+                        }
+
+                        // GBA Color Profile & Audio Anti-Aliasing Profile
+                        if (isGbaSystem) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                HudMenuButton(
+                                    label = if (gbaColorCorrection) "Color: LCD Balanced" else "Color: Vivid Raw",
+                                    icon = Icons.Rounded.Palette,
+                                    onClick = onToggleGbaColorCorrection,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                HudMenuButton(
+                                    label = if (gbaAudioFiltering) "Audio: Anti-Aliased" else "Audio: Raw Hardware",
+                                    icon = Icons.Rounded.GraphicEq,
+                                    onClick = onToggleGbaAudioFiltering,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+
+                        // Game Boy DMG Monochrome Palette & LCD Ghosting
+                        val isGbPure = isGbSystem && (game.systemId.lowercase() in listOf("gb", "gameboy", "game boy") || (!game.systemId.lowercase().contains("gbc") && !game.title.contains("color", ignoreCase = true)))
+                        val isGbcSystem = isGbSystem && (game.systemId.lowercase() in listOf("gbc", "gameboy color", "game boy color") || game.title.contains("color", ignoreCase = true))
+
+                        if (isGbPure) {
+                            val palLabel = when (gbPalette) {
+                                "dmg" -> "Palette: DMG Green"
+                                "pocket" -> "Palette: Pocket B&W"
+                                else -> "Palette: Colorized"
+                            }
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                HudMenuButton(
+                                    label = palLabel,
+                                    icon = Icons.Rounded.Palette,
+                                    onClick = onCycleGbPalette,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                HudMenuButton(
+                                    label = if (lcdGhosting) "Ghosting: LCD Authentic" else "Ghosting: Crisp Off",
+                                    icon = Icons.Rounded.Tv,
+                                    onClick = onToggleLcdGhosting,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        } else if (isGbcSystem) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                HudMenuButton(
+                                    label = if (gbcColorCorrection) "Color: LCD Balanced" else "Color: Vivid Raw",
+                                    icon = Icons.Rounded.Palette,
+                                    onClick = onToggleGbcColorCorrection,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                HudMenuButton(
+                                    label = if (lcdGhosting) "Ghosting: LCD Authentic" else "Ghosting: Crisp Off",
+                                    icon = Icons.Rounded.Tv,
+                                    onClick = onToggleLcdGhosting,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
 
                         // In-game Battery Save (SRAM) Cloud Sync
@@ -307,6 +402,270 @@ fun GamePauseHud(
                                     fontSize = 11.sp,
                                     modifier = Modifier.padding(horizontal = 4.dp),
                                 )
+                            }
+                        }
+
+                        // Wireless Link Cable & Multiplayer Session
+                        if (isNativeMode && (isNdsSystem || isGbaSystem || isGbSystem)) {
+                            val context = LocalContext.current
+                            val linkManager = remember { LinkSessionManager.getInstance(context) }
+                            val linkSessionState by linkManager.sessionState.collectAsState()
+                            val discoveredPeers by linkManager.discoveredPeers.collectAsState()
+                            val activeSession by linkManager.activeSession.collectAsState()
+                            val transportMode = linkManager.transportMode
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(alpha = 0.04f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp),
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Cable,
+                                            contentDescription = null,
+                                            tint = when (linkSessionState) {
+                                                LinkSessionState.CONNECTED -> Color(0xFF00E676)
+                                                LinkSessionState.ADVERTISING -> Color(0xFF00E5FF)
+                                                LinkSessionState.DISCOVERING -> Color(0xFFA855F7)
+                                                else -> VantafynColors.Muted
+                                            },
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Text(
+                                            text = "Wireless Link Cable",
+                                            color = VantafynColors.Ink,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        Text(
+                                            text = when {
+                                                transportMode == LinkTransportMode.OFFLINE -> "Offline"
+                                                linkSessionState == LinkSessionState.CONNECTED -> "Connected"
+                                                linkSessionState == LinkSessionState.ADVERTISING -> "Hosting Room"
+                                                linkSessionState == LinkSessionState.DISCOVERING -> "Scanning"
+                                                else -> "Ready"
+                                            },
+                                            color = when {
+                                                linkSessionState == LinkSessionState.CONNECTED -> Color(0xFF00E676)
+                                                linkSessionState == LinkSessionState.ADVERTISING -> Color(0xFF00E5FF)
+                                                else -> VantafynColors.Muted
+                                            },
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+
+                                    if (transportMode != LinkTransportMode.OFFLINE) {
+                                        // Actions when not connected
+                                        if (linkSessionState != LinkSessionState.CONNECTED && linkSessionState != LinkSessionState.ADVERTISING) {
+                                            if (transportMode == LinkTransportMode.SERVER_RELAY) {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(VantafynGradients.accentHorizontal())
+                                                            .clickable {
+                                                                linkManager.startServerRelaySession(
+                                                                    gameId = game.id,
+                                                                    gameTitle = game.title,
+                                                                    core = game.core,
+                                                                    roomCode = linkManager.serverRoomCode,
+                                                                    isHost = true,
+                                                                )
+                                                            }
+                                                            .padding(vertical = 8.dp),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Text(
+                                                            text = "Host Room #${linkManager.serverRoomCode}",
+                                                            color = Color.White,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                        )
+                                                    }
+
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(Color.White.copy(alpha = 0.08f))
+                                                            .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f), RoundedCornerShape(8.dp))
+                                                            .clickable {
+                                                                linkManager.startServerRelaySession(
+                                                                    gameId = game.id,
+                                                                    gameTitle = game.title,
+                                                                    core = game.core,
+                                                                    roomCode = linkManager.serverRoomCode,
+                                                                    isHost = false,
+                                                                )
+                                                            }
+                                                            .padding(vertical = 8.dp),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Text(
+                                                            text = "Join Room #${linkManager.serverRoomCode}",
+                                                            color = Color(0xFF00E5FF),
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                        )
+                                                    }
+                                                }
+                                            } else {
+                                                Row(
+                                                    modifier = Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(VantafynGradients.accentHorizontal())
+                                                            .clickable {
+                                                                linkManager.startHosting(
+                                                                    gameId = game.id,
+                                                                    gameTitle = game.title,
+                                                                    core = game.core,
+                                                                )
+                                                            }
+                                                            .padding(vertical = 8.dp),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Text(
+                                                            text = "Host Room",
+                                                            color = Color.White,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                        )
+                                                    }
+
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(Color.White.copy(alpha = 0.08f))
+                                                            .clickable {
+                                                                linkManager.startDiscovery(filterGameId = game.id)
+                                                            }
+                                                            .padding(vertical = 8.dp),
+                                                        contentAlignment = Alignment.Center,
+                                                    ) {
+                                                        Text(
+                                                            text = "Scan Peers",
+                                                            color = VantafynColors.Ink,
+                                                            fontSize = 12.sp,
+                                                            fontWeight = FontWeight.SemiBold,
+                                                        )
+                                                    }
+                                                }
+                                            }
+
+                                            // If nearby peers found
+                                            if (discoveredPeers.isNotEmpty()) {
+                                                Text(
+                                                    text = "Nearby Handhelds Found:",
+                                                    color = VantafynColors.Muted,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                )
+                                                discoveredPeers.forEach { peer ->
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .clip(RoundedCornerShape(8.dp))
+                                                            .background(Color.White.copy(alpha = 0.05f))
+                                                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                                    ) {
+                                                        Column {
+                                                            Text(
+                                                                text = peer.hostName,
+                                                                color = VantafynColors.Ink,
+                                                                fontSize = 12.sp,
+                                                                fontWeight = FontWeight.SemiBold,
+                                                            )
+                                                            Text(
+                                                                text = "${peer.ip}:${peer.port}",
+                                                                color = VantafynColors.Muted,
+                                                                fontSize = 10.sp,
+                                                            )
+                                                        }
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .clip(RoundedCornerShape(6.dp))
+                                                                .background(Color(0xFF00E5FF))
+                                                                .clickable {
+                                                                    linkManager.connectToPeer(peer)
+                                                                }
+                                                                .padding(horizontal = 10.dp, vertical = 5.dp),
+                                                        ) {
+                                                            Text(
+                                                                text = "Connect",
+                                                                color = Color.Black,
+                                                                fontSize = 11.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } else {
+                                            // Connected or Hosting: Show active session info & disconnect button
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                            ) {
+                                                Text(
+                                                    text = if (linkSessionState == LinkSessionState.ADVERTISING) {
+                                                        if (activeSession?.transportMode == LinkTransportMode.SERVER_RELAY)
+                                                            "Online Room #${activeSession?.peerName?.substringAfter("#") ?: "1234"} active"
+                                                        else
+                                                            "Room open on port ${activeSession?.port} (${activeSession?.remoteIp})"
+                                                    } else {
+                                                        "Connected to ${activeSession?.peerName}"
+                                                    },
+                                                    color = Color(0xFF00E5FF),
+                                                    fontSize = 11.sp,
+                                                    maxLines = 1,
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(RoundedCornerShape(6.dp))
+                                                        .background(Color(0xFFFF3366).copy(alpha = 0.2f))
+                                                        .border(1.dp, Color(0xFFFF3366).copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                                                        .clickable { linkManager.disconnect() }
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                ) {
+                                                    Text(
+                                                        text = "Disconnect",
+                                                        color = Color(0xFFFF5277),
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            text = "Wireless multiplayer is turned off in Retro Settings",
+                                            color = VantafynColors.Muted,
+                                            fontSize = 11.sp,
+                                        )
+                                    }
+                                }
                             }
                         }
 

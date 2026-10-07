@@ -107,6 +107,18 @@ struct vf_session {
     int16_t touch_y;
     bool touch_pressed;
 
+    // Visual Enhancements & LCD Simulation
+    bool gba_color_correction;
+    bool gbc_color_correction;
+    int gb_palette_mode; // 0 = colorized/auto, 1 = DMG Pea Soup Green, 2 = Pocket B&W
+    bool lcd_ghosting;
+    uint32_t *prev_frame_buffer;
+    size_t prev_frame_buffer_size;
+
+    bool audio_filtering;
+    int32_t audio_filter_prev_l;
+    int32_t audio_filter_prev_r;
+
     // Dynamic Core Options
     vf_option_t options[VF_MAX_OPTIONS];
     int option_count;
@@ -135,11 +147,14 @@ static void ring_free(audio_ring_t *ring) {
     }
 }
 
-static void ring_write_samples(audio_ring_t *ring, const int16_t *data, size_t frames) {
+static void ring_write_samples(audio_ring_t *ring, const int16_t *data, size_t frames, bool filter, int32_t *prev_l, int32_t *prev_r) {
     if (!ring->buffer || frames == 0) return;
     size_t r = atomic_load(&ring->read_idx);
     size_t w = atomic_load(&ring->write_idx);
     size_t cap = ring->capacity;
+
+    int32_t fl = prev_l ? *prev_l : 0;
+    int32_t fr = prev_r ? *prev_r : 0;
 
     for (size_t i = 0; i < frames; i++) {
         size_t next_w = (w + 1) % cap;
@@ -148,10 +163,19 @@ static void ring_write_samples(audio_ring_t *ring, const int16_t *data, size_t f
             r = (r + 1) % cap;
             atomic_store(&ring->read_idx, r);
         }
-        ring->buffer[w * 2] = data[i * 2];
-        ring->buffer[w * 2 + 1] = data[i * 2 + 1];
+        if (filter) {
+            fl = (180 * (int32_t)data[i * 2] + 76 * fl) >> 8;
+            fr = (180 * (int32_t)data[i * 2 + 1] + 76 * fr) >> 8;
+            ring->buffer[w * 2] = (int16_t)fl;
+            ring->buffer[w * 2 + 1] = (int16_t)fr;
+        } else {
+            ring->buffer[w * 2] = data[i * 2];
+            ring->buffer[w * 2 + 1] = data[i * 2 + 1];
+        }
         w = next_w;
     }
+    if (prev_l) *prev_l = fl;
+    if (prev_r) *prev_r = fr;
     atomic_store(&ring->write_idx, w);
 }
 
@@ -316,7 +340,10 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         s->frame_buffer_size = needed_pixels;
     }
 
-    // Convert core frame format to Android RGBA_8888
+    // Convert core frame format to Android RGBA_8888 (with optional GBA/GBC LCD color correction & DMG palette)
+    bool cc = s->gba_color_correction || s->gbc_color_correction;
+    int pal = s->gb_palette_mode;
+
     if (s->pixel_format == RETRO_PIXEL_FORMAT_XRGB8888) {
         const uint32_t *src = (const uint32_t *)data;
         size_t src_stride = pitch / sizeof(uint32_t);
@@ -325,10 +352,37 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
             uint32_t *dst_line = s->frame_buffer + y * width;
             for (unsigned x = 0; x < width; x++) {
                 uint32_t pixel = line[x];
-                // Convert 0RGB to RGBA
                 uint32_t r = (pixel >> 16) & 0xFF;
                 uint32_t g = (pixel >> 8) & 0xFF;
                 uint32_t b = pixel & 0xFF;
+                if (pal == 1) { // DMG Pea Soup
+                    int d1 = (int)r - (int)g;
+                    int d2 = (int)g - (int)b;
+                    if (d1 >= -28 && d1 <= 28 && d2 >= -28 && d2 <= 28) {
+                        uint32_t lum = (77 * r + 150 * g + 29 * b) >> 8;
+                        if (lum < 64) { r = 15; g = 56; b = 15; }
+                        else if (lum < 128) { r = 48; g = 98; b = 48; }
+                        else if (lum < 192) { r = 139; g = 172; b = 15; }
+                        else { r = 155; g = 188; b = 15; }
+                    }
+                } else if (pal == 2) { // Pocket B&W
+                    int d1 = (int)r - (int)g;
+                    int d2 = (int)g - (int)b;
+                    if (d1 >= -28 && d1 <= 28 && d2 >= -28 && d2 <= 28) {
+                        uint32_t lum = (77 * r + 150 * g + 29 * b) >> 8;
+                        if (lum < 64) { r = 0; g = 0; b = 0; }
+                        else if (lum < 128) { r = 85; g = 85; b = 85; }
+                        else if (lum < 192) { r = 170; g = 170; b = 170; }
+                        else { r = 255; g = 255; b = 255; }
+                    }
+                } else if (cc) {
+                    uint32_t cr = (210 * r + 31 * g + 15 * b) >> 8;
+                    uint32_t cg = (15 * r + 200 * g + 41 * b) >> 8;
+                    uint32_t cb = (20 * r + 36 * g + 200 * b) >> 8;
+                    r = cr > 255 ? 255 : cr;
+                    g = cg > 255 ? 255 : cg;
+                    b = cb > 255 ? 255 : cb;
+                }
                 dst_line[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }
         }
@@ -343,6 +397,34 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 uint32_t r = ((pixel >> 11) & 0x1F) * 255 / 31;
                 uint32_t g = ((pixel >> 5) & 0x3F) * 255 / 63;
                 uint32_t b = (pixel & 0x1F) * 255 / 31;
+                if (pal == 1) { // DMG Pea Soup
+                    int d1 = (int)r - (int)g;
+                    int d2 = (int)g - (int)b;
+                    if (d1 >= -28 && d1 <= 28 && d2 >= -28 && d2 <= 28) {
+                        uint32_t lum = (77 * r + 150 * g + 29 * b) >> 8;
+                        if (lum < 64) { r = 15; g = 56; b = 15; }
+                        else if (lum < 128) { r = 48; g = 98; b = 48; }
+                        else if (lum < 192) { r = 139; g = 172; b = 15; }
+                        else { r = 155; g = 188; b = 15; }
+                    }
+                } else if (pal == 2) { // Pocket B&W
+                    int d1 = (int)r - (int)g;
+                    int d2 = (int)g - (int)b;
+                    if (d1 >= -28 && d1 <= 28 && d2 >= -28 && d2 <= 28) {
+                        uint32_t lum = (77 * r + 150 * g + 29 * b) >> 8;
+                        if (lum < 64) { r = 0; g = 0; b = 0; }
+                        else if (lum < 128) { r = 85; g = 85; b = 85; }
+                        else if (lum < 192) { r = 170; g = 170; b = 170; }
+                        else { r = 255; g = 255; b = 255; }
+                    }
+                } else if (cc) {
+                    uint32_t cr = (210 * r + 31 * g + 15 * b) >> 8;
+                    uint32_t cg = (15 * r + 200 * g + 41 * b) >> 8;
+                    uint32_t cb = (20 * r + 36 * g + 200 * b) >> 8;
+                    r = cr > 255 ? 255 : cr;
+                    g = cg > 255 ? 255 : cg;
+                    b = cb > 255 ? 255 : cb;
+                }
                 dst_line[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }
         }
@@ -357,9 +439,64 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 uint32_t r = ((pixel >> 10) & 0x1F) * 255 / 31;
                 uint32_t g = ((pixel >> 5) & 0x1F) * 255 / 31;
                 uint32_t b = (pixel & 0x1F) * 255 / 31;
+                if (pal == 1) { // DMG Pea Soup
+                    int d1 = (int)r - (int)g;
+                    int d2 = (int)g - (int)b;
+                    if (d1 >= -28 && d1 <= 28 && d2 >= -28 && d2 <= 28) {
+                        uint32_t lum = (77 * r + 150 * g + 29 * b) >> 8;
+                        if (lum < 64) { r = 15; g = 56; b = 15; }
+                        else if (lum < 128) { r = 48; g = 98; b = 48; }
+                        else if (lum < 192) { r = 139; g = 172; b = 15; }
+                        else { r = 155; g = 188; b = 15; }
+                    }
+                } else if (pal == 2) { // Pocket B&W
+                    int d1 = (int)r - (int)g;
+                    int d2 = (int)g - (int)b;
+                    if (d1 >= -28 && d1 <= 28 && d2 >= -28 && d2 <= 28) {
+                        uint32_t lum = (77 * r + 150 * g + 29 * b) >> 8;
+                        if (lum < 64) { r = 0; g = 0; b = 0; }
+                        else if (lum < 128) { r = 85; g = 85; b = 85; }
+                        else if (lum < 192) { r = 170; g = 170; b = 170; }
+                        else { r = 255; g = 255; b = 255; }
+                    }
+                } else if (cc) {
+                    uint32_t cr = (210 * r + 31 * g + 15 * b) >> 8;
+                    uint32_t cg = (15 * r + 200 * g + 41 * b) >> 8;
+                    uint32_t cb = (20 * r + 36 * g + 200 * b) >> 8;
+                    r = cr > 255 ? 255 : cr;
+                    g = cg > 255 ? 255 : cg;
+                    b = cb > 255 ? 255 : cb;
+                }
                 dst_line[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }
         }
+    }
+
+    // Optional LCD Ghosting (authentic STN passive-matrix liquid crystal response decay)
+    if (!s->prev_frame_buffer || s->prev_frame_buffer_size < needed_pixels) {
+        free(s->prev_frame_buffer);
+        s->prev_frame_buffer = (uint32_t *)calloc(needed_pixels, sizeof(uint32_t));
+        s->prev_frame_buffer_size = needed_pixels;
+    }
+    if (s->lcd_ghosting && s->prev_frame_buffer) {
+        for (size_t i = 0; i < needed_pixels; i++) {
+            uint32_t curr = s->frame_buffer[i];
+            uint32_t prev = s->prev_frame_buffer[i];
+            uint32_t cr = curr & 0xFF;
+            uint32_t cg = (curr >> 8) & 0xFF;
+            uint32_t cb = (curr >> 16) & 0xFF;
+            uint32_t pr = prev & 0xFF;
+            uint32_t pg = (prev >> 8) & 0xFF;
+            uint32_t pb = (prev >> 16) & 0xFF;
+            uint32_t br = (cr * 65 + pr * 35) / 100;
+            uint32_t bg = (cg * 65 + pg * 35) / 100;
+            uint32_t bb = (cb * 65 + pb * 35) / 100;
+            uint32_t blended = (0xFF << 24) | (bb << 16) | (bg << 8) | br;
+            s->frame_buffer[i] = blended;
+            s->prev_frame_buffer[i] = blended;
+        }
+    } else if (s->prev_frame_buffer) {
+        memcpy(s->prev_frame_buffer, s->frame_buffer, needed_pixels * sizeof(uint32_t));
     }
 
     ANativeWindow *win_top = s->swap_dual_screens ? s->window_secondary : s->window;
@@ -423,13 +560,13 @@ static void core_audio_sample(int16_t left, int16_t right) {
     vf_session_t *s = s_current_session;
     if (!s) return;
     int16_t frame[2] = {left, right};
-    ring_write_samples(&s->audio_ring, frame, 1);
+    ring_write_samples(&s->audio_ring, frame, 1, s->audio_filtering, &s->audio_filter_prev_l, &s->audio_filter_prev_r);
 }
 
 static size_t core_audio_sample_batch(const int16_t *data, size_t frames) {
     vf_session_t *s = s_current_session;
     if (!s || !data || frames == 0) return 0;
-    ring_write_samples(&s->audio_ring, data, frames);
+    ring_write_samples(&s->audio_ring, data, frames, s->audio_filtering, &s->audio_filter_prev_l, &s->audio_filter_prev_r);
     return frames;
 }
 
@@ -543,6 +680,13 @@ vf_session_t* vf_session_create(const vf_callbacks_t *callbacks) {
     atomic_store(&session->is_active, false);
     session->fast_forward_ratio = 1;
     session->pixel_format = RETRO_PIXEL_FORMAT_RGB565;
+    session->gba_color_correction = true;
+    session->gbc_color_correction = true;
+    session->gb_palette_mode = 0;
+    session->lcd_ghosting = false;
+    session->prev_frame_buffer = NULL;
+    session->prev_frame_buffer_size = 0;
+    session->audio_filtering = true;
 
     s_current_session = session;
     pthread_mutex_unlock(&s_session_lock);
@@ -569,6 +713,11 @@ void vf_session_destroy(vf_session_t *session) {
     if (session->frame_buffer) {
         free(session->frame_buffer);
         session->frame_buffer = NULL;
+    }
+    if (session->prev_frame_buffer) {
+        free(session->prev_frame_buffer);
+        session->prev_frame_buffer = NULL;
+        session->prev_frame_buffer_size = 0;
     }
 
     if (s_current_session == session) {
@@ -867,6 +1016,28 @@ bool vf_session_load_state(vf_session_t *session, const void *data, size_t size)
 
 void vf_session_set_option(vf_session_t *session, const char *key, const char *value) {
     if (!session || !key || !value) return;
+    if (strcmp(key, "gba_color_correction") == 0) {
+        session->gba_color_correction = (strcmp(value, "enabled") == 0 || strcmp(value, "true") == 0);
+        LOGI("GBA color correction: %s", session->gba_color_correction ? "enabled" : "disabled");
+    }
+    if (strcmp(key, "gbc_color_correction") == 0) {
+        session->gbc_color_correction = (strcmp(value, "enabled") == 0 || strcmp(value, "true") == 0);
+        LOGI("GBC color correction: %s", session->gbc_color_correction ? "enabled" : "disabled");
+    }
+    if (strcmp(key, "gb_palette") == 0) {
+        if (strcmp(value, "dmg") == 0) session->gb_palette_mode = 1;
+        else if (strcmp(value, "pocket") == 0) session->gb_palette_mode = 2;
+        else session->gb_palette_mode = 0;
+        LOGI("GB palette mode set to: %d (%s)", session->gb_palette_mode, value);
+    }
+    if (strcmp(key, "lcd_ghosting") == 0) {
+        session->lcd_ghosting = (strcmp(value, "enabled") == 0 || strcmp(value, "true") == 0);
+        LOGI("LCD ghosting: %s", session->lcd_ghosting ? "enabled" : "disabled");
+    }
+    if (strcmp(key, "audio_filtering") == 0) {
+        session->audio_filtering = (strcmp(value, "enabled") == 0 || strcmp(value, "true") == 0);
+        LOGI("Audio filtering: %s", session->audio_filtering ? "enabled" : "disabled");
+    }
     for (int i = 0; i < session->option_count; i++) {
         if (strcmp(session->options[i].key, key) == 0) {
             strncpy(session->options[i].value, value, sizeof(session->options[i].value) - 1);

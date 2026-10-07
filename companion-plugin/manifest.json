@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.22.0",
-        "changelog": "Adds the Pokémon Event Vault with transactional Crystal and Gen 3 mythical event unlocks, premium event UI, and safe save backups.",
+        "version": "0.2.23.0",
+        "changelog": "Adds server-side Wireless Link Cable room management and low-latency WebSocket packet relay for cross-network multiplayer.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.56/Vantafyn.Plugin.Companion_0.2.22_net9.zip",
-        "checksum": "fa76cca208ed79dfb4eacfaf5567a565",
-        "timestamp": "2026-10-04T23:54:32Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.57/Vantafyn.Plugin.Companion_0.2.23_net9.zip",
+        "checksum": "7fb4a68912de5648032afe74610af3e5",
+        "timestamp": "2026-10-07T09:59:55Z"
       },
       {
-        "version": "0.2.22.1",
-        "changelog": "Adds the Pokémon Event Vault with transactional Crystal and Gen 3 mythical event unlocks, premium event UI, and safe save backups.",
+        "version": "0.2.23.1",
+        "changelog": "Adds server-side Wireless Link Cable room management and low-latency WebSocket packet relay for cross-network multiplayer.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.56/Vantafyn.Plugin.Companion_0.2.22_net10.zip",
-        "checksum": "2c63452f9873effa75b5341f477de567",
-        "timestamp": "2026-10-04T23:54:32Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.57/Vantafyn.Plugin.Companion_0.2.23_net10.zip",
+        "checksum": "b23297a9011500ee10aee391112dcc6e",
+        "timestamp": "2026-10-07T09:59:55Z"
       },
       {
         "version": "0.2.21.0",

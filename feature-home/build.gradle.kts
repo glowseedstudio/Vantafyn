@@ -26,6 +26,7 @@ dependencies {
     implementation(project(":core-ui"))
     implementation(project(":feature-music"))
     implementation(project(":feature-player"))
+    implementation(project(":core-emulator"))
     implementation(project(":feature-requests"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

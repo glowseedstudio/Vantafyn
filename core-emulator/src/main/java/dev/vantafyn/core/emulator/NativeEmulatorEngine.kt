@@ -175,6 +175,26 @@ class NativeEmulatorEngine(
         nativeSetOption(key, value)
     }
 
+    fun setColorCorrection(enabled: Boolean) {
+        setOption("gba_color_correction", if (enabled) "enabled" else "disabled")
+    }
+
+    fun setGbcColorCorrection(enabled: Boolean) {
+        setOption("gbc_color_correction", if (enabled) "enabled" else "disabled")
+    }
+
+    fun setGbPalette(mode: String) {
+        setOption("gb_palette", mode)
+    }
+
+    fun setLcdGhosting(enabled: Boolean) {
+        setOption("lcd_ghosting", if (enabled) "enabled" else "disabled")
+    }
+
+    fun setAudioFiltering(enabled: Boolean) {
+        setOption("audio_filtering", if (enabled) "enabled" else "disabled")
+    }
+
     @Volatile
     var isMuted: Boolean = false
         set(value) {

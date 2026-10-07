@@ -28,6 +28,7 @@ public sealed class ServiceRegistrator : IPluginServiceRegistrator
         serviceCollection.AddSingleton<IOmbiUserSessionStore, FileOmbiUserSessionStore>();
         serviceCollection.AddSingleton<IGamesService, GamesService>();
         serviceCollection.AddSingleton<IGameSavesService, GameSavesService>();
+        serviceCollection.AddSingleton<IGameLinkService, InMemoryGameLinkService>();
         serviceCollection.AddSingleton<Pokemon.IPokemonProviderFactory, Pokemon.PokemonProviderFactory>();
         serviceCollection.AddSingleton<Pokemon.IPokemonGameDetector, Pokemon.PokemonGameDetector>();
         serviceCollection.AddSingleton<Pokemon.IPokemonVaultStore, Pokemon.FilePokemonVaultStore>();

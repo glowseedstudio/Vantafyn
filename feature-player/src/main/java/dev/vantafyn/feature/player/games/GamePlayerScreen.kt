@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -55,6 +56,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.key
+import dev.vantafyn.core.emulator.net.LinkSessionManager
+import dev.vantafyn.core.emulator.net.ActiveLinkSession
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -180,12 +183,12 @@ fun GamePlayerScreen(
     val isNativeMode = remember(game.systemId, game.core) {
         val s = game.systemId.lowercase().trim()
         val c = game.core.lowercase().trim()
-        s in setOf("nds", "ds", "gba") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba")
+        s in setOf("nds", "ds", "gba", "gb", "gbc") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") || c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy")
     }
     val isHandheld = remember(game.systemId, game.core) {
         val s = game.systemId.lowercase().trim()
         val c = game.core.lowercase().trim()
-        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") || c.contains("gambatte")
+        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") || c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy")
     }
 
     val initialFilter = remember(isHandheld) {
@@ -214,6 +217,11 @@ fun GamePlayerScreen(
     var videoFilter by remember { mutableStateOf(initialFilter) }
     var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
     var showTouchControls by remember { mutableStateOf(!hasPhysicalGamepad) }
+    var gbaColorCorrection by remember { mutableStateOf(prefs.getBoolean("gba_color_correction", true)) }
+    var gbaAudioFiltering by remember { mutableStateOf(prefs.getBoolean("gba_audio_filtering", true)) }
+    var gbcColorCorrection by remember { mutableStateOf(prefs.getBoolean("gbc_color_correction", true)) }
+    var gbPalette by remember { mutableStateOf(prefs.getString("gb_palette_${game.id}", "colorized") ?: "colorized") }
+    var lcdGhosting by remember { mutableStateOf(prefs.getBoolean("lcd_ghosting", false)) }
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     val defaultNdsLayout = if (isLandscape) NdsScreenLayout.LeftRight else NdsScreenLayout.TopBottom
@@ -239,6 +247,16 @@ fun GamePlayerScreen(
     // Release the screen-on lock while the pause HUD (or crash screen) is up so the panel can sleep.
     LaunchedEffect(isPaused, activity) {
         activity?.window?.decorView?.keepScreenOn = !isPaused
+    }
+
+    val linkManager = remember { dev.vantafyn.core.emulator.net.LinkSessionManager.getInstance(context) }
+    val activeLinkSession by linkManager.activeSession.collectAsState()
+    LaunchedEffect(activeLinkSession, nativeEngine) {
+        val eng = nativeEngine
+        val ses = activeLinkSession
+        if (eng != null && ses != null) {
+            linkManager.configureEngineForLink(eng, ses)
+        }
     }
 
     // Battery: freeze the emulator whenever the app leaves the foreground
@@ -319,9 +337,44 @@ fun GamePlayerScreen(
         }
     }
 
-    // Sync audio mute to WebView
-    LaunchedEffect(isMuted, webViewInstance) {
-        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setMute($isMuted);", null)
+    // Sync audio mute to WebView or Native Engine
+    LaunchedEffect(isMuted, webViewInstance, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.isMuted = isMuted
+        } else {
+            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setMute($isMuted);", null)
+        }
+    }
+
+    // Sync GBA enhancements (color correction & audio anti-aliasing) to native core
+    LaunchedEffect(gbaColorCorrection, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.setColorCorrection(gbaColorCorrection)
+        }
+    }
+
+    LaunchedEffect(gbaAudioFiltering, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.setAudioFiltering(gbaAudioFiltering)
+        }
+    }
+
+    LaunchedEffect(gbcColorCorrection, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.setGbcColorCorrection(gbcColorCorrection)
+        }
+    }
+
+    LaunchedEffect(gbPalette, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.setGbPalette(gbPalette)
+        }
+    }
+
+    LaunchedEffect(lcdGhosting, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.setLcdGhosting(lcdGhosting)
+        }
     }
 
     // Intercept hardware Back press to flush saves and toggle Pause HUD
@@ -388,7 +441,26 @@ fun GamePlayerScreen(
                 }
                 if (isNativeMode) {
                     val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
-                    val coreId = storageManager.nativeCoreManager.getCoreIdForSystem(game.systemId)
+                    val preferredCore = prefs.getString("selected_core_${game.id}", null)
+                    val effectiveCore = (preferredCore ?: game.core).trim()
+                    val coreId = if (effectiveCore.isNotBlank() && (effectiveCore.contains("gambatte", ignoreCase = true) ||
+                            effectiveCore.contains("tgbdual", ignoreCase = true) ||
+                            effectiveCore.contains("sameboy", ignoreCase = true) ||
+                            effectiveCore.contains("gpsp", ignoreCase = true) ||
+                            effectiveCore.contains("mgba", ignoreCase = true) ||
+                            effectiveCore.contains("melonds", ignoreCase = true))) {
+                        when {
+                            effectiveCore.contains("gambatte", ignoreCase = true) -> "gambatte"
+                            effectiveCore.contains("tgbdual", ignoreCase = true) -> "tgbdual"
+                            effectiveCore.contains("sameboy", ignoreCase = true) -> "sameboy"
+                            effectiveCore.contains("gpsp", ignoreCase = true) -> "gpsp"
+                            effectiveCore.contains("mgba", ignoreCase = true) -> "mgba"
+                            effectiveCore.contains("melonds", ignoreCase = true) -> "melonds"
+                            else -> storageManager.nativeCoreManager.getCoreIdForSystem(game.systemId)
+                        }
+                    } else {
+                        storageManager.nativeCoreManager.getCoreIdForSystem(game.systemId)
+                    }
                     statusMessage = "Loading native $coreId 64-bit core..."
                     val coreResult = storageManager.nativeCoreManager.ensureCoreInstalled(coreId) { p ->
                         downloadProgress = p
@@ -419,6 +491,23 @@ fun GamePlayerScreen(
                         if (isNdsSystem) {
                             engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
                         }
+                        engine.setColorCorrection(gbaColorCorrection)
+                        engine.setAudioFiltering(gbaAudioFiltering)
+                        engine.setGbcColorCorrection(gbcColorCorrection)
+                        engine.setGbPalette(gbPalette)
+                        engine.setLcdGhosting(lcdGhosting)
+
+                        // Configure Wireless Link Cable networking if active
+                        val linkManager = dev.vantafyn.core.emulator.net.LinkSessionManager.getInstance(context)
+                        if (linkManager.transportMode != dev.vantafyn.core.emulator.net.LinkTransportMode.OFFLINE) {
+                            val activeSession = linkManager.activeSession.value
+                            if (activeSession != null) {
+                                linkManager.configureEngineForLink(engine, activeSession)
+                            } else if (isNdsSystem) {
+                                engine.setOption("melonds_nifi", "enabled")
+                            }
+                        }
+
                         if (sramFile.exists()) {
                             engine.loadSram(sramFile)
                         }
@@ -516,6 +605,7 @@ fun GamePlayerScreen(
         val isPortraitLayout = totalHeight > (totalWidth * 1.1f) && !isTv
         val isNdsGame = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
         val isGbaGame = game.systemId.lowercase() == "gba" || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
+        val isGbGame = game.systemId.lowercase() in listOf("gb", "gbc") || game.core.contains("gambatte", ignoreCase = true) || game.core.contains("tgbdual", ignoreCase = true) || game.core.contains("sameboy", ignoreCase = true)
         val ratioFloat = if (hasSecondaryDisplay && isNdsGame) {
             4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
         } else if (isNdsGame) {
@@ -528,6 +618,12 @@ fun GamePlayerScreen(
             when (aspectRatio) {
                 GameAspectRatio.Standard -> 3f / 2f // Authentic 240x160 GBA (1.5:1)
                 GameAspectRatio.Widescreen -> 16f / 9f
+                GameAspectRatio.Square -> 1f
+            }
+        } else if (isGbGame) {
+            when (aspectRatio) {
+                GameAspectRatio.Standard -> 10f / 9f // Authentic 160x144 Game Boy (1.11:1)
+                GameAspectRatio.Widescreen -> 4f / 3f // Classic CRT / standard full screen
                 GameAspectRatio.Square -> 1f
             }
         } else {
@@ -1048,6 +1144,40 @@ fun GamePlayerScreen(
             },
             isSyncingSave = isSyncingSave,
             syncSaveSuccess = syncSaveSuccess,
+            gbaColorCorrection = gbaColorCorrection,
+            onToggleGbaColorCorrection = {
+                val next = !gbaColorCorrection
+                gbaColorCorrection = next
+                prefs.edit().putBoolean("gba_color_correction", next).apply()
+            },
+            gbaAudioFiltering = gbaAudioFiltering,
+            onToggleGbaAudioFiltering = {
+                val next = !gbaAudioFiltering
+                gbaAudioFiltering = next
+                prefs.edit().putBoolean("gba_audio_filtering", next).apply()
+            },
+            gbcColorCorrection = gbcColorCorrection,
+            onToggleGbcColorCorrection = {
+                val next = !gbcColorCorrection
+                gbcColorCorrection = next
+                prefs.edit().putBoolean("gbc_color_correction", next).apply()
+            },
+            gbPalette = gbPalette,
+            onCycleGbPalette = {
+                val next = when (gbPalette) {
+                    "colorized" -> "dmg"
+                    "dmg" -> "pocket"
+                    else -> "colorized"
+                }
+                gbPalette = next
+                prefs.edit().putString("gb_palette_${game.id}", next).apply()
+            },
+            lcdGhosting = lcdGhosting,
+            onToggleLcdGhosting = {
+                val next = !lcdGhosting
+                lcdGhosting = next
+                prefs.edit().putBoolean("lcd_ghosting", next).apply()
+            },
             onResume = {
                 isPaused = false
                 if (isNativeMode) {
@@ -1173,6 +1303,11 @@ fun GamePlayerScreen(
                 }
                 nativeEngine?.destroy()
                 nativeEngine = null
+                try {
+                    dev.vantafyn.core.emulator.net.LinkSessionManager.getInstance(context).disconnect()
+                } catch (e: Exception) {
+                    android.util.Log.w("GamePlayerScreen", "Error disconnecting link: ${e.message}")
+                }
             }
             val wv = webViewInstance
             webViewInstance = null
