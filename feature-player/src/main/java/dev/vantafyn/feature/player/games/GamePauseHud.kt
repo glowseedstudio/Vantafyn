@@ -212,7 +212,7 @@ fun GamePauseHud(
                         )
 
                         // Speed & Screen Layout / Aspect Ratio Row
-                        val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || isNativeMode
+                        val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth(),

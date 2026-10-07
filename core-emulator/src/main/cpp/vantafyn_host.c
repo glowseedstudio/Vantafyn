@@ -282,6 +282,10 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "Touch";
                 return true;
             }
+            if (strcmp(var->key, "gpsp_bios") == 0) {
+                var->value = "auto";
+                return true;
+            }
             return false;
         }
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE: {
@@ -338,6 +342,20 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 uint16_t pixel = line[x];
                 uint32_t r = ((pixel >> 11) & 0x1F) * 255 / 31;
                 uint32_t g = ((pixel >> 5) & 0x3F) * 255 / 63;
+                uint32_t b = (pixel & 0x1F) * 255 / 31;
+                dst_line[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
+            }
+        }
+    } else if (s->pixel_format == RETRO_PIXEL_FORMAT_0RGB1555) {
+        const uint16_t *src = (const uint16_t *)data;
+        size_t src_stride = pitch / sizeof(uint16_t);
+        for (unsigned y = 0; y < height; y++) {
+            const uint16_t *line = src + y * src_stride;
+            uint32_t *dst_line = s->frame_buffer + y * width;
+            for (unsigned x = 0; x < width; x++) {
+                uint16_t pixel = line[x];
+                uint32_t r = ((pixel >> 10) & 0x1F) * 255 / 31;
+                uint32_t g = ((pixel >> 5) & 0x1F) * 255 / 31;
                 uint32_t b = (pixel & 0x1F) * 255 / 31;
                 dst_line[x] = (0xFF << 24) | (b << 16) | (g << 8) | r;
             }

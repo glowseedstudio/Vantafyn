@@ -180,12 +180,12 @@ fun GamePlayerScreen(
     val isNativeMode = remember(game.systemId, game.core) {
         val s = game.systemId.lowercase().trim()
         val c = game.core.lowercase().trim()
-        s == "nds" || s == "ds" || c.contains("melonds") || c.contains("desmume")
+        s in setOf("nds", "ds", "gba") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba")
     }
     val isHandheld = remember(game.systemId, game.core) {
         val s = game.systemId.lowercase().trim()
         val c = game.core.lowercase().trim()
-        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp") || c.contains("melonds") || c.contains("desmume") || c.contains("mgba") || c.contains("gambatte")
+        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") || c.contains("gambatte")
     }
 
     val initialFilter = remember(isHandheld) {
@@ -387,8 +387,9 @@ fun GamePlayerScreen(
                     android.util.Log.i("GamePlayerScreen", "No existing SRAM found for ${game.id}, starting clean.")
                 }
                 if (isNativeMode) {
-                    statusMessage = "Loading native melonDS 64-bit core..."
+                    val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
                     val coreId = storageManager.nativeCoreManager.getCoreIdForSystem(game.systemId)
+                    statusMessage = "Loading native $coreId 64-bit core..."
                     val coreResult = storageManager.nativeCoreManager.ensureCoreInstalled(coreId) { p ->
                         downloadProgress = p
                         statusMessage = "Downloading native core: ${(p * 100).toInt()}%"
@@ -415,7 +416,9 @@ fun GamePlayerScreen(
                     }
 
                     if (av != null) {
-                        engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                        if (isNdsSystem) {
+                            engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                        }
                         if (sramFile.exists()) {
                             engine.loadSram(sramFile)
                         }
@@ -511,13 +514,21 @@ fun GamePlayerScreen(
         val totalWidth = maxWidth
         val totalHeight = maxHeight
         val isPortraitLayout = totalHeight > (totalWidth * 1.1f) && !isTv
-        val ratioFloat = if (hasSecondaryDisplay) {
+        val isNdsGame = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
+        val isGbaGame = game.systemId.lowercase() == "gba" || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
+        val ratioFloat = if (hasSecondaryDisplay && isNdsGame) {
             4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
-        } else if (isNativeMode || game.systemId.lowercase() in listOf("nds", "ds")) {
+        } else if (isNdsGame) {
             when (ndsScreenLayout) {
                 NdsScreenLayout.LeftRight -> 512f / 192f // 8:3 = ~2.67 widescreen side-by-side
                 NdsScreenLayout.TopBottom -> 256f / 384f // 2:3 = ~0.67 vertical stack
                 NdsScreenLayout.TopOnly, NdsScreenLayout.BottomOnly -> 256f / 192f // 4:3 = 1.33 single screen
+            }
+        } else if (isGbaGame) {
+            when (aspectRatio) {
+                GameAspectRatio.Standard -> 3f / 2f // Authentic 240x160 GBA (1.5:1)
+                GameAspectRatio.Widescreen -> 16f / 9f
+                GameAspectRatio.Square -> 1f
             }
         } else {
             when (aspectRatio) {
@@ -563,7 +574,7 @@ fun GamePlayerScreen(
                     NativeEmulatorSurface(
                         engine = nativeEngine!!,
                         modifier = Modifier.fillMaxSize(),
-                        isDualScreen = !hasSecondaryDisplay,
+                        isDualScreen = !hasSecondaryDisplay && isNdsGame,
                         layout = if (hasSecondaryDisplay) {
                             if (swapDualScreens) NdsScreenLayout.BottomOnly else NdsScreenLayout.TopOnly
                         } else ndsScreenLayout,

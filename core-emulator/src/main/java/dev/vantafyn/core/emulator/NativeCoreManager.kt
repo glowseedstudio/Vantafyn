@@ -23,7 +23,7 @@ class NativeCoreManager(private val context: Context) {
         // Map system identifier to Libretro core name
         private val SYSTEM_TO_CORE = mapOf(
             "nds" to "melonds",
-            "gba" to "mgba",
+            "gba" to "gpsp",
             "gb" to "gambatte",
             "gbc" to "gambatte",
             "snes" to "snes9x",

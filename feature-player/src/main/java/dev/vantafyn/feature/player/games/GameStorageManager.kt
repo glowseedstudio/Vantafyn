@@ -154,9 +154,13 @@ class GameStorageManager(
                 android.util.Log.w("GameStorageManager", "Could not pre-cache emulator asset $relPath: ${e.message}")
             }
         }
-        // Pre-cache native core if this is a Nintendo DS or supported native system
+        // Pre-cache native core if this is a Nintendo DS, Game Boy Advance, or supported native system
         val nativeCoreId = nativeCoreManager.getCoreIdForSystem(systemId)
-        if (systemId.equals("nds", ignoreCase = true) || core.contains("melonds", ignoreCase = true)) {
+        if (systemId.equals("nds", ignoreCase = true) || 
+            systemId.equals("gba", ignoreCase = true) || 
+            core.contains("melonds", ignoreCase = true) || 
+            core.contains("gpsp", ignoreCase = true) ||
+            core.contains("mgba", ignoreCase = true)) {
             nativeCoreManager.ensureCoreInstalled(nativeCoreId)
         }
     }
