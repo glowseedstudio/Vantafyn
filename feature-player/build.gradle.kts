@@ -21,6 +21,7 @@ dependencies {
     implementation(project(":core-jellyfin"))
     implementation(project(":core-cast"))
     implementation(project(":core-ui"))
+    implementation(project(":core-emulator"))
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

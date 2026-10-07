@@ -73,3 +73,49 @@ fun RetroCrtOverlay(
         }
     }
 }
+
+/**
+ * Authentic handheld LCD subpixel matrix overlay.
+ * Renders subtle horizontal and vertical pixel matrix separation lines
+ * without CRT scanlines or tube curve, perfectly tailored for NDS, GBA, and Game Boy.
+ */
+@Composable
+fun RetroLcdOverlay(
+    modifier: Modifier = Modifier,
+) {
+    Canvas(
+        modifier = modifier.fillMaxSize()
+    ) {
+        val width = size.width
+        val height = size.height
+        if (width <= 0f || height <= 0f) return@Canvas
+
+        // Subtle LCD subpixel separation grid
+        val pixelSpacing = (density * 2.5f).coerceAtLeast(2.5f)
+        val gridColor = Color(0x22000000) // ~13% opacity subtle LCD dark grid lines
+
+        // Horizontal separation lines
+        var y = 0f
+        while (y < height) {
+            drawLine(
+                color = gridColor,
+                start = Offset(0f, y),
+                end = Offset(width, y),
+                strokeWidth = 1f,
+            )
+            y += pixelSpacing
+        }
+
+        // Vertical separation lines
+        var x = 0f
+        while (x < width) {
+            drawLine(
+                color = gridColor,
+                start = Offset(x, 0f),
+                end = Offset(x, height),
+                strokeWidth = 1f,
+            )
+            x += pixelSpacing
+        }
+    }
+}

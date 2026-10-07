@@ -12,6 +12,7 @@ import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import dev.vantafyn.core.emulator.NativeCoreManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,6 +22,7 @@ class GameStorageManager(
     private val context: Context,
     private val gamesRepository: JellyfinGamesRepository,
 ) {
+    val nativeCoreManager by lazy { NativeCoreManager(context) }
     companion object {
         val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private const val MAX_BATTERY_SAVE_BYTES = 32 * 1024 * 1024
@@ -151,6 +153,11 @@ class GameStorageManager(
             } catch (e: Exception) {
                 android.util.Log.w("GameStorageManager", "Could not pre-cache emulator asset $relPath: ${e.message}")
             }
+        }
+        // Pre-cache native core if this is a Nintendo DS or supported native system
+        val nativeCoreId = nativeCoreManager.getCoreIdForSystem(systemId)
+        if (systemId.equals("nds", ignoreCase = true) || core.contains("melonds", ignoreCase = true)) {
+            nativeCoreManager.ensureCoreInstalled(nativeCoreId)
         }
     }
 

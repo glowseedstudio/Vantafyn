@@ -282,6 +282,57 @@ Once running, configure the Companion Plugin in Jellyfin:
 
 ---
 
+### 🛡️ Pokémon / PK Vault — Scope & Disclaimer
+
+Vantafyn and PK Vault are independent, unofficial projects created for retro game preservation, personal save-file management, and use with games that users legally provide themselves.
+
+#### What PK Vault does
+
+PK Vault is designed exclusively to work with user-provided retro emulator save files, currently covering supported Pokémon games from the Game Boy, Game Boy Color, Game Boy Advance, and Nintendo DS generations.
+
+Its features are intended to let users:
+
+- Read and manage their own emulator save files.
+- Back up and restore those saves.
+- View Pokédex, trainer, badge, Pokémon, and related save data.
+- Transfer compatible Pokémon between supported retro emulator save files.
+- Restore or enable event flags contained within supported legacy save formats.
+- Preserve Pokémon and progress across the user's own emulated games.
+
+PK Vault operates as a self-hosted retro save-management system. It is not intended to interact with Nintendo's current Pokémon ecosystem.
+
+#### What PK Vault does NOT do
+
+PK Vault does not:
+
+- Connect to or modify Pokémon HOME.
+- Connect to Nintendo Account or Nintendo Switch Online services.
+- Modify Nintendo Switch Pokémon games or their save data.
+- Provide a pathway for modified Pokémon or emulator save data into current official Pokémon games or services.
+- Provide Nintendo Switch emulation or Switch circumvention functionality.
+- Supply Pokémon game ROMs, firmware, encryption keys, BIOS files, or other copyrighted game files.
+- Circumvent Nintendo's current online services, authentication systems, DRM, or other technological protection measures.
+
+Users are responsible for supplying and managing their own legally obtained game and save data.
+
+> **Later-generation save import**: PK Vault may read user-provided save files from supported later-generation games, including Nintendo 3DS and Nintendo Switch titles, solely for importing Pokémon and Pokédex information into the user's self-hosted PK Vault. These imports are read-only and come from emulators. PK Vault does not modify, patch, write back to, or export Pokémon into those save files, and imported data cannot be transferred from PK Vault into Nintendo's current games, hardware, Pokémon HOME, accounts, or online services.
+
+#### Assets and third-party data
+
+Vantafyn does not bundle Pokémon game ROMs with the application. Where supported, metadata and other externally sourced resources may be retrieved at runtime from third-party services and remain subject to their respective licences, terms, and intellectual-property rights.
+
+#### Unofficial project
+
+Vantafyn and PK Vault are unofficial, fan-made projects.
+
+They are not affiliated with, authorised by, endorsed by, sponsored by, or associated with Nintendo, The Pokémon Company, Game Freak, Creatures Inc., or their affiliates.
+
+Pokémon, Pokémon character names, Nintendo, Nintendo Switch, Pokémon HOME, and related names, characters, artwork, trademarks, and intellectual property are the property of their respective owners.
+
+The purpose of PK Vault is limited to personal management and preservation of user-provided retro emulator save data. It is deliberately designed without integration into Nintendo's current Pokémon games, hardware, accounts, or online services.
+
+---
+
 ## 🔌 The Vantafyn Companion Plugin: The Central Ecosystem Bridge
 
 Standard Jellyfin servers are built purely for video and music streaming. To power an all-in-one entertainment OS with retro gaming, cloud saves, Pokémon storage, synchronized settings, and private push notifications, Vantafyn utilizes the **Vantafyn Companion Plugin** as its central server-side bridge.

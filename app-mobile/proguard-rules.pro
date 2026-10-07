@@ -128,3 +128,11 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 -dontwarn com.google.protobuf.**
+
+# ----------------------------------------------------------------------------------
+# Native Emulator Engine & JNI
+# ----------------------------------------------------------------------------------
+-keep class dev.vantafyn.core.emulator.** { *; }
+-keepclasseswithmembernames class dev.vantafyn.core.emulator.** {
+    native <methods>;
+}

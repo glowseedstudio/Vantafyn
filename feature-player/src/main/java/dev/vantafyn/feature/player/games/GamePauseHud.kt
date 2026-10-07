@@ -17,13 +17,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
+import androidx.compose.material.icons.automirrored.rounded.VolumeMute
+import androidx.compose.material.icons.automirrored.rounded.VolumeUp
+import androidx.compose.material.icons.rounded.AspectRatio
+import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.Dashboard
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.SwapVert
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Tv
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -32,17 +42,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.material.icons.rounded.Tv
-import androidx.compose.material.icons.automirrored.rounded.VolumeMute
-import androidx.compose.material.icons.automirrored.rounded.VolumeUp
-import androidx.compose.material.icons.rounded.TouchApp
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.vantafyn.core.emulator.NdsScreenLayout
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.ui.VantafynColors
 
@@ -54,8 +59,25 @@ enum class GameAspectRatio(val label: String, val cssValue: String) {
 
 enum class GameVideoFilter(val label: String, val id: String) {
     Crisp("Crisp Pixels", "crisp"),
+    LcdGrid("LCD Grid", "lcd"),
     Crt("CRT Scanlines", "crt"),
-    Smooth("Smooth Filter", "smooth"),
+    Smooth("Smooth Filter", "smooth");
+
+    fun nextForSystem(isHandheld: Boolean): GameVideoFilter {
+        return if (isHandheld) {
+            when (this) {
+                Crisp -> LcdGrid
+                LcdGrid -> Smooth
+                Smooth, Crt -> Crisp
+            }
+        } else {
+            when (this) {
+                Crisp -> Crt
+                Crt -> Smooth
+                Smooth, LcdGrid -> Crisp
+            }
+        }
+    }
 }
 
 @Composable
@@ -71,6 +93,16 @@ fun GamePauseHud(
     showTouchControls: Boolean,
     onToggleTouchControls: () -> Unit,
     isTv: Boolean,
+    isNativeMode: Boolean = false,
+    isHandheld: Boolean = false,
+    ndsLayout: NdsScreenLayout = NdsScreenLayout.TopBottom,
+    onCycleNdsLayout: () -> Unit = {},
+    hasSecondaryDisplay: Boolean = false,
+    swapDualScreens: Boolean = false,
+    onToggleSwapDualScreens: () -> Unit = {},
+    onSyncCloudSave: () -> Unit = {},
+    isSyncingSave: Boolean = false,
+    syncSaveSuccess: Boolean = false,
     onResume: () -> Unit,
     onToggleSpeed: () -> Unit,
     onCycleAspectRatio: () -> Unit,
@@ -111,7 +143,7 @@ fun GamePauseHud(
                     verticalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.verticalScroll(rememberScrollState()),
                 ) {
-                    // Header: Title & System
+                    // Header: Title, System & Mode Badge
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(4.dp),
@@ -133,16 +165,30 @@ fun GamePauseHud(
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                             )
-                            if (game.region != null) {
+                            if (hasSecondaryDisplay) {
                                 Text(
-                                    text = "• ${game.region}",
+                                    text = "• Dual Physical Displays",
+                                    color = Color(0xFF30D158),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            } else if (isNativeMode) {
+                                Text(
+                                    text = "• 64-Bit Native Core",
+                                    color = Color(0xFF64D2FF),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            } else if (game.core.isNotEmpty()) {
+                                Text(
+                                    text = "• ${game.core}",
                                     color = VantafynColors.Muted,
                                     fontSize = 12.sp,
                                 )
                             }
-                            if (game.core.isNotEmpty()) {
+                            if (game.region != null) {
                                 Text(
-                                    text = "• ${game.core}",
+                                    text = "• ${game.region}",
                                     color = VantafynColors.Muted,
                                     fontSize = 12.sp,
                                 )
@@ -165,7 +211,8 @@ fun GamePauseHud(
                             onClick = onResume,
                         )
 
-                        // Speed & Aspect Ratio Row
+                        // Speed & Screen Layout / Aspect Ratio Row
+                        val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || isNativeMode
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.fillMaxWidth(),
@@ -176,12 +223,28 @@ fun GamePauseHud(
                                 onClick = onToggleSpeed,
                                 modifier = Modifier.weight(1f),
                             )
-                            HudMenuButton(
-                                label = aspectRatio.label,
-                                icon = Icons.Rounded.AspectRatio,
-                                onClick = onCycleAspectRatio,
-                                modifier = Modifier.weight(1f),
-                            )
+                            if (hasSecondaryDisplay) {
+                                HudMenuButton(
+                                    label = if (swapDualScreens) "Attached: Top" else "Attached: Touch",
+                                    icon = Icons.Rounded.SwapVert,
+                                    onClick = onToggleSwapDualScreens,
+                                    modifier = Modifier.weight(1.3f),
+                                )
+                            } else if (isNdsSystem) {
+                                HudMenuButton(
+                                    label = ndsLayout.label,
+                                    icon = Icons.Rounded.Dashboard,
+                                    onClick = onCycleNdsLayout,
+                                    modifier = Modifier.weight(1.3f),
+                                )
+                            } else {
+                                HudMenuButton(
+                                    label = aspectRatio.label,
+                                    icon = Icons.Rounded.AspectRatio,
+                                    onClick = onCycleAspectRatio,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
 
                         // Sound & Video Filter Row
@@ -203,13 +266,35 @@ fun GamePauseHud(
                             )
                         }
 
+                        // In-game Battery Save (SRAM) Cloud Sync
+                        if (isNativeMode) {
+                            HudMenuButton(
+                                label = when {
+                                    syncSaveSuccess -> "Battery Save Synced to Cloud!"
+                                    isSyncingSave -> "Syncing Battery Save to Cloud..."
+                                    else -> "Sync Battery Save to Cloud"
+                                },
+                                icon = if (syncSaveSuccess) Icons.Rounded.CloudDone else Icons.Rounded.CloudUpload,
+                                isLoading = isSyncingSave,
+                                onClick = onSyncCloudSave,
+                            )
+                        }
+
                         // Touch Controls Toggle (mobile/tablet only)
                         if (!isTv) {
                             HudMenuButton(
-                                label = if (showTouchControls) "Touch Controls: Visible" else "Touch Controls: Hidden",
+                                label = if (showTouchControls) "Virtual Pad: Visible" else "Virtual Pad: Hidden",
                                 icon = Icons.Rounded.TouchApp,
                                 onClick = onToggleTouchControls,
                             )
+                            if (isNdsSystem) {
+                                Text(
+                                    text = "Stylus touch is active directly on the lower DS screen",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 11.sp,
+                                    modifier = Modifier.padding(horizontal = 4.dp),
+                                )
+                            }
                         }
 
                         // Reset Game
@@ -241,9 +326,11 @@ private fun HudMenuButton(
     modifier: Modifier = Modifier,
     primary: Boolean = false,
     danger: Boolean = false,
+    enabled: Boolean = true,
     isLoading: Boolean = false,
 ) {
     val bgModifier = when {
+        !enabled -> Modifier.background(Color(0x11FFFFFF), RoundedCornerShape(14.dp))
         primary -> Modifier.background(
             Brush.horizontalGradient(listOf(VantafynColors.Primary, VantafynColors.Secondary)),
             RoundedCornerShape(14.dp)
@@ -253,6 +340,7 @@ private fun HudMenuButton(
     }
 
     val contentColor = when {
+        !enabled -> Color(0x55FFFFFF)
         primary -> Color.Black
         danger -> Color(0xFFFF5555)
         else -> Color.White
@@ -264,7 +352,7 @@ private fun HudMenuButton(
             .height(46.dp)
             .clip(RoundedCornerShape(14.dp))
             .then(bgModifier)
-            .clickable(enabled = !isLoading, onClick = onClick)
+            .clickable(enabled = enabled && !isLoading, onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
@@ -290,7 +378,8 @@ private fun HudMenuButton(
                 text = label,
                 color = contentColor,
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 14.sp,
+                fontSize = 13.sp,
+                maxLines = 1,
             )
         }
     }

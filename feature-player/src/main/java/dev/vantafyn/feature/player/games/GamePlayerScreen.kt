@@ -61,6 +61,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -87,6 +89,9 @@ import java.net.URL
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import dev.vantafyn.core.emulator.NativeEmulatorEngine
+import dev.vantafyn.core.emulator.NativeEmulatorSurface
+import dev.vantafyn.core.emulator.NdsScreenLayout
 import kotlinx.coroutines.withContext
 
 @SuppressLint("SetJavaScriptEnabled")
@@ -171,10 +176,25 @@ fun GamePlayerScreen(
             else -> GameAspectRatio.Standard
         }
     }
-    val initialFilter = remember {
-        when (prefs.getString("video_filter", "crisp")) {
-            "crt" -> GameVideoFilter.Crt
-            "smooth" -> GameVideoFilter.Smooth
+    // Native Libretro Core Engine state & handheld detection
+    val isNativeMode = remember(game.systemId, game.core) {
+        val s = game.systemId.lowercase().trim()
+        val c = game.core.lowercase().trim()
+        s == "nds" || s == "ds" || c.contains("melonds") || c.contains("desmume")
+    }
+    val isHandheld = remember(game.systemId, game.core) {
+        val s = game.systemId.lowercase().trim()
+        val c = game.core.lowercase().trim()
+        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp") || c.contains("melonds") || c.contains("desmume") || c.contains("mgba") || c.contains("gambatte")
+    }
+
+    val initialFilter = remember(isHandheld) {
+        val saved = prefs.getString("video_filter", "crisp")
+        when {
+            saved == "crt" && isHandheld -> GameVideoFilter.Crisp // Enforce no CRT scanlines for NDS & handhelds
+            saved == "crt" -> GameVideoFilter.Crt
+            saved == "lcd" -> GameVideoFilter.LcdGrid
+            saved == "smooth" -> GameVideoFilter.Smooth
             else -> GameVideoFilter.Crisp
         }
     }
@@ -193,6 +213,13 @@ fun GamePlayerScreen(
     var isMuted by remember { mutableStateOf(false) }
     var videoFilter by remember { mutableStateOf(initialFilter) }
     var showTouchControls by remember { mutableStateOf(true) }
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val defaultNdsLayout = if (isLandscape) NdsScreenLayout.LeftRight else NdsScreenLayout.TopBottom
+    var ndsScreenLayout by remember { mutableStateOf(defaultNdsLayout) }
+    var swapDualScreens by remember { mutableStateOf(false) }
+    var isSyncingSave by remember { mutableStateOf(false) }
+    var syncSaveSuccess by remember { mutableStateOf(false) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var webRendererCrashed by remember { mutableStateOf(false) }
     var webViewReloadKey by remember { mutableIntStateOf(0) }
@@ -200,31 +227,50 @@ fun GamePlayerScreen(
     var initialSramBase64 by remember { mutableStateOf<String?>(null) }
     var pendingConflict by remember { mutableStateOf<SaveSyncInfo?>(null) }
     var pendingDownloadedRom by remember { mutableStateOf<File?>(null) }
+    var nativeEngine by remember { mutableStateOf<NativeEmulatorEngine?>(null) }
+    var nativeCoreLoaded by remember { mutableStateOf(false) }
+
+    val hasSecondaryDisplay = rememberNdsDualDisplayManager(
+        engine = nativeEngine,
+        isNativeMode = isNativeMode,
+        swapDualScreens = swapDualScreens,
+    )
 
     // Release the screen-on lock while the pause HUD (or crash screen) is up so the panel can sleep.
     LaunchedEffect(isPaused, activity) {
         activity?.window?.decorView?.keepScreenOn = !isPaused
     }
 
-    // Battery: freeze the emulator + WebView timers whenever the app leaves the foreground so the
-    // main loop, save flushes and DOM cleanup keep-alive all stop instead of running in the background.
+    // Battery: freeze the emulator whenever the app leaves the foreground
     val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, webViewInstance) {
+    DisposableEffect(lifecycleOwner, webViewInstance, nativeEngine) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_STOP -> {
-                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
-                    if (!isPaused) {
-                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                    if (isNativeMode) {
+                        val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                        nativeEngine?.saveSram(sramFile)
+                        nativeEngine?.pause()
+                    } else {
+                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
+                        if (!isPaused) {
+                            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                        }
+                        webViewInstance?.pauseTimers()
+                        webViewInstance?.onPause()
                     }
-                    webViewInstance?.pauseTimers()
-                    webViewInstance?.onPause()
                 }
                 Lifecycle.Event.ON_START -> {
-                    webViewInstance?.resumeTimers()
-                    webViewInstance?.onResume()
-                    if (!isPaused) {
-                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                    if (isNativeMode) {
+                        if (!isPaused) {
+                            nativeEngine?.resume()
+                        }
+                    } else {
+                        webViewInstance?.resumeTimers()
+                        webViewInstance?.onResume()
+                        if (!isPaused) {
+                            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                        }
                     }
                 }
                 else -> Unit
@@ -264,9 +310,13 @@ fun GamePlayerScreen(
         webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVideoFilter('${videoFilter.id}');", null)
     }
 
-    // Sync speed changes to WebView
-    LaunchedEffect(fastForwardSpeed, webViewInstance) {
-        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setSpeed($fastForwardSpeed);", null)
+    // Sync speed changes to WebView or Native Engine
+    LaunchedEffect(fastForwardSpeed, webViewInstance, nativeEngine) {
+        if (isNativeMode) {
+            nativeEngine?.setFastForward(fastForwardSpeed.toInt())
+        } else {
+            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setSpeed($fastForwardSpeed);", null)
+        }
     }
 
     // Sync audio mute to WebView
@@ -277,11 +327,21 @@ fun GamePlayerScreen(
     // Intercept hardware Back press to flush saves and toggle Pause HUD
     BackHandler(enabled = true) {
         if (!isPaused) {
-            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves(); window.VantafynEmulator?.pause();", null)
+            if (isNativeMode) {
+                val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                nativeEngine?.saveSram(sramFile)
+                nativeEngine?.pause()
+            } else {
+                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves(); window.VantafynEmulator?.pause();", null)
+            }
             isPaused = true
         } else {
             isPaused = false
-            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+            if (isNativeMode) {
+                nativeEngine?.resume()
+            } else {
+                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+            }
         }
     }
 
@@ -326,6 +386,45 @@ fun GamePlayerScreen(
                     initialSramBase64 = null
                     android.util.Log.i("GamePlayerScreen", "No existing SRAM found for ${game.id}, starting clean.")
                 }
+                if (isNativeMode) {
+                    statusMessage = "Loading native melonDS 64-bit core..."
+                    val coreId = storageManager.nativeCoreManager.getCoreIdForSystem(game.systemId)
+                    val coreResult = storageManager.nativeCoreManager.ensureCoreInstalled(coreId) { p ->
+                        downloadProgress = p
+                        statusMessage = "Downloading native core: ${(p * 100).toInt()}%"
+                    }
+                    val coreFile = coreResult.getOrThrow()
+                    
+                    val engine = NativeEmulatorEngine(
+                        onFatalErrorCallback = { err ->
+                            android.util.Log.e("GamePlayerScreen", "Native emulator fatal error: $err")
+                        },
+                        onCoreShutdownCallback = {
+                            android.util.Log.i("GamePlayerScreen", "Native core requested shutdown")
+                        },
+                    )
+
+                    val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                    val av = engine.loadGame(
+                        corePath = coreFile,
+                        romPath = file,
+                        systemDir = storageManager.nativeCoreManager.getSystemDirectory(),
+                        saveDir = storageManager.nativeCoreManager.getSaveDirectory(),
+                    )
+
+                    if (av != null) {
+                        engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                        if (sramFile.exists()) {
+                            engine.loadSram(sramFile)
+                        }
+                        nativeEngine = engine
+                        engine.start()
+                        nativeCoreLoaded = true
+                    } else {
+                        throw IllegalStateException("Native core failed to boot game ROM.")
+                    }
+                }
+
                 romFile = file
                 statusMessage = "Starting emulation core..."
                 isDownloading = false
@@ -335,18 +434,55 @@ fun GamePlayerScreen(
         }
     }
 
+    // Bitmask for native pad input
+    var nativeInputMask by remember { mutableIntStateOf(0) }
+
     // Input Controller
     val inputController = rememberGameInputController(
         onButtonEvent = { btn, isDown ->
-            val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
-            webViewInstance?.evaluateJavascript(js, null)
+            if (isNativeMode) {
+                val bit = when (btn) {
+                    RetroButton.B -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_B
+                    RetroButton.Y -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_Y
+                    RetroButton.Select -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_SELECT
+                    RetroButton.Start -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_START
+                    RetroButton.Up -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_UP
+                    RetroButton.Down -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_DOWN
+                    RetroButton.Left -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_LEFT
+                    RetroButton.Right -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_RIGHT
+                    RetroButton.A -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_A
+                    RetroButton.X -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_X
+                    RetroButton.L1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L
+                    RetroButton.R1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R
+                    RetroButton.L2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L2
+                    RetroButton.R2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R2
+                    else -> -1
+                }
+                if (bit >= 0) {
+                    nativeInputMask = if (isDown) (nativeInputMask or (1 shl bit)) else (nativeInputMask and (1 shl bit).inv())
+                    nativeEngine?.setInputMask(0, nativeInputMask)
+                }
+            } else {
+                val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
+                webViewInstance?.evaluateJavascript(js, null)
+            }
         },
         onMenuTriggered = {
             isPaused = !isPaused
             if (isPaused) {
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                if (isNativeMode) {
+                    val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                    nativeEngine?.saveSram(sramFile)
+                    nativeEngine?.pause()
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                }
             } else {
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                if (isNativeMode) {
+                    nativeEngine?.resume()
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                }
             }
         },
         onAxisEvent = { axis, value ->
@@ -373,10 +509,20 @@ fun GamePlayerScreen(
         val totalWidth = maxWidth
         val totalHeight = maxHeight
         val isPortraitLayout = totalHeight > (totalWidth * 1.1f) && !isTv
-        val ratioFloat = when (aspectRatio) {
-            GameAspectRatio.Standard -> 4f / 3f
-            GameAspectRatio.Widescreen -> 16f / 9f
-            GameAspectRatio.Square -> 1f
+        val ratioFloat = if (hasSecondaryDisplay) {
+            4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
+        } else if (isNativeMode || game.systemId.lowercase() in listOf("nds", "ds")) {
+            when (ndsScreenLayout) {
+                NdsScreenLayout.LeftRight -> 512f / 192f // 8:3 = ~2.67 widescreen side-by-side
+                NdsScreenLayout.TopBottom -> 256f / 384f // 2:3 = ~0.67 vertical stack
+                NdsScreenLayout.TopOnly, NdsScreenLayout.BottomOnly -> 256f / 192f // 4:3 = 1.33 single screen
+            }
+        } else {
+            when (aspectRatio) {
+                GameAspectRatio.Standard -> 4f / 3f
+                GameAspectRatio.Widescreen -> 16f / 9f
+                GameAspectRatio.Square -> 1f
+            }
         }
         val gameHeight = if (isPortraitLayout) (totalWidth / ratioFloat).coerceAtMost(totalHeight * 0.65f) else totalHeight
         val controlsHeight = if (isPortraitLayout) (totalHeight - gameHeight).coerceAtLeast(0.dp) else totalHeight
@@ -389,14 +535,21 @@ fun GamePlayerScreen(
                     .fillMaxWidth()
                     .height(gameHeight)
             } else {
-                when (aspectRatio) {
-                    GameAspectRatio.Widescreen -> Modifier
+                val screenAspect = if (totalHeight.value > 0f) (totalWidth.value / totalHeight.value) else 1f
+                if (aspectRatio == GameAspectRatio.Widescreen && !isNativeMode) {
+                    Modifier
                         .align(Alignment.Center)
                         .fillMaxSize()
-                    GameAspectRatio.Standard, GameAspectRatio.Square -> Modifier
+                } else if (ratioFloat > screenAspect) {
+                    Modifier
+                        .align(Alignment.Center)
+                        .fillMaxWidth()
+                        .aspectRatio(ratioFloat)
+                } else {
+                    Modifier
                         .align(Alignment.Center)
                         .fillMaxHeight()
-                        .aspectRatio(ratioFloat, matchHeightConstraintsFirst = true)
+                        .aspectRatio(ratioFloat)
                 }
             }
 
@@ -404,9 +557,19 @@ fun GamePlayerScreen(
                 modifier = gameContainerModifier,
                 contentAlignment = Alignment.Center,
             ) {
-                key(webViewReloadKey) {
-                    AndroidView(
-                        factory = { ctx ->
+                if (isNativeMode && nativeEngine != null) {
+                    NativeEmulatorSurface(
+                        engine = nativeEngine!!,
+                        modifier = Modifier.fillMaxSize(),
+                        isDualScreen = !hasSecondaryDisplay,
+                        layout = if (hasSecondaryDisplay) {
+                            if (swapDualScreens) NdsScreenLayout.BottomOnly else NdsScreenLayout.TopOnly
+                        } else ndsScreenLayout,
+                    )
+                } else {
+                    key(webViewReloadKey) {
+                        AndroidView(
+                            factory = { ctx ->
                             WebView(ctx).apply {
                                 layoutParams = ViewGroup.LayoutParams(
                                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -621,10 +784,13 @@ fun GamePlayerScreen(
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
+            }
 
-                // High-fidelity CRT scanline & curved tube vignette overlay
-                if (videoFilter == GameVideoFilter.Crt) {
+                // Video Filter Overlays: Authentic CRT Scanlines (Home Consoles) or LCD Grid (Handhelds)
+                if (videoFilter == GameVideoFilter.Crt && !isHandheld) {
                     RetroCrtOverlay(modifier = Modifier.matchParentSize())
+                } else if (videoFilter == GameVideoFilter.LcdGrid && isHandheld) {
+                    RetroLcdOverlay(modifier = Modifier.matchParentSize())
                 }
             }
         }
@@ -761,8 +927,32 @@ fun GamePlayerScreen(
                     core = game.core,
                     isPortrait = isPortraitLayout,
                     onButtonPress = { btn, isDown ->
-                        val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
-                        webViewInstance?.evaluateJavascript(js, null)
+                        if (isNativeMode) {
+                            val bit = when (btn) {
+                                RetroButton.B -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_B
+                                RetroButton.Y -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_Y
+                                RetroButton.Select -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_SELECT
+                                RetroButton.Start -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_START
+                                RetroButton.Up -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_UP
+                                RetroButton.Down -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_DOWN
+                                RetroButton.Left -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_LEFT
+                                RetroButton.Right -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_RIGHT
+                                RetroButton.A -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_A
+                                RetroButton.X -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_X
+                                RetroButton.L1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L
+                                RetroButton.R1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R
+                                RetroButton.L2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L2
+                                RetroButton.R2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R2
+                                else -> -1
+                            }
+                            if (bit >= 0) {
+                                nativeInputMask = if (isDown) (nativeInputMask or (1 shl bit)) else (nativeInputMask and (1 shl bit).inv())
+                                nativeEngine?.setInputMask(0, nativeInputMask)
+                            }
+                        } else {
+                            val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
+                            webViewInstance?.evaluateJavascript(js, null)
+                        }
                     },
                     onAxisChange = { axis, value ->
                         if (lastAxisValues[axis] != value) {
@@ -773,7 +963,13 @@ fun GamePlayerScreen(
                     },
                     onMenuClick = {
                         isPaused = true
-                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                        if (isNativeMode) {
+                            val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                            nativeEngine?.saveSram(sramFile)
+                            nativeEngine?.pause()
+                        } else {
+                            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                        }
                     },
                 )
             }
@@ -788,29 +984,76 @@ fun GamePlayerScreen(
             isMuted = isMuted,
             onToggleMute = {
                 isMuted = !isMuted
+                if (isNativeMode) {
+                    nativeEngine?.isMuted = isMuted
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVolume(${if (isMuted) 0 else 1});", null)
+                }
             },
             videoFilter = videoFilter,
             onCycleVideoFilter = {
-                videoFilter = when (videoFilter) {
-                    GameVideoFilter.Crisp -> GameVideoFilter.Crt
-                    GameVideoFilter.Crt -> GameVideoFilter.Smooth
-                    GameVideoFilter.Smooth -> GameVideoFilter.Crisp
-                }
+                videoFilter = videoFilter.nextForSystem(isHandheld)
+                prefs.edit().putString("video_filter", videoFilter.id).apply()
             },
             showTouchControls = showTouchControls,
             onToggleTouchControls = {
                 showTouchControls = !showTouchControls
             },
             isTv = isTv,
+            isNativeMode = isNativeMode,
+            isHandheld = isHandheld,
+            ndsLayout = ndsScreenLayout,
+            onCycleNdsLayout = {
+                ndsScreenLayout = ndsScreenLayout.next()
+                if (isNativeMode) {
+                    nativeEngine?.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                }
+            },
+            hasSecondaryDisplay = hasSecondaryDisplay,
+            swapDualScreens = swapDualScreens,
+            onToggleSwapDualScreens = {
+                swapDualScreens = !swapDualScreens
+            },
+            onSyncCloudSave = {
+                if (isNativeMode) {
+                    isSyncingSave = true
+                    syncSaveSuccess = false
+                    scope.launch {
+                        val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                        nativeEngine?.saveSram(sramFile)
+                        if (sramFile.exists() && sramFile.length() > 0 && session != null) {
+                            storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true)
+                        }
+                        delay(300)
+                        isSyncingSave = false
+                        syncSaveSuccess = true
+                        delay(2500)
+                        syncSaveSuccess = false
+                    }
+                }
+            },
+            isSyncingSave = isSyncingSave,
+            syncSaveSuccess = syncSaveSuccess,
             onResume = {
                 isPaused = false
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                if (isNativeMode) {
+                    nativeEngine?.resume()
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                }
             },
             onToggleSpeed = {
                 fastForwardSpeed = when (fastForwardSpeed) {
-                    1f -> configuredFfSpeed
-                    configuredFfSpeed -> if (configuredFfSpeed < 4f) 4f else 1f
+                    1f -> 2f
+                    2f -> 3f
+                    3f -> 4f
+                    4f -> 8f
                     else -> 1f
+                }
+                if (isNativeMode) {
+                    nativeEngine?.setFastForward(fastForwardSpeed.toInt())
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setSpeed($fastForwardSpeed);", null)
                 }
             },
             onCycleAspectRatio = {
@@ -821,11 +1064,27 @@ fun GamePlayerScreen(
                 }
             },
             onReset = {
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.reset();", null)
+                if (isNativeMode) {
+                    nativeEngine?.reset()
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.reset();", null)
+                }
                 isPaused = false
             },
             onExit = {
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.destroy();", null)
+                if (isNativeMode) {
+                    val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                    nativeEngine?.saveSram(sramFile)
+                    if (sramFile.exists() && sramFile.length() > 0) {
+                        GameStorageManager.saveScope.launch {
+                            storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true)
+                        }
+                    }
+                    nativeEngine?.destroy()
+                    nativeEngine = null
+                } else {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.destroy();", null)
+                }
                 scope.launch {
                     delay(200)
                     onExit()
@@ -889,6 +1148,17 @@ fun GamePlayerScreen(
             val durationMs = System.currentTimeMillis() - startTime
             if (durationMs > 2000L) {
                 tracker.recordPlaySession(game, durationMs)
+            }
+            if (isNativeMode) {
+                val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                nativeEngine?.saveSram(sramFile)
+                if (sramFile.exists() && sramFile.length() > 0) {
+                    GameStorageManager.saveScope.launch {
+                        storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true)
+                    }
+                }
+                nativeEngine?.destroy()
+                nativeEngine = null
             }
             val wv = webViewInstance
             webViewInstance = null

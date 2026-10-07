@@ -30,6 +30,12 @@ android {
             isShrinkResources = false
         }
     }
+
+    packaging {
+        jniLibs {
+            pickFirsts += setOf("**/libc++_shared.so")
+        }
+    }
 }
 
 kotlin {
