@@ -281,43 +281,14 @@ fun PokemonVaultScreen(
                         } else null
 
                         if (saveBytes != null && saveBytes.isNotEmpty()) {
-                            val localParsed = when {
-                                dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.isGen1Save(saveBytes) -> {
-                                    dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.parse(
-                                        saveBytes = saveBytes,
-                                        gameTitle = target.game.title,
-                                        gameId = gameId,
-                                    )
-                                }
-                                dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.isGen2Save(saveBytes) -> {
-                                    dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.parse(
-                                        saveBytes = saveBytes,
-                                        gameTitle = target.game.title,
-                                        gameId = gameId,
-                                    )
-                                }
-                                dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.isGen4Save(saveBytes, target.game.title) -> {
-                                    dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(
-                                        saveBytes = saveBytes,
-                                        gameTitle = target.game.title,
-                                        gameId = gameId,
-                                    )
-                                }
-                                dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(saveBytes, target.game.title) -> {
-                                    dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(
-                                        saveBytes = saveBytes,
-                                        gameTitle = target.game.title,
-                                        gameId = gameId,
-                                    )
-                                }
-                                else -> {
-                                    dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(
-                                        saveBytes = saveBytes,
-                                        gameTitle = target.game.title,
-                                        gameId = target.game.pokemon?.pokemonGameId?.ifBlank { null } ?: gameId,
-                                    )
-                                }
-                            }
+                            val meta = target.game.pokemon
+                            val localParsed = dev.vantafyn.core.jellyfin.PokemonNativeSaveParser.parse(
+                                saveBytes = saveBytes,
+                                gameTitle = target.game.title,
+                                gameId = meta?.pokemonGameId?.ifBlank { null } ?: gameId,
+                                expectedGeneration = meta?.generation ?: 0,
+                                expectedPlatform = meta?.platform ?: "",
+                            )
                             if (localParsed != null && (localParsed.party.isNotEmpty() || localParsed.boxes.any { it.entries.isNotEmpty() } || localParsed.gymBadges.isNotEmpty())) {
                                 saveDto = localParsed.copy(
                                     gameId = gameId,
@@ -637,21 +608,13 @@ fun PokemonVaultScreen(
                 if (localSaveFile.exists() && localSaveFile.length() > 0L) {
                     val bytes = runCatching { localSaveFile.readBytes() }.getOrNull()
                     if (bytes != null && bytes.isNotEmpty()) {
-                        val parsed = when {
-                            dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.isGen1Save(bytes) ->
-                                dev.vantafyn.core.jellyfin.Gen1NativeSaveParser.parse(bytes, game.title, game.id)
-                            dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.isGen2Save(bytes) ->
-                                dev.vantafyn.core.jellyfin.Gen2NativeSaveParser.parse(bytes, game.title, game.id)
-                            dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.isGen4Save(bytes, game.title) ->
-                                dev.vantafyn.core.jellyfin.Gen4NativeSaveParser.parse(bytes, game.title, game.id)
-                            dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.isGen5Save(bytes, game.title) ->
-                                dev.vantafyn.core.jellyfin.Gen5NativeSaveParser.parse(bytes, game.title, game.id)
-                            else -> dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.parse(
-                                bytes,
-                                game.title,
-                                game.pokemon?.pokemonGameId?.ifBlank { null } ?: game.id,
-                            )
-                        }
+                        val parsed = dev.vantafyn.core.jellyfin.PokemonNativeSaveParser.parse(
+                            saveBytes = bytes,
+                            gameTitle = game.title,
+                            gameId = game.pokemon?.pokemonGameId?.ifBlank { null } ?: game.id,
+                            expectedGeneration = game.pokemon?.generation ?: 0,
+                            expectedPlatform = game.pokemon?.platform ?: "",
+                        )
                         val hasSaveContent = parsed != null && (
                             parsed.party.isNotEmpty() ||
                                 parsed.boxes.any { it.entries.isNotEmpty() } ||

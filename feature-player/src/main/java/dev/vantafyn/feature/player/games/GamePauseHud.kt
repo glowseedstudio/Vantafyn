@@ -20,9 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AspectRatio
-import androidx.compose.material.icons.rounded.CheckCircle
-import androidx.compose.material.icons.rounded.CloudDownload
-import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.automirrored.rounded.ExitToApp
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.PlayArrow
@@ -67,8 +64,6 @@ fun GamePauseHud(
     game: GameDetail,
     aspectRatio: GameAspectRatio,
     fastForwardSpeed: Float,
-    isSavingState: Boolean,
-    saveStateSuccess: Boolean,
     isMuted: Boolean,
     onToggleMute: () -> Unit,
     videoFilter: GameVideoFilter,
@@ -77,8 +72,6 @@ fun GamePauseHud(
     onToggleTouchControls: () -> Unit,
     isTv: Boolean,
     onResume: () -> Unit,
-    onQuickSave: () -> Unit,
-    onQuickLoad: () -> Unit,
     onToggleSpeed: () -> Unit,
     onCycleAspectRatio: () -> Unit,
     onReset: () -> Unit,
@@ -171,26 +164,6 @@ fun GamePauseHud(
                             primary = true,
                             onClick = onResume,
                         )
-
-                        // Save & Load State Row
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            HudMenuButton(
-                                label = if (isSavingState) "Saving..." else if (saveStateSuccess) "Saved!" else "Save State",
-                                icon = if (saveStateSuccess) Icons.Rounded.CheckCircle else Icons.Rounded.CloudUpload,
-                                isLoading = isSavingState,
-                                onClick = onQuickSave,
-                                modifier = Modifier.weight(1f),
-                            )
-                            HudMenuButton(
-                                label = "Load State",
-                                icon = Icons.Rounded.CloudDownload,
-                                onClick = onQuickLoad,
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
 
                         // Speed & Aspect Ratio Row
                         Row(

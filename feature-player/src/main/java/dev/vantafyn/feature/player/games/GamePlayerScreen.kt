@@ -62,12 +62,15 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.coerceAtMost
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GamePlayTracker
 import dev.vantafyn.core.jellyfin.GameSaveKind
@@ -184,8 +187,6 @@ fun GamePlayerScreen(
     }
 
     var isPaused by remember { mutableStateOf(false) }
-    var isSavingState by remember { mutableStateOf(false) }
-    var saveStateSuccess by remember { mutableStateOf(false) }
     var aspectRatio by remember { mutableStateOf(initialAspect) }
     var fastForwardSpeed by remember { mutableFloatStateOf(1f) }
     var configuredFfSpeed by remember { mutableFloatStateOf(initialFfSpeed) }
@@ -199,6 +200,47 @@ fun GamePlayerScreen(
     var initialSramBase64 by remember { mutableStateOf<String?>(null) }
     var pendingConflict by remember { mutableStateOf<SaveSyncInfo?>(null) }
     var pendingDownloadedRom by remember { mutableStateOf<File?>(null) }
+
+    // Release the screen-on lock while the pause HUD (or crash screen) is up so the panel can sleep.
+    LaunchedEffect(isPaused, activity) {
+        activity?.window?.decorView?.keepScreenOn = !isPaused
+    }
+
+    // Battery: freeze the emulator + WebView timers whenever the app leaves the foreground so the
+    // main loop, save flushes and DOM cleanup keep-alive all stop instead of running in the background.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, webViewInstance) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
+                    if (!isPaused) {
+                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
+                    }
+                    webViewInstance?.pauseTimers()
+                    webViewInstance?.onPause()
+                }
+                Lifecycle.Event.ON_START -> {
+                    webViewInstance?.resumeTimers()
+                    webViewInstance?.onResume()
+                    if (!isPaused) {
+                        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
+                    }
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            webViewInstance?.resumeTimers()
+            webViewInstance?.onResume()
+        }
+    }
+
+    // Battery: only forward axis values to the WebView when they actually change, instead of
+    // echoing every gamepad/touch sample (which can be 60-120 Hz) across the JS bridge.
+    val lastAxisValues = remember { mutableMapOf<String, Float>() }
 
     // Sync aspect ratio changes to preferences and WebView
     LaunchedEffect(aspectRatio, webViewInstance) {
@@ -308,8 +350,11 @@ fun GamePlayerScreen(
             }
         },
         onAxisEvent = { axis, value ->
-            val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
-            webViewInstance?.evaluateJavascript(js, null)
+            if (lastAxisValues[axis] != value) {
+                lastAxisValues[axis] = value
+                val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
+                webViewInstance?.evaluateJavascript(js, null)
+            }
         },
     )
 
@@ -394,37 +439,21 @@ fun GamePlayerScreen(
                                         }
 
                                         @JavascriptInterface
-                                        fun onStateSaved(base64Data: String) {
-                                            isSavingState = true
-                                            GameStorageManager.saveScope.launch {
-                                                try {
-                                                    val bytes = Base64.decode(base64Data, Base64.DEFAULT)
-                                                    android.util.Log.i("GamePlayerScreen", "Writing State save (${bytes.size} bytes) for ${game.id}")
-                                                    val result = storageManager.saveState(session, game.id, bytes, GameSaveKind.State)
-                                                    withContext(Dispatchers.Main) {
-                                                        isSavingState = false
-                                                        saveStateSuccess = result.isSuccess
-                                                    }
-                                                    delay(2500)
-                                                    withContext(Dispatchers.Main) {
-                                                        saveStateSuccess = false
-                                                    }
-                                                } catch (e: Exception) {
-                                                    android.util.Log.e("GamePlayerScreen", "Error saving State for ${game.id}", e)
-                                                    withContext(Dispatchers.Main) {
-                                                        isSavingState = false
-                                                    }
-                                                }
-                                            }
+                                        fun onSramSaved(base64Data: String) {
+                                            persistSram(base64Data, forceUpload = false)
                                         }
 
                                         @JavascriptInterface
-                                        fun onSramSaved(base64Data: String) {
+                                        fun onSramSavedForced(base64Data: String) {
+                                            persistSram(base64Data, forceUpload = true)
+                                        }
+
+                                        fun persistSram(base64Data: String, forceUpload: Boolean) {
                                             GameStorageManager.saveScope.launch {
                                                 try {
                                                     val bytes = Base64.decode(base64Data, Base64.DEFAULT)
-                                                    android.util.Log.i("GamePlayerScreen", "Persisting in-game SRAM save (${bytes.size} bytes) for ${game.id}")
-                                                    storageManager.saveState(session, game.id, bytes, GameSaveKind.Sram)
+                                                    android.util.Log.i("GamePlayerScreen", "Persisting in-game SRAM save (${bytes.size} bytes) for ${game.id} (force=$forceUpload)")
+                                                    storageManager.saveState(session, game.id, bytes, GameSaveKind.Sram, forceUpload)
                                                 } catch (e: Exception) {
                                                     android.util.Log.e("GamePlayerScreen", "Error persisting SRAM for ${game.id}", e)
                                                 }
@@ -736,8 +765,11 @@ fun GamePlayerScreen(
                         webViewInstance?.evaluateJavascript(js, null)
                     },
                     onAxisChange = { axis, value ->
-                        val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
-                        webViewInstance?.evaluateJavascript(js, null)
+                        if (lastAxisValues[axis] != value) {
+                            lastAxisValues[axis] = value
+                            val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
+                            webViewInstance?.evaluateJavascript(js, null)
+                        }
                     },
                     onMenuClick = {
                         isPaused = true
@@ -753,8 +785,6 @@ fun GamePlayerScreen(
             game = game,
             aspectRatio = aspectRatio,
             fastForwardSpeed = fastForwardSpeed,
-            isSavingState = isSavingState,
-            saveStateSuccess = saveStateSuccess,
             isMuted = isMuted,
             onToggleMute = {
                 isMuted = !isMuted
@@ -775,21 +805,6 @@ fun GamePlayerScreen(
             onResume = {
                 isPaused = false
                 webViewInstance?.evaluateJavascript("window.VantafynEmulator?.resume();", null)
-            },
-            onQuickSave = {
-                webViewInstance?.evaluateJavascript("window.VantafynEmulator?.requestSaveState(); window.VantafynEmulator?.requestSaveSram();", null)
-            },
-            onQuickLoad = {
-                scope.launch(Dispatchers.IO) {
-                    val stateData = storageManager.loadSaveState(session, game.id, GameSaveKind.State)
-                    if (stateData != null && stateData.isNotEmpty()) {
-                        val base64 = Base64.encodeToString(stateData, Base64.NO_WRAP)
-                        withContext(Dispatchers.Main) {
-                            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.loadState('$base64');", null)
-                            isPaused = false
-                        }
-                    }
-                }
             },
             onToggleSpeed = {
                 fastForwardSpeed = when (fastForwardSpeed) {
@@ -1003,23 +1018,37 @@ private fun generateEmulatorHtml(
                 window.EJS_color = '#21D8FF';
                 window.EJS_backgroundColor = '#000000';
                 window.EJS_disableUI = true;
-                window.EJS_fixedSaveInterval = 1000;
                 window.VantafynIsNintendoDsCore = ${if (systemCoreName == "melonds" || systemCoreName == "desmume") "true" else "false"};
                 window.EJS_defaultOptions = {
                     'virtual-gamepad': 'disabled',
                     'menu-bar-button': 'hidden',
-                    'save-save-interval': '1',
+                    'save-save-interval': '15',
                     'save-state-location': 'browser',
                     'fps-limit': '60',
                     $dsLayoutOption
                 };
 
-                // Keep WebView compositor and VSync active even when no touch input occurs
-                setInterval(function() {
-                    if (window.requestAnimationFrame) {
-                        window.requestAnimationFrame(function() {});
+                // Battery: only keep the compositor warm while the page is visible and the emulator
+                // is running. Cleared on hide/pause so it can't spin in the background.
+                var vsyncKeepAliveInterval = null;
+                function startVsyncKeepAlive() {
+                    if (vsyncKeepAliveInterval || document.hidden || window.VantafynEmulatorPaused) return;
+                    vsyncKeepAliveInterval = setInterval(function() {
+                        if (window.requestAnimationFrame) {
+                            window.requestAnimationFrame(function() {});
+                        }
+                    }, 250);
+                }
+                function stopVsyncKeepAlive() {
+                    if (vsyncKeepAliveInterval) {
+                        clearInterval(vsyncKeepAliveInterval);
+                        vsyncKeepAliveInterval = null;
                     }
-                }, 250);
+                }
+                document.addEventListener('visibilitychange', function() {
+                    if (document.hidden) { stopVsyncKeepAlive(); } else { startVsyncKeepAlive(); }
+                });
+                startVsyncKeepAlive();
 
                 window.VantafynInitialSram = ${if (initialSramBase64 != null) "\"$initialSramBase64\"" else "null"};
                 window._lastSramHash = window.VantafynInitialSram;
@@ -1085,22 +1114,30 @@ private fun generateEmulatorHtml(
 
                 function extractSramData(gm) {
                     if (!gm) return null;
+                    var savePath = "";
+                    try {
+                        if (typeof gm.getSaveFilePath === 'function') savePath = gm.getSaveFilePath();
+                    } catch(e) {}
                     try {
                         gm.saveSaveFiles();
                     } catch(e) {}
                     try {
                         var s = gm.getSaveFile(false);
-                        if (s && s.length > 0) return (s instanceof Uint8Array) ? s : new Uint8Array(s);
+                        if (s && s.length > 0) {
+                            console.log("Vantafyn: extracted SRAM from " + savePath + " (" + s.length + " bytes)");
+                            return (s instanceof Uint8Array) ? s : new Uint8Array(s);
+                        }
                     } catch(e) {}
                     try {
-                        if (typeof gm.getSaveFilePath === 'function') {
-                            var p = gm.getSaveFilePath();
-                            if (p && gm.FS && gm.FS.analyzePath(p).exists) {
-                                var d = gm.FS.readFile(p);
-                                if (d && d.length > 0) return (d instanceof Uint8Array) ? d : new Uint8Array(d);
+                        if (savePath && gm.FS && gm.FS.analyzePath(savePath).exists) {
+                            var d = gm.FS.readFile(savePath);
+                            if (d && d.length > 0) {
+                                console.log("Vantafyn: extracted SRAM from fallback " + savePath + " (" + d.length + " bytes)");
+                                return (d instanceof Uint8Array) ? d : new Uint8Array(d);
                             }
                         }
                     } catch(e) {}
+                    console.warn("Vantafyn: no SRAM produced, core save path was '" + savePath + "'");
                     return null;
                 }
 
@@ -1112,11 +1149,7 @@ private fun generateEmulatorHtml(
                         dirs.forEach(function(d) {
                             try { if (!fs.analyzePath(d).exists) fs.mkdir(d); } catch(e) {}
                         });
-                        var candidateStems = window.VantafynIsNintendoDsCore ? [] : [
-                            "current_game",
-                            "game",
-                            "$safeGameName"
-                        ];
+                        var candidateStems = ["$safeGameName"];
                         var candidatePaths = [];
                         try {
                             if (window.EJS_emulator && window.EJS_emulator.gameManager && typeof window.EJS_emulator.gameManager.getSaveFilePath === 'function') {
@@ -1224,28 +1257,6 @@ private fun generateEmulatorHtml(
                     }
                 };
 
-                // Periodic SRAM persistence checker (every 1.5s)
-                var sramCheckInterval = setInterval(function() {
-                    if (window.EJS_emulator && window.EJS_emulator.gameManager && window.EJS_emulator.started) {
-                        try {
-                            var gm = window.EJS_emulator.gameManager;
-                            var sram = extractSramData(gm);
-                            if (sram && sram.length > 0) {
-                                var b64 = uint8ToBase64(sram);
-                                if (b64 && b64 !== window._lastSramHash) {
-                                    window._lastSramHash = b64;
-                                    console.log("Vantafyn: In-game SRAM changed! (" + sram.length + " bytes). Persisting to storage...");
-                                    if (window.VantafynBridge && window.VantafynBridge.onSramSaved) {
-                                        window.VantafynBridge.onSramSaved(b64);
-                                    }
-                                }
-                            }
-                        } catch(e) {
-                            console.warn("Vantafyn: periodic SRAM check error", e);
-                        }
-                    }
-                }, 1500);
-
                 window.VantafynEmulator = {
                     setMute: function(muted) {
                         try {
@@ -1319,6 +1330,8 @@ private fun generateEmulatorHtml(
                     },
                     pause: function() {
                         try {
+                            window.VantafynEmulatorPaused = true;
+                            stopVsyncKeepAlive();
                             var emu = window.EJS_emulator;
                             if (!emu) return;
                             if (typeof emu.pause === 'function') emu.pause();
@@ -1329,6 +1342,8 @@ private fun generateEmulatorHtml(
                     },
                     resume: function() {
                         try {
+                            window.VantafynEmulatorPaused = false;
+                            startVsyncKeepAlive();
                             var emu = window.EJS_emulator;
                             if (!emu) return;
                             if (typeof emu.play === 'function') emu.play();
@@ -1373,83 +1388,10 @@ private fun generateEmulatorHtml(
                                 var b64 = uint8ToBase64(sram);
                                 window._lastSramHash = b64;
                                 console.log("Vantafyn: flushAllSaves saved SRAM (" + sram.length + " bytes)");
-                                window.VantafynBridge.onSramSaved(b64);
+                                window.VantafynBridge.onSramSavedForced(b64);
                             }
                         } catch(e) {
                             console.error("Vantafyn: flushAllSaves SRAM error", e);
-                        }
-                        try {
-                            var state = null;
-                            if (typeof gm.getState === 'function') {
-                                state = gm.getState();
-                            } else if (gm.functions && typeof gm.functions.saveStateInfo === 'function') {
-                                var info = gm.functions.saveStateInfo().split("|");
-                                if (info[2] === "1") {
-                                    var size = parseInt(info[0]);
-                                    var start = parseInt(info[1]);
-                                    state = new Uint8Array(gm.Module.HEAPU8.subarray(start, start + size));
-                                }
-                            }
-                            if (state && state.length > 0 && window.VantafynBridge) {
-                                console.log("Vantafyn: flushAllSaves saved State (" + state.length + " bytes)");
-                                window.VantafynBridge.onStateSaved(uint8ToBase64(state));
-                            }
-                        } catch(e) {
-                            console.error("Vantafyn: flushAllSaves State error", e);
-                        }
-                    },
-                    requestSaveState: function() {
-                        var emu = window.EJS_emulator;
-                        var gm = emu && emu.gameManager;
-                        if (!gm) {
-                            console.error("Vantafyn: GameManager not ready");
-                            return;
-                        }
-                        try {
-                            var state = null;
-                            if (typeof gm.getState === 'function') {
-                                state = gm.getState();
-                            } else if (gm.functions && typeof gm.functions.saveStateInfo === 'function') {
-                                var info = gm.functions.saveStateInfo().split("|");
-                                if (info[2] === "1") {
-                                    var size = parseInt(info[0]);
-                                    var start = parseInt(info[1]);
-                                    state = new Uint8Array(gm.Module.HEAPU8.subarray(start, start + size));
-                                }
-                            }
-                            if (state && window.VantafynBridge) {
-                                var bytes = (state instanceof Uint8Array) ? state : new Uint8Array(state);
-                                var base64 = uint8ToBase64(bytes);
-                                window.VantafynBridge.onStateSaved(base64);
-                            }
-                        } catch(e) {
-                            console.error("Vantafyn: Failed to save state", e);
-                        }
-                    },
-                    loadState: function(base64) {
-                        var emu = window.EJS_emulator;
-                        var gm = emu && emu.gameManager;
-                        try {
-                            var binary_string = atob(base64);
-                            var len = binary_string.length;
-                            var bytes = new Uint8Array(len);
-                            for (var i = 0; i < len; i++) {
-                                bytes[i] = binary_string.charCodeAt(i);
-                            }
-                            if (gm && typeof gm.loadState === 'function') {
-                                gm.loadState(bytes);
-                                console.log("Vantafyn: Loaded state via gm.loadState (" + len + " bytes)");
-                            } else if (emu && typeof emu.loadState === 'function') {
-                                emu.loadState(bytes);
-                                console.log("Vantafyn: Loaded state via emu.loadState (" + len + " bytes)");
-                            } else if (gm && gm.functions && typeof gm.functions.loadState === 'function') {
-                                gm.functions.loadState(bytes);
-                                console.log("Vantafyn: Loaded state via gm.functions.loadState (" + len + " bytes)");
-                            } else {
-                                console.error("Vantafyn: No suitable loadState function found on emulator/gameManager");
-                            }
-                        } catch(e) {
-                            console.error("Vantafyn: Failed to load state", e);
                         }
                     },
                     requestSaveSram: function() {
@@ -1461,7 +1403,7 @@ private fun generateEmulatorHtml(
                             if (sram && sram.length > 0 && window.VantafynBridge) {
                                 var b64 = uint8ToBase64(sram);
                                 window._lastSramHash = b64;
-                                window.VantafynBridge.onSramSaved(b64);
+                                window.VantafynBridge.onSramSavedForced(b64);
                             }
                         } catch(e) {
                             console.error("Vantafyn: Failed to get SRAM", e);
@@ -1556,7 +1498,7 @@ private fun generateEmulatorHtml(
                     destroy: function() {
                         try {
                             if (typeof cleanUpInterval !== 'undefined') clearInterval(cleanUpInterval);
-                            if (typeof sramCheckInterval !== 'undefined') clearInterval(sramCheckInterval);
+                            stopVsyncKeepAlive();
                         } catch(e) {}
                         try {
                             if (window.VantafynEmulator && window.VantafynEmulator.flushAllSaves) {

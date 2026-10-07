@@ -279,7 +279,7 @@ fun GameDetailModal(
                         }
                     }
 
-                    // Cloud Save State Sync Indicator
+                    // Battery save sync indicator
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()

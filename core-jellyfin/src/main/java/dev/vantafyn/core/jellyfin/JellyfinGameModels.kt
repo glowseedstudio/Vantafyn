@@ -9,7 +9,7 @@ enum class GameSaveKind(val value: String) {
 
     companion object {
         fun fromValue(value: String): GameSaveKind =
-            entries.firstOrNull { it.value.equals(value, ignoreCase = true) } ?: State
+            entries.firstOrNull { it.value.equals(value, ignoreCase = true) } ?: Sram
     }
 }
 
@@ -276,6 +276,27 @@ data class PokemonGameSaveDto(
     val gymBadges: List<PokemonGymBadgeRegionDto> = emptyList(),
 ) : Serializable
 
+/**
+ * Builds a stable key used to match a save against its game's region/badge tables.
+ *
+ * The raw Jellyfin game id is a base64 blob, so it can accidentally contain lowercase
+ * words such as "ruby" and produce false region matches. Only short, lowercase slugs
+ * (the `pokemonGameId` values) are kept; anything else falls back to the title alone.
+ */
+fun pokemonGameKey(gameId: String, gameTitle: String): String {
+    val rawId = gameId.trim()
+    val usableId = if (
+        rawId.isNotEmpty() &&
+        rawId.length <= 32 &&
+        rawId.all { it.isLowerCase() || it.isDigit() || it == '_' || it == '-' }
+    ) {
+        rawId
+    } else {
+        ""
+    }
+    return "$usableId ${gameTitle.lowercase()}".trim()
+}
+
 object PokemonGymBadgeCatalog {
     private data class BadgeDef(val id: String, val name: String)
 
@@ -312,6 +333,17 @@ object PokemonGymBadgeCatalog {
         BadgeDef("rain", "Rain Badge"),
     )
 
+    private val sinnoh = listOf(
+        BadgeDef("coal", "Coal Badge"),
+        BadgeDef("forest", "Forest Badge"),
+        BadgeDef("cobble", "Cobble Badge"),
+        BadgeDef("fen", "Fen Badge"),
+        BadgeDef("relic", "Relic Badge"),
+        BadgeDef("mine", "Mine Badge"),
+        BadgeDef("icicle", "Icicle Badge"),
+        BadgeDef("beacon", "Beacon Badge"),
+    )
+
     fun forGen1(kantoFlags: Int): List<PokemonGymBadgeRegionDto> =
         listOf(createRegion("kanto", "Kanto", 1, kanto, kantoFlags))
 
@@ -321,18 +353,46 @@ object PokemonGymBadgeCatalog {
             createRegion("kanto", "Kanto", 1, kanto, kantoFlags),
         )
 
-    fun forGen3(gameId: String, badgeFlags: Int): List<PokemonGymBadgeRegionDto> {
-        val key = gameId.lowercase()
+    fun forGen3(gameKey: String, badgeFlags: Int): List<PokemonGymBadgeRegionDto> {
+        val key = gameKey.lowercase()
         val isFrLg = key.contains("firered") ||
             key.contains("fire_red") ||
             key.contains("fire red") ||
             key.contains("leafgreen") ||
             key.contains("leaf_green") ||
             key.contains("leaf green")
-        return listOf(
-            if (isFrLg) createRegion("kanto", "Kanto", 1, kanto, badgeFlags)
-            else createRegion("hoenn", "Hoenn", 3, hoenn, badgeFlags)
-        )
+        val isHoenn = key.contains("emerald") ||
+            key.contains("omega ruby") ||
+            key.contains("alpha sapphire") ||
+            key.contains("ruby") ||
+            key.contains("sapphire")
+        return when {
+            isFrLg -> listOf(createRegion("kanto", "Kanto", 1, kanto, badgeFlags))
+            isHoenn -> listOf(createRegion("hoenn", "Hoenn", 3, hoenn, badgeFlags))
+            else -> emptyList()
+        }
+    }
+
+    /**
+     * @param johtoFlags Sinnoh badge bitfield for DP/Pt, Johto badge bitfield for HGSS.
+     * @param kantoFlags Kanto badge bitfield for HGSS (bits 8..15 of the 16-badge field).
+     */
+    fun forGen4(gameKey: String, johtoFlags: Int, kantoFlags: Int): List<PokemonGymBadgeRegionDto> {
+        val key = gameKey.lowercase()
+        val isHgss = key.contains("heartgold") ||
+            key.contains("soulsilver") ||
+            key.contains("heart gold") ||
+            key.contains("soul silver") ||
+            key.contains("hgss")
+        val isSinnoh = key.contains("diamond") || key.contains("pearl") || key.contains("platinum")
+        return when {
+            isHgss -> listOf(
+                createRegion("johto", "Johto", 2, johto, johtoFlags),
+                createRegion("kanto", "Kanto", 1, kanto, kantoFlags),
+            )
+            isSinnoh -> listOf(createRegion("sinnoh", "Sinnoh", 4, sinnoh, johtoFlags))
+            else -> emptyList()
+        }
     }
 
     private fun createRegion(

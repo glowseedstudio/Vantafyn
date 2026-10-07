@@ -178,6 +178,7 @@ object Gen4NativeSaveParser {
 
         val otName = decodeUtf16String(saveBytes, generalBase + offsets.trainerNameOffset, 7).ifBlank { "TRAINER" }
         val tid = readUInt16LE(saveBytes, generalBase + offsets.tidOffset)
+        val (johtoBadgeFlags, kantoBadgeFlags) = readBadgeFlags(saveBytes, generalBase, offsets)
 
         val partyList = mutableListOf<PokemonSummaryDto>()
         val pokemonDetails = mutableMapOf<String, PokemonDetailsDto>()
@@ -262,8 +263,41 @@ object Gen4NativeSaveParser {
             pokedexSeen = pokedex?.seenSpeciesIds?.size,
             caughtSpeciesIds = pokedex?.caughtSpeciesIds.orEmpty(),
             seenSpeciesIds = pokedex?.seenSpeciesIds.orEmpty(),
+            gymBadges = PokemonGymBadgeCatalog.forGen4(
+                pokemonGameKey(gameId, gameTitle),
+                johtoBadgeFlags,
+                kantoBadgeFlags,
+            ),
         )
     }
+
+    /**
+     * Badge bitfield offsets are relative to the trainer name block, matching PKHeX:
+     * `Badges = General[Trainer1 + 0x1A]` and, for HGSS only, `Badges16 = General[Trainer1 + 0x1F]`.
+     * Bits are ordered gym-by-gym, so bit N is the Nth badge of that region.
+     */
+    private fun readBadgeFlags(
+        saveBytes: ByteArray,
+        generalBase: Int,
+        offsets: VariantOffsets,
+    ): Pair<Int, Int> {
+        val trainerStart = generalBase + offsets.trainerNameOffset
+        val nameEnd = trainerStart + 16
+        if (trainerStart < 0 || nameEnd > saveBytes.size) return 0 to 0
+        val erased = (trainerStart until nameEnd).all { (saveBytes[it].toInt() and 0xFF) == 0xFF }
+        if (erased) return 0 to 0
+
+        val johto = readBadgeByte(saveBytes, trainerStart + 0x1A)
+        val kanto = if (offsets.variant == Gen4Variant.HGSS) {
+            readBadgeByte(saveBytes, trainerStart + 0x1F)
+        } else {
+            0
+        }
+        return johto to kanto
+    }
+
+    private fun readBadgeByte(data: ByteArray, offset: Int): Int =
+        if (offset in data.indices) data[offset].toInt() and 0xFF else 0
 
     private fun readPokedexFlags(
         saveBytes: ByteArray,

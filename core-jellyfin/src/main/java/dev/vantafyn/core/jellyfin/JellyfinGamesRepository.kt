@@ -16,10 +16,10 @@ interface JellyfinGamesRepository {
     suspend fun getGames(session: JellyfinSession, libraryId: String, systemId: String): Result<List<GameSummary>>
     suspend fun getGameDetail(session: JellyfinSession, libraryId: String, gameId: String): Result<GameDetail>
     fun getRomDownloadUrl(session: JellyfinSession, libraryId: String, token: String): String
-    suspend fun getCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State): Result<ByteArray?>
-    suspend fun getCloudSaveWithMetadata(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State): Result<CloudSaveEntry?>
-    suspend fun uploadCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State, data: ByteArray): Result<Unit>
-    suspend fun deleteCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.State): Result<Unit>
+    suspend fun getCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram): Result<ByteArray?>
+    suspend fun getCloudSaveWithMetadata(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram): Result<CloudSaveEntry?>
+    suspend fun uploadCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram, data: ByteArray): Result<Unit>
+    suspend fun deleteCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram): Result<Unit>
 }
 
 class DefaultJellyfinGamesRepository(

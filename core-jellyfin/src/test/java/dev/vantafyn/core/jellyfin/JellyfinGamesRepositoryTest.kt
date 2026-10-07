@@ -38,7 +38,7 @@ class JellyfinGamesRepositoryTest {
         assertEquals(GameSaveKind.State, GameSaveKind.fromValue("state"))
         assertEquals(GameSaveKind.Sram, GameSaveKind.fromValue("sram"))
         assertEquals(GameSaveKind.Settings, GameSaveKind.fromValue("settings"))
-        assertEquals(GameSaveKind.State, GameSaveKind.fromValue("unknown"))
+        assertEquals(GameSaveKind.Sram, GameSaveKind.fromValue("unknown"))
     }
 
     @Test

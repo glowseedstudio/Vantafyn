@@ -294,12 +294,25 @@ object Gen3NativeSaveParser {
         val details: PokemonDetailsDto,
     )
 
+    fun isGen3Save(saveBytes: ByteArray?): Boolean {
+        if (saveBytes == null || saveBytes.size < SLOT_SIZE) return false
+        if (Gen1NativeSaveParser.isGen1Save(saveBytes)) return false
+        if (Gen2NativeSaveParser.isGen2Save(saveBytes)) return false
+        if (parseSlotSections(saveBytes, 0)?.all { it != null } == true) return true
+        if (saveBytes.size >= SLOT_SIZE * 2 &&
+            parseSlotSections(saveBytes, SLOT_SIZE)?.all { it != null } == true
+        ) {
+            return true
+        }
+        return false
+    }
+
     fun parse(
         saveBytes: ByteArray,
         gameTitle: String = "FireRed",
         gameId: String = "",
     ): PokemonGameSaveDto? {
-        if (saveBytes.size < SLOT_SIZE) return null
+        if (!isGen3Save(saveBytes)) return null
 
         val sections = extractActiveSections(saveBytes) ?: return null
 
@@ -464,7 +477,7 @@ object Gen3NativeSaveParser {
     }
 
     private fun gameKey(gameId: String, gameTitle: String): String =
-        "$gameId $gameTitle".lowercase()
+        pokemonGameKey(gameId, gameTitle)
 
     private fun extractActiveSections(saveBytes: ByteArray): Array<ByteArray?>? {
         val slot0 = parseSlotSections(saveBytes, 0)

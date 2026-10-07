@@ -36,7 +36,6 @@ import androidx.compose.material.icons.rounded.CloudOff
 import androidx.compose.material.icons.rounded.CloudSync
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Search
@@ -138,18 +137,13 @@ fun GamesSavesScreen(
             val items = mutableListOf<ManagedSaveItem>()
             if (savesDir.exists() && savesDir.isDirectory) {
                 val files = savesDir.listFiles().orEmpty().filter {
-                    it.isFile && (it.extension.equals("state", ignoreCase = true) ||
-                            it.extension.equals("sram", ignoreCase = true) ||
+                    it.isFile && (it.extension.equals("sram", ignoreCase = true) ||
                             it.extension.equals("srm", ignoreCase = true) ||
                             it.extension.equals("sav", ignoreCase = true))
                 }
                 for (file in files) {
                     val rawName = file.nameWithoutExtension
-                    val kind = if (file.extension.equals("state", ignoreCase = true)) {
-                        GameSaveKind.State
-                    } else {
-                        GameSaveKind.Sram
-                    }
+                    val kind = GameSaveKind.Sram
 
                     val matched = games.firstOrNull { g ->
                         val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -223,7 +217,6 @@ fun GamesSavesScreen(
         }
     }
 
-    val totalStates = remember(savesList) { savesList.count { it.kind == GameSaveKind.State } }
     val totalBattery = remember(savesList) { savesList.count { it.kind == GameSaveKind.Sram } }
     val totalStorageBytes = remember(savesList) { savesList.sumOf { it.sizeBytes } }
 
@@ -473,45 +466,23 @@ fun GamesSavesScreen(
                     }
                 }
 
-                // Storage and Counts Grid (2x2 to prevent truncation)
-                Column(
+                // Storage and Counts
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        SaveStatBox(
-                            title = "TOTAL SAVES",
-                            value = "${savesList.size}",
-                            accentColor = Color(0xFF00E5FF),
-                            modifier = Modifier.weight(1f),
-                        )
-                        SaveStatBox(
-                            title = "STORAGE USED",
-                            value = formatSaveSize(totalStorageBytes),
-                            accentColor = Color(0xFFFF2A85),
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        SaveStatBox(
-                            title = "SAVE STATES",
-                            value = "$totalStates",
-                            accentColor = Color(0xFF9D00FF),
-                            modifier = Modifier.weight(1f),
-                        )
-                        SaveStatBox(
-                            title = "BATTERY SAVES",
-                            value = "$totalBattery",
-                            accentColor = Color(0xFF00E676),
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
+                    SaveStatBox(
+                        title = "BATTERY SAVES",
+                        value = "$totalBattery",
+                        accentColor = Color(0xFF00E676),
+                        modifier = Modifier.weight(1f),
+                    )
+                    SaveStatBox(
+                        title = "STORAGE USED",
+                        value = formatSaveSize(totalStorageBytes),
+                        accentColor = Color(0xFFFF2A85),
+                        modifier = Modifier.weight(1f),
+                    )
                 }
             }
         }
@@ -561,14 +532,6 @@ fun GamesSavesScreen(
                             count = savesList.size,
                             isSelected = selectedKindFilter == null,
                             onClick = { selectedKindFilter = null },
-                        )
-                    }
-                    item {
-                        SaveFilterPill(
-                            label = "Save States",
-                            count = totalStates,
-                            isSelected = selectedKindFilter == GameSaveKind.State,
-                            onClick = { selectedKindFilter = GameSaveKind.State },
                         )
                     }
                     item {
@@ -628,7 +591,7 @@ fun GamesSavesScreen(
                         )
                         Text(
                             text = if (searchQuery.isNotEmpty()) "Try searching for a different game or clearing filters."
-                            else "When you play games in the Retro Vault, battery saves and save states will automatically appear here and sync to $serverName.",
+                            else "When you play games in the Retro Vault, battery saves will automatically appear here and sync to $serverName.",
                             color = VantafynColors.Muted,
                             fontSize = 12.sp,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -720,7 +683,6 @@ fun GamesSavesScreen(
     // Delete Confirmation Dialog
     if (savePendingDelete != null) {
         val target = savePendingDelete!!
-        val isState = target.kind == GameSaveKind.State
         AlertDialog(
             onDismissRequest = { savePendingDelete = null },
             title = {
@@ -732,7 +694,7 @@ fun GamesSavesScreen(
             },
             text = {
                 Text(
-                    text = "Are you sure you want to delete this ${if (isState) "save state" else "battery save"} for \"${target.gameTitle}\"?\n\nThis will permanently delete the local file and remove it from your Jellyfin cloud storage.",
+                    text = "Are you sure you want to delete this battery save for \"${target.gameTitle}\"?\n\nThis will permanently delete the local file and remove it from your Jellyfin cloud storage.",
                     color = VantafynColors.Muted,
                     fontSize = 14.sp,
                 )
@@ -880,10 +842,9 @@ private fun SaveCardItem(
     onExport: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val isState = save.kind == GameSaveKind.State
-    val badgeColor = if (isState) Color(0xFF9D00FF) else Color(0xFF00E676)
-    val badgeText = if (isState) "Save State" else "Battery SRAM"
-    val badgeIcon = if (isState) Icons.Rounded.History else Icons.Rounded.Save
+    val badgeColor = Color(0xFF00E676)
+    val badgeText = "Battery SRAM"
+    val badgeIcon = Icons.Rounded.Save
 
     Box(
         modifier = Modifier

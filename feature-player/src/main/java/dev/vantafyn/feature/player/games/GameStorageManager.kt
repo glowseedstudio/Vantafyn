@@ -24,7 +24,13 @@ class GameStorageManager(
     companion object {
         val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
         private const val MAX_BATTERY_SAVE_BYTES = 32 * 1024 * 1024
+
+        // Battery: in-game saves write locally immediately, but the network radio is only woken
+        // once per this interval unless the save is forced (pause/exit flush).
+        private const val CLOUD_UPLOAD_MIN_INTERVAL_MS = 30_000L
     }
+
+    private val lastCloudUploadAtMs = mutableMapOf<String, Long>()
 
     val persistentRomsDir: File
         get() = File(context.filesDir, "games/roms").apply { mkdirs() }
@@ -547,7 +553,7 @@ class GameStorageManager(
     suspend fun loadSaveState(
         session: JellyfinSession?,
         gameId: String,
-        kind: GameSaveKind = GameSaveKind.State,
+        kind: GameSaveKind = GameSaveKind.Sram,
         forceCloud: Boolean = false,
     ): ByteArray? = withContext(Dispatchers.IO) {
         val localFile = getLocalSaveFile(gameId, kind)
@@ -596,7 +602,8 @@ class GameStorageManager(
         session: JellyfinSession?,
         gameId: String,
         data: ByteArray,
-        kind: GameSaveKind = GameSaveKind.State,
+        kind: GameSaveKind = GameSaveKind.Sram,
+        forceUpload: Boolean = false,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val localFile = getLocalSaveFile(gameId, kind)
@@ -604,11 +611,23 @@ class GameStorageManager(
             localFile.writeBytes(data)
             val hash = computeHash(data)
             if (session != null) {
-                val cloudRes = gamesRepository.uploadCloudSave(session, gameId, kind, data)
-                if (cloudRes.isSuccess) {
-                    markSynced(gameId, kind, hash, localFile.lastModified())
+                val key = "${gameId}_${kind.value}"
+                val now = System.currentTimeMillis()
+                val lastUpload = lastCloudUploadAtMs[key] ?: 0L
+                if (forceUpload || now - lastUpload >= CLOUD_UPLOAD_MIN_INTERVAL_MS) {
+                    lastCloudUploadAtMs[key] = now
+                    val cloudRes = gamesRepository.uploadCloudSave(session, gameId, kind, data)
+                    if (cloudRes.isSuccess) {
+                        markSynced(gameId, kind, hash, localFile.lastModified())
+                    } else {
+                        // Allow an immediate retry on the next save instead of waiting out the window.
+                        lastCloudUploadAtMs.remove(key)
+                        android.util.Log.w("GameStorageManager", "Cloud save sync error: ${cloudRes.exceptionOrNull()?.message}")
+                    }
                 } else {
-                    android.util.Log.w("GameStorageManager", "Cloud save sync error: ${cloudRes.exceptionOrNull()?.message}")
+                    // Local write landed; cloud upload deferred to the next window or forced flush.
+                    // checkSaveSync still sees this as LOCAL_NEWER, so nothing is lost.
+                    android.util.Log.d("GameStorageManager", "Cloud upload debounced for ${gameId}/${kind.value}")
                 }
             }
             Unit
@@ -618,7 +637,7 @@ class GameStorageManager(
     suspend fun deleteSave(
         session: JellyfinSession?,
         gameId: String,
-        kind: GameSaveKind = GameSaveKind.State,
+        kind: GameSaveKind = GameSaveKind.Sram,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val localFile = getLocalSaveFile(gameId, kind)
