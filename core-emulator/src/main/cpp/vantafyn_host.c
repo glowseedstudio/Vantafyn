@@ -119,6 +119,21 @@ struct vf_session {
     int32_t audio_filter_prev_l;
     int32_t audio_filter_prev_r;
 
+    // Video Filtering & Scaling
+    bool crisp_pixels;
+    int last_buffer_w;
+    int last_buffer_h;
+    int last_buffer_secondary_w;
+    int last_buffer_secondary_h;
+    uint32_t *lut_x;
+    int lut_x_capacity;
+    int lut_x_src_w;
+    int lut_x_dst_w;
+    uint32_t *lut_y;
+    int lut_y_capacity;
+    int lut_y_src_h;
+    int lut_y_dst_h;
+
     // Dynamic Core Options
     vf_option_t options[VF_MAX_OPTIONS];
     int option_count;
@@ -322,6 +337,68 @@ static bool core_environment(unsigned cmd, void *data) {
     }
 }
 
+static void blit_frame_nearest(
+    const uint32_t *src, int src_w, int src_h, size_t src_stride,
+    uint32_t *dst, int dst_w, int dst_h, size_t dst_stride,
+    uint32_t **p_lut_x, int *p_lut_x_cap, int *p_lut_x_src, int *p_lut_x_dst,
+    uint32_t **p_lut_y, int *p_lut_y_cap, int *p_lut_y_src, int *p_lut_y_dst
+) {
+    if (!src || !dst || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) return;
+
+    if (src_w == dst_w && src_h == dst_h) {
+        for (int y = 0; y < dst_h; y++) {
+            memcpy(dst + y * dst_stride, src + y * src_stride, dst_w * sizeof(uint32_t));
+        }
+        return;
+    }
+
+    // Reallocate and compute X LUT if needed
+    if (*p_lut_x_cap < dst_w) {
+        free(*p_lut_x);
+        *p_lut_x = (uint32_t *)malloc(dst_w * sizeof(uint32_t));
+        *p_lut_x_cap = dst_w;
+        *p_lut_x_src = 0;
+        *p_lut_x_dst = 0;
+    }
+    if (*p_lut_x && (*p_lut_x_src != src_w || *p_lut_x_dst != dst_w)) {
+        uint32_t *lx = *p_lut_x;
+        for (int dx = 0; dx < dst_w; dx++) {
+            lx[dx] = (uint32_t)((dx * (uint64_t)src_w) / dst_w);
+        }
+        *p_lut_x_src = src_w;
+        *p_lut_x_dst = dst_w;
+    }
+
+    // Reallocate and compute Y LUT if needed
+    if (*p_lut_y_cap < dst_h) {
+        free(*p_lut_y);
+        *p_lut_y = (uint32_t *)malloc(dst_h * sizeof(uint32_t));
+        *p_lut_y_cap = dst_h;
+        *p_lut_y_src = 0;
+        *p_lut_y_dst = 0;
+    }
+    if (*p_lut_y && (*p_lut_y_src != src_h || *p_lut_y_dst != dst_h)) {
+        uint32_t *ly = *p_lut_y;
+        for (int dy = 0; dy < dst_h; dy++) {
+            ly[dy] = (uint32_t)((dy * (uint64_t)src_h) / dst_h);
+        }
+        *p_lut_y_src = src_h;
+        *p_lut_y_dst = dst_h;
+    }
+
+    const uint32_t *lx = *p_lut_x;
+    const uint32_t *ly = *p_lut_y;
+    if (!lx || !ly) return;
+
+    for (int dy = 0; dy < dst_h; dy++) {
+        const uint32_t *src_row = src + ly[dy] * src_stride;
+        uint32_t *dst_row = dst + dy * dst_stride;
+        for (int dx = 0; dx < dst_w; dx++) {
+            dst_row[dx] = src_row[lx[dx]];
+        }
+    }
+}
+
 static void core_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch) {
     vf_session_t *s = s_current_session;
     if (!s || !data || width == 0 || height == 0) return;
@@ -508,44 +585,112 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         unsigned single_h = 192;
 
         if (win_top) {
-            ANativeWindow_setBuffersGeometry(win_top, (int32_t)single_w, (int32_t)single_h, WINDOW_FORMAT_RGBA_8888);
-            ANativeWindow_Buffer top_buf;
-            if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
-                uint32_t *dst = (uint32_t *)top_buf.bits;
-                for (unsigned y = 0; y < single_h && y < (unsigned)top_buf.height; y++) {
-                    memcpy(dst + y * top_buf.stride, s->frame_buffer + y * width, single_w * sizeof(uint32_t));
+            if (!s->crisp_pixels) {
+                if (s->last_buffer_w != (int)single_w || s->last_buffer_h != (int)single_h) {
+                    ANativeWindow_setBuffersGeometry(win_top, (int32_t)single_w, (int32_t)single_h, WINDOW_FORMAT_RGBA_8888);
+                    s->last_buffer_w = (int)single_w;
+                    s->last_buffer_h = (int)single_h;
                 }
-                ANativeWindow_unlockAndPost(win_top);
+                ANativeWindow_Buffer top_buf;
+                if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
+                    uint32_t *dst = (uint32_t *)top_buf.bits;
+                    for (unsigned y = 0; y < single_h && y < (unsigned)top_buf.height; y++) {
+                        memcpy(dst + y * top_buf.stride, s->frame_buffer + y * width, single_w * sizeof(uint32_t));
+                    }
+                    ANativeWindow_unlockAndPost(win_top);
+                }
+            } else {
+                if (s->last_buffer_w != 0 || s->last_buffer_h != 0) {
+                    ANativeWindow_setBuffersGeometry(win_top, 0, 0, WINDOW_FORMAT_RGBA_8888);
+                    s->last_buffer_w = 0;
+                    s->last_buffer_h = 0;
+                }
+                ANativeWindow_Buffer top_buf;
+                if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
+                    blit_frame_nearest(
+                        s->frame_buffer, (int)single_w, (int)single_h, width,
+                        (uint32_t *)top_buf.bits, top_buf.width, top_buf.height, top_buf.stride,
+                        &s->lut_x, &s->lut_x_capacity, &s->lut_x_src_w, &s->lut_x_dst_w,
+                        &s->lut_y, &s->lut_y_capacity, &s->lut_y_src_h, &s->lut_y_dst_h
+                    );
+                    ANativeWindow_unlockAndPost(win_top);
+                }
             }
         }
 
         if (win_bottom) {
-            ANativeWindow_setBuffersGeometry(win_bottom, (int32_t)single_w, (int32_t)single_h, WINDOW_FORMAT_RGBA_8888);
-            ANativeWindow_Buffer bot_buf;
-            if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
-                uint32_t *dst = (uint32_t *)bot_buf.bits;
-                for (unsigned y = 0; y < single_h && y < (unsigned)bot_buf.height; y++) {
-                    const uint32_t *src_line;
-                    if (height >= 384) {
-                        src_line = s->frame_buffer + (y + 192) * width;
-                    } else {
-                        src_line = s->frame_buffer + y * width + 256;
-                    }
-                    memcpy(dst + y * bot_buf.stride, src_line, single_w * sizeof(uint32_t));
+            const uint32_t *src_line;
+            if (height >= 384) {
+                src_line = s->frame_buffer + 192 * width;
+            } else {
+                src_line = s->frame_buffer + 256;
+            }
+
+            if (!s->crisp_pixels) {
+                if (s->last_buffer_secondary_w != (int)single_w || s->last_buffer_secondary_h != (int)single_h) {
+                    ANativeWindow_setBuffersGeometry(win_bottom, (int32_t)single_w, (int32_t)single_h, WINDOW_FORMAT_RGBA_8888);
+                    s->last_buffer_secondary_w = (int)single_w;
+                    s->last_buffer_secondary_h = (int)single_h;
                 }
-                ANativeWindow_unlockAndPost(win_bottom);
+                ANativeWindow_Buffer bot_buf;
+                if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
+                    uint32_t *dst = (uint32_t *)bot_buf.bits;
+                    for (unsigned y = 0; y < single_h && y < (unsigned)bot_buf.height; y++) {
+                        memcpy(dst + y * bot_buf.stride, src_line + y * width, single_w * sizeof(uint32_t));
+                    }
+                    ANativeWindow_unlockAndPost(win_bottom);
+                }
+            } else {
+                if (s->last_buffer_secondary_w != 0 || s->last_buffer_secondary_h != 0) {
+                    ANativeWindow_setBuffersGeometry(win_bottom, 0, 0, WINDOW_FORMAT_RGBA_8888);
+                    s->last_buffer_secondary_w = 0;
+                    s->last_buffer_secondary_h = 0;
+                }
+                ANativeWindow_Buffer bot_buf;
+                if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
+                    blit_frame_nearest(
+                        src_line, (int)single_w, (int)single_h, width,
+                        (uint32_t *)bot_buf.bits, bot_buf.width, bot_buf.height, bot_buf.stride,
+                        &s->lut_x, &s->lut_x_capacity, &s->lut_x_src_w, &s->lut_x_dst_w,
+                        &s->lut_y, &s->lut_y_capacity, &s->lut_y_src_h, &s->lut_y_dst_h
+                    );
+                    ANativeWindow_unlockAndPost(win_bottom);
+                }
             }
         }
     } else if (s->window) {
-        // Single display mode: blit entire framebuffer
-        ANativeWindow_setBuffersGeometry(s->window, (int32_t)width, (int32_t)height, WINDOW_FORMAT_RGBA_8888);
-        ANativeWindow_Buffer win_buf;
-        if (ANativeWindow_lock(s->window, &win_buf, NULL) == 0) {
-            uint32_t *dst = (uint32_t *)win_buf.bits;
-            for (unsigned y = 0; y < height && y < (unsigned)win_buf.height; y++) {
-                memcpy(dst + y * win_buf.stride, s->frame_buffer + y * width, width * sizeof(uint32_t));
+        if (!s->crisp_pixels) {
+            // Smooth mode: set buffer geometry to core resolution and let display hardware interpolate
+            if (s->last_buffer_w != (int)width || s->last_buffer_h != (int)height) {
+                ANativeWindow_setBuffersGeometry(s->window, (int32_t)width, (int32_t)height, WINDOW_FORMAT_RGBA_8888);
+                s->last_buffer_w = (int)width;
+                s->last_buffer_h = (int)height;
             }
-            ANativeWindow_unlockAndPost(s->window);
+            ANativeWindow_Buffer win_buf;
+            if (ANativeWindow_lock(s->window, &win_buf, NULL) == 0) {
+                uint32_t *dst = (uint32_t *)win_buf.bits;
+                for (unsigned y = 0; y < height && y < (unsigned)win_buf.height; y++) {
+                    memcpy(dst + y * win_buf.stride, s->frame_buffer + y * width, width * sizeof(uint32_t));
+                }
+                ANativeWindow_unlockAndPost(s->window);
+            }
+        } else {
+            // Crisp mode: set buffer geometry to native display size and scale with crisp nearest-neighbor
+            if (s->last_buffer_w != 0 || s->last_buffer_h != 0) {
+                ANativeWindow_setBuffersGeometry(s->window, 0, 0, WINDOW_FORMAT_RGBA_8888);
+                s->last_buffer_w = 0;
+                s->last_buffer_h = 0;
+            }
+            ANativeWindow_Buffer win_buf;
+            if (ANativeWindow_lock(s->window, &win_buf, NULL) == 0) {
+                blit_frame_nearest(
+                    s->frame_buffer, (int)width, (int)height, width,
+                    (uint32_t *)win_buf.bits, win_buf.width, win_buf.height, win_buf.stride,
+                    &s->lut_x, &s->lut_x_capacity, &s->lut_x_src_w, &s->lut_x_dst_w,
+                    &s->lut_y, &s->lut_y_capacity, &s->lut_y_src_h, &s->lut_y_dst_h
+                );
+                ANativeWindow_unlockAndPost(s->window);
+            }
         }
     }
 
@@ -687,6 +832,19 @@ vf_session_t* vf_session_create(const vf_callbacks_t *callbacks) {
     session->prev_frame_buffer = NULL;
     session->prev_frame_buffer_size = 0;
     session->audio_filtering = true;
+    session->crisp_pixels = true;
+    session->last_buffer_w = -1;
+    session->last_buffer_h = -1;
+    session->last_buffer_secondary_w = -1;
+    session->last_buffer_secondary_h = -1;
+    session->lut_x = NULL;
+    session->lut_x_capacity = 0;
+    session->lut_x_src_w = 0;
+    session->lut_x_dst_w = 0;
+    session->lut_y = NULL;
+    session->lut_y_capacity = 0;
+    session->lut_y_src_h = 0;
+    session->lut_y_dst_h = 0;
 
     s_current_session = session;
     pthread_mutex_unlock(&s_session_lock);
@@ -718,6 +876,16 @@ void vf_session_destroy(vf_session_t *session) {
         free(session->prev_frame_buffer);
         session->prev_frame_buffer = NULL;
         session->prev_frame_buffer_size = 0;
+    }
+    if (session->lut_x) {
+        free(session->lut_x);
+        session->lut_x = NULL;
+        session->lut_x_capacity = 0;
+    }
+    if (session->lut_y) {
+        free(session->lut_y);
+        session->lut_y = NULL;
+        session->lut_y_capacity = 0;
     }
 
     if (s_current_session == session) {
@@ -934,6 +1102,8 @@ void vf_session_set_window(vf_session_t *session, void *native_window) {
     if (session->window) {
         ANativeWindow_acquire(session->window);
     }
+    session->last_buffer_w = -1;
+    session->last_buffer_h = -1;
     pthread_mutex_unlock(&session->window_mutex);
 }
 
@@ -947,6 +1117,8 @@ void vf_session_set_secondary_window(vf_session_t *session, void *native_window)
     if (session->window_secondary) {
         ANativeWindow_acquire(session->window_secondary);
     }
+    session->last_buffer_secondary_w = -1;
+    session->last_buffer_secondary_h = -1;
     pthread_mutex_unlock(&session->window_mutex);
 }
 
@@ -1037,6 +1209,16 @@ void vf_session_set_option(vf_session_t *session, const char *key, const char *v
     if (strcmp(key, "audio_filtering") == 0) {
         session->audio_filtering = (strcmp(value, "enabled") == 0 || strcmp(value, "true") == 0);
         LOGI("Audio filtering: %s", session->audio_filtering ? "enabled" : "disabled");
+    }
+    if (strcmp(key, "video_filter") == 0) {
+        pthread_mutex_lock(&session->window_mutex);
+        session->crisp_pixels = (strcmp(value, "smooth") != 0);
+        session->last_buffer_w = -1;
+        session->last_buffer_h = -1;
+        session->last_buffer_secondary_w = -1;
+        session->last_buffer_secondary_h = -1;
+        pthread_mutex_unlock(&session->window_mutex);
+        LOGI("Video filter set to: %s (crisp=%d)", value, session->crisp_pixels);
     }
     for (int i = 0; i < session->option_count; i++) {
         if (strcmp(session->options[i].key, key) == 0) {

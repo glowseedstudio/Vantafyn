@@ -195,6 +195,10 @@ class NativeEmulatorEngine(
         setOption("audio_filtering", if (enabled) "enabled" else "disabled")
     }
 
+    fun setVideoFilter(filterId: String) {
+        setOption("video_filter", filterId)
+    }
+
     @Volatile
     var isMuted: Boolean = false
         set(value) {

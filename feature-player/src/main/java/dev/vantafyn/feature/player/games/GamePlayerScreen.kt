@@ -322,10 +322,14 @@ fun GamePlayerScreen(
         webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setAspectRatio('$mode');", null)
     }
 
-    // Sync video filter changes to preferences and WebView
-    LaunchedEffect(videoFilter, webViewInstance) {
+    // Sync video filter changes to preferences, WebView, and Native Engine
+    LaunchedEffect(videoFilter, webViewInstance, nativeEngine) {
         prefs.edit().putString("video_filter", videoFilter.id).apply()
-        webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVideoFilter('${videoFilter.id}');", null)
+        if (isNativeMode) {
+            nativeEngine?.setVideoFilter(videoFilter.id)
+        } else {
+            webViewInstance?.evaluateJavascript("window.VantafynEmulator?.setVideoFilter('${videoFilter.id}');", null)
+        }
     }
 
     // Sync speed changes to WebView or Native Engine
@@ -496,6 +500,7 @@ fun GamePlayerScreen(
                         engine.setGbcColorCorrection(gbcColorCorrection)
                         engine.setGbPalette(gbPalette)
                         engine.setLcdGhosting(lcdGhosting)
+                        engine.setVideoFilter(videoFilter.id)
 
                         // Configure Wireless Link Cable networking if active
                         val linkManager = dev.vantafyn.core.emulator.net.LinkSessionManager.getInstance(context)
