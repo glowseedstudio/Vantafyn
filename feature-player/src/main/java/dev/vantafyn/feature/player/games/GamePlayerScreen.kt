@@ -405,12 +405,14 @@ fun GamePlayerScreen(
                     )
 
                     val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
-                    val av = engine.loadGame(
-                        corePath = coreFile,
-                        romPath = file,
-                        systemDir = storageManager.nativeCoreManager.getSystemDirectory(),
-                        saveDir = storageManager.nativeCoreManager.getSaveDirectory(),
-                    )
+                    val av = withContext(Dispatchers.IO) {
+                        engine.loadGame(
+                            corePath = coreFile,
+                            romPath = file,
+                            systemDir = storageManager.nativeCoreManager.getSystemDirectory(),
+                            saveDir = storageManager.nativeCoreManager.getSaveDirectory(),
+                        )
+                    }
 
                     if (av != null) {
                         engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)

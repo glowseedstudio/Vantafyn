@@ -9,6 +9,7 @@
 #include <android/native_window.h>
 #include <dlfcn.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,11 +73,16 @@ struct vf_session {
     char system_directory[PATH_MAX];
     char save_directory[PATH_MAX];
 
+    // ROM buffer persistence (MUST NOT be freed during gameplay)
+    void *rom_data;
+    size_t rom_size;
+
     // Threading and execution control
     pthread_t thread;
     atomic_bool is_thread_running;
     atomic_bool is_paused;
     atomic_bool is_active;
+    atomic_bool reset_requested;
     int fast_forward_ratio;
 
     // Window Rendering
@@ -170,6 +176,21 @@ static size_t ring_read_samples(audio_ring_t *ring, int16_t *out, size_t max_fra
 // Libretro Host Environment Callbacks
 // ---------------------------------------------------------------------------
 
+static void core_log_printf(enum retro_log_level level, const char *fmt, ...) {
+    va_list va;
+    va_start(va, fmt);
+    android_LogPriority prio = ANDROID_LOG_INFO;
+    switch (level) {
+        case RETRO_LOG_DEBUG: prio = ANDROID_LOG_DEBUG; break;
+        case RETRO_LOG_INFO: prio = ANDROID_LOG_INFO; break;
+        case RETRO_LOG_WARN: prio = ANDROID_LOG_WARN; break;
+        case RETRO_LOG_ERROR: prio = ANDROID_LOG_ERROR; break;
+        default: prio = ANDROID_LOG_INFO; break;
+    }
+    __android_log_vprint(prio, "MelonDSCore", fmt, va);
+    va_end(va);
+}
+
 static bool core_environment(unsigned cmd, void *data) {
     vf_session_t *s = s_current_session;
     if (!s) return false;
@@ -220,7 +241,11 @@ static bool core_environment(unsigned cmd, void *data) {
             return true;
         }
         case RETRO_ENVIRONMENT_GET_LOG_INTERFACE: {
-            // Null or custom logger
+            struct retro_log_callback *cb = (struct retro_log_callback *)data;
+            if (cb) {
+                cb->log = core_log_printf;
+                return true;
+            }
             return false;
         }
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
@@ -232,13 +257,29 @@ static bool core_environment(unsigned cmd, void *data) {
                     return true;
                 }
             }
-            // Defaults for melonDS: screen layout, threaded 3D, etc.
+            // Essential defaults for melonDS standalone parity and direct booting
             if (strcmp(var->key, "melonds_screen_layout") == 0) {
-                var->value = "Top/Bottom";
+                var->value = "Left/Right";
+                return true;
+            }
+            if (strcmp(var->key, "melonds_boot_directly") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "melonds_console_mode") == 0) {
+                var->value = "DS";
                 return true;
             }
             if (strcmp(var->key, "melonds_threaded_renderer") == 0) {
                 var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "melonds_jit_enable") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "melonds_touch_mode") == 0) {
+                var->value = "Touch";
                 return true;
             }
             return false;
@@ -416,6 +457,13 @@ static void* run_loop_thread(void *arg) {
     clock_gettime(CLOCK_MONOTONIC, &next_frame_time);
 
     while (atomic_load(&s->is_thread_running)) {
+        if (atomic_exchange(&s->reset_requested, false)) {
+            if (s->retro_reset) {
+                LOGI("Executing retro_reset synchronously on emulation worker thread");
+                s->retro_reset();
+            }
+        }
+
         if (atomic_load(&s->is_paused)) {
             usleep(15000); // 15ms sleep when paused
             clock_gettime(CLOCK_MONOTONIC, &next_frame_time);
@@ -609,18 +657,25 @@ vf_result_t vf_session_load_game(
     }
     fclose(f);
 
+    session->rom_data = rom_data;
+    session->rom_size = (size_t)rom_size;
+
     struct retro_game_info game_info = {
         .path = rom_path,
-        .data = rom_data,
-        .size = (size_t)rom_size,
+        .data = session->rom_data,
+        .size = session->rom_size,
         .meta = NULL
     };
 
     bool loaded = session->retro_load_game(&game_info);
-    free(rom_data);
 
     if (!loaded) {
         LOGE("retro_load_game rejected ROM");
+        if (session->rom_data) {
+            free(session->rom_data);
+            session->rom_data = NULL;
+            session->rom_size = 0;
+        }
         session->retro_deinit();
         dlclose(session->core_handle);
         session->core_handle = NULL;
@@ -643,8 +698,8 @@ vf_result_t vf_session_load_game(
         *out_av_info = session->av_info;
     }
 
-    // Enable touch input device on port 0 for DS cores
-    session->retro_set_controller_port_device(0, RETRO_DEVICE_POINTER);
+    // Set joypad device on port 0 (standard RetroPad buttons)
+    session->retro_set_controller_port_device(0, RETRO_DEVICE_JOYPAD);
 
     atomic_store(&session->is_active, true);
     LOGI("Game loaded successfully. Resolution: %dx%d, FPS: %.1f, Audio: %.0fHz",
@@ -663,6 +718,12 @@ void vf_session_unload(vf_session_t *session) {
 
     if (session->retro_unload_game) session->retro_unload_game();
     if (session->retro_deinit) session->retro_deinit();
+
+    if (session->rom_data) {
+        free(session->rom_data);
+        session->rom_data = NULL;
+        session->rom_size = 0;
+    }
 
     dlclose(session->core_handle);
     session->core_handle = NULL;
@@ -687,8 +748,8 @@ void vf_session_resume(vf_session_t *session) {
 }
 
 void vf_session_reset(vf_session_t *session) {
-    if (session && session->retro_reset) {
-        session->retro_reset();
+    if (session) {
+        atomic_store(&session->reset_requested, true);
     }
 }
 

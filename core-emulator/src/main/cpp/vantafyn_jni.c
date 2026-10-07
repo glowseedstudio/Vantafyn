@@ -39,10 +39,7 @@ static JNIEnv* get_jni_env(void) {
 
 static void cb_on_frame_rendered(void *user_data) {
     (void)user_data;
-    JNIEnv *env = get_jni_env();
-    if (env && g_engine_obj && g_mid_on_frame_rendered) {
-        (*env)->CallVoidMethod(env, g_engine_obj, g_mid_on_frame_rendered);
-    }
+    // No-op to prevent 60Hz JNI invocation overhead on the render thread
 }
 
 static void cb_on_geometry_changed(void *user_data, int width, int height, double aspect) {
