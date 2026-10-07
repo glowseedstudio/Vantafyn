@@ -123,10 +123,21 @@ public static class Gen5SaveParser
             result.Boxes.Add(box);
         }
 
+        result.DetectedGeneration = 5;
         result.PokedexCaught = pokedex?.CaughtSpeciesIds.Count;
         result.PokedexSeen = pokedex?.SeenSpeciesIds.Count;
         result.CaughtSpeciesIds = pokedex?.CaughtSpeciesIds ?? [];
         result.SeenSpeciesIds = pokedex?.SeenSpeciesIds ?? [];
+
+        bool isUninitialized = partyCount == 0 &&
+                               result.Boxes.All(b => b.OccupiedCount == 0) &&
+                               (pokedex == null || pokedex.Value.CaughtSpeciesIds.Count == 0);
+        if (isUninitialized)
+        {
+            result.IsSuccess = false;
+            result.ErrorMessage = "Save file is uninitialized (no in-game save exists).";
+            return result;
+        }
 
         result.IsSuccess = true;
         return result;

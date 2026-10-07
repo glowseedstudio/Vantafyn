@@ -159,6 +159,11 @@ object Gen5NativeSaveParser {
             )
         }
 
+        val isUninitialized = partyCount == 0 &&
+            boxesList.all { it.occupiedCount == 0 } &&
+            (pokedex?.caughtSpeciesIds?.isEmpty() ?: true)
+        if (isUninitialized) return null
+
         return PokemonGameSaveDto(
             gameId = gameId,
             title = gameTitle,

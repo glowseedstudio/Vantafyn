@@ -331,7 +331,11 @@ fun PokemonVaultScreen(
                 availableGames = games
                 // If lower state is PersonalVault, but games exist, default lower to first game for convenience
                 if (lowerState.containerType is StorageContainerType.PersonalVault && games.isNotEmpty()) {
-                    lowerState = lowerState.copy(containerType = StorageContainerType.GameCartridge(games.first()))
+                    lowerState = lowerState.copy(
+                        containerType = StorageContainerType.GameCartridge(games.first()),
+                        gameSave = null,
+                        vaultBox = null,
+                    )
                 }
             }
             loadVaultSummary()
@@ -593,8 +597,16 @@ fun PokemonVaultScreen(
 
     val allDetectedSaves = remember(upperState.gameSave, lowerState.gameSave, availableGames) {
         val map = mutableMapOf<String, dev.vantafyn.core.jellyfin.PokemonGameSaveDto>()
-        upperState.gameSave?.let { map[it.gameId] = it }
-        lowerState.gameSave?.let { map[it.gameId] = it }
+        fun isValidSave(save: dev.vantafyn.core.jellyfin.PokemonGameSaveDto?): Boolean {
+            if (save == null || !save.saveFound || !save.providerAvailable) return false
+            return save.party.isNotEmpty() ||
+                save.boxes.any { it.entries.isNotEmpty() } ||
+                save.totalPokemonCount > 0 ||
+                (save.pokedexCaught ?: 0) > 0 ||
+                save.gymBadges.any { r -> r.badges.any { it.isEarned } }
+        }
+        upperState.gameSave?.takeIf { isValidSave(it) }?.let { map[it.gameId] = it }
+        lowerState.gameSave?.takeIf { isValidSave(it) }?.let { map[it.gameId] = it }
         for (game in availableGames) {
             if (!map.containsKey(game.id)) {
                 val safeGameId = game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -615,14 +627,8 @@ fun PokemonVaultScreen(
                             expectedGeneration = game.pokemon?.generation ?: 0,
                             expectedPlatform = game.pokemon?.platform ?: "",
                         )
-                        val hasSaveContent = parsed != null && (
-                            parsed.party.isNotEmpty() ||
-                                parsed.boxes.any { it.entries.isNotEmpty() } ||
-                                parsed.totalPokemonCount > 0 ||
-                                parsed.gymBadges.isNotEmpty()
-                            )
-                        if (hasSaveContent) {
-                            map[game.id] = parsed!!.copy(
+                        if (parsed != null && isValidSave(parsed)) {
+                            map[game.id] = parsed.copy(
                                 gameId = game.id,
                                 title = game.title,
                             )
@@ -719,6 +725,8 @@ fun PokemonVaultScreen(
                                     containerType = StorageContainerType.GameCartridge(game),
                                     selectedBoxIndex = 1,
                                     isPartyMode = false,
+                                    gameSave = null,
+                                    vaultBox = null,
                                 )
                                 loadContainerData(TransferSide.Destination)
                                 subScreen = VaultSubScreen.BoxTransfer
@@ -999,7 +1007,13 @@ fun PokemonVaultScreen(
                     availableGames = availableGames,
                     selectedSlotIndex = upperSelectedSlotIndex,
                     onSelectContainer = { target ->
-                        upperState = upperState.copy(containerType = target, selectedBoxIndex = 1, isPartyMode = false)
+                        upperState = upperState.copy(
+                            containerType = target,
+                            selectedBoxIndex = 1,
+                            isPartyMode = false,
+                            gameSave = null,
+                            vaultBox = null,
+                        )
                         loadContainerData(TransferSide.Source)
                         upperSelectedSlotIndex = null
                     },
@@ -1086,7 +1100,13 @@ fun PokemonVaultScreen(
                     availableGames = availableGames,
                     selectedSlotIndex = lowerSelectedSlotIndex,
                     onSelectContainer = { target ->
-                        lowerState = lowerState.copy(containerType = target, selectedBoxIndex = 1, isPartyMode = false)
+                        lowerState = lowerState.copy(
+                            containerType = target,
+                            selectedBoxIndex = 1,
+                            isPartyMode = false,
+                            gameSave = null,
+                            vaultBox = null,
+                        )
                         loadContainerData(TransferSide.Destination)
                         lowerSelectedSlotIndex = null
                     },

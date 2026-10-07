@@ -131,4 +131,26 @@ class PokemonNativeSaveParserTest {
             PokemonGymBadgeCatalog.forGen3(pokemonGameKey(base64LikeId, "Pokemon - FireRed Version"), 0x01).single().region,
         )
     }
+
+    @Test
+    fun uninitializedGen4SaveReturnsNull() {
+        val dummy = ByteArray(512 * 1024)
+        assertNull(Gen4NativeSaveParser.parse(dummy, "Pokemon - HeartGold Version", "heartgold"))
+    }
+
+    @Test
+    fun uninitializedGen5SaveReturnsNull() {
+        val dummy = ByteArray(512 * 1024)
+        assertNull(Gen5NativeSaveParser.parse(dummy, "Pokemon - Black Version", "black"))
+    }
+
+    @Test
+    fun unovaBadgeRegionIsReportedForGen5() {
+        val regions = PokemonGymBadgeCatalog.forGen5("black pokemon - black version", 0b01)
+        assertEquals(1, regions.size)
+        assertEquals("unova", regions.single().region)
+        assertEquals(8, regions.single().badges.size)
+        assertTrue(regions.single().badges[0].isEarned)
+        assertFalse(regions.single().badges[1].isEarned)
+    }
 }

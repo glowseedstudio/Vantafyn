@@ -122,7 +122,7 @@ object Gen4NativeSaveParser {
     )
 
     fun isGen4Save(saveBytes: ByteArray, gameTitle: String = ""): Boolean {
-        if (saveBytes.size < 0x80000) return false // At least 512 KB
+        if (saveBytes.size < 0x40000) return false // At least 256 KB
         val lowerTitle = gameTitle.lowercase()
         if (lowerTitle.contains("diamond") || lowerTitle.contains("pearl") ||
             lowerTitle.contains("platinum") || lowerTitle.contains("heartgold") ||
@@ -160,12 +160,15 @@ object Gen4NativeSaveParser {
     private fun getActiveSlot(saveBytes: ByteArray, blockStart: Int, blockSize: Int): Int {
         val footerOffset = blockStart + blockSize - 0x14
         val c1 = readUInt32LE(saveBytes, footerOffset)
+        if (footerOffset + PARTITION_SIZE + 4 > saveBytes.size) {
+            return if (c1 != 0xFFFFFFFFL) 0 else -1
+        }
         val c2 = readUInt32LE(saveBytes, footerOffset + PARTITION_SIZE)
         return if (c2 != 0xFFFFFFFFL && (c1 == 0xFFFFFFFFL || c2 > c1)) 1 else 0
     }
 
     fun parse(saveBytes: ByteArray, gameTitle: String = "Pokemon Gen 4", gameId: String = ""): PokemonGameSaveDto? {
-        if (saveBytes.size < 0x80000) return null
+        if (saveBytes.size < 0x40000) return null
 
         val offsets = detectVariant(saveBytes, gameTitle)
 
@@ -246,6 +249,14 @@ object Gen4NativeSaveParser {
                 )
             )
         }
+
+        val isUninitialized = partyList.isEmpty() &&
+            boxesList.all { it.occupiedCount == 0 } &&
+            (pokedex?.caughtSpeciesIds?.isEmpty() ?: true) &&
+            (johtoBadgeFlags == 0 && kantoBadgeFlags == 0) &&
+            (otName == "TRAINER" || otName.isBlank()) &&
+            tid == 0
+        if (isUninitialized || activeSlotGeneral < 0) return null
 
         return PokemonGameSaveDto(
             gameId = gameId,

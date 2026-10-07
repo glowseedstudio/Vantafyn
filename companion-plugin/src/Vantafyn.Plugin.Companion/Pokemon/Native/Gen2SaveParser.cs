@@ -251,6 +251,7 @@ public static class Gen2SaveParser
         result.SeenSpeciesIds = seenIds.OrderBy(id => id).ToList();
 
         result.Boxes = boxesList;
+        result.DetectedGeneration = 2;
         result.IsSuccess = true;
         return result;
     }

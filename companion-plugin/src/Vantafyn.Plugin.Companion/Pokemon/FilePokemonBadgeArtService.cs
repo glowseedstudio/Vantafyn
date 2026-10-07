@@ -35,6 +35,24 @@ public sealed partial class FilePokemonBadgeArtService(ICompanionPaths paths) : 
         new("hoenn", "Hoenn", 3, "feather", "Feather Badge", 6),
         new("hoenn", "Hoenn", 3, "mind", "Mind Badge", 7),
         new("hoenn", "Hoenn", 3, "rain", "Rain Badge", 8),
+
+        new("sinnoh", "Sinnoh", 4, "coal", "Coal Badge", 1),
+        new("sinnoh", "Sinnoh", 4, "forest", "Forest Badge", 2),
+        new("sinnoh", "Sinnoh", 4, "cobble", "Cobble Badge", 3),
+        new("sinnoh", "Sinnoh", 4, "fen", "Fen Badge", 4),
+        new("sinnoh", "Sinnoh", 4, "relic", "Relic Badge", 5),
+        new("sinnoh", "Sinnoh", 4, "mine", "Mine Badge", 6),
+        new("sinnoh", "Sinnoh", 4, "icicle", "Icicle Badge", 7),
+        new("sinnoh", "Sinnoh", 4, "beacon", "Beacon Badge", 8),
+
+        new("unova", "Unova", 5, "trio", "Trio Badge", 1),
+        new("unova", "Unova", 5, "basic", "Basic Badge", 2),
+        new("unova", "Unova", 5, "insect", "Insect Badge", 3),
+        new("unova", "Unova", 5, "bolt", "Bolt Badge", 4),
+        new("unova", "Unova", 5, "quake", "Quake Badge", 5),
+        new("unova", "Unova", 5, "jet", "Jet Badge", 6),
+        new("unova", "Unova", 5, "freeze", "Freeze Badge", 7),
+        new("unova", "Unova", 5, "legend", "Legend Badge", 8),
     ];
 
     public PokemonBadgeArtCatalogDto GetCatalog(PokemonConfiguration config, string imageUrlBase)

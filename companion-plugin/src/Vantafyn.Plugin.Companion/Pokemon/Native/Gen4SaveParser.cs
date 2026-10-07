@@ -36,7 +36,7 @@ public static class Gen4SaveParser
 
     public static bool IsGen4Save(byte[] saveBytes, string gameId = "")
     {
-        if (saveBytes == null || saveBytes.Length < 0x80000) return false;
+        if (saveBytes == null || saveBytes.Length < 0x40000) return false;
         var lower = (gameId ?? string.Empty).ToLowerInvariant();
         return lower.Contains("diamond") || lower.Contains("pearl") ||
                lower.Contains("platinum") || lower.Contains("heartgold") ||
@@ -60,17 +60,42 @@ public static class Gen4SaveParser
     {
         int footerOffset = blockStart + blockSize - 0x14;
         uint c1 = ReadUInt32LE(saveBytes, footerOffset);
+        if (footerOffset + PartitionSize + 4 > saveBytes.Length)
+        {
+            return c1 != uint.MaxValue ? 0 : -1;
+        }
         uint c2 = ReadUInt32LE(saveBytes, footerOffset + PartitionSize);
         return (c2 != uint.MaxValue && (c1 == uint.MaxValue || c2 > c1)) ? 1 : 0;
+    }
+
+    private static (byte johtoOrSinnoh, byte kanto) ReadBadgeFlags(byte[] saveBytes, int generalBase, int trainerNameOffset, bool isHgss)
+    {
+        int trainerStart = generalBase + trainerNameOffset;
+        int nameEnd = trainerStart + 16;
+        if (trainerStart < 0 || nameEnd > saveBytes.Length) return (0, 0);
+        bool erased = true;
+        for (int i = trainerStart; i < nameEnd; i++)
+        {
+            if (saveBytes[i] != 0xFF)
+            {
+                erased = false;
+                break;
+            }
+        }
+        if (erased) return (0, 0);
+
+        byte johtoOrSinnoh = (trainerStart + 0x1A < saveBytes.Length) ? saveBytes[trainerStart + 0x1A] : (byte)0;
+        byte kanto = (isHgss && trainerStart + 0x1F < saveBytes.Length) ? saveBytes[trainerStart + 0x1F] : (byte)0;
+        return (johtoOrSinnoh, kanto);
     }
 
     public static PokemonSaveParseResult Parse(byte[] saveBytes, string gameId, PkVaultStaticCatalog catalog)
     {
         var result = new PokemonSaveParseResult();
-        if (saveBytes == null || saveBytes.Length < 0x80000)
+        if (saveBytes == null || saveBytes.Length < 0x40000)
         {
             result.IsSuccess = false;
-            result.ErrorMessage = "Save file size is invalid for Gen 4 (must be >= 512KB).";
+            result.ErrorMessage = "Save file size is invalid for Gen 4 (must be >= 256KB).";
             return result;
         }
 
@@ -172,10 +197,37 @@ public static class Gen4SaveParser
             result.Boxes.Add(box);
         }
 
+        result.DetectedGeneration = 4;
         result.PokedexCaught = pokedex?.CaughtSpeciesIds.Count;
         result.PokedexSeen = pokedex?.SeenSpeciesIds.Count;
         result.CaughtSpeciesIds = pokedex?.CaughtSpeciesIds ?? [];
         result.SeenSpeciesIds = pokedex?.SeenSpeciesIds ?? [];
+
+        bool isHgss = lower.Contains("heartgold") || lower.Contains("soulsilver") ||
+                      lower.Contains("heart gold") || lower.Contains("soul silver") ||
+                      lower.Contains("hgss");
+        var (johtoOrSinnoh, kanto) = ReadBadgeFlags(saveBytes, generalBase, trainerNameOffset, isHgss);
+        result.GymBadges = PokemonGymBadgeCatalog.ForGen4(gameId ?? string.Empty, johtoOrSinnoh, kanto);
+
+        bool isUninitialized = partyCount == 0 &&
+                               result.Boxes.All(b => b.OccupiedCount == 0) &&
+                               (pokedex == null || pokedex.Value.CaughtSpeciesIds.Count == 0) &&
+                               result.GymBadges.All(r => r.Badges.All(b => !b.IsEarned)) &&
+                               (string.IsNullOrWhiteSpace(otName) || otName == "TRAINER") &&
+                               tid == 0;
+        if (isUninitialized || activeGeneral < 0)
+        {
+            result.GymBadges = [];
+            result.Party = [];
+            result.Boxes = [];
+            result.CaughtSpeciesIds = [];
+            result.SeenSpeciesIds = [];
+            result.PokedexCaught = null;
+            result.PokedexSeen = null;
+            result.IsSuccess = false;
+            result.ErrorMessage = "Save file is uninitialized (no in-game save exists).";
+            return result;
+        }
 
         result.IsSuccess = true;
         return result;

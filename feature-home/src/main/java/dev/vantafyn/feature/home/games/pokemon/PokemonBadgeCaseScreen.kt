@@ -90,7 +90,20 @@ fun PokemonBadgeCaseScreen(
     val scrollState = rememberScrollState()
     val games = remember(availableGames, detectedSaves) {
         detectedSaves
-            .filter { it.gymBadges.isNotEmpty() }
+            .filter { save ->
+                save.saveFound && save.providerAvailable &&
+                    save.gymBadges.isNotEmpty() &&
+                    (save.party.isNotEmpty() ||
+                     save.boxes.any { it.entries.isNotEmpty() } ||
+                     save.totalPokemonCount > 0 ||
+                     (save.pokedexCaught ?: 0) > 0 ||
+                     save.gymBadges.any { r -> r.badges.any { it.isEarned } })
+            }
+            .filter { save ->
+                val game = availableGames.firstOrNull { it.id == save.gameId }
+                val expectedGen = game?.pokemon?.generation ?: 0
+                expectedGen == 0 || save.generation == 0 || expectedGen == save.generation
+            }
             .map { save ->
                 val game = availableGames.firstOrNull { it.id == save.gameId }
                 val title = game?.pokemon?.canonicalTitle

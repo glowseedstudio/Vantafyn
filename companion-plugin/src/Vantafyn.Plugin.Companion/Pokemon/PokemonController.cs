@@ -2187,16 +2187,35 @@ public sealed class PokemonController : ControllerBase
                 Title = game.Title,
                 Platform = meta.Platform,
                 Generation = meta.Generation,
-                SaveFound = true,
-                ProviderAvailable = false,
+                SaveFound = false,
+                ProviderAvailable = true,
                 ErrorMessage = parseResult.ErrorMessage
+            });
+        }
+
+        if (parseResult.DetectedGeneration.HasValue && meta.Generation > 0 &&
+            parseResult.DetectedGeneration.Value != meta.Generation)
+        {
+            return Ok(new PokemonGameSaveDto
+            {
+                GameId = game.Id,
+                Title = game.Title,
+                Platform = meta.Platform,
+                Generation = meta.Generation,
+                SaveFound = false,
+                ProviderAvailable = true,
+                ErrorMessage = $"Save file generation ({parseResult.DetectedGeneration.Value}) does not match game generation ({meta.Generation})."
             });
         }
 
         var totalCount = parseResult.Party.Count + parseResult.Boxes.Sum(b => b.OccupiedCount);
         var shinyCount = parseResult.Party.Count(p => p.IsShiny) + parseResult.Boxes.Sum(b => b.Entries.Count(p => p.IsShiny));
+        bool hasActualSaveContent = totalCount > 0 ||
+                                   (parseResult.PokedexCaught ?? 0) > 0 ||
+                                   parseResult.CaughtSpeciesIds.Count > 0 ||
+                                   parseResult.GymBadges.Any(r => r.Badges.Any(b => b.IsEarned));
 
-        if (_journeyService != null)
+        if (_journeyService != null && hasActualSaveContent)
         {
             try
             {
@@ -2235,7 +2254,7 @@ public sealed class PokemonController : ControllerBase
             CaughtSpeciesIds = parseResult.CaughtSpeciesIds,
             SeenSpeciesIds = parseResult.SeenSpeciesIds,
             GymBadges = parseResult.GymBadges,
-            SaveFound = true,
+            SaveFound = hasActualSaveContent,
             ProviderAvailable = true,
             Party = parseResult.Party,
             Boxes = parseResult.Boxes,

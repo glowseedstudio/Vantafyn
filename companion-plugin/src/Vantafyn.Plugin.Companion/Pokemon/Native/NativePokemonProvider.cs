@@ -62,31 +62,49 @@ public sealed class NativePokemonProvider : IPokemonProvider
 
         try
         {
-            if (Gen1SaveParser.IsGen1Save(saveBytes))
+            int expectedGen = generation;
+            if (expectedGen <= 0)
             {
-                var result = Gen1SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
-                return Task.FromResult(result);
+                expectedGen = InferGeneration(pokemonGameId, platform);
             }
-            else if (Gen2SaveParser.IsGen2Save(saveBytes))
+
+            PokemonSaveParseResult result;
+            switch (expectedGen)
             {
-                var result = Gen2SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
-                return Task.FromResult(result);
+                case 1:
+                    result = Gen1SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
+                case 2:
+                    result = Gen2SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
+                case 3:
+                    result = Gen3SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
+                case 4:
+                    result = Gen4SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
+                case 5:
+                    result = Gen5SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
+                default:
+                    result = Probe(saveBytes, pokemonGameId, platform);
+                    break;
             }
-            else if (Gen4SaveParser.IsGen4Save(saveBytes, pokemonGameId))
+
+            if (result != null && expectedGen > 0 && result.DetectedGeneration.HasValue && result.DetectedGeneration.Value != expectedGen)
             {
-                var result = Gen4SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
-                return Task.FromResult(result);
+                return Task.FromResult(new PokemonSaveParseResult
+                {
+                    IsSuccess = false,
+                    ErrorMessage = $"Save data generation ({result.DetectedGeneration.Value}) does not match expected Generation {expectedGen}."
+                });
             }
-            else if (Gen5SaveParser.IsGen5Save(saveBytes, pokemonGameId))
+
+            return Task.FromResult(result ?? new PokemonSaveParseResult
             {
-                var result = Gen5SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
-                return Task.FromResult(result);
-            }
-            else
-            {
-                var result = Gen3SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
-                return Task.FromResult(result);
-            }
+                IsSuccess = false,
+                ErrorMessage = "Could not parse Pokémon save data for this title."
+            });
         }
         catch (Exception ex)
         {
@@ -97,6 +115,96 @@ public sealed class NativePokemonProvider : IPokemonProvider
                 ErrorMessage = $"Native save parsing error: {ex.Message}"
             });
         }
+    }
+
+    private PokemonSaveParseResult Probe(byte[] saveBytes, string pokemonGameId, string platform)
+    {
+        var plat = (platform ?? string.Empty).ToLowerInvariant();
+        if (plat == "nds")
+        {
+            if (Gen4SaveParser.IsGen4Save(saveBytes, pokemonGameId))
+                return Gen4SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            if (Gen5SaveParser.IsGen5Save(saveBytes, pokemonGameId))
+                return Gen5SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            return new PokemonSaveParseResult
+            {
+                IsSuccess = false,
+                ErrorMessage = "NDS save data does not match known Gen 4 or Gen 5 formats."
+            };
+        }
+        if (plat == "gba")
+        {
+            if (Gen3SaveParser.IsGen3Save(saveBytes))
+                return Gen3SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            return new PokemonSaveParseResult
+            {
+                IsSuccess = false,
+                ErrorMessage = "GBA save data does not match known Gen 3 format."
+            };
+        }
+        if (plat is "gbc" or "gb")
+        {
+            if (Gen2SaveParser.IsGen2Save(saveBytes))
+                return Gen2SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            if (Gen1SaveParser.IsGen1Save(saveBytes))
+                return Gen1SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            return new PokemonSaveParseResult
+            {
+                IsSuccess = false,
+                ErrorMessage = "GB/GBC save data does not match known Gen 1 or Gen 2 format."
+            };
+        }
+
+        if (Gen1SaveParser.IsGen1Save(saveBytes))
+            return Gen1SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+        if (Gen2SaveParser.IsGen2Save(saveBytes))
+            return Gen2SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+        if (Gen4SaveParser.IsGen4Save(saveBytes, pokemonGameId))
+            return Gen4SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+        if (Gen5SaveParser.IsGen5Save(saveBytes, pokemonGameId))
+            return Gen5SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+        if (Gen3SaveParser.IsGen3Save(saveBytes))
+            return Gen3SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+
+        return new PokemonSaveParseResult
+        {
+            IsSuccess = false,
+            ErrorMessage = "Unrecognized Pokémon save file."
+        };
+    }
+
+    private static int InferGeneration(string pokemonGameId, string platform)
+    {
+        var lower = (pokemonGameId ?? string.Empty).ToLowerInvariant();
+        if (lower.Contains("heartgold") || lower.Contains("soulsilver") || lower.Contains("heart gold") ||
+            lower.Contains("soul silver") || lower.Contains("hgss") || lower.Contains("diamond") ||
+            lower.Contains("pearl") || lower.Contains("platinum"))
+        {
+            return 4;
+        }
+        if (lower.Contains("black") || lower.Contains("white") || lower.Contains("b2w2") ||
+            lower.Contains("black 2") || lower.Contains("white 2"))
+        {
+            return 5;
+        }
+        if (lower.Contains("firered") || lower.Contains("leafgreen") || lower.Contains("fire red") ||
+            lower.Contains("leaf green") || lower.Contains("emerald") || lower.Contains("ruby") ||
+            lower.Contains("sapphire"))
+        {
+            return 3;
+        }
+        if (lower.Contains("crystal") || lower.Contains("gold") || lower.Contains("silver"))
+        {
+            return 2;
+        }
+        if (lower.Contains("red") || lower.Contains("blue") || lower.Contains("yellow") || lower.Contains("pikachu"))
+        {
+            return 1;
+        }
+
+        var plat = (platform ?? string.Empty).ToLowerInvariant();
+        if (plat == "gba") return 3;
+        return 0;
     }
 
     public Task<PokemonExtractResult> ExtractPokemonFromSaveAsync(
@@ -110,6 +218,16 @@ public sealed class NativePokemonProvider : IPokemonProvider
         int slotIndex,
         CancellationToken cancellationToken)
     {
+        int effectiveGen = generation > 0 ? generation : InferGeneration(pokemonGameId, platform);
+        if (effectiveGen != 3)
+        {
+            return Task.FromResult(new PokemonExtractResult
+            {
+                IsSuccess = false,
+                ErrorMessage = $"Native Pokémon extraction is currently only supported for Generation 3 (got Generation {effectiveGen})."
+            });
+        }
+
         try
         {
             var parseResult = Gen3SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
@@ -148,6 +266,16 @@ public sealed class NativePokemonProvider : IPokemonProvider
         bool targetParty,
         CancellationToken cancellationToken)
     {
+        int effectiveGen = generation > 0 ? generation : InferGeneration(pokemonGameId, platform);
+        if (effectiveGen != 3)
+        {
+            return Task.FromResult(new PokemonInjectResult
+            {
+                IsSuccess = false,
+                ErrorMessage = $"Native Pokémon injection is currently only supported for Generation 3 (got Generation {effectiveGen})."
+            });
+        }
+
         try
         {
             int box = targetBoxIndex ?? 1;

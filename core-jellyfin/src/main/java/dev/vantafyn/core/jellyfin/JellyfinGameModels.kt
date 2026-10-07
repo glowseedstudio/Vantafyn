@@ -344,6 +344,17 @@ object PokemonGymBadgeCatalog {
         BadgeDef("beacon", "Beacon Badge"),
     )
 
+    private val unova = listOf(
+        BadgeDef("trio", "Trio Badge"),
+        BadgeDef("basic", "Basic Badge"),
+        BadgeDef("insect", "Insect Badge"),
+        BadgeDef("bolt", "Bolt Badge"),
+        BadgeDef("quake", "Quake Badge"),
+        BadgeDef("jet", "Jet Badge"),
+        BadgeDef("freeze", "Freeze Badge"),
+        BadgeDef("legend", "Legend Badge"),
+    )
+
     fun forGen1(kantoFlags: Int): List<PokemonGymBadgeRegionDto> =
         listOf(createRegion("kanto", "Kanto", 1, kanto, kantoFlags))
 
@@ -392,6 +403,16 @@ object PokemonGymBadgeCatalog {
             )
             isSinnoh -> listOf(createRegion("sinnoh", "Sinnoh", 4, sinnoh, johtoFlags))
             else -> emptyList()
+        }
+    }
+
+    fun forGen5(gameKey: String, unovaFlags: Int): List<PokemonGymBadgeRegionDto> {
+        val key = gameKey.lowercase()
+        val isUnova = key.contains("black") || key.contains("white") || key.contains("b2w2")
+        return if (isUnova) {
+            listOf(createRegion("unova", "Unova", 5, unova, unovaFlags))
+        } else {
+            emptyList()
         }
     }
 

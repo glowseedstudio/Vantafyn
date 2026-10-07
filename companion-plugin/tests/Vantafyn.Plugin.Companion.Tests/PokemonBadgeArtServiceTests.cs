@@ -25,16 +25,18 @@ public sealed class PokemonBadgeArtServiceTests : IDisposable
     }
 
     [Fact]
-    public void Catalog_ReturnsAllGenOneToThreeBadgeDefinitions()
+    public void Catalog_ReturnsAllGenOneToFiveBadgeDefinitions()
     {
         var service = new FilePokemonBadgeArtService(_paths);
         var catalog = service.GetCatalog(new PokemonConfiguration(), "/Vantafyn/Pokemon/Badges");
 
-        Assert.Equal(24, catalog.TotalCount);
-        Assert.Equal(3, catalog.Regions.Count);
+        Assert.Equal(40, catalog.TotalCount);
+        Assert.Equal(5, catalog.Regions.Count);
         Assert.Contains(catalog.Regions, r => r.Id == "kanto" && r.TotalCount == 8);
         Assert.Contains(catalog.Regions, r => r.Id == "johto" && r.TotalCount == 8);
         Assert.Contains(catalog.Regions, r => r.Id == "hoenn" && r.TotalCount == 8);
+        Assert.Contains(catalog.Regions, r => r.Id == "sinnoh" && r.TotalCount == 8);
+        Assert.Contains(catalog.Regions, r => r.Id == "unova" && r.TotalCount == 8);
         Assert.Equal(0, catalog.AvailableCount);
     }
 

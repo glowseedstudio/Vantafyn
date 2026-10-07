@@ -677,6 +677,69 @@ public sealed class PokemonSaveReaderTests
         Assert.False(kanto.Badges.Single(b => b.Id == "cascade").IsEarned);
     }
 
+    [Fact]
+    public async Task NativePokemonProvider_Gen4HeartGold_DoesNotFallBackToGen3()
+    {
+        var provider = new NativePokemonProvider();
+        var dummyGen3Save = CreateGen3Save();
+
+        var result = await provider.ParseSaveAsync(dummyGen3Save, "heartgold", "nds", 4, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.NotEqual(3, result.DetectedGeneration);
+    }
+
+    [Fact]
+    public async Task NativePokemonProvider_Gen4HeartGold_UninitializedSave_ReturnsFailure()
+    {
+        var provider = new NativePokemonProvider();
+        // 512 KB blank file like freshly flushed melonDS SRAM before in-game save
+        var blankBytes = new byte[0x80000];
+
+        var result = await provider.ParseSaveAsync(blankBytes, "heartgold", "nds", 4, CancellationToken.None);
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(result.GymBadges);
+        Assert.Empty(result.Party);
+    }
+
+    [Fact]
+    public void PokemonGymBadgeCatalog_Gen3DoesNotInventHoennForHeartGold()
+    {
+        var badges = PokemonGymBadgeCatalog.ForGen3("heartgold", 0xFF);
+        Assert.Empty(badges);
+    }
+
+    [Fact]
+    public void PokemonGymBadgeCatalog_Gen4HeartGoldReturnsJohtoAndKanto()
+    {
+        // johtoFlags = 0b00000011 (Zephyr + Hive earned), kantoFlags = 0b00000101 (Boulder + Thunder earned)
+        var regions = PokemonGymBadgeCatalog.ForGen4("heartgold", 0b00000011, 0b00000101);
+
+        Assert.Equal(2, regions.Count);
+        Assert.Equal("johto", regions[0].Region);
+        Assert.Equal("kanto", regions[1].Region);
+
+        Assert.True(regions[0].Badges.Single(b => b.Id == "zephyr").IsEarned);
+        Assert.True(regions[0].Badges.Single(b => b.Id == "hive").IsEarned);
+        Assert.False(regions[0].Badges.Single(b => b.Id == "plain").IsEarned);
+
+        Assert.True(regions[1].Badges.Single(b => b.Id == "boulder").IsEarned);
+        Assert.False(regions[1].Badges.Single(b => b.Id == "cascade").IsEarned);
+        Assert.True(regions[1].Badges.Single(b => b.Id == "thunder").IsEarned);
+    }
+
+    [Fact]
+    public void PokemonGymBadgeCatalog_Gen4SinnohReturnsSinnohRegion()
+    {
+        var regions = PokemonGymBadgeCatalog.ForGen4("platinum", 0b00000001, 0);
+
+        var sinnoh = Assert.Single(regions);
+        Assert.Equal("sinnoh", sinnoh.Region);
+        Assert.True(sinnoh.Badges.Single(b => b.Id == "coal").IsEarned);
+        Assert.False(sinnoh.Badges.Single(b => b.Id == "forest").IsEarned);
+    }
+
     private static byte[] CreateGen1Save()
     {
         var bytes = new byte[32768];

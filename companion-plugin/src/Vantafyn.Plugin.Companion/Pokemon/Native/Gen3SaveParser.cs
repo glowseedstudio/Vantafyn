@@ -293,7 +293,7 @@ public static class Gen3SaveParser
         result.SeenSpeciesIds = seenIds.OrderBy(id => id).ToList();
 
         result.Boxes = boxesList;
-
+        result.DetectedGeneration = 3;
         result.IsSuccess = true;
         return result;
     }

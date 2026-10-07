@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.23}"
+VERSION="${1:-0.2.24}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.57}"
-CHANGELOG="Adds server-side Wireless Link Cable room management and low-latency WebSocket packet relay for cross-network multiplayer."
+TAG="${2:-v0.9.58}"
+CHANGELOG="Adds Pokémon Gen 4/5 save parsing, Johto/Sinnoh/Unova gym badge cases, and generation-isolated diploma screens."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.23.0",
+        "changelog": "Adds server-side Wireless Link Cable room management and low-latency WebSocket packet relay for cross-network multiplayer.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.57/Vantafyn.Plugin.Companion_0.2.23_net9.zip",
+        "checksum": "916f9a305b5f5162ef461c689eb3781d",
+        "timestamp": "2026-10-07T12:07:18Z"
+      },
+      {
+        "version": "0.2.23.1",
+        "changelog": "Adds server-side Wireless Link Cable room management and low-latency WebSocket packet relay for cross-network multiplayer.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.57/Vantafyn.Plugin.Companion_0.2.23_net10.zip",
+        "checksum": "09ee2e41795e1a0ebc10ca189fa0c8ac",
+        "timestamp": "2026-10-07T12:07:18Z"
       },
       {
         "version": "0.2.21.0",

@@ -118,9 +118,20 @@ fun PokemonDiplomaCaseScreen(
 
     val items = remember(availableGames, detectedSaves) {
         detectedSaves
-            .filter { it.saveFound && it.providerAvailable }
+            .filter { save ->
+                save.saveFound && save.providerAvailable &&
+                    (save.party.isNotEmpty() ||
+                     save.boxes.any { it.entries.isNotEmpty() } ||
+                     save.totalPokemonCount > 0 ||
+                     (save.pokedexCaught ?: 0) > 0 ||
+                     save.gymBadges.any { r -> r.badges.any { it.isEarned } })
+            }
             .flatMap { save ->
                 val game = availableGames.firstOrNull { it.id == save.gameId }
+                val expectedGen = game?.pokemon?.generation ?: 0
+                if (expectedGen != 0 && save.generation != 0 && expectedGen != save.generation) {
+                    return@flatMap emptyList()
+                }
                 val title = game?.pokemon?.canonicalTitle
                     ?: game?.cleanTitle
                     ?: cleanGameTitle(save.title).ifBlank { save.title.ifBlank { "Pokemon Save" } }
@@ -459,16 +470,18 @@ private fun diplomaDefinitionsFor(save: PokemonGameSaveDto, gameTitle: String, b
     fun item(id: String, title: String, region: String, required: Int, accent: Color) =
         DiplomaCaseItem(save, gameTitle, id, title, region, required, accent, boxartUrl)
 
+    val gen = save.generation
     return when {
-        key.contains("firered") || key.contains("leafgreen") || save.generation == 1 ->
+        gen == 1 || ((key.contains("firered") || key.contains("leafgreen")) && gen == 3) ->
             listOf(item("kanto-diploma", "Kanto Pokédex Diploma", "Kanto", 150, Color(0xFFFBBF24)))
-        key.contains("gold") || key.contains("silver") || key.contains("crystal") || key.contains("heartgold") || key.contains("soulsilver") ->
-            listOf(item("johto-diploma", "Johto Pokédex Diploma", "Johto", 251, Color(0xFFA78BFA)))
-        key.contains("ruby") || key.contains("sapphire") || key.contains("emerald") ->
+        (gen == 2 && (key.contains("gold") || key.contains("silver") || key.contains("crystal"))) ||
+        (gen == 4 && (key.contains("heartgold") || key.contains("soulsilver") || key.contains("hgss"))) ->
+            listOf(item("johto-diploma", "Johto Pokédex Diploma", "Johto", 256, Color(0xFFA78BFA)))
+        gen == 3 && (key.contains("ruby") || key.contains("sapphire") || key.contains("emerald")) ->
             listOf(item("hoenn-diploma", "Hoenn Pokédex Diploma", "Hoenn", 200, Color(0xFF38BDF8)))
-        save.generation == 4 ->
+        gen == 4 && (key.contains("diamond") || key.contains("pearl") || key.contains("platinum")) ->
             listOf(item("sinnoh-diploma", "Sinnoh Pokédex Diploma", "Sinnoh", 210, Color(0xFFF472B6)))
-        save.generation == 5 ->
+        gen == 5 && (key.contains("black") || key.contains("white") || key.contains("b2w2")) ->
             listOf(item("unova-diploma", "Unova Pokédex Diploma", "Unova", 156, Color(0xFF34D399)))
         else -> emptyList()
     }
