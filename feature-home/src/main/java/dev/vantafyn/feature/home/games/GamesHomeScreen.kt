@@ -30,9 +30,14 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.content.res.Configuration
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Casino
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.CloudDone
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
@@ -48,6 +53,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -375,45 +383,16 @@ fun GamesHomeScreen(
     }
 
     pendingRecentRemoval?.let { record ->
-        AlertDialog(
-            onDismissRequest = { pendingRecentRemoval = null },
-            containerColor = Color(0xFF141827),
-            titleContentColor = Color.White,
-            textContentColor = VantafynColors.Muted,
-            title = {
-                Text(
-                    text = "Remove from Continue Playing?",
-                    fontWeight = FontWeight.Bold,
-                )
+        ContinuePlayingGameModal(
+            record = record,
+            onDismiss = { pendingRecentRemoval = null },
+            onResume = {
+                onOpenGame(record.toGameSummary())
+                pendingRecentRemoval = null
             },
-            text = {
-                Text(
-                    text = "${record.title} will only be hidden from this rail. Your game, save, and play history stay untouched.",
-                    lineHeight = 20.sp,
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onRemoveRecentGame(record.id)
-                        pendingRecentRemoval = null
-                    },
-                ) {
-                    Text(
-                        text = "Remove",
-                        color = Color(0xFF00E5FF),
-                        fontWeight = FontWeight.Bold,
-                    )
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingRecentRemoval = null }) {
-                    Text(
-                        text = "Cancel",
-                        color = VantafynColors.Muted,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
+            onRemove = {
+                onRemoveRecentGame(record.id)
+                pendingRecentRemoval = null
             },
         )
     }
@@ -736,6 +715,243 @@ private fun RecentGameCard(
             fontSize = 10.sp,
             maxLines = 1,
         )
+    }
+}
+
+@Composable
+private fun ContinuePlayingGameModal(
+    record: RecentGameRecord,
+    onDismiss: () -> Unit,
+    onResume: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    val context = LocalContext.current
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val effectiveBoxart = remember(record.id, record.boxartUrl) {
+        val local = context.getSharedPreferences("vantafyn_retro_settings", android.content.Context.MODE_PRIVATE)
+            .getString("boxart_${record.id}", null)
+        GameBoxartScraper.convertToCdnUrl(local ?: record.boxartUrl)
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = if (isLandscape) 460.dp else 400.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            Color(0xFF24243A),
+                            Color(0xFF171B2B),
+                            Color(0xFF0D101B),
+                        ),
+                    ),
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        listOf(VantafynColors.Primary, VantafynColors.Secondary),
+                    ),
+                    shape = RoundedCornerShape(24.dp),
+                )
+                .padding(if (isLandscape) 16.dp else 20.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(if (isLandscape) 12.dp else 16.dp),
+        ) {
+            // Header Row: Thumbnail + System Badge + Title + Playtime + Close
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                // Game Cover Art / Icon
+                Box(
+                    modifier = Modifier
+                        .width(if (isLandscape) 48.dp else 56.dp)
+                        .aspectRatio(3f / 4f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF1E1E28))
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (!effectiveBoxart.isNullOrBlank()) {
+                        AsyncImage(
+                            model = effectiveBoxart,
+                            contentDescription = record.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = Icons.Rounded.SportsEsports,
+                            contentDescription = null,
+                            tint = Color.White.copy(alpha = 0.4f),
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                }
+
+                // Title & Badges
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .border(
+                                    1.dp,
+                                    Brush.linearGradient(VantafynGradients.AccentColors),
+                                    RoundedCornerShape(6.dp),
+                                )
+                                .background(VantafynColors.Graphite.copy(alpha = 0.95f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        ) {
+                            Text(
+                                text = record.systemId.uppercase(),
+                                color = Color.White,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                            )
+                        }
+
+                        Text(
+                            text = "CONTINUE PLAYING",
+                            color = Color(0xFF00E5FF),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp,
+                        )
+                    }
+
+                    Text(
+                        text = record.title,
+                        color = Color.White,
+                        fontSize = if (isLandscape) 15.sp else 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Text(
+                        text = if (record.playTimeMs > 0) "Played ${GamePlayTracker.formatPlayTime(record.playTimeMs)}" else "Recently played",
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                    )
+                }
+
+                // Close Button
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.08f))
+                        .clickable(onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = VantafynColors.Muted,
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
+            // Primary Action: Resume Game
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(if (isLandscape) 44.dp else 48.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(VantafynGradients.accentHorizontal())
+                    .clickable(onClick = onResume),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    Text(
+                        text = "RESUME GAME",
+                        color = Color.White,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 13.sp,
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+            }
+
+            // Destructive / Hide Action: Remove from Continue Playing
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF28131E).copy(alpha = 0.6f))
+                    .border(1.dp, Color(0xFFFF5277).copy(alpha = 0.35f), RoundedCornerShape(14.dp))
+                    .clickable(onClick = onRemove)
+                    .padding(if (isLandscape) 10.dp else 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFFF5277).copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.DeleteOutline,
+                        contentDescription = null,
+                        tint = Color(0xFFFF5277),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = "Remove from Continue Playing",
+                        color = Color.White,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Hides from this rail. Your saves and play history stay safe.",
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                    )
+                }
+            }
+
+            // Cancel
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onDismiss)
+                    .padding(vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Cancel",
+                    color = VantafynColors.Muted,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
     }
 }
 
