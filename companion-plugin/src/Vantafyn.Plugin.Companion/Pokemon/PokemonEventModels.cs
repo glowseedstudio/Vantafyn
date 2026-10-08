@@ -28,6 +28,12 @@ public sealed class PokemonEventUnlockDto
     [JsonPropertyName("accent")]
     public string Accent { get; set; } = "#FBBF24";
 
+    [JsonPropertyName("targetSpeciesId")]
+    public int TargetSpeciesId { get; set; }
+
+    [JsonPropertyName("inGameLocation")]
+    public string InGameLocation { get; set; } = string.Empty;
+
     [JsonPropertyName("supportedGameIds")]
     public List<string> SupportedGameIds { get; set; } = [];
 }

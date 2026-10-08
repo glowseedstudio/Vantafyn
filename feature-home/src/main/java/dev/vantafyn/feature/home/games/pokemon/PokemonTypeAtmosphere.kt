@@ -392,8 +392,22 @@ object PokemonTypeCatalog {
     )
 
     private val HISUIAN_TYPE_OVERRIDES: Map<Int, Pair<PokemonType, PokemonType?>> = mapOf(
+        58 to (PokemonType.Fire to PokemonType.Rock),
+        59 to (PokemonType.Fire to PokemonType.Rock),
+        100 to (PokemonType.Electric to PokemonType.Grass),
+        101 to (PokemonType.Electric to PokemonType.Grass),
+        157 to (PokemonType.Fire to PokemonType.Ghost),
+        211 to (PokemonType.Dark to PokemonType.Poison),
+        215 to (PokemonType.Poison to PokemonType.Fighting),
+        503 to (PokemonType.Water to PokemonType.Dark),
+        549 to (PokemonType.Grass to PokemonType.Fighting),
         570 to (PokemonType.Normal to PokemonType.Ghost),
         571 to (PokemonType.Normal to PokemonType.Ghost),
+        628 to (PokemonType.Psychic to PokemonType.Flying),
+        705 to (PokemonType.Steel to PokemonType.Dragon),
+        706 to (PokemonType.Steel to PokemonType.Dragon),
+        713 to (PokemonType.Ice to PokemonType.Rock),
+        724 to (PokemonType.Grass to PokemonType.Fighting),
     )
 
     private val FORM_TYPE_OVERRIDES: Map<String, Pair<PokemonType, PokemonType?>> = mapOf(
@@ -439,8 +453,26 @@ object PokemonTypeCatalog {
         "10251" to (PokemonType.Fighting to PokemonType.Fire),
         "10252" to (PokemonType.Fighting to PokemonType.Water),
         "10253" to (PokemonType.Poison to PokemonType.Ground),
+        "10229" to (PokemonType.Fire to PokemonType.Rock),
+        "10230" to (PokemonType.Fire to PokemonType.Rock),
+        "10231" to (PokemonType.Electric to PokemonType.Grass),
+        "10232" to (PokemonType.Electric to PokemonType.Grass),
+        "10233" to (PokemonType.Fire to PokemonType.Ghost),
+        "10234" to (PokemonType.Dark to PokemonType.Poison),
+        "10235" to (PokemonType.Poison to PokemonType.Fighting),
+        "10236" to (PokemonType.Water to PokemonType.Dark),
+        "10237" to (PokemonType.Grass to PokemonType.Fighting),
         "10238" to (PokemonType.Normal to PokemonType.Ghost),
         "10239" to (PokemonType.Normal to PokemonType.Ghost),
+        "10240" to (PokemonType.Psychic to PokemonType.Flying),
+        "10241" to (PokemonType.Steel to PokemonType.Dragon),
+        "10242" to (PokemonType.Steel to PokemonType.Dragon),
+        "10243" to (PokemonType.Ice to PokemonType.Rock),
+        "10244" to (PokemonType.Grass to PokemonType.Fighting),
+        "10004" to (PokemonType.Bug to PokemonType.Ground),
+        "10005" to (PokemonType.Bug to PokemonType.Steel),
+        "10017" to (PokemonType.Water to PokemonType.Ground),
+        "10025" to (PokemonType.Water to PokemonType.Ground),
     )
 
     private fun fallbackBySpeciesName(name: String): Pair<PokemonType, PokemonType?> {

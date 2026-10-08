@@ -44,6 +44,214 @@ public static class Gen4SaveParser
                lower.Contains("soul silver") || lower.Contains("hgss");
     }
 
+    public static ushort CalculateCrc16(byte[] data, int offset, int length)
+    {
+        ushort crc = 0xFFFF;
+        for (int i = 0; i < length; i++)
+        {
+            crc = (ushort)(crc ^ (data[offset + i] << 8));
+            for (int b = 0; b < 8; b++)
+            {
+                if ((crc & 0x8000) != 0)
+                    crc = (ushort)((crc << 1) ^ 0x1021);
+                else
+                    crc = (ushort)(crc << 1);
+            }
+        }
+        return crc;
+    }
+
+    private static (int generalSize, int keyOffset, int slotCount) GetGen4KeyItemBlockInfo(string gameId)
+    {
+        var lower = (gameId ?? string.Empty).ToLowerInvariant();
+        if (lower.Contains("platinum"))
+        {
+            return (0xCF2C, 0x08D8, 40);
+        }
+        if (lower.Contains("heartgold") || lower.Contains("soulsilver") || lower.Contains("heart gold") || lower.Contains("soul silver") || lower.Contains("hgss"))
+        {
+            return (0xF628, 0x08D8, 50);
+        }
+        // Diamond / Pearl
+        return (0xC100, 0x08BC, 40);
+    }
+
+    private static ushort? ResolveGen4EventItemId(string eventId) => eventId switch
+    {
+        PokemonEventCatalog.Gen4MemberCard => 426,
+        PokemonEventCatalog.Gen4OaksLetter => 427,
+        PokemonEventCatalog.Gen4AzureFlute => 428,
+        PokemonEventCatalog.PlatinumSecretKey => 467,
+        PokemonEventCatalog.HgssEnigmaStone => 534,
+        _ => null
+    };
+
+    public static bool IsEventUnlocked(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < PartitionSize) return false;
+        var targetItem = ResolveGen4EventItemId(eventId);
+        if (targetItem == null) return false;
+
+        var (generalSize, keyOffset, slotCount) = GetGen4KeyItemBlockInfo(gameId);
+        int activeSlot = GetActiveSlot(saveBytes, 0, generalSize);
+        if (activeSlot < 0) activeSlot = 0;
+
+        int baseOffset = activeSlot * PartitionSize;
+        if (HasKeyItem(saveBytes, baseOffset + keyOffset, slotCount, targetItem.Value))
+        {
+            return true;
+        }
+
+        if (saveBytes.Length >= PartitionSize * 2)
+        {
+            int altOffset = (1 - activeSlot) * PartitionSize;
+            if (HasKeyItem(saveBytes, altOffset + keyOffset, slotCount, targetItem.Value))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static byte[] UnlockEvent(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < PartitionSize)
+        {
+            throw new InvalidDataException("Save file size is invalid for Gen 4 (must be >= 256KB).");
+        }
+
+        var targetItem = ResolveGen4EventItemId(eventId);
+        if (targetItem == null)
+        {
+            throw new InvalidDataException($"Unsupported Gen 4 event '{eventId}'.");
+        }
+
+        var (generalSize, keyOffset, slotCount) = GetGen4KeyItemBlockInfo(gameId);
+        var copy = (byte[])saveBytes.Clone();
+
+        int activeSlot = GetActiveSlot(copy, 0, generalSize);
+        if (activeSlot < 0) activeSlot = 0;
+
+        // Patch active partition
+        PatchPartitionKeyItem(copy, activeSlot * PartitionSize, generalSize, keyOffset, slotCount, targetItem.Value);
+
+        // If secondary partition exists and is initialized, patch it too so both slots stay synchronized
+        int secondarySlot = 1 - activeSlot;
+        int secondaryOffset = secondarySlot * PartitionSize;
+        if (secondaryOffset + generalSize <= copy.Length)
+        {
+            uint secCounter = ReadUInt32LE(copy, secondaryOffset + generalSize - 0x14);
+            if (secCounter != uint.MaxValue && secCounter != 0)
+            {
+                PatchPartitionKeyItem(copy, secondaryOffset, generalSize, keyOffset, slotCount, targetItem.Value);
+            }
+        }
+
+        return copy;
+    }
+
+    private static void PatchPartitionKeyItem(byte[] data, int baseOffset, int generalSize, int keyOffset, int slotCount, ushort itemId)
+    {
+        int pocketOffset = baseOffset + keyOffset;
+        int emptySlot = -1;
+
+        for (int i = 0; i < slotCount; i++)
+        {
+            int slotOffset = pocketOffset + (i * 4);
+            if (slotOffset + 4 > data.Length) break;
+            ushort existing = ReadUInt16LE(data, slotOffset);
+            if (existing == itemId)
+            {
+                // Item already present, ensure quantity is at least 1
+                WriteUInt16LE(data, slotOffset + 2, 1);
+                RecalculateGeneralBlockCrc(data, baseOffset, generalSize);
+                return;
+            }
+            if (emptySlot < 0 && existing == 0)
+            {
+                emptySlot = slotOffset;
+            }
+        }
+
+        if (emptySlot < 0)
+        {
+            throw new InvalidDataException("The Key Items pocket is full. Free one slot before unlocking this event.");
+        }
+
+        // Set Mystery Gift flag at 0x48 in General Block to enable Mystery Gift on title screen
+        if (baseOffset + 0x48 < data.Length)
+        {
+            data[baseOffset + 0x48] = 0x01;
+        }
+
+        WriteUInt16LE(data, emptySlot, itemId);
+        WriteUInt16LE(data, emptySlot + 2, 1);
+        RecalculateGeneralBlockCrc(data, baseOffset, generalSize);
+    }
+
+    public static byte[] EnableMysteryGift(byte[] saveBytes, string gameId)
+    {
+        if (saveBytes == null || saveBytes.Length < 0x40000) return saveBytes ?? Array.Empty<byte>();
+        var (generalSize, _, _) = GetGen4KeyItemBlockInfo(gameId);
+        var copy = (byte[])saveBytes.Clone();
+        int activeSlot = GetActiveSlot(copy, 0, generalSize);
+        if (activeSlot < 0) activeSlot = 0;
+
+        int baseOffset = activeSlot * PartitionSize;
+        if (baseOffset + 0x48 < copy.Length)
+        {
+            copy[baseOffset + 0x48] = 0x01;
+            RecalculateGeneralBlockCrc(copy, baseOffset, generalSize);
+        }
+
+        int secondarySlot = 1 - activeSlot;
+        int secondaryOffset = secondarySlot * PartitionSize;
+        if (secondaryOffset + generalSize <= copy.Length)
+        {
+            uint secCounter = ReadUInt32LE(copy, secondaryOffset + generalSize - 0x14);
+            if (secCounter != uint.MaxValue && secCounter != 0)
+            {
+                copy[secondaryOffset + 0x48] = 0x01;
+                RecalculateGeneralBlockCrc(copy, secondaryOffset, generalSize);
+            }
+        }
+
+        return copy;
+    }
+
+    private static void RecalculateGeneralBlockCrc(byte[] data, int baseOffset, int generalSize)
+    {
+        int crcDataLength = generalSize - 0x14;
+        ushort crc = CalculateCrc16(data, baseOffset, crcDataLength);
+        WriteUInt16LE(data, baseOffset + generalSize - 0x02, crc);
+    }
+
+    private static bool HasKeyItem(byte[] data, int pocketOffset, int slotCount, ushort itemId)
+    {
+        for (int i = 0; i < slotCount; i++)
+        {
+            int slotOffset = pocketOffset + (i * 4);
+            if (slotOffset + 2 > data.Length) break;
+            ushort existingId = ReadUInt16LE(data, slotOffset);
+            if (existingId == itemId)
+            {
+                ushort qty = ReadUInt16LE(data, slotOffset + 2);
+                if (qty > 0) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void WriteUInt16LE(byte[] data, int offset, ushort value)
+    {
+        if (offset + 2 <= data.Length)
+        {
+            data[offset] = (byte)(value & 0xFF);
+            data[offset + 1] = (byte)((value >> 8) & 0xFF);
+        }
+    }
+
     private static uint ReadUInt32LE(byte[] data, int offset)
     {
         if (offset + 4 > data.Length || offset < 0) return uint.MaxValue;
@@ -425,11 +633,25 @@ public static class Gen4SaveParser
         string nature = NatureNames[(int)(pid % 25)];
         string pkmId = $"gen4_{speciesId}_{otId}_{slot}_{(isParty ? "p" : $"b{boxIndex}")}";
 
+        int formBits = (unshuffled[64] & 0xF8) >> 3;
+        string? form = null;
+        if (speciesId == 201)
+        {
+            form = formBits switch
+            {
+                >= 0 and <= 25 => ((char)('A' + formBits)).ToString(),
+                26 => "!",
+                27 => "?",
+                _ => "A"
+            };
+        }
+
         var summary = new PokemonSummaryDto
         {
             Id = pkmId,
             Species = speciesName,
             SpeciesId = speciesId,
+            Form = form,
             Nickname = nickname,
             Level = level,
             Gender = genderStr,

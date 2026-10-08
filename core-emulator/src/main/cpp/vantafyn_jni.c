@@ -252,6 +252,12 @@ Java_dev_vantafyn_core_emulator_NativeEmulatorEngine_nativeSetInput(JNIEnv *env,
 }
 
 JNIEXPORT void JNICALL
+Java_dev_vantafyn_core_emulator_NativeEmulatorEngine_nativeSetAnalog(JNIEnv *env, jobject thiz, jint port, jint index, jint id, jshort value) {
+    (void)env; (void)thiz;
+    if (g_session) vf_session_set_analog(g_session, (int)port, (int)index, (int)id, (int16_t)value);
+}
+
+JNIEXPORT void JNICALL
 Java_dev_vantafyn_core_emulator_NativeEmulatorEngine_nativeSetTouch(JNIEnv *env, jobject thiz, jshort x, jshort y, jboolean pressed) {
     (void)env; (void)thiz;
     if (g_session) vf_session_set_touch_state(g_session, (int16_t)x, (int16_t)y, (pressed == JNI_TRUE));

@@ -266,7 +266,8 @@ public sealed class PokemonGameDetector : IPokemonGameDetector
     private static string Normalize(string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return string.Empty;
-        return CleanPattern.Replace(text.ToLowerInvariant(), string.Empty);
+        var lowered = text.ToLowerInvariant().Replace("é", "e");
+        return CleanPattern.Replace(lowered, string.Empty);
     }
 
     private static bool IsSystemCompatible(string normSystem, string normCore, string[] allowedSystems)

@@ -216,7 +216,9 @@ fun GamePlayerScreen(
     var isMuted by remember { mutableStateOf(false) }
     var videoFilter by remember { mutableStateOf(initialFilter) }
     var hasPhysicalGamepad by remember { mutableStateOf(GameInputController.isGamepadConnected()) }
-    var showTouchControls by remember { mutableStateOf(!hasPhysicalGamepad) }
+    var showTouchControls by remember {
+        mutableStateOf(prefs.getBoolean("show_touch_controls", true))
+    }
     var gbaColorCorrection by remember { mutableStateOf(prefs.getBoolean("gba_color_correction", true)) }
     var gbaAudioFiltering by remember { mutableStateOf(prefs.getBoolean("gba_audio_filtering", true)) }
     var gbcColorCorrection by remember { mutableStateOf(prefs.getBoolean("gbc_color_correction", true)) }
@@ -536,31 +538,53 @@ fun GamePlayerScreen(
     // Bitmask for native pad input
     var nativeInputMask by remember { mutableIntStateOf(0) }
 
+    val onNativeButton: (RetroButton, Boolean) -> Unit = { btn, isDown ->
+        val bit = when (btn) {
+            RetroButton.B -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_B
+            RetroButton.Y -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_Y
+            RetroButton.Select -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_SELECT
+            RetroButton.Start -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_START
+            RetroButton.Up -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_UP
+            RetroButton.Down -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_DOWN
+            RetroButton.Left -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_LEFT
+            RetroButton.Right -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_RIGHT
+            RetroButton.A -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_A
+            RetroButton.X -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_X
+            RetroButton.L1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L
+            RetroButton.R1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R
+            RetroButton.L2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L2
+            RetroButton.R2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R2
+            RetroButton.Z -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L2
+            else -> -1
+        }
+        if (bit >= 0) {
+            nativeInputMask = if (isDown) (nativeInputMask or (1 shl bit)) else (nativeInputMask and (1 shl bit).inv())
+            nativeEngine?.setInputMask(0, nativeInputMask)
+        } else {
+            when (btn) {
+                RetroButton.CUp -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_RIGHT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_Y, if (isDown) -1f else 0f)
+                RetroButton.CDown -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_RIGHT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_Y, if (isDown) 1f else 0f)
+                RetroButton.CLeft -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_RIGHT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_X, if (isDown) -1f else 0f)
+                RetroButton.CRight -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_RIGHT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_X, if (isDown) 1f else 0f)
+                else -> {}
+            }
+        }
+    }
+
+    val onNativeAxis: (String, Float) -> Unit = { axis, value ->
+        when (axis) {
+            "left_x" -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_LEFT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_X, value)
+            "left_y" -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_LEFT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_Y, value)
+            "right_x" -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_RIGHT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_X, value)
+            "right_y" -> nativeEngine?.setAnalog(0, NativeEmulatorEngine.RETRO_DEVICE_INDEX_ANALOG_RIGHT, NativeEmulatorEngine.RETRO_DEVICE_ID_ANALOG_Y, value)
+        }
+    }
+
     // Input Controller
     val inputController = rememberGameInputController(
         onButtonEvent = { btn, isDown ->
             if (isNativeMode) {
-                val bit = when (btn) {
-                    RetroButton.B -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_B
-                    RetroButton.Y -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_Y
-                    RetroButton.Select -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_SELECT
-                    RetroButton.Start -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_START
-                    RetroButton.Up -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_UP
-                    RetroButton.Down -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_DOWN
-                    RetroButton.Left -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_LEFT
-                    RetroButton.Right -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_RIGHT
-                    RetroButton.A -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_A
-                    RetroButton.X -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_X
-                    RetroButton.L1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L
-                    RetroButton.R1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R
-                    RetroButton.L2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L2
-                    RetroButton.R2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R2
-                    else -> -1
-                }
-                if (bit >= 0) {
-                    nativeInputMask = if (isDown) (nativeInputMask or (1 shl bit)) else (nativeInputMask and (1 shl bit).inv())
-                    nativeEngine?.setInputMask(0, nativeInputMask)
-                }
+                onNativeButton(btn, isDown)
             } else {
                 val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
                 webViewInstance?.evaluateJavascript(js, null)
@@ -587,8 +611,12 @@ fun GamePlayerScreen(
         onAxisEvent = { axis, value ->
             if (lastAxisValues[axis] != value) {
                 lastAxisValues[axis] = value
-                val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
-                webViewInstance?.evaluateJavascript(js, null)
+                if (isNativeMode) {
+                    onNativeAxis(axis, value)
+                } else {
+                    val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
+                    webViewInstance?.evaluateJavascript(js, null)
+                }
             }
         },
     )
@@ -1042,27 +1070,7 @@ fun GamePlayerScreen(
                     isPortrait = isPortraitLayout,
                     onButtonPress = { btn, isDown ->
                         if (isNativeMode) {
-                            val bit = when (btn) {
-                                RetroButton.B -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_B
-                                RetroButton.Y -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_Y
-                                RetroButton.Select -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_SELECT
-                                RetroButton.Start -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_START
-                                RetroButton.Up -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_UP
-                                RetroButton.Down -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_DOWN
-                                RetroButton.Left -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_LEFT
-                                RetroButton.Right -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_RIGHT
-                                RetroButton.A -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_A
-                                RetroButton.X -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_X
-                                RetroButton.L1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L
-                                RetroButton.R1 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R
-                                RetroButton.L2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_L2
-                                RetroButton.R2 -> NativeEmulatorEngine.RETRO_DEVICE_ID_JOYPAD_R2
-                                else -> -1
-                            }
-                            if (bit >= 0) {
-                                nativeInputMask = if (isDown) (nativeInputMask or (1 shl bit)) else (nativeInputMask and (1 shl bit).inv())
-                                nativeEngine?.setInputMask(0, nativeInputMask)
-                            }
+                            onNativeButton(btn, isDown)
                         } else {
                             val js = "window.VantafynEmulator?.setButton('${btn.id}', $isDown);"
                             webViewInstance?.evaluateJavascript(js, null)
@@ -1071,8 +1079,12 @@ fun GamePlayerScreen(
                     onAxisChange = { axis, value ->
                         if (lastAxisValues[axis] != value) {
                             lastAxisValues[axis] = value
-                            val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
-                            webViewInstance?.evaluateJavascript(js, null)
+                            if (isNativeMode) {
+                                onNativeAxis(axis, value)
+                            } else {
+                                val js = "window.VantafynEmulator?.setAxis('$axis', $value);"
+                                webViewInstance?.evaluateJavascript(js, null)
+                            }
                         }
                     },
                     onMenuClick = {
@@ -1112,6 +1124,7 @@ fun GamePlayerScreen(
             showTouchControls = showTouchControls,
             onToggleTouchControls = {
                 showTouchControls = !showTouchControls
+                prefs.edit().putBoolean("show_touch_controls", showTouchControls).apply()
             },
             hasPhysicalGamepad = hasPhysicalGamepad,
             isTv = isTv,

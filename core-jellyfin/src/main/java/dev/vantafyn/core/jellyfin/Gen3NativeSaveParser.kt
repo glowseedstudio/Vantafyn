@@ -682,10 +682,21 @@ object Gen3NativeSaveParser {
 
         val pkmId = "gen3_${speciesId}_%08x".format(pid)
 
+        val unownLetter = if (speciesId == 201) {
+            val unownIdx = (((pid and 3L) or ((pid ushr 8 and 3L) shl 2) or ((pid ushr 16 and 3L) shl 4) or ((pid ushr 24 and 3L) shl 6)) % 28L).toInt()
+            when (unownIdx) {
+                in 0..25 -> ('A'.code + unownIdx).toChar().toString()
+                26 -> "!"
+                27 -> "?"
+                else -> "A"
+            }
+        } else null
+
         val summary = PokemonSummaryDto(
             id = pkmId,
             species = speciesName,
             speciesId = speciesId,
+            form = unownLetter,
             nickname = nickname,
             level = level,
             gender = gender,

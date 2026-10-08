@@ -740,6 +740,49 @@ public sealed class PokemonSaveReaderTests
         Assert.False(sinnoh.Badges.Single(b => b.Id == "forest").IsEarned);
     }
 
+    [Theory]
+    [InlineData("diamond", PokemonEventCatalog.Gen4MemberCard, 426, 0xC100)]
+    [InlineData("pearl", PokemonEventCatalog.Gen4OaksLetter, 427, 0xC100)]
+    [InlineData("platinum", PokemonEventCatalog.Gen4AzureFlute, 428, 0xCF2C)]
+    [InlineData("platinum", PokemonEventCatalog.PlatinumSecretKey, 467, 0xCF2C)]
+    [InlineData("heartgold", PokemonEventCatalog.HgssEnigmaStone, 534, 0xF628)]
+    public void Gen4SaveParser_UnlockEvent_AddsKeyItemAndRecomputesCrc(string gameId, string eventId, ushort expectedItemId, int generalSize)
+    {
+        var save = new byte[0x80000];
+        // Set save counter in partition 0
+        BitConverter.GetBytes(42u).CopyTo(save, generalSize - 0x14);
+
+        Assert.False(Gen4SaveParser.IsEventUnlocked(save, gameId, eventId));
+
+        var unlocked = Gen4SaveParser.UnlockEvent(save, gameId, eventId);
+        Assert.True(Gen4SaveParser.IsEventUnlocked(unlocked, gameId, eventId));
+
+        int pocketOffset = (gameId.Contains("platinum") || gameId.Contains("heartgold")) ? 0x08D8 : 0x08BC;
+        ushort writtenItemId = BitConverter.ToUInt16(unlocked, pocketOffset);
+        Assert.Equal(expectedItemId, writtenItemId);
+
+        // Verify CRC16 recalculation
+        ushort expectedCrc = Gen4SaveParser.CalculateCrc16(unlocked, 0, generalSize - 0x14);
+        ushort storedCrc = BitConverter.ToUInt16(unlocked, generalSize - 0x02);
+        Assert.Equal(expectedCrc, storedCrc);
+    }
+
+    [Fact]
+    public void Gen5SaveParser_UnlockEvent_AddsLibertyPassAndRecomputesCrc()
+    {
+        var save = new byte[0x80000];
+
+        Assert.False(Gen5SaveParser.IsEventUnlocked(save, "black", PokemonEventCatalog.BwLibertyPass));
+
+        var unlocked = Gen5SaveParser.UnlockEvent(save, "black", PokemonEventCatalog.BwLibertyPass);
+        Assert.True(Gen5SaveParser.IsEventUnlocked(unlocked, "black", PokemonEventCatalog.BwLibertyPass));
+
+        // Verify CRC16 recalculation for Bag block (0x18400, length 0x09C0, crc at 0x18DC2)
+        ushort expectedCrc = Gen5SaveParser.CalculateCrc16(unlocked, 0x18400, 0x09C0);
+        ushort storedCrc = BitConverter.ToUInt16(unlocked, 0x18DC2);
+        Assert.Equal(expectedCrc, storedCrc);
+    }
+
     private static byte[] CreateGen1Save()
     {
         var bytes = new byte[32768];

@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.25.0",
+        "changelog": "Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.59/Vantafyn.Plugin.Companion_0.2.25_net9.zip",
+        "checksum": "598c4bf693e14d746fc17163fc637019",
+        "timestamp": "2026-10-08T09:32:27Z"
+      },
+      {
+        "version": "0.2.25.1",
+        "changelog": "Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.59/Vantafyn.Plugin.Companion_0.2.25_net10.zip",
+        "checksum": "1e95e6cd84aa2c88582a4006cc8b9069",
+        "timestamp": "2026-10-08T09:32:27Z"
+      },
+      {
         "version": "0.2.24.0",
         "changelog": "Adds Pokémon Gen 4/5 save parsing, Johto/Sinnoh/Unova gym badge cases, and generation-isolated diploma screens.",
         "targetAbi": "10.11.0.0",

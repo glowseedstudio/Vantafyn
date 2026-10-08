@@ -30,6 +30,53 @@ object PokemonFormsCatalog {
 
     fun isSpinda(speciesId: Int): Boolean = speciesId == 327
 
+    val UNOWN_LETTERS: List<String> = listOf(
+        "A", "B", "C", "D", "E", "F", "G", "H", "I", "J",
+        "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
+        "U", "V", "W", "X", "Y", "Z", "!", "?"
+    )
+
+    fun isUnown(speciesId: Int): Boolean = speciesId == 201
+
+    fun getUnownSpriteKey(letter: String): String = when (letter.trim().uppercase()) {
+        "!" -> "201-exclamation"
+        "?" -> "201-question"
+        else -> "201-${letter.trim().lowercase()}"
+    }
+
+    fun getUnownLetter(formKey: String?): String? {
+        if (formKey.isNullOrBlank()) return null
+        val trimmed = formKey.trim()
+        val lower = trimmed.lowercase()
+        return when {
+            lower == "201-exclamation" || lower == "exclamation" || trimmed == "!" -> "!"
+            lower == "201-question" || lower == "question" || trimmed == "?" -> "?"
+            lower.startsWith("201-") && lower.length == 5 -> lower.substring(4).uppercase()
+            lower.startsWith("unown ") -> {
+                val rem = trimmed.substring(6).trim()
+                if (rem == "!" || rem == "?") rem else rem.take(1).uppercase()
+            }
+            trimmed.length == 1 && trimmed[0].uppercaseChar() in 'A'..'Z' -> trimmed.uppercase()
+            else -> null
+        }
+    }
+
+    fun getMegaStoneSlug(form: PokemonFormModel?): String? {
+        if (form == null || !form.isMega || form.description.isNullOrBlank()) return null
+        val desc = form.description
+        val stoneName = when {
+            desc.contains("awakened by ", ignoreCase = true) -> desc.substringAfter("awakened by ").trim()
+            desc.contains("Blue Orb", ignoreCase = true) -> "Blue Orb"
+            desc.contains("Red Orb", ignoreCase = true) -> "Red Orb"
+            desc.contains("Dragon Ascent", ignoreCase = true) -> "Meteorite"
+            else -> null
+        }?.removePrefix("the ")?.trim() ?: return null
+
+        return stoneName.lowercase()
+            .replace(" ", "-")
+            .replace("[^a-z0-9-]".toRegex(), "")
+    }
+
     const val SPINDA_LORE: String =
         "4,294,967,296 Spot Patterns: Spinda's facial spots are procedurally placed by a 32-bit personality value, rendering virtually every specimen uniquely distinct."
 
@@ -486,6 +533,109 @@ object PokemonFormsCatalog {
         618 to listOf(
             PokemonFormModel("Unova", "618", "Flat mud-trap fish charged with electricity (Ground/Electric)"),
             PokemonFormModel("Galarian", "10180", "Bear-trap patterned metal mud fish (Ground/Steel)"),
+        ),
+
+        // Unown (All 28 Canonical Glyph Variations)
+        201 to UNOWN_LETTERS.map { letter ->
+            PokemonFormModel(
+                name = "Unown $letter",
+                spriteKey = getUnownSpriteKey(letter),
+                description = "Ancient glyph representing letter '$letter'",
+            )
+        },
+
+        // Hisuian Regional Forms
+        58 to listOf(
+            PokemonFormModel("Kanto", "58", "Loyal flame-spitting pup (Fire)"),
+            PokemonFormModel("Hisuian", "10229", "Ancient igneous fur coat with rock horn (Fire/Rock)"),
+        ),
+        59 to listOf(
+            PokemonFormModel("Kanto", "59", "Legendary flame-maned canine (Fire)"),
+            PokemonFormModel("Hisuian", "10230", "Fierce volcanic guardian of ancient Hisui (Fire/Rock)"),
+        ),
+        100 to listOf(
+            PokemonFormModel("Kanto", "100", "Artificial Poké Ball mimic (Electric)"),
+            PokemonFormModel("Hisuian", "10231", "Wooden sphere packed with discharge seeds (Electric/Grass)"),
+        ),
+        101 to listOf(
+            PokemonFormModel("Kanto", "101", "Explosive electric sphere (Electric)"),
+            PokemonFormModel("Hisuian", "10232", "Enormous laughing wooden discharge orb (Electric/Grass)"),
+        ),
+        157 to listOf(
+            PokemonFormModel("Johto", "157", "Explosive fire storm badger (Fire)"),
+            PokemonFormModel("Hisuian", "10233", "Spirit-purifying ghostly flames (Fire/Ghost)"),
+        ),
+        211 to listOf(
+            PokemonFormModel("Johto", "211", "Poison barb pufferfish (Water/Poison)"),
+            PokemonFormModel("Hisuian", "10234", "Toxic spiked terror of northern seas (Dark/Poison)"),
+        ),
+        215 to listOf(
+            PokemonFormModel("Johto", "215", "Sharp-clawed nocturnal stalker (Dark/Ice)"),
+            PokemonFormModel("Hisuian", "10235", "Highland cliff climber with venomous talons (Poison/Fighting)"),
+        ),
+        503 to listOf(
+            PokemonFormModel("Unova", "503", "Formidable seamitar swordsman (Water)"),
+            PokemonFormModel("Hisuian", "10236", "Ruthless black-bladed warrior (Water/Dark)"),
+        ),
+        549 to listOf(
+            PokemonFormModel("Unova", "549", "Flowering dancer with fragrant crown (Grass)"),
+            PokemonFormModel("Hisuian", "10237", "Graceful kickboxer of snowy meadows (Grass/Fighting)"),
+        ),
+        628 to listOf(
+            PokemonFormModel("Unova", "628", "Valiant eagle warrior of skies (Normal/Flying)"),
+            PokemonFormModel("Hisuian", "10240", "Psychic wind master emitting psychokinetic shockwaves (Psychic/Flying)"),
+        ),
+        705 to listOf(
+            PokemonFormModel("Kalos", "705", "Soft snail dragon (Dragon)"),
+            PokemonFormModel("Hisuian", "10241", "Melancholic snail sheltered in a heavy metallic shell (Steel/Dragon)"),
+        ),
+        706 to listOf(
+            PokemonFormModel("Kalos", "706", "Affectionate slimy dragon titan (Dragon)"),
+            PokemonFormModel("Hisuian", "10242", "Mighty metallic-shelled dragon guardian (Steel/Dragon)"),
+        ),
+        713 to listOf(
+            PokemonFormModel("Kalos", "713", "Glacial iceberg behemoth (Ice)"),
+            PokemonFormModel("Hisuian", "10243", "Diamond-hard armor plated with mountain rock (Ice/Rock)"),
+        ),
+        724 to listOf(
+            PokemonFormModel("Alola", "724", "Shadow-striking arrow quill archer (Grass/Ghost)"),
+            PokemonFormModel("Hisuian", "10244", "Hard-fighting mountain ranger with blazing kicks (Grass/Fighting)"),
+        ),
+
+        // Sinnoh Cloaks & Shells
+        412 to listOf(
+            PokemonFormModel("Plant Cloak", "412", "Cloak woven of leaves and twigs (Bug)"),
+            PokemonFormModel("Sandy Cloak", "10004", "Cloak coated in sand and earth (Bug)"),
+            PokemonFormModel("Trash Cloak", "10005", "Cloak of building materials and insulation (Bug)"),
+        ),
+        413 to listOf(
+            PokemonFormModel("Plant Cloak", "413", "Evolved with plant cloak (Bug/Grass)"),
+            PokemonFormModel("Sandy Cloak", "10004", "Evolved with sandy cloak (Bug/Ground)"),
+            PokemonFormModel("Trash Cloak", "10005", "Evolved with trash cloak (Bug/Steel)"),
+        ),
+        422 to listOf(
+            PokemonFormModel("West Sea", "422", "Pink sea slug inhabiting western Sinnoh (Water)"),
+            PokemonFormModel("East Sea", "10017", "Blue sea slug inhabiting eastern Sinnoh (Water)"),
+        ),
+        423 to listOf(
+            PokemonFormModel("West Sea", "423", "Pink-brown gastrodon from western Sinnoh (Water/Ground)"),
+            PokemonFormModel("East Sea", "10025", "Green-blue gastrodon from eastern Sinnoh (Water/Ground)"),
+        ),
+
+        // Paldean Form Variations
+        925 to listOf(
+            PokemonFormModel("Family of Four", "925", "Standard tandem pair with two children (Normal)"),
+            PokemonFormModel("Family of Three", "10254", "Rare single-child family unit (Normal)"),
+        ),
+        931 to listOf(
+            PokemonFormModel("Green Plumage", "931", "Green-feathered flock leader (Normal/Flying)"),
+            PokemonFormModel("Blue Plumage", "10259", "Blue-feathered city dweller (Normal/Flying)"),
+            PokemonFormModel("Yellow Plumage", "10260", "Yellow-feathered rambunctious squawker (Normal/Flying)"),
+            PokemonFormModel("White Plumage", "10261", "White-feathered quiet flock member (Normal/Flying)"),
+        ),
+        982 to listOf(
+            PokemonFormModel("Two-Segment", "982", "Standard dual-segmented body (Normal)"),
+            PokemonFormModel("Three-Segment", "10258", "Ultra-rare 1/100 triple-segmented body (Normal)"),
         ),
     )
 }

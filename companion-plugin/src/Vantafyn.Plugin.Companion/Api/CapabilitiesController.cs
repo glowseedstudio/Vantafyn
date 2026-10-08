@@ -27,7 +27,7 @@ public sealed class CapabilitiesController(
 
         return Ok(new
         {
-            pluginVersion = "0.2.24",
+            pluginVersion = "0.2.25",
             apiVersion = 1,
             userSettings = new
             {

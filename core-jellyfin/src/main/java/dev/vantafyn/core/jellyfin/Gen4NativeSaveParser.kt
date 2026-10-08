@@ -498,10 +498,21 @@ object Gen4NativeSaveParser {
         val natureName = NATURE_NAMES[(pid % 25L).toInt()]
         val pkmId = "gen4_${speciesId}_${otId}_${slot}_${if (isParty) "p" else "b$boxIndex"}"
 
+        val formBits = (unshuffled[64].toInt() and 0xF8) ushr 3
+        val unownLetter = if (speciesId == 201) {
+            when (formBits) {
+                in 0..25 -> ('A'.code + formBits).toChar().toString()
+                26 -> "!"
+                27 -> "?"
+                else -> "A"
+            }
+        } else null
+
         val summary = PokemonSummaryDto(
             id = pkmId,
             species = speciesName,
             speciesId = speciesId,
+            form = unownLetter,
             nickname = nickname,
             level = level,
             gender = genderStr,

@@ -77,6 +77,7 @@ size_t vf_session_read_audio(vf_session_t *session, int16_t *buffer, size_t samp
 
 // Input & Touch State
 void vf_session_set_input_mask(vf_session_t *session, int port, uint32_t mask);
+void vf_session_set_analog(vf_session_t *session, int port, int index, int id, int16_t value);
 void vf_session_set_touch_state(vf_session_t *session, int16_t x, int16_t y, bool pressed);
 
 // Memory & Save Management

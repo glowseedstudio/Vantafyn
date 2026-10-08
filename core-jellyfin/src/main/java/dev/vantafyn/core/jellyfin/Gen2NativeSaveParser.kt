@@ -334,10 +334,16 @@ object Gen2NativeSaveParser {
         val natureName = NATURE_NAMES[(exp % 25).coerceAtLeast(0).toInt()]
         val pkmId = "gen2_${speciesId}_${otid}_${partySlot}_${if (isParty) "p" else "b$boxIndex"}"
 
+        val unownLetter = if (speciesId == 201) {
+            val letterIdx = (((atkDv and 6) shl 5) or ((defDv and 6) shl 3) or ((speDv and 6) shl 1) or ((spcDv and 6) shr 1)) / 10
+            ('A'.code + letterIdx.coerceIn(0, 25)).toChar().toString()
+        } else null
+
         val summary = PokemonSummaryDto(
             id = pkmId,
             species = speciesName,
             speciesId = speciesId,
+            form = unownLetter,
             nickname = nickname,
             level = level,
             gender = "Genderless",

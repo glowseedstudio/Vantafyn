@@ -447,11 +447,25 @@ public static class Gen3SaveParser
 
         var pkmId = $"gen3_{speciesId}_{pid:x8}";
 
+        string? form = null;
+        if (speciesId == 201)
+        {
+            int unownIdx = (int)((((pid & 3) | ((pid >> 8 & 3) << 2) | ((pid >> 16 & 3) << 4) | ((pid >> 24 & 3) << 6)) % 28));
+            form = unownIdx switch
+            {
+                >= 0 and <= 25 => ((char)('A' + unownIdx)).ToString(),
+                26 => "!",
+                27 => "?",
+                _ => "A"
+            };
+        }
+
         var summary = new PokemonSummaryDto
         {
             Id = pkmId,
             Species = speciesName,
             SpeciesId = speciesId,
+            Form = form,
             Nickname = nickname,
             Level = level,
             Gender = gender,

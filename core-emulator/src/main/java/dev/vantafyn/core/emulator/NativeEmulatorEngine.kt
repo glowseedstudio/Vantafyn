@@ -55,6 +55,12 @@ class NativeEmulatorEngine(
         const val RETRO_DEVICE_ID_JOYPAD_R2 = 13
         const val RETRO_DEVICE_ID_JOYPAD_L3 = 14
         const val RETRO_DEVICE_ID_JOYPAD_R3 = 15
+
+        // Libretro Analog stick constants
+        const val RETRO_DEVICE_INDEX_ANALOG_LEFT = 0
+        const val RETRO_DEVICE_INDEX_ANALOG_RIGHT = 1
+        const val RETRO_DEVICE_ID_ANALOG_X = 0
+        const val RETRO_DEVICE_ID_ANALOG_Y = 1
     }
 
     private var audioTrack: AudioTrack? = null
@@ -147,6 +153,11 @@ class NativeEmulatorEngine(
 
     fun setInputMask(port: Int, mask: Int) {
         nativeSetInput(port, mask)
+    }
+
+    fun setAnalog(port: Int, index: Int, id: Int, value: Float) {
+        val clamped = (value * 32767f).coerceIn(-32768f, 32767f).toInt().toShort()
+        nativeSetAnalog(port, index, id, clamped)
     }
 
     fun setTouch(x: Short, y: Short, pressed: Boolean) {
@@ -323,6 +334,7 @@ class NativeEmulatorEngine(
     private external fun nativeSetDualScreenSwap(swap: Boolean)
     private external fun nativeReadAudio(buffer: ShortArray, offset: Int, lengthSamples: Int): Int
     private external fun nativeSetInput(port: Int, mask: Int)
+    private external fun nativeSetAnalog(port: Int, index: Int, id: Int, value: Short)
     private external fun nativeSetTouch(x: Short, y: Short, pressed: Boolean)
     private external fun nativeSaveSram(path: String): Boolean
     private external fun nativeLoadSram(path: String): Boolean

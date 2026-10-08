@@ -21,7 +21,7 @@ public sealed class PokemonController : ControllerBase
 {
     // Bump this whenever the synthesis prompt or client-side narration profile changes in a
     // way that should not reuse previously rendered species audio.
-    private const string NarrationRenderProfile = "pokedex-voice-v3";
+    private const string NarrationRenderProfile = "pokedex-voice-v4";
     private static readonly ConcurrentDictionary<string, (Guid UserId, DateTimeOffset ExpiresAt, PokemonSaveParseResult Parsed, int Generation)> ExternalSavePreviews = new();
     private readonly IGamesService _gamesService;
     private readonly IGameSavesService _gameSavesService;
@@ -242,14 +242,13 @@ public sealed class PokemonController : ControllerBase
     }
 
     // Kokoro is a general English narrator, rather than a Pokémon-specific voice model.
-    // Use plain phonetic spellings here instead of engine-specific markup: this works with
-    // every OpenAI-compatible service supported by the Companion and keeps the spoken
-    // wording independent of the on-screen canonical spelling.
+    // Use plain, continuous phonetic spellings without artificial hyphens so the neural model
+    // maintains smooth prosody and does not introduce glottal stops or robotic pauses.
     private static string FormatNarrationText(string text) => text
-        .Replace("Pokémon", "Poh-kay-mon", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokemon", "Poh-kay-mon", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokédex", "Poh-kay-dex", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokedex", "Poh-kay-dex", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokémon", "Pokaymon", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokemon", "Pokaymon", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokédex", "Pokaydex", StringComparison.OrdinalIgnoreCase)
+        .Replace("Pokedex", "Pokaydex", StringComparison.OrdinalIgnoreCase)
         .Replace("TM", "T M", StringComparison.OrdinalIgnoreCase)
         .Replace("HP", "H P", StringComparison.OrdinalIgnoreCase);
 
@@ -258,250 +257,61 @@ public sealed class PokemonController : ControllerBase
         var displayName = string.IsNullOrWhiteSpace(name) ? "Unknown Pokémon" : name.Trim();
         var phoneticName = displayName switch
         {
-            "Bulbasaur" => "Bul-buh-sore",
-            "Ivysaur" => "Eye-vee-sore",
-            "Venusaur" => "Vee-nuh-sore",
-            "Charmander" => "Char-man-der",
-            "Charmeleon" => "Char-meel-ee-on",
-            "Charizard" => "Char-ih-zard",
-            "Squirtle" => "Skwer-tle",
-            "Wartortle" => "War-tor-tle",
-            "Blastoise" => "Blas-toys",
-            "Rattata" => "Ruh-ta-ta",
-            "Raticate" => "Rat-ih-kate",
-            "Nidoran F" => "Nidoran female",
-            "Nidoran M" => "Nidoran male",
-            "Nidorina" => "Nidor-eena",
-            "Nidorino" => "Nidor-eeno",
-            "Nidoqueen" => "Nido-queen",
-            "Nidoking" => "Nido-king",
-            "Vulpix" => "Vull-pix",
-            "Ninetales" => "Nine-tails",
-            "Meowth" => "Mee-owth",
-            "Psyduck" => "Sigh-duck",
-            "Growlithe" => "Growl-ith",
-            "Arcanine" => "Ar-kuh-nine",
-            "Machop" => "Muh-chop",
-            "Machoke" => "Muh-choke",
-            "Machamp" => "Muh-champ",
-            "Geodude" => "Gee-oh-dude",
-            "Ponyta" => "Poe-nee-ta",
-            "Farfetch'd" => "Far-fetched",
-            "Farfetchd" => "Far-fetched",
-            "Doduo" => "Doh-doo-oh",
-            "Dodrio" => "Doh-dree-oh",
-            "Gyarados" => "Gare-uh-dos",
-            "Lapras" => "Lap-riss",
-            "Eevee" => "Ee-vee",
-            "Omanyte" => "Oh-muh-nite",
-            "Omastar" => "Oh-muh-star",
-            "Kabuto" => "Kah-boo-toe",
-            "Aerodactyl" => "Air-oh-dack-til",
-            "Articuno" => "Ar-tick-uno",
-            "Zapdos" => "Zap-dose",
-            "Moltres" => "Mole-trace",
-            "Dratini" => "Druh-tee-nee",
-            "Dragonair" => "Drag-on-air",
-            "Dragonite" => "Drag-oh-nite",
-            "Mewtwo" => "Mew-two",
-            "Mr Mime" => "Mister Mime",
-            "Mr. Mime" => "Mister Mime",
-            "Mime Jr" => "Mime Junior",
-            "Mime Jr." => "Mime Junior",
-            "Sirfetch'd" => "Sir-fetched",
-            "Sirfetchd" => "Sir-fetched",
-            "Pichu" => "Pee-choo",
-            "Togepi" => "Toe-guh-pee",
-            "Togetic" => "Toe-get-ick",
-            "Ampharos" => "Am-fuh-ross",
-            "Sudowoodo" => "Soo-doh-woo-doh",
-            "Wooper" => "Woo-per",
-            "Wobbuffet" => "Wob-buh-fet",
-            "Girafarig" => "Jih-raff-uh-rig",
-            "Dunsparce" => "Dun-sparse",
-            "Qwilfish" => "Quill-fish",
-            "Sneasel" => "Snee-zil",
-            "Suicune" => "Swee-koon",
-            "Treecko" => "Tree-ko",
-            "Grovyle" => "Grow-vile",
-            "Sceptile" => "Sep-tile",
-            "Torchic" => "Tor-chick",
-            "Mudkip" => "Mud-kip",
-            "Zigzagoon" => "Zig-zag-goon",
-            "Linoone" => "Lie-noon",
-            "Ralts" => "Ralts",
-            "Gardevoir" => "Gar-deh-vwar",
-            "Sableye" => "Say-bull-eye",
-            "Mawile" => "Maw-while",
-            "Aron" => "Air-on",
-            "Aggron" => "Ag-ron",
-            "Gulpin" => "Gull-pin",
-            "Wailmer" => "Wail-mer",
-            "Wailord" => "Wail-lord",
-            "Spoink" => "Spoynk",
-            "Spinda" => "Spin-duh",
-            "Swablu" => "Swah-blue",
-            "Altaria" => "Al-tair-ee-uh",
-            "Lileep" => "Lie-leep",
-            "Milotic" => "My-low-tick",
-            "Castform" => "Cast-form",
-            "Shuppet" => "Shup-pet",
-            "Banette" => "Buh-net",
-            "Duskull" => "Dusk-ull",
-            "Absol" => "Ab-soll",
-            "Wynaut" => "Why-not",
-            "Snorunt" => "Snow-runt",
-            "Bagon" => "Bay-gon",
-            "Salamence" => "Sal-uh-mence",
-            "Beldum" => "Bell-dum",
-            "Metang" => "Meh-tang",
-            "Metagross" => "Met-uh-gross",
-            "Latias" => "Lah-tee-ahs",
-            "Latios" => "Lah-tee-ohs",
-            "Kyogre" => "Kai-oh-gur",
-            "Groudon" => "Grow-don",
-            "Rayquaza" => "Ray-kway-zuh",
-            "Jirachi" => "Jih-rah-chee",
-            "Deoxys" => "Dee-ox-iss",
-            "Turtwig" => "Turt-wig",
-            "Chimchar" => "Chim-char",
-            "Piplup" => "Pip-lup",
-            "Bidoof" => "Bee-doof",
-            "Shinx" => "Shinks",
-            "Pachirisu" => "Pah-chee-ree-soo",
-            "Buizel" => "Bwee-zil",
-            "Drifloon" => "Drift-loon",
-            "Lopunny" => "Low-punny",
-            "Mismagius" => "Miss-may-jee-us",
-            "Chingling" => "Ching-ling",
-            "Bonsly" => "Bon-sly",
-            "Spiritomb" => "Speer-it-toom",
-            "Garchomp" => "Gar-chomp",
-            "Lucario" => "Loo-car-ee-oh",
-            "Hippopotas" => "Hippo-poh-tas",
-            "Drapion" => "Drap-ee-on",
-            "Croagunk" => "Crow-gunk",
-            "Finneon" => "Fin-ee-on",
-            "Snover" => "Snow-ver",
-            "Rotom" => "Row-tom",
-            "Uxie" => "Yook-see",
-            "Mesprit" => "Mess-prit",
-            "Azelf" => "Azelf",
-            "Dialga" => "Dee-al-guh",
-            "Palkia" => "Pal-kee-uh",
-            "Giratina" => "Gear-uh-tee-nuh",
-            "Cresselia" => "Cress-ell-ee-uh",
-            "Phione" => "Fee-oh-nay",
-            "Manaphy" => "Man-uh-fee",
-            "Darkrai" => "Dark-rye",
-            "Shaymin" => "Shay-min",
-            "Arceus" => "Ar-key-us",
-            "Type Null" => "Type Null",
-            "Flabebe" => "Flah-bay-bay",
-            "Flabébé" => "Flah-bay-bay",
-            "Fletchling" => "Fletch-ling",
-            "Talonflame" => "Tal-on-flame",
-            "Vivillon" => "Vih-vee-yon",
-            "Honedge" => "Hon-edge",
-            "Doublade" => "Doo-blade",
-            "Aegislash" => "Ee-jih-slash",
-            "Inkay" => "In-kay",
-            "Malamar" => "Mal-uh-mar",
-            "Tyrunt" => "Tie-runt",
-            "Amaura" => "Ah-more-uh",
-            "Sylveon" => "Sil-vee-on",
-            "Hawlucha" => "Hah-loo-cha",
-            "Dedenne" => "Deh-den-nay",
-            "Carbink" => "Car-bink",
-            "Goomy" => "Goo-mee",
-            "Sliggoo" => "Slig-goo",
-            "Goodra" => "Goo-druh",
-            "Xerneas" => "Zer-nee-us",
-            "Yveltal" => "Ee-vell-tall",
-            "Zygarde" => "Zye-guard",
-            "Rowlet" => "Row-let",
-            "Litten" => "Lit-ten",
-            "Popplio" => "Pop-lee-oh",
-            "Toucannon" => "Too-cannon",
-            "Crabrawler" => "Crab-rawler",
-            "Oricorio" => "Or-ee-core-ee-oh",
-            "Lycanroc" => "Lie-can-rock",
-            "Mimikyu" => "Mim-ee-kyoo",
-            "Solgaleo" => "Sol-gah-lay-oh",
-            "Lunala" => "Loo-nah-lah",
-            "Nihilego" => "Nee-hil-ego",
-            "Pheromosa" => "Fair-oh-moe-sah",
-            "Xurkitree" => "Zerk-it-tree",
-            "Necrozma" => "Neh-croz-muh",
-            "Magearna" => "Mah-gear-nuh",
-            "Grookey" => "Groo-key",
-            "Scorbunny" => "Score-bunny",
-            "Sobble" => "Sob-bull",
-            "Corviknight" => "Core-vih-knight",
-            "Obstagoon" => "Ob-stuh-goon",
-            "Perrserker" => "Per-sirker",
-            "Sirfetch D" => "Sir-fetched",
-            "Toxel" => "Tox-ell",
-            "Toxtricity" => "Tox-triss-ih-tee",
-            "Sinistea" => "Sin-iss-tea",
-            "Hatenna" => "Hah-ten-uh",
-            "Hattrem" => "Hat-trem",
-            "Hatterene" => "Hat-uh-reen",
-            "Falinks" => "Fay-links",
-            "Snom" => "Snom",
-            "Eiscue" => "Ice-cue",
-            "Morpeko" => "More-peh-ko",
-            "Duraludon" => "Duh-ral-oo-don",
-            "Zacian" => "Zah-see-un",
-            "Zamazenta" => "Zah-mah-zen-tah",
-            "Eternatus" => "Eh-ter-nuh-tus",
-            "Kubfu" => "Koob-foo",
-            "Urshifu" => "Ur-shee-foo",
-            "Zarude" => "Zah-rood",
-            "Regieleki" => "Reh-jee-eh-lek-ee",
-            "Regidrago" => "Reh-jee-dray-go",
-            "Glastrier" => "Glass-tree-er",
-            "Spectrier" => "Speck-tree-er",
-            "Calyrex" => "Cal-ee-rex",
-            "Sprigatito" => "Spree-gah-tee-toe",
-            "Fuecoco" => "Fway-co-co",
-            "Quaxly" => "Quacks-lee",
-            "Lechonk" => "Leh-chonk",
-            "Pawmi" => "Paw-mee",
-            "Maushold" => "Mouse-hold",
-            "Fidough" => "Fye-dough",
-            "Smoliv" => "Smoll-iv",
-            "Nacli" => "Nack-lee",
-            "Charcadet" => "Char-kuh-det",
-            "Armarouge" => "Ar-muh-roozh",
-            "Ceruledge" => "Sair-oo-ledge",
-            "Tadbulb" => "Tad-bulb",
-            "Bellibolt" => "Bell-ee-bolt",
-            "Wiglett" => "Wig-let",
-            "Bombirdier" => "Bom-bur-deer",
-            "Glimmet" => "Glim-met",
-            "Glimmora" => "Glim-more-uh",
-            "Tinkatink" => "Tink-uh-tink",
-            "Tinkaton" => "Tink-uh-ton",
-            "Palafin" => "Pal-uh-fin",
-            "Cyclizar" => "Sigh-klih-zar",
-            "Gimmighoul" => "Gim-ee-gool",
-            "Gholdengo" => "Goal-den-go",
-            "Wo Chien" => "Woah Chee-en",
-            "Chien Pao" => "Chee-en Pow",
-            "Ting Lu" => "Ting Loo",
-            "Chi Yu" => "Chee Yoo",
-            "Roaring Moon" => "Roaring Moon",
-            "Iron Valiant" => "Iron Valiant",
-            "Koraidon" => "Kor-eye-don",
-            "Miraidon" => "Meer-eye-don",
-            "Ogerpon" => "Oh-ger-pon",
-            "Terapagos" => "Tair-uh-pah-gos",
-            "Jangmo O" => "Jang-mo-oh",
-            "Hakamo O" => "Ha-ka-mo-oh",
-            "Kommo O" => "Kom-mo-oh",
-            "Ho Oh" => "Ho-oh",
-            "Porygon Z" => "Porygon Zee",
+            // Punctuation, symbols, abbreviations, and gender suffixes
+            "Nidoran F" or "Nidoran-f" => "Nidoran Female",
+            "Nidoran M" or "Nidoran-m" => "Nidoran Male",
+            "Mr Mime" or "Mr. Mime" or "Mr-Mime" => "Mister Mime",
+            "Mime Jr" or "Mime Jr." or "Mime-Jr" => "Mime Junior",
+            "Type: Null" or "Type Null" or "Type-Null" => "Type Null",
+            "Farfetch'd" or "Farfetchd" => "Farfetched",
+            "Sirfetch'd" or "Sirfetchd" or "Sirfetch D" => "Sirfetched",
+            "Ho-Oh" or "Ho Oh" => "Ho Oh",
+            "Porygon-Z" or "Porygon Z" => "Porygon Zee",
+            "Porygon2" => "Porygon Two",
+            "Jangmo-o" or "Jangmo O" => "Jangmo Oh",
+            "Hakamo-o" or "Hakamo O" => "Hakamo Oh",
+            "Kommo-o" or "Kommo O" => "Kommo Oh",
+            "Wo-Chien" or "Wo Chien" => "Wo Chien",
+            "Chien-Pao" or "Chien Pao" => "Chien Pow",
+            "Ting-Lu" or "Ting Lu" => "Ting Loo",
+            "Chi-Yu" or "Chi Yu" => "Chee Yoo",
+            "Flabébé" or "Flabebe" => "Flabaybay",
+
+            // Tricky phonetics requiring non-standard English phonemization (smooth, unbroken words)
+            "Arceus" => "Arkeus",
+            "Suicune" => "Sweecoon",
+            "Kyogre" => "Kyoger",
+            "Gyarados" => "Gairados",
+            "Rayquaza" => "Raykwayza",
+            "Deoxys" => "Deeoxiss",
+            "Xerneas" => "Zerneas",
+            "Xurkitree" => "Zurkitree",
+            "Yveltal" => "Eeveltall",
+            "Zygarde" => "Zyegard",
+            "Aegislash" => "Eegislash",
+            "Calyrex" => "Calirex",
+            "Milotic" => "Mylowtic",
+            "Giratina" => "Geeratina",
+            "Regice" => "Reji Ice",
+            "Regirock" => "Rejirock",
+            "Registeel" => "Rejisteel",
+            "Regigigas" => "Rejigigas",
+            "Regieleki" => "Rejieleki",
+            "Regidrago" => "Rejidrago",
+            "Necrozma" => "Nekrozma",
+            "Eternatus" => "Eeternatus",
+            "Basculegion" => "Baskulegion",
+            "Gholdengo" => "Goldengo",
+            "Koraidon" => "Koridon",
+            "Miraidon" => "Miridon",
+            "Armarouge" => "Armaroozh",
+            "Ceruledge" => "Seruledge",
+            "Toxtricity" => "Toxtrisity",
+            "Vivillon" => "Viviyon",
+            "Sneasler" => "Sneezler",
+            "Overqwil" => "Overquill",
+
+            // All standard English Pokémon names are natively pronounced smoothly by Kokoro
             _ => displayName
         };
         return FormatNarrationText(phoneticName);
@@ -785,6 +595,21 @@ public sealed class PokemonController : ControllerBase
     public IActionResult GetMegaEvolutionSymbol()
     {
         var file = ResolveMegaEvolutionSymbolPath(Configuration);
+        return file == null ? NotFound() : PhysicalFile(file.Value.Path, file.Value.ContentType);
+    }
+
+    /// <summary>
+    /// Streams the optional Mega Evolution stone image from the configured badge-art folder.
+    /// Expected locations: {BadgeArtPath}/mega-stones/{stoneId}.png, {BadgeArtPath}/mega/stones/{stoneId}.png, etc.
+    /// </summary>
+    [HttpGet("MegaEvolution/Stones/{stoneId}/Image")]
+    [HttpGet("MegaEvolution/Stones/{stoneId}")]
+    [AllowAnonymous]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public IActionResult GetMegaStoneImage([FromRoute] string stoneId)
+    {
+        var file = ResolveMegaStonePath(Configuration, stoneId);
         return file == null ? NotFound() : PhysicalFile(file.Value.Path, file.Value.ContentType);
     }
 
@@ -3258,6 +3083,8 @@ public sealed class PokemonController : ControllerBase
                 {
                     2 when definition.Id == PokemonEventCatalog.CrystalGsBall => Gen2SaveParser.UnlockCrystalGsBallEvent(original),
                     3 => Gen3SaveParser.UnlockEvent(original, gameKey, definition.Id),
+                    4 => Gen4SaveParser.UnlockEvent(original, gameKey, definition.Id),
+                    5 => Gen5SaveParser.UnlockEvent(original, gameKey, definition.Id),
                     _ => throw new InvalidDataException("This event generation is not implemented yet.")
                 };
 
@@ -3275,6 +3102,261 @@ public sealed class PokemonController : ControllerBase
         if (!result.Success || result.Value == null)
         {
             return BadRequest(new { error = result.ErrorMessage ?? "Event unlock failed." });
+        }
+
+        return Ok(result.Value);
+    }
+
+    private static readonly ConcurrentDictionary<string, HashSet<string>> MemoryRedeemedCodes = new();
+
+    private HashSet<string> GetRedeemedMysteryGiftCodes(Guid userId, string gameId)
+    {
+        var key = $"{userId:N}_{gameId}";
+        if (_paths != null)
+        {
+            try
+            {
+                var dir = Path.Combine(_paths.PokemonRoot, "mystery-gifts");
+                var path = Path.Combine(dir, $"{key}.json");
+                if (System.IO.File.Exists(path))
+                {
+                    var json = System.IO.File.ReadAllText(path);
+                    var list = JsonSerializer.Deserialize<List<string>>(json);
+                    if (list != null) return new HashSet<string>(list, StringComparer.OrdinalIgnoreCase);
+                }
+            }
+            catch
+            {
+                // Fall back to memory
+            }
+        }
+        return MemoryRedeemedCodes.GetOrAdd(key, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private void MarkMysteryGiftCodeRedeemed(Guid userId, string gameId, string code)
+    {
+        var key = $"{userId:N}_{gameId}";
+        var set = GetRedeemedMysteryGiftCodes(userId, gameId);
+        lock (set)
+        {
+            set.Add(PokemonMysteryGiftCatalog.NormalizeCode(code));
+        }
+        MemoryRedeemedCodes[key] = set;
+
+        if (_paths != null)
+        {
+            try
+            {
+                var dir = Path.Combine(_paths.PokemonRoot, "mystery-gifts");
+                Directory.CreateDirectory(dir);
+                var path = Path.Combine(dir, $"{key}.json");
+                var json = JsonSerializer.Serialize(set.ToList());
+                System.IO.File.WriteAllText(path, json);
+            }
+            catch
+            {
+                // Non-fatal
+            }
+        }
+    }
+
+    private bool IsMysteryGiftRedeemed(
+        Guid userId,
+        string gameId,
+        PokemonMysteryGiftDto gift,
+        byte[]? saveBytes,
+        int generation,
+        string gameKey)
+    {
+        var redeemedSet = GetRedeemedMysteryGiftCodes(userId, gameId);
+        var normalizedCode = PokemonMysteryGiftCatalog.NormalizeCode(gift.Code);
+        if (redeemedSet.Contains(normalizedCode))
+        {
+            return true;
+        }
+
+        if (gift.EventId != null && saveBytes is { Length: > 0 })
+        {
+            return IsEventUnlocked(saveBytes, generation, gameKey, gift.EventId);
+        }
+
+        return false;
+    }
+
+    [HttpGet("MysteryGifts/Catalog")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public ActionResult<IReadOnlyList<PokemonMysteryGiftDto>> GetMysteryGiftCatalog()
+    {
+        if (!IsPokemonIntegrationEnabled()) return Ok(Array.Empty<PokemonMysteryGiftDto>());
+        return Ok(PokemonMysteryGiftCatalog.All);
+    }
+
+    [HttpGet("MysteryGifts/Codes/{gameId}")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<PokemonMysteryGiftDto>>> GetMysteryGiftCodesForGame(
+        [FromRoute] string gameId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled()) return Ok(Array.Empty<PokemonMysteryGiftDto>());
+        var game = FindGame(gameId);
+        if (game == null) return Ok(Array.Empty<PokemonMysteryGiftDto>());
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var meta = await _detector.GetMetadataAsync(userId, game.Id, game.Title, game.FileName, game.System, game.Core, cancellationToken).ConfigureAwait(false);
+        if (meta == null || !meta.IsPokemonGame) return Ok(Array.Empty<PokemonMysteryGiftDto>());
+
+        var saveBytes = await _gameSavesService.GetAsync(userId, game.Id, "sram", cancellationToken).ConfigureAwait(false);
+        var gameKey = $"{meta.PokemonGameId} {game.Title} {game.FileName}";
+
+        var compatibleGifts = PokemonMysteryGiftCatalog.All
+            .Where(g => PokemonMysteryGiftCatalog.SupportsGame(g, gameKey))
+            .Select(g => new PokemonMysteryGiftDto
+            {
+                Code = g.Code,
+                Aliases = g.Aliases,
+                Id = g.Id,
+                Title = g.Title,
+                Subtitle = g.Subtitle,
+                Description = g.Description,
+                Generation = g.Generation,
+                Region = g.Region,
+                RewardType = g.RewardType,
+                TargetSpeciesId = g.TargetSpeciesId,
+                TargetSpeciesName = g.TargetSpeciesName,
+                Accent = g.Accent,
+                InGameInstructions = g.InGameInstructions,
+                SupportedGameIds = g.SupportedGameIds,
+                EventId = g.EventId,
+                IsShiny = g.IsShiny,
+                OriginalTrainer = g.OriginalTrainer,
+                RibbonName = g.RibbonName,
+                IsRedeemed = IsMysteryGiftRedeemed(userId, game.Id, g, saveBytes, meta.Generation, gameKey)
+            })
+            .ToList();
+
+        return Ok(compatibleGifts);
+    }
+
+    [HttpPost("MysteryGifts/Redeem")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonMysteryGiftRedeemResponse>> RedeemMysteryGift(
+        [FromBody] PokemonMysteryGiftRedeemRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled()) return NotFound(new { error = "Pokémon integration is disabled." });
+        if (string.IsNullOrWhiteSpace(request.GameId) || string.IsNullOrWhiteSpace(request.Code))
+        {
+            return BadRequest(new { error = "Game and code are required." });
+        }
+
+        var gift = PokemonMysteryGiftCatalog.Find(request.Code);
+        if (gift == null)
+        {
+            return BadRequest(new { error = $"Unrecognized Mystery Gift code '{request.Code}'. Check historical distribution archives." });
+        }
+
+        var game = FindGame(request.GameId);
+        if (game == null) return NotFound(new { error = "Game not found." });
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var meta = await _detector.GetMetadataAsync(userId, game.Id, game.Title, game.FileName, game.System, game.Core, cancellationToken).ConfigureAwait(false);
+        if (meta == null || !meta.IsPokemonGame) return BadRequest(new { error = "This is not a supported Pokémon game." });
+
+        var gameKey = $"{meta.PokemonGameId} {game.Title} {game.FileName}";
+        if (!PokemonMysteryGiftCatalog.SupportsGame(gift, gameKey))
+        {
+            return BadRequest(new { error = $"{gift.Title} is not compatible with {meta.CanonicalTitle}." });
+        }
+
+        var saveBytes = await _gameSavesService.GetAsync(userId, game.Id, "sram", cancellationToken).ConfigureAwait(false);
+        if (saveBytes == null || saveBytes.Length == 0)
+        {
+            return BadRequest(new { error = "No battery save found for this game. Start the game and save once first." });
+        }
+
+        if (IsMysteryGiftRedeemed(userId, game.Id, gift, saveBytes, meta.Generation, gameKey))
+        {
+            return Ok(new PokemonMysteryGiftRedeemResponse
+            {
+                Success = true,
+                Code = gift.Code,
+                Title = gift.Title,
+                Subtitle = gift.Subtitle,
+                RewardType = gift.RewardType,
+                TargetSpeciesId = gift.TargetSpeciesId,
+                TargetSpeciesName = gift.TargetSpeciesName,
+                Accent = gift.Accent,
+                InGameInstructions = gift.InGameInstructions,
+                Message = $"{gift.Title} has already been redeemed for this save.",
+                BackupIds = []
+            });
+        }
+
+        var result = await _transactionManager.ExecuteAsync(
+            userId,
+            operationType: "MysteryGiftRedeem",
+            sourceGameId: game.Id,
+            destinationGameId: null,
+            pokemonId: null,
+            species: gift.TargetSpeciesName,
+            nickname: gift.Title,
+            operation: async context =>
+            {
+                var original = context.SourceSaveWorkingCopy;
+
+                // 1. If key item event, patch the save file
+                if (!string.IsNullOrWhiteSpace(gift.EventId))
+                {
+                    context.SourceSaveWorkingCopy = meta.Generation switch
+                    {
+                        2 when gift.EventId == PokemonEventCatalog.CrystalGsBall => Gen2SaveParser.UnlockCrystalGsBallEvent(original),
+                        3 => Gen3SaveParser.UnlockEvent(original, gameKey, gift.EventId),
+                        4 => Gen4SaveParser.UnlockEvent(original, gameKey, gift.EventId),
+                        5 => Gen5SaveParser.UnlockEvent(original, gameKey, gift.EventId),
+                        _ => original
+                    };
+                }
+                else if (meta.Generation == 4)
+                {
+                    // Activate Mystery Gift menu on title screen
+                    context.SourceSaveWorkingCopy = Gen4SaveParser.EnableMysteryGift(original, gameKey);
+                }
+
+                // 2. If Pokemon or Egg reward, deliver to user's Personal Vault
+                if (gift.RewardType is "Pokemon" or "Egg")
+                {
+                    var vaultEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(gift, meta.CanonicalTitle, meta.Generation);
+                    await _vaultStore.AddOrUpdateEntryAsync(userId, vaultEntry, cancellationToken).ConfigureAwait(false);
+                }
+
+                // 3. Mark code as redeemed
+                MarkMysteryGiftCodeRedeemed(userId, game.Id, gift.Code);
+
+                return new PokemonMysteryGiftRedeemResponse
+                {
+                    Success = true,
+                    Code = gift.Code,
+                    Title = gift.Title,
+                    Subtitle = gift.Subtitle,
+                    RewardType = gift.RewardType,
+                    TargetSpeciesId = gift.TargetSpeciesId,
+                    TargetSpeciesName = gift.TargetSpeciesName,
+                    Accent = gift.Accent,
+                    InGameInstructions = gift.InGameInstructions,
+                    Message = $"{gift.Title} redeemed successfully! {gift.InGameInstructions}",
+                    BackupIds = context.BackupIds
+                };
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (!result.Success || result.Value == null)
+        {
+            return BadRequest(new { error = result.ErrorMessage ?? "Mystery Gift redemption failed." });
         }
 
         return Ok(result.Value);
@@ -3332,6 +3414,8 @@ public sealed class PokemonController : ControllerBase
         {
             2 when eventId == PokemonEventCatalog.CrystalGsBall => Gen2SaveParser.IsCrystalGsBallUnlocked(saveBytes),
             3 => Gen3SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
+            4 => Gen4SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
+            5 => Gen5SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
             _ => false
         };
 
@@ -3390,6 +3474,62 @@ public sealed class PokemonController : ControllerBase
                 var candidate = Path.GetFullPath(Path.Combine(megaRoot, name + extension));
                 if (!IsPathInside(candidate, megaRoot) || !System.IO.File.Exists(candidate)) continue;
                 return (candidate, ImageContentType(candidate));
+            }
+        }
+
+        return null;
+    }
+
+    private (string Path, string ContentType)? ResolveMegaStonePath(PokemonConfiguration config, string stoneId)
+    {
+        if (string.IsNullOrWhiteSpace(stoneId)) return null;
+        var normalizedId = stoneId.Trim().ToLowerInvariant();
+        if (normalizedId.Length > 96 || !normalizedId.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_'))
+        {
+            return null;
+        }
+
+        var root = config.BadgeArtPath?.Trim('\"', '\'').Trim();
+        if (string.IsNullOrWhiteSpace(root))
+        {
+            root = Path.Combine(_paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon"), "badge-art");
+        }
+
+        var fullRoot = Path.GetFullPath(root);
+        if (!Directory.Exists(fullRoot)) return null;
+
+        var candidateFolders = new[]
+        {
+            Path.Combine(fullRoot, "mega-stones"),
+            Path.Combine(fullRoot, "mega", "stones"),
+            Path.Combine(fullRoot, "mega"),
+            Path.Combine(fullRoot, "stones"),
+            fullRoot
+        };
+
+        var nameVariants = new[]
+        {
+            normalizedId,
+            normalizedId.Replace("-", "_"),
+            normalizedId.Replace("_", "-"),
+            normalizedId.Replace("-", "").Replace("_", "")
+        }.Distinct();
+
+        var extensions = new[] { ".png", ".webp", ".jpg", ".jpeg", ".svg" };
+
+        foreach (var folder in candidateFolders)
+        {
+            var fullFolder = Path.GetFullPath(folder);
+            if (!IsPathInside(fullFolder, fullRoot) || !Directory.Exists(fullFolder)) continue;
+
+            foreach (var name in nameVariants)
+            {
+                foreach (var extension in extensions)
+                {
+                    var candidate = Path.GetFullPath(Path.Combine(fullFolder, name + extension));
+                    if (!IsPathInside(candidate, fullFolder) || !System.IO.File.Exists(candidate)) continue;
+                    return (candidate, ImageContentType(candidate));
+                }
             }
         }
 

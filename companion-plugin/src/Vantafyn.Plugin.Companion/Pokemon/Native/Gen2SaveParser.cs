@@ -362,11 +362,15 @@ public static class Gen2SaveParser
         string natureName = NatureNames[(exp % 25)];
         string pkmId = $"gen2_{speciesId}_{otid}_{partySlot}_{(isParty ? "p" : $"b{boxIndex}")}";
 
+        int letterIdx = (((atkDv & 6) << 5) | ((defDv & 6) << 3) | ((speDv & 6) << 1) | ((spcDv & 6) >> 1)) / 10;
+        string? form = speciesId == 201 ? ((char)('A' + Math.Clamp(letterIdx, 0, 25))).ToString() : null;
+
         var summary = new PokemonSummaryDto
         {
             Id = pkmId,
             Species = speciesName,
             SpeciesId = speciesId,
+            Form = form,
             Nickname = nickname,
             Level = level,
             Gender = "Genderless",

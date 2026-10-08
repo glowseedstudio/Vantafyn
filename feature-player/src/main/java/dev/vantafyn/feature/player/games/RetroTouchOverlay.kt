@@ -446,6 +446,7 @@ fun TouchAnalogStick(
             .pointerInput(maxRadiusPx) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerId = down.id
                     val center = Offset(size.width / 2f, size.height / 2f)
                     var currPos = down.position - center
                     val dist = currPos.getDistance()
@@ -459,7 +460,7 @@ fun TouchAnalogStick(
 
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                         if (!change.pressed) {
                             knobOffset = Offset.Zero
                             onAxisChange(0f, 0f)
@@ -679,12 +680,13 @@ private fun CButton(
             .border(1.5.dp, color.copy(alpha = 0.8f), CircleShape)
             .pointerInput(button) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerId = down.id
                     isPressed = true
                     onPress(button, true)
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                         if (!change.pressed) {
                             isPressed = false
                             onPress(button, false)
@@ -819,12 +821,13 @@ private fun TouchBumperButton(
             .border(1.dp, color.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerId = down.id
                     isPressed = true
                     onPress(true)
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                         if (!change.pressed) {
                             isPressed = false
                             onPress(false)
@@ -862,12 +865,13 @@ private fun TouchPillButton(
             .border(1.dp, color.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
             .pointerInput(Unit) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerId = down.id
                     isPressed = true
                     onPress(true)
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                         if (!change.pressed) {
                             isPressed = false
                             onPress(false)
@@ -908,6 +912,7 @@ private fun TouchDpad(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerId = down.id
                     val dir = resolveDirection(down.position.x, down.position.y, size.width.toFloat(), size.height.toFloat())
                     if (dir != null) {
                         activeDirection = dir
@@ -915,7 +920,7 @@ private fun TouchDpad(
                     }
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                         if (!change.pressed) {
                             activeDirection?.let { onDirectionChange(it, false) }
                             activeDirection = null
@@ -1062,12 +1067,13 @@ private fun RetroActionButton(
             .border(2.dp, color.copy(alpha = 0.7f), CircleShape)
             .pointerInput(button) {
                 awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    val pointerId = down.id
                     isPressed = true
                     onPress(button, true)
                     while (true) {
                         val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull() ?: break
+                        val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                         if (!change.pressed) {
                             isPressed = false
                             onPress(button, false)

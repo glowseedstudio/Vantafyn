@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.24}"
+VERSION="${1:-0.2.25}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.58}"
-CHANGELOG="Adds Pokémon Gen 4/5 save parsing, Johto/Sinnoh/Unova gym badge cases, and generation-isolated diploma screens."
+TAG="${2:-v0.9.59}"
+CHANGELOG="Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.24.0",
+        "changelog": "Adds Pokémon Gen 4/5 save parsing, Johto/Sinnoh/Unova gym badge cases, and generation-isolated diploma screens.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.58/Vantafyn.Plugin.Companion_0.2.24_net9.zip",
+        "checksum": "efeff8fa9084b0e2dd349535a9106137",
+        "timestamp": "2026-10-07T12:20:15Z"
+      },
+      {
+        "version": "0.2.24.1",
+        "changelog": "Adds Pokémon Gen 4/5 save parsing, Johto/Sinnoh/Unova gym badge cases, and generation-isolated diploma screens.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.58/Vantafyn.Plugin.Companion_0.2.24_net10.zip",
+        "checksum": "47aa287f6c90fbec210ed0377728eb7c",
+        "timestamp": "2026-10-07T12:20:15Z"
       },
       {
         "version": "0.2.23.0",

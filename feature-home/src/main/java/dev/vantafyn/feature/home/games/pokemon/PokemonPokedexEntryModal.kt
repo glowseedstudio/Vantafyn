@@ -457,7 +457,6 @@ fun PokemonPokedexEntryModal(
         megaForms.indexOfFirst { it.spriteKey == selectedFormKey }
     }
     val isMegaArtwork = selectedMegaIndex >= 0
-    val activeMegaName = megaForms.getOrNull(selectedMegaIndex)?.name ?: "Mega"
     val megaSymbolUrl = remember(session) {
         session?.let {
             "${it.server.url.trimEnd('/')}/Vantafyn/Pokemon/MegaEvolution/Symbol?api_key=${it.accessToken}"
@@ -475,6 +474,33 @@ fun PokemonPokedexEntryModal(
             isFemale = showFemaleArtwork,
             formKey = selectedFormKey,
         )
+    }
+
+    val isUnown = remember(currentSpeciesId) {
+        PokemonFormsCatalog.isUnown(currentSpeciesId)
+    }
+
+    val caughtUnownLetters = remember(currentSpeciesId, localPokemonList, vaultBoxes, isCaught) {
+        if (currentSpeciesId != 201) emptySet()
+        else {
+            val caught = mutableSetOf<String>()
+            localPokemonList.filter { it.first.speciesId == 201 }.forEach { (summary, _) ->
+                PokemonFormsCatalog.getUnownLetter(summary.form)?.let { caught.add(it) }
+            }
+            vaultBoxes.forEach { box ->
+                box.entries.filter { it.speciesId == 201 }.forEach { entry ->
+                    PokemonFormsCatalog.getUnownLetter(entry.form)?.let { caught.add(it) }
+                }
+            }
+            if (isCaught && caught.isEmpty()) {
+                caught.add("A")
+            }
+            caught
+        }
+    }
+
+    val selectedUnownLetter = remember(selectedFormKey) {
+        PokemonFormsCatalog.getUnownLetter(selectedFormKey) ?: "A"
     }
 
     BackHandler(onBack = onDismiss)
@@ -613,7 +639,7 @@ fun PokemonPokedexEntryModal(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(230.dp)
+                    .height(if (isUnown) 272.dp else 230.dp)
                     .padding(horizontal = 16.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(
@@ -651,8 +677,13 @@ fun PokemonPokedexEntryModal(
                         model = artworkUrl,
                         contentDescription = dexData.name,
                         modifier = Modifier
-                            .size(195.dp)
-                            .padding(8.dp),
+                            .size(if (isUnown) 165.dp else 195.dp)
+                            .padding(
+                                top = if (isUnown) 6.dp else 8.dp,
+                                bottom = if (isUnown) 52.dp else 8.dp,
+                                start = 8.dp,
+                                end = 8.dp,
+                            ),
                         contentScale = ContentScale.Fit,
                     )
 
@@ -660,7 +691,6 @@ fun PokemonPokedexEntryModal(
                         MegaEvolutionQuickToggle(
                             symbolUrl = megaSymbolUrl,
                             isActive = isMegaArtwork,
-                            label = activeMegaName,
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
                                 .padding(
@@ -684,19 +714,20 @@ fun PokemonPokedexEntryModal(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
                                 .padding(10.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(Color(0xFF161928).copy(alpha = 0.85f))
-                                .border(1.dp, Color(0xFF282F48), RoundedCornerShape(12.dp))
-                                .padding(2.dp),
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(Color(0xFF131625).copy(alpha = 0.85f))
+                                .border(1.dp, Color(0xFF282F48), RoundedCornerShape(14.dp))
+                                .padding(3.dp),
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
                             ) {
-                                // Male
+                                // Male ♂
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(9.dp))
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(10.dp))
                                         .background(
                                             if (!showFemaleArtwork) Color(0xFF0284C7).copy(alpha = 0.35f)
                                             else Color.Transparent
@@ -704,35 +735,24 @@ fun PokemonPokedexEntryModal(
                                         .border(
                                             1.dp,
                                             if (!showFemaleArtwork) Color(0xFF38BDF8) else Color.Transparent,
-                                            RoundedCornerShape(9.dp)
+                                            RoundedCornerShape(10.dp)
                                         )
-                                        .clickable { showFemaleArtwork = false }
-                                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                                        .clickable { showFemaleArtwork = false },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        Text(
-                                            text = "♂",
-                                            color = if (!showFemaleArtwork) Color(0xFF38BDF8) else Color(0xFF64748B),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                        )
-                                        Text(
-                                            text = "Male",
-                                            color = if (!showFemaleArtwork) Color.White else Color(0xFF64748B),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                    }
+                                    Text(
+                                        text = "♂",
+                                        color = if (!showFemaleArtwork) Color(0xFF38BDF8) else Color(0xFF64748B),
+                                        fontSize = 19.sp,
+                                        fontWeight = FontWeight.Black,
+                                    )
                                 }
 
-                                // Female
+                                // Female ♀
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(9.dp))
+                                        .size(34.dp)
+                                        .clip(RoundedCornerShape(10.dp))
                                         .background(
                                             if (showFemaleArtwork) Color(0xFFE11D48).copy(alpha = 0.35f)
                                             else Color.Transparent
@@ -740,33 +760,20 @@ fun PokemonPokedexEntryModal(
                                         .border(
                                             1.dp,
                                             if (showFemaleArtwork) Color(0xFFFB7185) else Color.Transparent,
-                                            RoundedCornerShape(9.dp)
+                                            RoundedCornerShape(10.dp)
                                         )
-                                        .clickable { showFemaleArtwork = true }
-                                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                                        .clickable { showFemaleArtwork = true },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(3.dp),
-                                    ) {
-                                        Text(
-                                            text = "♀",
-                                            color = if (showFemaleArtwork) Color(0xFFFB7185) else Color(0xFF64748B),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.ExtraBold,
-                                        )
-                                        Text(
-                                            text = "Female",
-                                            color = if (showFemaleArtwork) Color.White else Color(0xFF64748B),
-                                            fontSize = 10.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                    }
+                                    Text(
+                                        text = "♀",
+                                        color = if (showFemaleArtwork) Color(0xFFFB7185) else Color(0xFF64748B),
+                                        fontSize = 19.sp,
+                                        fontWeight = FontWeight.Black,
+                                    )
                                 }
                             }
                         }
-
                         // Difference note at bottom of artwork if female selected
                         if (showFemaleArtwork) {
                             val diffDesc = remember(currentSpeciesId) {
@@ -833,6 +840,98 @@ fun PokemonPokedexEntryModal(
                             }
                         }
                     }
+
+                    // Unown Alphabet Card docked at bottom of the hero card
+                    if (isUnown) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 8.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0xFF0D101C).copy(alpha = 0.92f))
+                                .border(1.dp, Color(0xFF232A44), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "UNOWN ALPHABET",
+                                        color = Color(0xFF94A3B8),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.8.sp,
+                                    )
+                                    Text(
+                                        text = "${caughtUnownLetters.size}/28 CAUGHT",
+                                        color = if (caughtUnownLetters.size == 28) Color(0xFF34D399) else Color(0xFF38BDF8),
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontFamily = FontFamily.Monospace,
+                                    )
+                                }
+
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(rememberScrollState()),
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    PokemonFormsCatalog.UNOWN_LETTERS.forEach { letter ->
+                                        val isCaughtLetter = letter in caughtUnownLetters
+                                        val isSelectedLetter = letter == selectedUnownLetter
+
+                                        val bgColor = when {
+                                            isSelectedLetter -> Color(0xFF00E5FF).copy(alpha = 0.30f)
+                                            isCaughtLetter -> Color(0xFF10B981).copy(alpha = 0.22f)
+                                            else -> Color(0xFF161A29).copy(alpha = 0.60f)
+                                        }
+                                        val borderColor = when {
+                                            isSelectedLetter -> Color(0xFF00E5FF)
+                                            isCaughtLetter -> Color(0xFF34D399)
+                                            else -> Color(0xFF2A314A)
+                                        }
+                                        val textColor = when {
+                                            isSelectedLetter -> Color.White
+                                            isCaughtLetter -> Color(0xFF6EE7B7)
+                                            else -> Color(0xFF64748B)
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .size(26.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(bgColor)
+                                                .border(
+                                                    if (isSelectedLetter) 1.5.dp else 1.dp,
+                                                    borderColor,
+                                                    RoundedCornerShape(6.dp),
+                                                )
+                                                .clickable {
+                                                    selectedFormKey = PokemonFormsCatalog.getUnownSpriteKey(letter)
+                                                },
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = letter,
+                                                color = textColor,
+                                                fontSize = 11.sp,
+                                                fontWeight = if (isCaughtLetter || isSelectedLetter) FontWeight.Black else FontWeight.Medium,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 } else {
                     // Strong Ambient Backlight Glow behind the unregistered silhouette
                     Box(
@@ -890,7 +989,7 @@ fun PokemonPokedexEntryModal(
                 PokemonFormsCatalog.isSpinda(currentSpeciesId)
             }
 
-            if (alternateForms.isNotEmpty()) {
+            if (alternateForms.isNotEmpty() && !isUnown) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -909,18 +1008,6 @@ fun PokemonPokedexEntryModal(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 1.sp,
                         )
-                        if (activeForm != null && !activeForm.description.isNullOrBlank()) {
-                            Text(
-                                text = activeForm.description,
-                                color = primaryType.accentColor,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.padding(start = 8.dp),
-                            )
-                        }
-
                     }
 
                     Row(
@@ -965,6 +1052,15 @@ fun PokemonPokedexEntryModal(
                     }
 
                     if (activeForm?.isMega == true && !activeForm.description.isNullOrBlank()) {
+                        val megaStoneUrl = remember(session, activeForm) {
+                            val stoneSlug = PokemonFormsCatalog.getMegaStoneSlug(activeForm)
+                            if (session != null && stoneSlug != null) {
+                                "${session.server.url.trimEnd('/')}/Vantafyn/Pokemon/MegaEvolution/Stones/$stoneSlug/Image?api_key=${session.accessToken}"
+                            } else {
+                                null
+                            }
+                        }
+
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -988,18 +1084,34 @@ fun PokemonPokedexEntryModal(
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .size(34.dp)
+                                        .size(36.dp)
                                         .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.24f))
+                                        .background(Color.Black.copy(alpha = 0.28f))
                                         .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.AutoAwesome,
-                                        contentDescription = null,
-                                        tint = Color(0xFFFFF7AD),
-                                        modifier = Modifier.size(18.dp),
-                                    )
+                                    var hasStoneError by remember(megaStoneUrl) { mutableStateOf(false) }
+
+                                    if (megaStoneUrl != null && !hasStoneError) {
+                                        AsyncImage(
+                                            model = megaStoneUrl,
+                                            contentDescription = null,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .padding(1.dp),
+                                            contentScale = ContentScale.Fit,
+                                            onError = { hasStoneError = true },
+                                        )
+                                    }
+
+                                    if (megaStoneUrl == null || hasStoneError) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.AutoAwesome,
+                                            contentDescription = null,
+                                            tint = Color(0xFFFFF7AD),
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                    }
                                 }
                                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                     Text(
@@ -1730,66 +1842,56 @@ fun PokemonPokedexEntryModal(
 private fun MegaEvolutionQuickToggle(
     symbolUrl: String?,
     isActive: Boolean,
-    label: String,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    val shellBrush = Brush.linearGradient(
-        colors = if (isActive) {
-            listOf(Color(0xFFFF4FD8), Color(0xFF7C3AED), Color(0xFF22D3EE))
-        } else {
-            listOf(Color(0xFF26213D), Color(0xFF181B2C), Color(0xFF123247))
-        },
-    )
-    val text = if (isActive) label else "Mega"
+    var hasSymbolError by remember(symbolUrl) { mutableStateOf(false) }
 
-    Row(
+    Box(
         modifier = modifier
-            .clip(RoundedCornerShape(15.dp))
-            .background(shellBrush)
-            .border(
-                1.dp,
-                if (isActive) Color.White.copy(alpha = 0.46f) else Color(0xFFFF4FD8).copy(alpha = 0.55f),
-                RoundedCornerShape(15.dp),
+            .size(36.dp)
+            .clip(CircleShape)
+            .then(
+                if (isActive) {
+                    Modifier
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    Color(0xFFFF4FD8).copy(alpha = 0.45f),
+                                    Color(0xFF7C3AED).copy(alpha = 0.25f),
+                                    Color(0xFF131625).copy(alpha = 0.70f),
+                                ),
+                            )
+                        )
+                        .border(
+                            1.5.dp,
+                            Color(0xFFFF4FD8).copy(alpha = 0.85f),
+                            CircleShape,
+                        )
+                } else {
+                    Modifier
+                }
             )
-            .clickable(onClick = onClick)
-            .padding(start = 6.dp, end = 9.dp, top = 5.dp, bottom = 5.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .background(Color.Black.copy(alpha = 0.28f))
-                .border(1.dp, Color.White.copy(alpha = 0.24f), CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
+        if (!symbolUrl.isNullOrBlank() && !hasSymbolError) {
+            AsyncImage(
+                model = symbolUrl,
+                contentDescription = "Mega Evolution",
+                modifier = Modifier
+                    .size(if (isActive) 26.dp else 28.dp),
+                contentScale = ContentScale.Fit,
+                onError = { hasSymbolError = true },
+            )
+        } else {
             Icon(
                 imageVector = Icons.Rounded.AutoAwesome,
-                contentDescription = null,
-                tint = Color(0xFFFFF7AD),
-                modifier = Modifier.size(14.dp),
+                contentDescription = "Mega Evolution",
+                tint = if (isActive) Color(0xFFFF6FE5) else Color.White.copy(alpha = 0.70f),
+                modifier = Modifier.size(20.dp),
             )
-            if (!symbolUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = symbolUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(18.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Fit,
-                )
-            }
         }
-        Text(
-            text = text,
-            color = Color.White,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.ExtraBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 

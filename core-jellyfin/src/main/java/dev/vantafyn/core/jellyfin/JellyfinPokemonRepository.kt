@@ -59,6 +59,9 @@ interface JellyfinPokemonRepository {
     suspend fun getEventUnlockCatalog(session: JellyfinSession): Result<List<PokemonEventUnlockDto>>
     suspend fun getEventUnlockStatus(session: JellyfinSession, gameId: String): Result<List<PokemonEventUnlockStatusDto>>
     suspend fun unlockEvent(session: JellyfinSession, gameId: String, eventId: String): Result<PokemonEventUnlockResponse>
+    suspend fun getMysteryGiftCatalog(session: JellyfinSession): Result<List<PokemonMysteryGiftDto>>
+    suspend fun getMysteryGiftCodesForGame(session: JellyfinSession, gameId: String): Result<List<PokemonMysteryGiftDto>>
+    suspend fun redeemMysteryGift(session: JellyfinSession, gameId: String, code: String): Result<PokemonMysteryGiftRedeemResponse>
     suspend fun getBadgeArtCatalog(session: JellyfinSession): Result<PokemonBadgeArtCatalogDto>
     suspend fun getDiplomaProofs(session: JellyfinSession): Result<List<PokemonDiplomaProofDto>>
     suspend fun uploadDiplomaProof(
@@ -1272,7 +1275,43 @@ class DefaultJellyfinPokemonRepository(
             region = obj.optStringAny("region", "Region"),
             legendary = obj.optStringAny("legendary", "Legendary"),
             accent = obj.optStringAny("accent", "Accent", default = "#FBBF24"),
+            targetSpeciesId = obj.optIntAny("targetSpeciesId", "TargetSpeciesId"),
+            inGameLocation = obj.optStringAny("inGameLocation", "InGameLocation"),
             supportedGameIds = supported,
+        )
+    }
+
+    private fun parseMysteryGift(obj: JSONObject): PokemonMysteryGiftDto {
+        val supported = mutableListOf<String>()
+        val arr = obj.optJSONArrayAny("supportedGameIds", "SupportedGameIds")
+        if (arr != null) {
+            for (i in 0 until arr.length()) supported.add(arr.optString(i))
+        }
+        val aliases = mutableListOf<String>()
+        val aliasArr = obj.optJSONArrayAny("aliases", "Aliases")
+        if (aliasArr != null) {
+            for (i in 0 until aliasArr.length()) aliases.add(aliasArr.optString(i))
+        }
+        return PokemonMysteryGiftDto(
+            code = obj.optStringAny("code", "Code"),
+            aliases = aliases,
+            id = obj.optStringAny("id", "Id"),
+            title = obj.optStringAny("title", "Title"),
+            subtitle = obj.optStringAny("subtitle", "Subtitle"),
+            description = obj.optStringAny("description", "Description"),
+            generation = obj.optIntAny("generation", "Generation"),
+            region = obj.optStringAny("region", "Region"),
+            rewardType = obj.optStringAny("rewardType", "RewardType", default = "EventItem"),
+            targetSpeciesId = obj.optIntAny("targetSpeciesId", "TargetSpeciesId"),
+            targetSpeciesName = obj.optStringAny("targetSpeciesName", "TargetSpeciesName"),
+            accent = obj.optStringAny("accent", "Accent", default = "#FBBF24"),
+            inGameInstructions = obj.optStringAny("inGameInstructions", "InGameInstructions"),
+            supportedGameIds = supported,
+            eventId = obj.optStringAny("eventId", "EventId").ifBlank { null },
+            isShiny = obj.optBooleanAny("isShiny", "IsShiny"),
+            originalTrainer = obj.optStringAny("originalTrainer", "OriginalTrainer").ifBlank { null },
+            ribbonName = obj.optStringAny("ribbonName", "RibbonName").ifBlank { null },
+            isRedeemed = obj.optBooleanAny("isRedeemed", "IsRedeemed"),
         )
     }
 
@@ -1579,6 +1618,78 @@ class DefaultJellyfinPokemonRepository(
                     success = obj.optBooleanAny("success", "Success"),
                     eventId = obj.optStringAny("eventId", "EventId"),
                     gameId = obj.optStringAny("gameId", "GameId"),
+                    message = obj.optStringAny("message", "Message"),
+                    backupIds = backupIds,
+                )
+            }
+        }
+
+    override suspend fun getMysteryGiftCatalog(session: JellyfinSession): Result<List<PokemonMysteryGiftDto>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/MysteryGifts/Catalog")
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                val list = mutableListOf<PokemonMysteryGiftDto>()
+                for (i in 0 until array.length()) {
+                    list.add(parseMysteryGift(array.getJSONObject(i)))
+                }
+                list
+            }
+        }
+
+    override suspend fun getMysteryGiftCodesForGame(
+        session: JellyfinSession,
+        gameId: String,
+    ): Result<List<PokemonMysteryGiftDto>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/MysteryGifts/Codes/$gameId")
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                val list = mutableListOf<PokemonMysteryGiftDto>()
+                for (i in 0 until array.length()) {
+                    list.add(parseMysteryGift(array.getJSONObject(i)))
+                }
+                list
+            }
+        }
+
+    override suspend fun redeemMysteryGift(
+        session: JellyfinSession,
+        gameId: String,
+        code: String,
+    ): Result<PokemonMysteryGiftRedeemResponse> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/MysteryGifts/Redeem")
+                conn.requestMethod = "POST"
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val json = JSONObject()
+                    .put("gameId", gameId)
+                    .put("code", code)
+                conn.outputStream.bufferedWriter().use { it.write(json.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val obj = JSONObject(body)
+                val backupIds = mutableListOf<String>()
+                val backups = obj.optJSONArrayAny("backupIds", "BackupIds")
+                if (backups != null) {
+                    for (i in 0 until backups.length()) backupIds.add(backups.optString(i))
+                }
+                PokemonMysteryGiftRedeemResponse(
+                    success = obj.optBooleanAny("success", "Success"),
+                    code = obj.optStringAny("code", "Code"),
+                    title = obj.optStringAny("title", "Title"),
+                    subtitle = obj.optStringAny("subtitle", "Subtitle"),
+                    rewardType = obj.optStringAny("rewardType", "RewardType", default = "EventItem"),
+                    targetSpeciesId = obj.optIntAny("targetSpeciesId", "TargetSpeciesId"),
+                    targetSpeciesName = obj.optStringAny("targetSpeciesName", "TargetSpeciesName"),
+                    accent = obj.optStringAny("accent", "Accent", default = "#FBBF24"),
+                    inGameInstructions = obj.optStringAny("inGameInstructions", "InGameInstructions"),
                     message = obj.optStringAny("message", "Message"),
                     backupIds = backupIds,
                 )

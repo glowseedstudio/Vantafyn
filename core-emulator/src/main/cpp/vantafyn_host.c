@@ -102,10 +102,11 @@ struct vf_session {
     audio_ring_t audio_ring;
 
     // Input state
-    uint32_t input_masks[VF_MAX_PORTS];
-    int16_t touch_x;
-    int16_t touch_y;
-    bool touch_pressed;
+    _Atomic uint32_t input_masks[VF_MAX_PORTS];
+    _Atomic int16_t analog_state[VF_MAX_PORTS][2][2];
+    _Atomic int16_t touch_x;
+    _Atomic int16_t touch_y;
+    _Atomic bool touch_pressed;
 
     // Visual Enhancements & LCD Simulation
     bool gba_color_correction;
@@ -330,6 +331,13 @@ static bool core_environment(unsigned cmd, void *data) {
         case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE: {
             bool updated = atomic_exchange(&s->options_updated, false);
             *(bool *)data = updated;
+            return true;
+        }
+        case RETRO_ENVIRONMENT_GET_INPUT_BITMASKS: {
+            if (data) *(bool *)data = true;
+            return true;
+        }
+        case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
             return true;
         }
         default:
@@ -721,21 +729,55 @@ static void core_input_poll(void) {
 
 static int16_t core_input_state(unsigned port, unsigned device, unsigned index, unsigned id) {
     vf_session_t *s = s_current_session;
-    if (!s) return 0;
+    if (!s || port >= VF_MAX_PORTS) return 0;
 
-    if (device == RETRO_DEVICE_JOYPAD && port < VF_MAX_PORTS) {
-        uint32_t mask = s->input_masks[port];
-        return (mask & (1 << id)) ? 1 : 0;
+    if (device == RETRO_DEVICE_JOYPAD) {
+        uint32_t mask = atomic_load(&s->input_masks[port]);
+
+        // Synthesize D-pad from left analog stick if analog stick is tilted
+        int16_t lx = atomic_load(&s->analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_X]);
+        int16_t ly = atomic_load(&s->analog_state[port][RETRO_DEVICE_INDEX_ANALOG_LEFT][RETRO_DEVICE_ID_ANALOG_Y]);
+        if (lx > 16000) mask |= (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT);
+        else if (lx < -16000) mask |= (1 << RETRO_DEVICE_ID_JOYPAD_LEFT);
+        if (ly > 16000) mask |= (1 << RETRO_DEVICE_ID_JOYPAD_DOWN);
+        else if (ly < -16000) mask |= (1 << RETRO_DEVICE_ID_JOYPAD_UP);
+
+        if (id == RETRO_DEVICE_ID_JOYPAD_MASK) {
+            return (int16_t)(mask & 0xFFFF);
+        }
+        if (id < 16) {
+            return (mask & (1 << id)) ? 1 : 0;
+        }
+        return 0;
+    }
+
+    if (device == RETRO_DEVICE_ANALOG) {
+        if (index <= 1 && id <= 1) {
+            int16_t val = atomic_load(&s->analog_state[port][index][id]);
+            // If analog stick is neutral, synthesize left stick from D-pad
+            if (val == 0 && index == RETRO_DEVICE_INDEX_ANALOG_LEFT) {
+                uint32_t mask = atomic_load(&s->input_masks[port]);
+                if (id == RETRO_DEVICE_ID_ANALOG_X) {
+                    if (mask & (1 << RETRO_DEVICE_ID_JOYPAD_RIGHT)) return 0x7fff;
+                    if (mask & (1 << RETRO_DEVICE_ID_JOYPAD_LEFT)) return -0x7fff;
+                } else if (id == RETRO_DEVICE_ID_ANALOG_Y) {
+                    if (mask & (1 << RETRO_DEVICE_ID_JOYPAD_DOWN)) return 0x7fff;
+                    if (mask & (1 << RETRO_DEVICE_ID_JOYPAD_UP)) return -0x7fff;
+                }
+            }
+            return val;
+        }
+        return 0;
     }
 
     // Pointer / Touchscreen (DS Touch Input)
     if (device == RETRO_DEVICE_POINTER) {
         if (id == RETRO_DEVICE_ID_POINTER_PRESSED) {
-            return s->touch_pressed ? 1 : 0;
+            return atomic_load(&s->touch_pressed) ? 1 : 0;
         } else if (id == RETRO_DEVICE_ID_POINTER_X) {
-            return s->touch_x;
+            return atomic_load(&s->touch_x);
         } else if (id == RETRO_DEVICE_ID_POINTER_Y) {
-            return s->touch_y;
+            return atomic_load(&s->touch_y);
         }
     }
 
@@ -1136,15 +1178,21 @@ size_t vf_session_read_audio(vf_session_t *session, int16_t *buffer, size_t samp
 
 void vf_session_set_input_mask(vf_session_t *session, int port, uint32_t mask) {
     if (session && port >= 0 && port < VF_MAX_PORTS) {
-        session->input_masks[port] = mask;
+        atomic_store(&session->input_masks[port], mask);
+    }
+}
+
+void vf_session_set_analog(vf_session_t *session, int port, int index, int id, int16_t value) {
+    if (session && port >= 0 && port < VF_MAX_PORTS && index >= 0 && index <= 1 && id >= 0 && id <= 1) {
+        atomic_store(&session->analog_state[port][index][id], value);
     }
 }
 
 void vf_session_set_touch_state(vf_session_t *session, int16_t x, int16_t y, bool pressed) {
     if (session) {
-        session->touch_x = x;
-        session->touch_y = y;
-        session->touch_pressed = pressed;
+        atomic_store(&session->touch_x, x);
+        atomic_store(&session->touch_y, y);
+        atomic_store(&session->touch_pressed, pressed);
     }
 }
 

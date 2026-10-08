@@ -386,6 +386,8 @@ data class PokemonEventUnlockDto(
     val region: String = "",
     val legendary: String = "",
     val accent: String = "#FBBF24",
+    val targetSpeciesId: Int = 0,
+    val inGameLocation: String = "",
     val supportedGameIds: List<String> = emptyList(),
 ) : Serializable
 
@@ -400,6 +402,47 @@ data class PokemonEventUnlockResponse(
     val success: Boolean = false,
     val eventId: String = "",
     val gameId: String = "",
+    val message: String = "",
+    val backupIds: List<String> = emptyList(),
+) : Serializable
+
+data class PokemonMysteryGiftDto(
+    val code: String = "",
+    val aliases: List<String> = emptyList(),
+    val id: String = "",
+    val title: String = "",
+    val subtitle: String = "",
+    val description: String = "",
+    val generation: Int = 0,
+    val region: String = "",
+    val rewardType: String = "EventItem",
+    val targetSpeciesId: Int = 0,
+    val targetSpeciesName: String = "",
+    val accent: String = "#FBBF24",
+    val inGameInstructions: String = "",
+    val supportedGameIds: List<String> = emptyList(),
+    val eventId: String? = null,
+    val isShiny: Boolean = false,
+    val originalTrainer: String? = null,
+    val ribbonName: String? = null,
+    val isRedeemed: Boolean = false,
+) : Serializable
+
+data class PokemonMysteryGiftRedeemRequest(
+    val gameId: String,
+    val code: String,
+) : Serializable
+
+data class PokemonMysteryGiftRedeemResponse(
+    val success: Boolean = false,
+    val code: String = "",
+    val title: String = "",
+    val subtitle: String = "",
+    val rewardType: String = "EventItem",
+    val targetSpeciesId: Int = 0,
+    val targetSpeciesName: String = "",
+    val accent: String = "#FBBF24",
+    val inGameInstructions: String = "",
     val message: String = "",
     val backupIds: List<String> = emptyList(),
 ) : Serializable

@@ -46,6 +46,176 @@ public static class Gen5SaveParser
                lower.Contains("black 2") || lower.Contains("white 2");
     }
 
+    public static ushort CalculateCrc16(byte[] data, int offset, int length)
+    {
+        ushort crc = 0xFFFF;
+        for (int i = 0; i < length; i++)
+        {
+            crc = (ushort)(crc ^ (data[offset + i] << 8));
+            for (int b = 0; b < 8; b++)
+            {
+                if ((crc & 0x8000) != 0)
+                    crc = (ushort)((crc << 1) ^ 0x1021);
+                else
+                    crc = (ushort)(crc << 1);
+            }
+        }
+        return crc;
+    }
+
+    private static (int blockOffset, int blockDataLength, int checksumOffset, int keyPocketOffset, int slotCount, int copySize) GetGen5BagInfo(string gameId)
+    {
+        var lower = (gameId ?? string.Empty).ToLowerInvariant();
+        bool isB2W2 = lower.Contains("black 2") || lower.Contains("white 2") || lower.Contains("black2") || lower.Contains("white2") || lower.Contains("b2w2");
+
+        if (isB2W2)
+        {
+            // B2W2: Block 25 offset 0x18400, data length 0x09EC, checksum at 0x18DEE, Key items at 0x18A40 (104 slots), copy size 0x26000
+            return (0x18400, 0x09EC, 0x18DEE, 0x18A40, 104, 0x26000);
+        }
+
+        // BW1: Block 25 offset 0x18400, data length 0x09C0, checksum at 0x18DC2, Key items at 0x188D8 (83 slots), copy size 0x24000
+        return (0x18400, 0x09C0, 0x18DC2, 0x188D8, 83, 0x24000);
+    }
+
+    private static ushort? ResolveGen5EventItemId(string eventId) => eventId switch
+    {
+        PokemonEventCatalog.BwLibertyPass => 587,
+        _ => null
+    };
+
+    public static bool IsEventUnlocked(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < 0x24000) return false;
+        var targetItem = ResolveGen5EventItemId(eventId);
+        if (targetItem == null) return false;
+
+        var (_, _, _, keyPocketOffset, slotCount, copySize) = GetGen5BagInfo(gameId);
+
+        // Check primary copy
+        if (HasKeyItem(saveBytes, keyPocketOffset, slotCount, targetItem.Value))
+            return true;
+
+        // Check secondary copy if present
+        if (saveBytes.Length >= copySize * 2)
+        {
+            if (HasKeyItem(saveBytes, copySize + keyPocketOffset, slotCount, targetItem.Value))
+                return true;
+        }
+
+        return false;
+    }
+
+    public static byte[] UnlockEvent(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < 0x24000)
+        {
+            throw new InvalidDataException("Save file size is invalid for Gen 5 (must be >= 512KB).");
+        }
+
+        var targetItem = ResolveGen5EventItemId(eventId);
+        if (targetItem == null)
+        {
+            throw new InvalidDataException($"Unsupported Gen 5 event '{eventId}'.");
+        }
+
+        var (blockOffset, blockDataLength, checksumOffset, keyPocketOffset, slotCount, copySize) = GetGen5BagInfo(gameId);
+        var copy = (byte[])saveBytes.Clone();
+
+        // Patch primary copy
+        PatchBagKeyItem(copy, 0, blockOffset, blockDataLength, checksumOffset, keyPocketOffset, slotCount, targetItem.Value);
+
+        // Patch backup copy if available
+        if (copy.Length >= copySize * 2)
+        {
+            if (!IsErased(copy, copySize + blockOffset, blockDataLength))
+            {
+                PatchBagKeyItem(copy, copySize, blockOffset, blockDataLength, checksumOffset, keyPocketOffset, slotCount, targetItem.Value);
+            }
+        }
+
+        return copy;
+    }
+
+    private static void PatchBagKeyItem(
+        byte[] data,
+        int baseOffset,
+        int blockOffset,
+        int blockDataLength,
+        int checksumOffset,
+        int keyPocketOffset,
+        int slotCount,
+        ushort itemId)
+    {
+        int actualPocketOffset = baseOffset + keyPocketOffset;
+        int emptySlot = -1;
+
+        for (int i = 0; i < slotCount; i++)
+        {
+            int slotOffset = actualPocketOffset + (i * 4);
+            if (slotOffset + 4 > data.Length) break;
+            ushort existing = ReadUInt16LE(data, slotOffset);
+            if (existing == itemId)
+            {
+                // Already present, ensure quantity is at least 1
+                WriteUInt16LE(data, slotOffset + 2, 1);
+                RecalculateBagBlockCrc(data, baseOffset, blockOffset, blockDataLength, checksumOffset);
+                return;
+            }
+            if (emptySlot < 0 && existing == 0)
+            {
+                emptySlot = slotOffset;
+            }
+        }
+
+        if (emptySlot < 0)
+        {
+            throw new InvalidDataException("The Key Items pocket is full. Free one slot before unlocking this event.");
+        }
+
+        WriteUInt16LE(data, emptySlot, itemId);
+        WriteUInt16LE(data, emptySlot + 2, 1);
+        RecalculateBagBlockCrc(data, baseOffset, blockOffset, blockDataLength, checksumOffset);
+    }
+
+    private static void RecalculateBagBlockCrc(
+        byte[] data,
+        int baseOffset,
+        int blockOffset,
+        int blockDataLength,
+        int checksumOffset)
+    {
+        int actualBlockOffset = baseOffset + blockOffset;
+        int actualChecksumOffset = baseOffset + checksumOffset;
+        ushort crc = CalculateCrc16(data, actualBlockOffset, blockDataLength);
+        WriteUInt16LE(data, actualChecksumOffset, crc);
+    }
+
+    private static bool HasKeyItem(byte[] data, int pocketOffset, int slotCount, ushort itemId)
+    {
+        for (int i = 0; i < slotCount; i++)
+        {
+            int slotOffset = pocketOffset + (i * 4);
+            if (slotOffset + 2 > data.Length) break;
+            ushort existingId = ReadUInt16LE(data, slotOffset);
+            if (existingId == itemId)
+            {
+                ushort qty = ReadUInt16LE(data, slotOffset + 2);
+                if (qty > 0) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void WriteUInt16LE(byte[] data, int offset, ushort value)
+    {
+        if (offset + 2 <= data.Length)
+        {
+            data[offset] = (byte)(value & 0xFF);
+            data[offset + 1] = (byte)((value >> 8) & 0xFF);
+        }
+    }
+
     private static uint ReadUInt32LE(byte[] data, int offset)
     {
         if (offset + 4 > data.Length || offset < 0) return uint.MaxValue;
@@ -357,11 +527,25 @@ public static class Gen5SaveParser
         string nature = NatureNames[(int)(pid % 25)];
         string pkmId = $"gen5_{speciesId}_{otId}_{slot}_{(isParty ? "p" : $"b{boxIndex}")}";
 
+        int formBits = (unshuffled[64] & 0xF8) >> 3;
+        string? form = null;
+        if (speciesId == 201)
+        {
+            form = formBits switch
+            {
+                >= 0 and <= 25 => ((char)('A' + formBits)).ToString(),
+                26 => "!",
+                27 => "?",
+                _ => "A"
+            };
+        }
+
         var summary = new PokemonSummaryDto
         {
             Id = pkmId,
             Species = speciesName,
             SpeciesId = speciesId,
+            Form = form,
             Nickname = nickname,
             Level = level,
             Gender = genderStr,
