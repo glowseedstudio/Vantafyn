@@ -30,7 +30,7 @@ class AppUpdateChecker(
                     @Suppress("DEPRECATION")
                     context.packageManager.getPackageInfo(context.packageName, 0).versionName
                 }
-            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.9.63"
+            }.getOrNull()?.takeIf { it.isNotBlank() } ?: "0.9.64"
         }
 
         /**

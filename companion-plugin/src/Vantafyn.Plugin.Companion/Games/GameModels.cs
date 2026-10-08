@@ -31,6 +31,10 @@ public sealed class GameSystem
 
     [JsonPropertyName("gameCount")]
     public int GameCount { get; set; }
+
+    [JsonPropertyName("logoUrl")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LogoUrl { get; set; }
 }
 
 /// <summary>Summary representation of a single game in a system.</summary>

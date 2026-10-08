@@ -72,7 +72,7 @@ fun resolveSystemDisplayName(id: String, rawName: String): String {
 fun resolveSystemLogoUrl(id: String, core: String): String {
     val key = (if (id.isNotBlank()) id else core).lowercase().trim()
     if (key.contains("3ds") || key.contains("citra") || key.contains("azahar")) {
-        return "https://upload.wikimedia.org/wikipedia/commons/8/89/Nintendo_3DS_logo.svg"
+        return "https://raw.githubusercontent.com/EmuELEC/es-theme-EmuELEC-clean-style/master/3ds/_inc/system.svg"
     }
     val themeFolder = when {
         key.contains("gba") || key.contains("advance") -> "gba"

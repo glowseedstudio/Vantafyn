@@ -153,7 +153,8 @@ public sealed class GamesService : IGamesService
                     Id = name,
                     Name = name,
                     Core = GameSystemCoreResolver.ResolveCore(name),
-                    GameCount = games.Count
+                    GameCount = games.Count,
+                    LogoUrl = GameSystemCoreResolver.ResolveSystemLogoUrl(name)
                 });
             }
         }

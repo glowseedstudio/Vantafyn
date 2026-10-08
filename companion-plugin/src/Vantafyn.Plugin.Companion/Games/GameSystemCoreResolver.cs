@@ -262,4 +262,40 @@ public static class GameSystemCoreResolver
         var repoName = platform.Replace(" ", "_");
         return $"https://cdn.jsdelivr.net/gh/libretro-thumbnails/{repoName}@master/Named_Boxarts/{Uri.EscapeDataString(nameWithoutExt)}.png";
     }
+
+    public static string? ResolveSystemLogoUrl(string systemName)
+    {
+        var core = ResolveCore(systemName);
+        if (string.Equals(core, "citra", StringComparison.OrdinalIgnoreCase))
+        {
+            return "https://raw.githubusercontent.com/EmuELEC/es-theme-EmuELEC-clean-style/master/3ds/_inc/system.svg";
+        }
+
+        var themeFolder = core switch
+        {
+            "gba" => "gba",
+            "snes" => "snes",
+            "nes" => "nes",
+            "n64" => "n64",
+            "gb" => "gb",
+            "nds" => "nds",
+            "psx" => "psx",
+            "psp" => "psp",
+            "segaMD" => "genesis",
+            "segaMS" => "mastersystem",
+            "segaGG" => "gamegear",
+            "dreamcast" => "dreamcast",
+            "atari2600" => "atari2600",
+            "atari7800" => "atari7800",
+            "arcade" => "arcade",
+            "ngp" => "neogeo",
+            "ws" => "wonderswan",
+            "pce" => "pcengine",
+            _ => null
+        };
+
+        return themeFolder != null
+            ? $"https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/{themeFolder}/art/system.svg"
+            : null;
+    }
 }

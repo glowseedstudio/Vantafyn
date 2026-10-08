@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.29}"
+VERSION="${1:-0.2.30}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.63}"
-CHANGELOG="Adds Nintendo 3DS ROM format (.cci, .3ds, .cxi, .3dsx, .cia) detection and 3DS console library resolution."
+TAG="${2:-v0.9.64}"
+CHANGELOG="Fixes Nintendo 3DS console logo URL resolution using high-resolution clean vector art from GitHub CDN."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.29.0",
+        "changelog": "Adds Nintendo 3DS ROM format (.cci, .3ds, .cxi, .3dsx, .cia) detection and 3DS console library resolution.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.63/Vantafyn.Plugin.Companion_0.2.29_net9.zip",
+        "checksum": "e22e88b4937a23689d32b2cd8b908d10",
+        "timestamp": "2026-10-08T22:52:42Z"
+      },
+      {
+        "version": "0.2.29.1",
+        "changelog": "Adds Nintendo 3DS ROM format (.cci, .3ds, .cxi, .3dsx, .cia) detection and 3DS console library resolution.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.63/Vantafyn.Plugin.Companion_0.2.29_net10.zip",
+        "checksum": "f3fc75021ac37849049f6aa9757a9b78",
+        "timestamp": "2026-10-08T22:52:42Z"
       },
       {
         "version": "0.2.28.0",
