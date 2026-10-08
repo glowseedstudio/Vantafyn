@@ -606,4 +606,73 @@ public static class Gen7SaveParser
         }
         return 1;
     }
+
+    public static bool IsEventUnlocked(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < SaveMinSize) return false;
+
+        if (eventId == PokemonEventCatalog.Gen7MagearnaDelivery)
+        {
+            return HasSpeciesInSave(saveBytes, gameId, 801);
+        }
+
+        if (eventId == PokemonEventCatalog.Gen7AshGreninjaDelivery)
+        {
+            return HasSpeciesInSave(saveBytes, gameId, 658);
+        }
+
+        return false;
+    }
+
+    private static bool HasSpeciesInSave(byte[] saveBytes, string gameId, int targetSpeciesId)
+    {
+        try
+        {
+            bool isUsum = IsUsumTitle(gameId) || saveBytes.Length >= UsumSaveMinSize;
+            int partyOffset = isUsum ? UsumPartyOffset : SmPartyOffset;
+            int partyCountOffset = isUsum ? UsumPartyCountOffset : SmPartyCountOffset;
+            int boxOffset = isUsum ? UsumBoxOffset : SmBoxOffset;
+
+            int partyCount = partyCountOffset < saveBytes.Length ? Math.Clamp((int)saveBytes[partyCountOffset], 0, 6) : 0;
+            for (int i = 0; i < partyCount; i++)
+            {
+                int slotOffset = partyOffset + (i * PartySlotSize);
+                if (slotOffset + PartySlotSize <= saveBytes.Length)
+                {
+                    var pkm = ParsePokemon(saveBytes, slotOffset, PartySlotSize, true, i + 1, null, gameId, null!);
+                    if (pkm?.Summary?.SpeciesId == targetSpeciesId) return true;
+                }
+            }
+
+            for (int box = 0; box < BoxCount; box++)
+            {
+                for (int slot = 0; slot < SlotsPerBox; slot++)
+                {
+                    int slotOffset = boxOffset + (box * SlotsPerBox * BoxSlotSize) + (slot * BoxSlotSize);
+                    if (slotOffset + BoxSlotSize <= saveBytes.Length)
+                    {
+                        var pkm = ParsePokemon(saveBytes, slotOffset, BoxSlotSize, false, slot + 1, box + 1, gameId, null!);
+                        if (pkm?.Summary?.SpeciesId == targetSpeciesId) return true;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Non-fatal parse check
+        }
+
+        return false;
+    }
+
+    public static byte[] UnlockEvent(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < SaveMinSize)
+        {
+            throw new System.IO.InvalidDataException("Save file size is invalid for Gen 7 (must be >= 441KB).");
+        }
+
+        // Gen 7 event delivery is fulfilled through the Personal Vault and tracked via redeemed codes
+        return (byte[])saveBytes.Clone();
+    }
 }

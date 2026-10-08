@@ -32,6 +32,18 @@ public sealed class PokemonGameDetector : IPokemonGameDetector
 
     private static readonly CatalogEntry[] Catalog =
     [
+        // Gen 7 (3DS)
+        new("ultrasun", "Pokémon Ultra Sun", 7, "3ds", ["ultrasun"], ["3ds", "nintendo3ds", "citra"]),
+        new("ultramoon", "Pokémon Ultra Moon", 7, "3ds", ["ultramoon"], ["3ds", "nintendo3ds", "citra"]),
+        new("sun", "Pokémon Sun", 7, "3ds", ["pokemonsun", "pokmonsun", "sunversion"], ["3ds", "nintendo3ds", "citra"]),
+        new("moon", "Pokémon Moon", 7, "3ds", ["pokemonmoon", "pokmonmoon", "moonversion"], ["3ds", "nintendo3ds", "citra"]),
+
+        // Gen 6 (3DS)
+        new("omegaruby", "Pokémon Omega Ruby", 6, "3ds", ["omegaruby"], ["3ds", "nintendo3ds", "citra"]),
+        new("alphasapphire", "Pokémon Alpha Sapphire", 6, "3ds", ["alphasapphire"], ["3ds", "nintendo3ds", "citra"]),
+        new("x", "Pokémon X", 6, "3ds", ["pokemonx", "pokmonx"], ["3ds", "nintendo3ds", "citra"]),
+        new("y", "Pokémon Y", 6, "3ds", ["pokemony", "pokmony"], ["3ds", "nintendo3ds", "citra"]),
+
         // Gen 3 (GBA) - Checked early to prevent FireRed matching Red
         new("firered", "Pokémon FireRed", 3, "gba", ["firered", "fireredversion"], ["gba", "gameboyadvance"]),
         new("leafgreen", "Pokémon LeafGreen", 3, "gba", ["leafgreen", "leafgreenversion"], ["gba", "gameboyadvance"]),
@@ -126,7 +138,7 @@ public sealed class PokemonGameDetector : IPokemonGameDetector
             Platform = !string.IsNullOrWhiteSpace(normSystem) ? normSystem : "retro",
             SaveType = "sram",
             HasSave = false,
-            VaultSupported = detectedGen is >= 1 and <= 5,
+            VaultSupported = detectedGen is >= 1 and <= 7,
             DetectionConfidence = "heuristic"
         };
     }
@@ -315,12 +327,29 @@ public sealed class PokemonGameDetector : IPokemonGameDetector
         {
             if (normalizedText.Contains("leafgreen")) return false;
         }
+        if (keyword is "ruby" or "rubyversion")
+        {
+            if (normalizedText.Contains("omegaruby")) return false;
+        }
+        if (keyword is "sapphire" or "sapphireversion")
+        {
+            if (normalizedText.Contains("alphasapphire")) return false;
+        }
+        if (keyword is "sun" or "pokemonsun" or "pokmonsun" or "sunversion")
+        {
+            if (normalizedText.Contains("ultrasun")) return false;
+        }
+        if (keyword is "moon" or "pokemonmoon" or "pokmonmoon" or "moonversion")
+        {
+            if (normalizedText.Contains("ultramoon")) return false;
+        }
 
         return normalizedText.Contains(keyword);
     }
 
     private static int InferGeneration(string normSystem, string normCore)
     {
+        if (normSystem.Contains("3ds") || normCore.Contains("citra")) return 7;
         if (normSystem.Contains("gba") || normCore.Contains("gba")) return 3;
         if (normSystem.Contains("nds") || normCore.Contains("nds")) return 4;
         if (normSystem.Contains("gbc") || normCore.Contains("gbc")) return 2;

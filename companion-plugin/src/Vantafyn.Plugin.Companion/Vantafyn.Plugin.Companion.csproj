@@ -5,7 +5,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Vantafyn.Plugin.Companion</AssemblyName>
     <RootNamespace>Vantafyn.Plugin.Companion</RootNamespace>
-    <Version>0.2.27</Version>
+    <Version>0.2.28</Version>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
   </PropertyGroup>

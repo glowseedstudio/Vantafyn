@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.28.0",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.62/Vantafyn.Plugin.Companion_0.2.28_net9.zip",
+        "checksum": "c9cd9731f49255eaf49c9721abf73090",
+        "timestamp": "2026-10-08T22:27:52Z"
+      },
+      {
+        "version": "0.2.28.1",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.62/Vantafyn.Plugin.Companion_0.2.28_net10.zip",
+        "checksum": "1e98c0ff26cc6e62714356e75a0beb8e",
+        "timestamp": "2026-10-08T22:27:52Z"
+      },
+      {
         "version": "0.2.27.0",
         "changelog": "Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking.",
         "targetAbi": "10.11.0.0",

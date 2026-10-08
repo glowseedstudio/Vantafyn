@@ -61,6 +61,25 @@ public sealed class PokemonMysteryGiftTests
         var surfPika = PokemonMysteryGiftCatalog.Find("SURF-PIKA")!;
         Assert.True(PokemonMysteryGiftCatalog.SupportsGame(surfPika, "heartgold"));
         Assert.True(PokemonMysteryGiftCatalog.SupportsGame(surfPika, "platinum"));
+
+        // Gen 6
+        var torchic = PokemonMysteryGiftCatalog.Find("XY-TORCHIC")!;
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(torchic, "pokemon_x"));
+        Assert.False(PokemonMysteryGiftCatalog.SupportsGame(torchic, "omegaruby"));
+
+        var beldum = PokemonMysteryGiftCatalog.Find("ORAS-BELDUM")!;
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(beldum, "alphasapphire"));
+        Assert.False(PokemonMysteryGiftCatalog.SupportsGame(beldum, "pokemon_y"));
+
+        // Gen 7
+        var magearna = PokemonMysteryGiftCatalog.Find("MAGEARNA-QR")!;
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(magearna, "pokemon_sun"));
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(magearna, "ultramoon"));
+        Assert.False(PokemonMysteryGiftCatalog.SupportsGame(magearna, "omegaruby"));
+
+        var rockruff = PokemonMysteryGiftCatalog.Find("DUSK-ROCKRUFF")!;
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "ultrasun"));
+        Assert.False(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "pokemon_sun"));
     }
 
     [Fact]
@@ -86,6 +105,67 @@ public sealed class PokemonMysteryGiftTests
         Assert.Equal(100, dialgaEntry.Level);
         Assert.Equal("SUM2013", dialgaEntry.OriginalTrainer);
         Assert.Contains("Roar of Time", dialgaEntry.Details!.Moves);
+
+        // Gen 6 Vault Entry
+        var torchicGift = PokemonMysteryGiftCatalog.Find("XY-TORCHIC")!;
+        var torchicEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(torchicGift, "Pokémon X", 6);
+        Assert.Equal("Torchic", torchicEntry.Species);
+        Assert.Equal(10, torchicEntry.Level);
+        Assert.Equal("Blazikenite", torchicEntry.Details!.HeldItem);
+        Assert.Equal("Speed Boost", torchicEntry.Details.Ability);
+        Assert.Equal("XY", torchicEntry.OriginalTrainer);
+
+        var beldumGift = PokemonMysteryGiftCatalog.Find("ORAS-BELDUM")!;
+        var beldumEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(beldumGift, "Pokémon Omega Ruby", 6);
+        Assert.True(beldumEntry.IsShiny);
+        Assert.Equal("Metagrossite", beldumEntry.Details!.HeldItem);
+
+        // Gen 7 Vault Entry
+        var magearnaGift = PokemonMysteryGiftCatalog.Find("MAGEARNA-QR")!;
+        var magearnaEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(magearnaGift, "Pokémon Sun", 7);
+        Assert.Equal("Magearna", magearnaEntry.Species);
+        Assert.Equal(801, magearnaEntry.SpeciesId);
+        Assert.Equal("Silver Bottle Cap", magearnaEntry.Details!.HeldItem);
+        Assert.Contains("Fleur Cannon", magearnaEntry.Details.Moves);
+
+        var greninjaGift = PokemonMysteryGiftCatalog.Find("ASH-GRENINJA")!;
+        var greninjaEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(greninjaGift, "Pokémon Moon", 7);
+        Assert.Equal("Battle Bond", greninjaEntry.Details!.Ability);
+        Assert.Equal(36, greninjaEntry.Level);
+
+        var marshadowGift = PokemonMysteryGiftCatalog.Find("MT-TENSEI-MARSHADOW")!;
+        var marshadowEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(marshadowGift, "Pokémon Ultra Sun", 7);
+        Assert.Equal("Marshadium Z", marshadowEntry.Details!.HeldItem);
+    }
+
+    [Fact]
+    public void Gen6SaveParser_OrasEonTicket_UnlocksProperly()
+    {
+        var save = new byte[0x76000]; // 483,328 bytes ORAS
+        Assert.False(Gen6SaveParser.IsEventUnlocked(save, "oras", PokemonEventCatalog.OrasEonTicket));
+
+        var updated = Gen6SaveParser.UnlockEvent(save, "oras", PokemonEventCatalog.OrasEonTicket);
+        Assert.True(Gen6SaveParser.IsEventUnlocked(updated, "oras", PokemonEventCatalog.OrasEonTicket));
+
+        // Check key items offset directly
+        ushort itemId = (ushort)(updated[0x00A40] | (updated[0x00A41] << 8));
+        ushort count = (ushort)(updated[0x00A42] | (updated[0x00A43] << 8));
+        Assert.Equal(726, itemId);
+        Assert.Equal(1, count);
+    }
+
+    [Fact]
+    public void PokemonEventCatalog_Supports3dsEvents()
+    {
+        var orasEvent = PokemonEventCatalog.Find(PokemonEventCatalog.OrasEonTicket);
+        Assert.NotNull(orasEvent);
+        Assert.True(PokemonEventCatalog.SupportsGame(orasEvent, "pokemon_omega_ruby"));
+        Assert.False(PokemonEventCatalog.SupportsGame(orasEvent, "pokemon_x"));
+
+        var magearnaEvent = PokemonEventCatalog.Find(PokemonEventCatalog.Gen7MagearnaDelivery);
+        Assert.NotNull(magearnaEvent);
+        Assert.True(PokemonEventCatalog.SupportsGame(magearnaEvent, "pokemon_ultra_moon"));
+        Assert.False(PokemonEventCatalog.SupportsGame(magearnaEvent, "pokemon_omega_ruby"));
     }
 
     [Fact]
@@ -202,6 +282,83 @@ public sealed class PokemonMysteryGiftTests
         Assert.IsType<BadRequestObjectResult>(actionResult.Result);
     }
 
+    [Fact]
+    public async Task Controller_RedeemMysteryGift_OrasEonTicket_PatchesSaveAndUnlocksEvent()
+    {
+        using var harness = new TestHarness(_userId);
+
+        var request = new PokemonMysteryGiftRedeemRequest
+        {
+            GameId = "oras",
+            Code = "EON-TICKET"
+        };
+
+        var actionResult = await harness.Controller.RedeemMysteryGift(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonMysteryGiftRedeemResponse>(okResult.Value);
+
+        Assert.True(response.Success);
+        Assert.Equal("EventItem", response.RewardType);
+
+        // Verify save was patched with Eon Ticket (726)
+        var saveBytes = await harness.SavesService.GetAsync(_userId, "oras", "sram", CancellationToken.None);
+        Assert.NotNull(saveBytes);
+        Assert.True(Gen6SaveParser.IsEventUnlocked(saveBytes, "oras", PokemonEventCatalog.OrasEonTicket));
+    }
+
+    [Fact]
+    public async Task Controller_RedeemMysteryGift_Gen7Magearna_AddsToPersonalVault()
+    {
+        using var harness = new TestHarness(_userId);
+
+        var request = new PokemonMysteryGiftRedeemRequest
+        {
+            GameId = "sun",
+            Code = "MAGEARNA-QR"
+        };
+
+        var actionResult = await harness.Controller.RedeemMysteryGift(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonMysteryGiftRedeemResponse>(okResult.Value);
+
+        Assert.True(response.Success);
+        Assert.Equal("Pokemon", response.RewardType);
+        Assert.Equal("Magearna", response.TargetSpeciesName);
+
+        // Verify entry added to Personal Vault
+        var vault = await harness.VaultStore.GetOrCreateVaultAsync(_userId, CancellationToken.None);
+        var magearnaEntry = vault.Boxes.SelectMany(b => b.Entries).FirstOrDefault(e => e.Species == "Magearna");
+        Assert.NotNull(magearnaEntry);
+        Assert.Equal(801, magearnaEntry.SpeciesId);
+        Assert.Equal("Silver Bottle Cap", magearnaEntry.Details?.HeldItem);
+    }
+
+    [Fact]
+    public async Task Controller_UnlockEvent_Gen7MagearnaDelivery_AddsToVaultAndMarksRedeemed()
+    {
+        using var harness = new TestHarness(_userId);
+
+        var request = new PokemonEventUnlockRequest
+        {
+            GameId = "sun",
+            EventId = PokemonEventCatalog.Gen7MagearnaDelivery
+        };
+
+        var actionResult = await harness.Controller.UnlockEvent(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonEventUnlockResponse>(okResult.Value);
+
+        Assert.True(response.Success);
+
+        // Check event status is unlocked
+        var statusResult = await harness.Controller.GetEventUnlockStatus("sun", CancellationToken.None);
+        var statusOk = Assert.IsType<OkObjectResult>(statusResult.Result);
+        var statuses = Assert.IsAssignableFrom<IEnumerable<PokemonEventUnlockStatusDto>>(statusOk.Value);
+        var magearnaStatus = statuses.FirstOrDefault(s => s.EventId == PokemonEventCatalog.Gen7MagearnaDelivery);
+        Assert.NotNull(magearnaStatus);
+        Assert.True(magearnaStatus.Unlocked);
+    }
+
     private sealed class TestHarness : IDisposable
     {
         private readonly TempPaths _tempPaths = new();
@@ -230,16 +387,41 @@ public sealed class PokemonMysteryGiftTests
             var blackSave = new byte[0x80000];
             SavesService.SaveAsync(userId, "black", "sram", blackSave, CancellationToken.None).GetAwaiter().GetResult();
 
-            var game = new GameDetail
+            var orasSave = new byte[0x76000];
+            SavesService.SaveAsync(userId, "oras", "sram", orasSave, CancellationToken.None).GetAwaiter().GetResult();
+
+            var sunSave = new byte[0x6BE00];
+            SavesService.SaveAsync(userId, "sun", "sram", sunSave, CancellationToken.None).GetAwaiter().GetResult();
+
+            var games = new List<GameDetail>
             {
-                Id = "platinum",
-                Title = "Pokémon Platinum Version",
-                FileName = "platinum.nds",
-                System = "nds",
-                Core = "melonds"
+                new()
+                {
+                    Id = "platinum",
+                    Title = "Pokémon Platinum Version",
+                    FileName = "platinum.nds",
+                    System = "nds",
+                    Core = "melonds"
+                },
+                new()
+                {
+                    Id = "oras",
+                    Title = "Pokémon Omega Ruby",
+                    FileName = "omegaruby.3ds",
+                    System = "3ds",
+                    Core = "citra"
+                },
+                new()
+                {
+                    Id = "sun",
+                    Title = "Pokémon Sun",
+                    FileName = "sun.3ds",
+                    System = "3ds",
+                    Core = "citra"
+                }
             };
 
-            var gamesService = new TestGamesService(game);
+            var gamesService = new TestGamesService(games);
             var detector = new PokemonGameDetector(_tempPaths);
             var authContext = new TestAuthorizationContext(userId);
 
@@ -271,14 +453,16 @@ public sealed class PokemonMysteryGiftTests
         public void Dispose() => _tempPaths.Dispose();
     }
 
-    private sealed class TestGamesService(GameDetail game) : IGamesService
+    private sealed class TestGamesService(IReadOnlyList<GameDetail> games) : IGamesService
     {
+        public TestGamesService(GameDetail single) : this([single]) { }
+
         public IReadOnlyList<GameLibrary> GetGameLibraries() =>
             [new GameLibrary { Id = "lib1", Name = "Games", Locations = ["/tmp"] }];
 
         public IReadOnlyList<GameSystem> GetSystems(string libraryId) => [];
-        public IReadOnlyList<GameSummary> GetGames(string libraryId, string? system = null) => [game];
-        public GameDetail? GetGame(string libraryId, string gameId) => game;
+        public IReadOnlyList<GameSummary> GetGames(string libraryId, string? system = null) => games.Cast<GameSummary>().ToList();
+        public GameDetail? GetGame(string libraryId, string gameId) => games.FirstOrDefault(g => g.Id == gameId);
         public string? ResolveFilePath(string libraryId, string token, bool allowBios) => null;
         public string? GetBoxartPath(string libraryId, string gameId) => null;
         public byte[]? ExtractRomFromArchive(string archivePath) => null;

@@ -503,4 +503,64 @@ public static class Gen6SaveParser
         }
         return 1;
     }
+
+    private const int OrasKeyItemsOffset = 0x00A40;
+    private const int OrasKeyItemsSlotCount = 128;
+    private const ushort EonTicketItemId = 726;
+
+    public static bool IsEventUnlocked(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < OrasSaveMinSize) return false;
+        if (eventId != PokemonEventCatalog.OrasEonTicket) return false;
+
+        return HasKeyItem(saveBytes, OrasKeyItemsOffset, OrasKeyItemsSlotCount, EonTicketItemId);
+    }
+
+    private static bool HasKeyItem(byte[] saveBytes, int startOffset, int slotCount, ushort itemId)
+    {
+        if (saveBytes.Length < startOffset + (slotCount * 4)) return false;
+        for (int i = 0; i < slotCount; i++)
+        {
+            int offset = startOffset + (i * 4);
+            ushort id = ReadUInt16LE(saveBytes, offset);
+            ushort count = ReadUInt16LE(saveBytes, offset + 2);
+            if (id == itemId && count > 0) return true;
+        }
+        return false;
+    }
+
+    public static byte[] UnlockEvent(byte[] saveBytes, string gameId, string eventId)
+    {
+        if (saveBytes == null || saveBytes.Length < OrasSaveMinSize)
+        {
+            throw new System.IO.InvalidDataException("Save file size is invalid for Gen 6 ORAS (must be >= 472KB).");
+        }
+
+        if (eventId != PokemonEventCatalog.OrasEonTicket)
+        {
+            throw new System.IO.InvalidDataException($"Unsupported Gen 6 event '{eventId}'.");
+        }
+
+        var copy = (byte[])saveBytes.Clone();
+        if (HasKeyItem(copy, OrasKeyItemsOffset, OrasKeyItemsSlotCount, EonTicketItemId))
+        {
+            return copy;
+        }
+
+        for (int i = 0; i < OrasKeyItemsSlotCount; i++)
+        {
+            int offset = OrasKeyItemsOffset + (i * 4);
+            ushort id = ReadUInt16LE(copy, offset);
+            if (id == 0)
+            {
+                copy[offset] = (byte)(EonTicketItemId & 0xFF);
+                copy[offset + 1] = (byte)((EonTicketItemId >> 8) & 0xFF);
+                copy[offset + 2] = 1;
+                copy[offset + 3] = 0;
+                return copy;
+            }
+        }
+
+        throw new InvalidOperationException("Key Items pocket is full.");
+    }
 }

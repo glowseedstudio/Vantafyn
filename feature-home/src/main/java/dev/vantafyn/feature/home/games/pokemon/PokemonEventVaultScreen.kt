@@ -127,7 +127,7 @@ fun PokemonEventVaultScreen(
 
     val games = remember(availableGames, detectedSaves) {
         detectedSaves
-            .filter { it.saveFound && it.providerAvailable && it.generation in 2..5 }
+            .filter { it.saveFound && it.providerAvailable && it.generation in 2..7 }
             .map { save ->
                 val game = availableGames.firstOrNull { it.id == save.gameId }
                 val title = game?.pokemon?.canonicalTitle
@@ -1010,7 +1010,7 @@ private fun EventVaultMetric(label: String, value: String, accent: Color, modifi
 }
 
 @Composable
-private fun EventVaultEmpty(text: String = "No supported Gen 2-5 saves found yet.") {
+private fun EventVaultEmpty(text: String = "No supported Gen 2-7 saves found yet.") {
     Box(
         modifier = Modifier
             .fillMaxWidth()

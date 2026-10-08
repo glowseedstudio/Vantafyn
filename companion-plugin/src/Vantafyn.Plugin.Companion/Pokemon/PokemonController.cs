@@ -3012,14 +3012,20 @@ public sealed class PokemonController : ControllerBase
 
         var saveBytes = await _gameSavesService.GetAsync(userId, game.Id, "sram", cancellationToken).ConfigureAwait(false);
         var gameKey = $"{meta.PokemonGameId} {game.Title} {game.FileName}";
+        var redeemedSet = GetRedeemedMysteryGiftCodes(userId, game.Id);
         var statuses = PokemonEventCatalog.All
             .Where(e => PokemonEventCatalog.SupportsGame(e, gameKey))
-            .Select(e => new PokemonEventUnlockStatusDto
+            .Select(e =>
             {
-                EventId = e.Id,
-                Available = saveBytes is { Length: > 0 },
-                Unlocked = saveBytes is { Length: > 0 } && IsEventUnlocked(saveBytes, meta.Generation, gameKey, e.Id),
-                Reason = saveBytes is { Length: > 0 } ? null : "No battery save found for this game."
+                var isUnlocked = (saveBytes is { Length: > 0 } && IsEventUnlocked(saveBytes, meta.Generation, gameKey, e.Id))
+                    || redeemedSet.Contains(PokemonMysteryGiftCatalog.NormalizeCode(e.Id));
+                return new PokemonEventUnlockStatusDto
+                {
+                    EventId = e.Id,
+                    Available = saveBytes is { Length: > 0 },
+                    Unlocked = isUnlocked,
+                    Reason = saveBytes is { Length: > 0 } ? null : "No battery save found for this game."
+                };
             })
             .ToList();
         return Ok(statuses);
@@ -3064,19 +3070,21 @@ public sealed class PokemonController : ControllerBase
             pokemonId: null,
             species: definition.Legendary,
             nickname: definition.Title,
-            operation: context =>
+            operation: async context =>
             {
                 var original = context.SourceSaveWorkingCopy;
-                if (IsEventUnlocked(original, meta.Generation, gameKey, definition.Id))
+                var redeemedSet = GetRedeemedMysteryGiftCodes(userId, game.Id);
+                if (IsEventUnlocked(original, meta.Generation, gameKey, definition.Id) ||
+                    redeemedSet.Contains(PokemonMysteryGiftCatalog.NormalizeCode(definition.Id)))
                 {
-                    return Task.FromResult(new PokemonEventUnlockResponse
+                    return new PokemonEventUnlockResponse
                     {
                         Success = true,
                         EventId = definition.Id,
                         GameId = game.Id,
                         Message = $"{definition.Title} is already unlocked.",
                         BackupIds = context.BackupIds
-                    });
+                    };
                 }
 
                 context.SourceSaveWorkingCopy = meta.Generation switch
@@ -3085,17 +3093,32 @@ public sealed class PokemonController : ControllerBase
                     3 => Gen3SaveParser.UnlockEvent(original, gameKey, definition.Id),
                     4 => Gen4SaveParser.UnlockEvent(original, gameKey, definition.Id),
                     5 => Gen5SaveParser.UnlockEvent(original, gameKey, definition.Id),
+                    6 => Gen6SaveParser.UnlockEvent(original, gameKey, definition.Id),
+                    7 => Gen7SaveParser.UnlockEvent(original, gameKey, definition.Id),
                     _ => throw new InvalidDataException("This event generation is not implemented yet.")
                 };
 
-                return Task.FromResult(new PokemonEventUnlockResponse
+                // If Gen 7 event delivery or gift has a target species, deliver to personal vault
+                if (definition.Id is PokemonEventCatalog.Gen7MagearnaDelivery or PokemonEventCatalog.Gen7AshGreninjaDelivery)
+                {
+                    var matchingGift = PokemonMysteryGiftCatalog.All.FirstOrDefault(g => g.EventId == definition.Id);
+                    if (matchingGift != null)
+                    {
+                        var vaultEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(matchingGift, meta.CanonicalTitle, meta.Generation);
+                        await _vaultStore.AddOrUpdateEntryAsync(userId, vaultEntry, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+
+                MarkMysteryGiftCodeRedeemed(userId, game.Id, definition.Id);
+
+                return new PokemonEventUnlockResponse
                 {
                     Success = true,
                     EventId = definition.Id,
                     GameId = game.Id,
                     Message = $"{definition.Title} unlocked. Start the game from battery save and continue the event in-game.",
                     BackupIds = context.BackupIds
-                });
+                };
             },
             cancellationToken).ConfigureAwait(false);
 
@@ -3254,12 +3277,6 @@ public sealed class PokemonController : ControllerBase
             return BadRequest(new { error = "Game and code are required." });
         }
 
-        var gift = PokemonMysteryGiftCatalog.Find(request.Code);
-        if (gift == null)
-        {
-            return BadRequest(new { error = $"Unrecognized Mystery Gift code '{request.Code}'. Check historical distribution archives." });
-        }
-
         var game = FindGame(request.GameId);
         if (game == null) return NotFound(new { error = "Game not found." });
 
@@ -3268,6 +3285,12 @@ public sealed class PokemonController : ControllerBase
         if (meta == null || !meta.IsPokemonGame) return BadRequest(new { error = "This is not a supported Pokémon game." });
 
         var gameKey = $"{meta.PokemonGameId} {game.Title} {game.FileName}";
+        var gift = PokemonMysteryGiftCatalog.Find(request.Code, gameKey);
+        if (gift == null)
+        {
+            return BadRequest(new { error = $"Unrecognized Mystery Gift code '{request.Code}'. Check historical distribution archives." });
+        }
+
         if (!PokemonMysteryGiftCatalog.SupportsGame(gift, gameKey))
         {
             return BadRequest(new { error = $"{gift.Title} is not compatible with {meta.CanonicalTitle}." });
@@ -3318,6 +3341,8 @@ public sealed class PokemonController : ControllerBase
                         3 => Gen3SaveParser.UnlockEvent(original, gameKey, gift.EventId),
                         4 => Gen4SaveParser.UnlockEvent(original, gameKey, gift.EventId),
                         5 => Gen5SaveParser.UnlockEvent(original, gameKey, gift.EventId),
+                        6 => Gen6SaveParser.UnlockEvent(original, gameKey, gift.EventId),
+                        7 => Gen7SaveParser.UnlockEvent(original, gameKey, gift.EventId),
                         _ => original
                     };
                 }
@@ -3416,6 +3441,8 @@ public sealed class PokemonController : ControllerBase
             3 => Gen3SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
             4 => Gen4SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
             5 => Gen5SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
+            6 => Gen6SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
+            7 => Gen7SaveParser.IsEventUnlocked(saveBytes, gameKey, eventId),
             _ => false
         };
 

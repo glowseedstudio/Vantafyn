@@ -15,6 +15,9 @@ public static class PokemonEventCatalog
     public const string PlatinumSecretKey = "platinum-secret-key";
     public const string HgssEnigmaStone = "hgss-enigma-stone";
     public const string BwLibertyPass = "bw-liberty-pass";
+    public const string OrasEonTicket = "oras-eon-ticket";
+    public const string Gen7MagearnaDelivery = "gen7-magearna-delivery";
+    public const string Gen7AshGreninjaDelivery = "gen7-ash-greninja-delivery";
 
     private static readonly IReadOnlyList<PokemonEventUnlockDto> Events =
     [
@@ -199,6 +202,48 @@ public static class PokemonEventCatalog
             TargetSpeciesId = 494,
             InGameLocation = "Liberty Garden (Ferry from Castelia City pier)",
             SupportedGameIds = ["black", "white", "black2", "white2", "b2w2"]
+        },
+        new()
+        {
+            Id = OrasEonTicket,
+            Title = "Eon Ticket",
+            Subtitle = "Unlock Southern Island Lati Event",
+            Description = "Adds the Eon Ticket to your Key Items in Omega Ruby and Alpha Sapphire to sail with Norman from Petalburg to Southern Island and confront the other Eon twin holding Soul Dew.",
+            Generation = 6,
+            Region = "Hoenn",
+            Legendary = "Latios / Latias",
+            Accent = "#F59E0B",
+            TargetSpeciesId = 381,
+            InGameLocation = "Southern Island (Ferry from Petalburg / Slateport with Norman)",
+            SupportedGameIds = ["omegaruby", "alphasapphire", "oras"]
+        },
+        new()
+        {
+            Id = Gen7MagearnaDelivery,
+            Title = "Magearna Delivery",
+            Subtitle = "Hau'oli Antiquities Event",
+            Description = "Delivers the Mythical Pokémon Magearna holding a Silver Bottle Cap to the deliveryman waiting at the Antiquities of the Ages store inside Hau'oli City Mall.",
+            Generation = 7,
+            Region = "Alola",
+            Legendary = "Magearna",
+            Accent = "#94A3B8",
+            TargetSpeciesId = 801,
+            InGameLocation = "Hau'oli City Mall (Antiquities of the Ages store deliveryman)",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"]
+        },
+        new()
+        {
+            Id = Gen7AshGreninjaDelivery,
+            Title = "Ash-Greninja",
+            Subtitle = "Battle Bond Demo Delivery",
+            Description = "Delivers the Special Demo Battle Bond Greninja with Water Shuriken and Aerial Ace to the deliveryman waiting beside the counter in any Pokémon Center.",
+            Generation = 7,
+            Region = "Alola",
+            Legendary = "Ash-Greninja",
+            Accent = "#0284C7",
+            TargetSpeciesId = 658,
+            InGameLocation = "Any Pokémon Center (Deliveryman waiting by the counter)",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"]
         }
     ];
 
@@ -210,7 +255,50 @@ public static class PokemonEventCatalog
     public static bool SupportsGame(PokemonEventUnlockDto definition, string gameId)
     {
         var key = NormalizeGameKey(gameId);
-        return definition.SupportedGameIds.Any(s => key.Contains(s, StringComparison.OrdinalIgnoreCase));
+        return definition.SupportedGameIds.Any(s => IsGameKeyMatch(key, s));
+    }
+
+    public static bool IsGameKeyMatch(string key, string target)
+    {
+        if (target.Length <= 2)
+        {
+            return string.Equals(key, target, StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (target is "sun" or "moon")
+        {
+            if (key.Contains("ultra", StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        if (target is "black" or "white")
+        {
+            if (key.Contains("2", StringComparison.OrdinalIgnoreCase) || key.Contains("version2", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        if (target is "red")
+        {
+            if (key.Contains("fire", StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        if (target is "ruby")
+        {
+            if (key.Contains("omega", StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        if (target is "sapphire")
+        {
+            if (key.Contains("alpha", StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        if (target is "green")
+        {
+            if (key.Contains("leaf", StringComparison.OrdinalIgnoreCase)) return false;
+        }
+
+        return key.Contains(target, StringComparison.OrdinalIgnoreCase);
     }
 
     public static string NormalizeGameKey(string? gameId)

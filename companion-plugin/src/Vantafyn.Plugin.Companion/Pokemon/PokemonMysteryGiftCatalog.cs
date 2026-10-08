@@ -347,25 +347,494 @@ public static class PokemonMysteryGiftCatalog
             InGameInstructions = "The Eon Ticket is in your Key Items! Board the ferry from Lilycove City or Slateport City to sail to Southern Island.",
             SupportedGameIds = ["ruby", "sapphire", "emerald"],
             EventId = PokemonEventCatalog.RseEonTicket
+        },
+        new()
+        {
+            Code = "ORAS-EON-TICKET",
+            Aliases = ["EON-TICKET-ORAS", "SOUTHERN-ORAS", "EON-TICKET"],
+            Id = "oras-eon-ticket",
+            Title = "Eon Ticket (ORAS)",
+            Subtitle = "Southern Island Lati Event",
+            Description = "The serial code and StreetPass distribution ticket granting passage to Southern Island in Omega Ruby and Alpha Sapphire to catch the other Eon twin.",
+            Generation = 6,
+            Region = "Hoenn",
+            RewardType = "EventItem",
+            TargetSpeciesId = 381,
+            TargetSpeciesName = "Latios / Latias",
+            Accent = "#F59E0B",
+            InGameInstructions = "The Eon Ticket is in your Key Items! Speak to Norman in Petalburg Gym, then take the ferry to Southern Island.",
+            SupportedGameIds = ["omegaruby", "alphasapphire", "oras"],
+            EventId = PokemonEventCatalog.OrasEonTicket
+        },
+        new()
+        {
+            Code = "XY-TORCHIC",
+            Aliases = ["TORCHIC", "BLAZIKENITE", "XYTORCHIC"],
+            Id = "gen6-xy-torchic",
+            Title = "Speed Boost Torchic",
+            Subtitle = "XY Worldwide Launch Gift",
+            Description = "The worldwide launch event Torchic holding the Blazikenite Mega Stone, featuring the Hidden Ability Speed Boost.",
+            Generation = 6,
+            Region = "Kalos",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 255,
+            TargetSpeciesName = "Torchic",
+            Accent = "#F97316",
+            InGameInstructions = "Torchic (holding Blazikenite) has arrived in your Personal Vault! Withdraw it to your party or PC box to unleash Speed Boost and Mega Blaziken.",
+            SupportedGameIds = ["x", "y", "xy"],
+            OriginalTrainer = "XY",
+            RibbonName = "Premier Ribbon"
+        },
+        new()
+        {
+            Code = "ORAS-BELDUM",
+            Aliases = ["SHINY-BELDUM", "METAGROSSITE", "ORASBELDUM", "STEVEN-BELDUM"],
+            Id = "gen6-oras-beldum",
+            Title = "Shiny Beldum (Steven's)",
+            Subtitle = "ORAS Launch Distribution",
+            Description = "Steven Stone's commemorative Shiny Beldum holding the Metagrossite Mega Stone, distributed at the launch of Omega Ruby and Alpha Sapphire.",
+            Generation = 6,
+            Region = "Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 374,
+            TargetSpeciesName = "Beldum",
+            Accent = "#38BDF8",
+            IsShiny = true,
+            InGameInstructions = "Shiny Beldum (holding Metagrossite) has arrived in your Personal Vault! Withdraw it to your party to evolve into Shiny Mega Metagross.",
+            SupportedGameIds = ["omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "Steven",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "HOPE-DIANCIE",
+            Aliases = ["DIANCIE", "HOPEDIANCIE", "NOV2014-DIANCIE"],
+            Id = "gen6-hope-diancie",
+            Title = "Mythical Diancie (Hope)",
+            Subtitle = "Jewel Pokémon Wi-Fi Distribution",
+            Description = "The Mythical Jewel Pokémon Diancie, capable of Mega Evolving into Mega Diancie.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 719,
+            TargetSpeciesName = "Diancie",
+            Accent = "#F472B6",
+            InGameInstructions = "Mythical Diancie has arrived in your Personal Vault! Withdraw it to command Diamond Storm and Moonblast.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "Hope",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "HOOPA-UNBOUND",
+            Aliases = ["HOOPA", "MAC-HOOPA", "ALEXANDER-HOOPA", "PRISON-BOTTLE"],
+            Id = "gen6-hoopa",
+            Title = "Mythical Hoopa (Alexander)",
+            Subtitle = "Mischief Pokémon Event",
+            Description = "The Mythical Mischief Pokémon Hoopa, capable of using the Prison Bottle to transform into Hoopa Unbound.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 720,
+            TargetSpeciesName = "Hoopa",
+            Accent = "#8B5CF6",
+            InGameInstructions = "Mythical Hoopa has arrived in your Personal Vault! Withdraw it to command Hyperspace Hole and Psychic.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "Alexander",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "HELEN-VOLCANION",
+            Aliases = ["VOLCANION", "HELEN", "NEBULA"],
+            Id = "gen6-helen-volcanion",
+            Title = "Mythical Volcanion (Helen)",
+            Subtitle = "Steam Pokémon Event",
+            Description = "The dual Fire/Water Mythical Steam Pokémon Volcanion, wielding Steam Eruption.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 721,
+            TargetSpeciesName = "Volcanion",
+            Accent = "#EF4444",
+            InGameInstructions = "Mythical Volcanion has arrived in your Personal Vault! Withdraw it to scorch and scald foes with Steam Eruption.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "Helen",
+            RibbonName = "Wishing Ribbon"
+        },
+        new()
+        {
+            Code = "GALILEO-RAYQUAZA",
+            Aliases = ["SHINY-RAYQUAZA", "GALILEO", "DRAGON-ASCENT"],
+            Id = "gen6-galileo-rayquaza",
+            Title = "Shiny Rayquaza (Galileo)",
+            Subtitle = "Ancient Skies Shiny Event",
+            Description = "The black Shiny Sky High Pokémon Rayquaza knowing its signature Mega Evolution move Dragon Ascent.",
+            Generation = 6,
+            Region = "Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 384,
+            TargetSpeciesName = "Rayquaza",
+            Accent = "#10B981",
+            IsShiny = true,
+            InGameInstructions = "Shiny Rayquaza has arrived in your Personal Vault! Withdraw it to unleash Dragon Ascent and Mega Evolve without a Mega Stone.",
+            SupportedGameIds = ["omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "Galileo",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "GF-MEW",
+            Aliases = ["GFMEW", "20TH-MEW"],
+            Id = "gen6-gf-mew",
+            Title = "Mythical Mew (GF 20th)",
+            Subtitle = "20th Anniversary Mythical Distribution",
+            Description = "The Mythical New Species Pokémon Mew distributed to celebrate 20 years of Pokémon.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 151,
+            TargetSpeciesName = "Mew",
+            Accent = "#F472B6",
+            InGameInstructions = "Mythical Mew has arrived in your Personal Vault! Withdraw it to your party or PC box.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "GF",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "GF-CELEBI",
+            Aliases = ["GFCELEBI", "20TH-CELEBI"],
+            Id = "gen6-gf-celebi",
+            Title = "Mythical Celebi (GF 20th)",
+            Subtitle = "20th Anniversary Mythical Distribution",
+            Description = "The Mythical Time Travel Pokémon Celebi distributed to celebrate 20 years of Pokémon.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 251,
+            TargetSpeciesName = "Celebi",
+            Accent = "#34D399",
+            InGameInstructions = "Mythical Celebi has arrived in your Personal Vault! Withdraw it to your party or PC box.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "GF",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "GF-JIRACHI",
+            Aliases = ["GFJIRACHI", "20TH-JIRACHI"],
+            Id = "gen6-gf-jirachi",
+            Title = "Mythical Jirachi (GF 20th)",
+            Subtitle = "20th Anniversary Mythical Distribution",
+            Description = "The Mythical Wish Pokémon Jirachi distributed to celebrate 20 years of Pokémon.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 385,
+            TargetSpeciesName = "Jirachi",
+            Accent = "#FACC15",
+            InGameInstructions = "Mythical Jirachi has arrived in your Personal Vault! Withdraw it to grant wishes with Serene Grace.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "GF",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "GF-DARKRAI",
+            Aliases = ["GFDARKRAI", "20TH-DARKRAI"],
+            Id = "gen6-gf-darkrai",
+            Title = "Mythical Darkrai (GF 20th)",
+            Subtitle = "20th Anniversary Mythical Distribution",
+            Description = "The Mythical Pitch-Black Pokémon Darkrai distributed to celebrate 20 years of Pokémon.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 491,
+            TargetSpeciesName = "Darkrai",
+            Accent = "#64748B",
+            InGameInstructions = "Mythical Darkrai has arrived in your Personal Vault! Withdraw it to induce nightmares with Dark Void.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "GF",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "GF-ARCEUS",
+            Aliases = ["GFARCEUS", "20TH-ARCEUS"],
+            Id = "gen6-gf-arceus",
+            Title = "Mythical Arceus (GF 20th)",
+            Subtitle = "20th Anniversary Mythical Distribution",
+            Description = "The Mythical Alpha Pokémon Arceus distributed to celebrate 20 years of Pokémon.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 493,
+            TargetSpeciesName = "Arceus",
+            Accent = "#F59E0B",
+            InGameInstructions = "Mythical Arceus has arrived in your Personal Vault! Withdraw it to unleash Judgment across all 18 types.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "GF",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "GF-GENESECT",
+            Aliases = ["GFGENESECT", "20TH-GENESECT"],
+            Id = "gen6-gf-genesect",
+            Title = "Mythical Genesect (GF 20th)",
+            Subtitle = "20th Anniversary Mythical Distribution",
+            Description = "The Mythical Paleozoic Pokémon Genesect distributed to celebrate 20 years of Pokémon.",
+            Generation = 6,
+            Region = "Kalos / Hoenn",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 649,
+            TargetSpeciesName = "Genesect",
+            Accent = "#8B5CF6",
+            InGameInstructions = "Mythical Genesect has arrived in your Personal Vault! Withdraw it to fire Techno Blast with drive enhancements.",
+            SupportedGameIds = ["x", "y", "xy", "omegaruby", "alphasapphire", "oras"],
+            OriginalTrainer = "GF",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "MAGEARNA-QR",
+            Aliases = ["MAGEARNA", "MAGEARNAQR", "HAUOLI-MAGEARNA"],
+            Id = "gen7-magearna-qr",
+            Title = "Mythical Magearna",
+            Subtitle = "Hau'oli Antiquities Delivery",
+            Description = "The Artificial Pokémon Magearna created 500 years ago, holding a Silver Bottle Cap and knowing Fleur Cannon.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 801,
+            TargetSpeciesName = "Magearna",
+            Accent = "#94A3B8",
+            InGameInstructions = "Mythical Magearna has arrived in your Personal Vault! Withdraw it to command Fleur Cannon with Soul-Heart.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            EventId = PokemonEventCatalog.Gen7MagearnaDelivery,
+            OriginalTrainer = "QR Event",
+            RibbonName = "Wishing Ribbon"
+        },
+        new()
+        {
+            Code = "ASH-GRENINJA",
+            Aliases = ["BATTLE-BOND", "ASHGRENINJA", "DEMO-GRENINJA"],
+            Id = "gen7-ash-greninja",
+            Title = "Ash-Greninja",
+            Subtitle = "Special Demo Version Gift",
+            Description = "The bond-phenomenon Greninja transferred from the Special Demo Version featuring the exclusive Ability Battle Bond.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 658,
+            TargetSpeciesName = "Greninja",
+            Accent = "#0284C7",
+            InGameInstructions = "Ash-Greninja has arrived in your Personal Vault! Withdraw it to unleash Battle Bond and powered-up Water Shurikens.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            EventId = PokemonEventCatalog.Gen7AshGreninjaDelivery,
+            OriginalTrainer = "Ash",
+            RibbonName = "Souvenir Ribbon"
+        },
+        new()
+        {
+            Code = "SUNMOON-MUNCHLAX",
+            Aliases = ["MUNCHLAX", "SNORLIUM", "PULVERIZING-PANCAKE"],
+            Id = "gen7-sunmoon-munchlax",
+            Title = "Early Adopter Munchlax",
+            Subtitle = "Sun & Moon Launch Special",
+            Description = "The early purchase Munchlax holding the exclusive Snorlium Z crystal and knowing Happy Hour and Hold Back.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 446,
+            TargetSpeciesName = "Munchlax",
+            Accent = "#0D9488",
+            InGameInstructions = "Munchlax (holding Snorlium Z) has arrived in your Personal Vault! Evolve into Snorlax to unleash Pulverizing Pancake.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Early Adopter",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "DUSK-ROCKRUFF",
+            Aliases = ["ROCKRUFF", "DUSKROCKRUFF", "OWN-TEMPO"],
+            Id = "gen7-dusk-rockruff",
+            Title = "Own Tempo Rockruff",
+            Subtitle = "Ultra Sun & Ultra Moon Launch Gift",
+            Description = "The special Rockruff possessing the Own Tempo ability, allowing it to evolve into Dusk Form Lycanroc at twilight.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 744,
+            TargetSpeciesName = "Rockruff",
+            Accent = "#EA580C",
+            InGameInstructions = "Own Tempo Rockruff has arrived in your Personal Vault! Train between 5:00 PM and 5:59 PM to achieve Dusk Form Lycanroc.",
+            SupportedGameIds = ["ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Ultra Launch",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "MT-TENSEI-MARSHADOW",
+            Aliases = ["MARSHADOW", "MARSHADIUM", "MTTENSEI"],
+            Id = "gen7-marshadow",
+            Title = "Mythical Marshadow",
+            Subtitle = "Gloomdweller Marshadium Z Event",
+            Description = "The Mythical Gloomdweller Pokémon Marshadow holding its exclusive Marshadium Z crystal to perform Soul-Stealing 7-Star Strike.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 802,
+            TargetSpeciesName = "Marshadow",
+            Accent = "#475569",
+            InGameInstructions = "Mythical Marshadow (holding Marshadium Z) has arrived in your Personal Vault! Unleash Soul-Stealing 7-Star Strike in battle.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Mt. Tensei",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "FULA-CITY-ZERAORA",
+            Aliases = ["ZERAORA", "FULACITY", "THUNDERCLAP"],
+            Id = "gen7-zeraora",
+            Title = "Mythical Zeraora",
+            Subtitle = "Thunderclap Pokémon Event",
+            Description = "The Mythical Thunderclap Pokémon Zeraora wielding Plasma Fists and holding an Air Balloon.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 807,
+            TargetSpeciesName = "Zeraora",
+            Accent = "#FACC15",
+            InGameInstructions = "Mythical Zeraora has arrived in your Personal Vault! Withdraw it to unleash electrifying Plasma Fists.",
+            SupportedGameIds = ["ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Fula City",
+            RibbonName = "Wishing Ribbon"
+        },
+        new()
+        {
+            Code = "MELEMELE-TAPUKOKO",
+            Aliases = ["SHINY-TAPUKOKO", "MELEMELE", "TAPU-KOKO"],
+            Id = "gen7-shiny-tapukoko",
+            Title = "Shiny Tapu Koko (Melemele)",
+            Subtitle = "Island Guardian Shiny Distribution",
+            Description = "The guardian deity of Melemele Island appearing in its dazzling black Shiny coloration holding an Electric Seed.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 785,
+            TargetSpeciesName = "Tapu Koko",
+            Accent = "#FBBF24",
+            IsShiny = true,
+            InGameInstructions = "Shiny Tapu Koko has arrived in your Personal Vault! Withdraw it to command Electric Surge and Nature's Madness.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Melemele",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "ULTRA-POIPOLE",
+            Aliases = ["SHINY-POIPOLE", "POIPOLE", "ULTRAPOIPOLE"],
+            Id = "gen7-shiny-poipole",
+            Title = "Shiny Poipole (Ultra)",
+            Subtitle = "Ultra Space Poison Pin Event",
+            Description = "The white and gold Shiny Ultra Beast Poipole (UB Adhesive) distributed to celebrate Ultra Sun and Ultra Moon.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 803,
+            TargetSpeciesName = "Poipole",
+            Accent = "#A855F7",
+            IsShiny = true,
+            InGameInstructions = "Shiny Poipole has arrived in your Personal Vault! Teach it Dragon Pulse to evolve into Shiny Naganadel.",
+            SupportedGameIds = ["ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Ultra",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "PIKACHU20",
+            Aliases = ["CAP-PIKACHU", "ASH-CAP", "PIKASHUNIUM"],
+            Id = "gen7-cap-pikachu",
+            Title = "Original Cap Pikachu",
+            Subtitle = "I Choose You! 20th Anniversary Gift",
+            Description = "Ash's partner wearing the original Indigo League hat holding the exclusive Pikashunium Z crystal to unleash 10,000,000 Volt Thunderbolt.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 25,
+            TargetSpeciesName = "Pikachu",
+            Accent = "#EAB308",
+            InGameInstructions = "Original Cap Pikachu (holding Pikashunium Z) has arrived in your Personal Vault! Fire the 10,000,000 Volt Thunderbolt Z-Move.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Ash",
+            RibbonName = "Wishing Ribbon"
+        },
+        new()
+        {
+            Code = "ECLIPSE-SOLGALEO",
+            Aliases = ["SHINY-SOLGALEO", "ECLIPSE-SUN", "SOLGALEO"],
+            Id = "gen7-shiny-solgaleo",
+            Title = "Shiny Solgaleo (Eclipse)",
+            Subtitle = "Secret Shiny Legendary Distribution",
+            Description = "The dazzling crimson Shiny Solgaleo holding a Master Ball distributed via the Pokémon Pass app.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 791,
+            TargetSpeciesName = "Solgaleo",
+            Accent = "#EF4444",
+            IsShiny = true,
+            InGameInstructions = "Shiny Solgaleo (holding Master Ball) has arrived in your Personal Vault! Command Sunsteel Strike in battle.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Eclipse",
+            RibbonName = "Classic Ribbon"
+        },
+        new()
+        {
+            Code = "ECLIPSE-LUNALA",
+            Aliases = ["SHINY-LUNALA", "ECLIPSE-MOON", "LUNALA"],
+            Id = "gen7-shiny-lunala",
+            Title = "Shiny Lunala (Eclipse)",
+            Subtitle = "Secret Shiny Legendary Distribution",
+            Description = "The blood-moon crimson Shiny Lunala holding a Master Ball distributed via the Pokémon Pass app.",
+            Generation = 7,
+            Region = "Alola",
+            RewardType = "Pokemon",
+            TargetSpeciesId = 792,
+            TargetSpeciesName = "Lunala",
+            Accent = "#8B5CF6",
+            IsShiny = true,
+            InGameInstructions = "Shiny Lunala (holding Master Ball) has arrived in your Personal Vault! Command Moongeist Beam in battle.",
+            SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"],
+            OriginalTrainer = "Eclipse",
+            RibbonName = "Classic Ribbon"
         }
     ];
 
     public static IReadOnlyList<PokemonMysteryGiftDto> All => Gifts;
 
-    public static PokemonMysteryGiftDto? Find(string? code)
+    public static PokemonMysteryGiftDto? Find(string? code, string? gameId = null)
     {
         if (string.IsNullOrWhiteSpace(code)) return null;
         var normalized = NormalizeCode(code);
-        return Gifts.FirstOrDefault(g =>
+        var matches = Gifts.Where(g =>
             NormalizeCode(g.Code) == normalized ||
             NormalizeCode(g.Id) == normalized ||
-            g.Aliases.Any(a => NormalizeCode(a) == normalized));
+            g.Aliases.Any(a => NormalizeCode(a) == normalized)).ToList();
+
+        if (matches.Count == 0) return null;
+        if (matches.Count == 1 || string.IsNullOrWhiteSpace(gameId)) return matches[0];
+
+        var compatible = matches.FirstOrDefault(g => SupportsGame(g, gameId));
+        return compatible ?? matches[0];
     }
 
     public static bool SupportsGame(PokemonMysteryGiftDto gift, string gameId)
     {
         var key = PokemonEventCatalog.NormalizeGameKey(gameId);
-        return gift.SupportedGameIds.Any(s => key.Contains(s, StringComparison.OrdinalIgnoreCase));
+        return gift.SupportedGameIds.Any(s => PokemonEventCatalog.IsGameKeyMatch(key, s));
     }
 
     public static string NormalizeCode(string? code)
@@ -393,7 +862,7 @@ public static class PokemonMysteryGiftCatalog
             Generation = generation,
             OriginGame = originGame,
             OriginalTrainer = gift.OriginalTrainer ?? "Fateful Encounter",
-            OriginalTrainerId = gift.Generation == 5 ? "08303" : "06257",
+            OriginalTrainerId = gift.Generation >= 6 ? "02276" : (gift.Generation == 5 ? "08303" : "06257"),
             CurrentLocation = gift.RewardType == "Egg" ? "Fateful Encounter Egg" : "Mystery Gift Delivery",
             CreatedAtUtc = DateTimeOffset.UtcNow,
             UpdatedAtUtc = DateTimeOffset.UtcNow,
@@ -447,6 +916,178 @@ public static class PokemonMysteryGiftCatalog
         {
             entry.Level = 100;
             details.Moves = ["Dragon Pulse", "Dragon Claw", "Aura Sphere", "Shadow Force"];
+        }
+        else if (gift.Code.Contains("TORCHIC", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 10;
+            details.HeldItem = "Blazikenite";
+            details.Ability = "Speed Boost";
+            details.Nature = "Adamant";
+            details.Moves = ["Scratch", "Growl", "Focus Energy", "Ember"];
+        }
+        else if (gift.Code.Contains("BELDUM", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 5;
+            details.HeldItem = "Metagrossite";
+            details.Ability = "Clear Body";
+            details.Nature = "Jolly";
+            details.Moves = ["Hold Back", "Iron Head", "Zen Headbutt", "Iron Defense"];
+        }
+        else if (gift.Code.Contains("DIANCIE", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 50;
+            details.HeldItem = "Normal Gem";
+            details.Ability = "Clear Body";
+            details.Nature = "Naive";
+            details.Moves = ["Diamond Storm", "Moonblast", "Dazzling Gleam", "Protect"];
+        }
+        else if (gift.Code.Contains("HOOPA", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 50;
+            details.HeldItem = "Focus Sash";
+            details.Ability = "Magician";
+            details.Nature = "Modest";
+            details.Moves = ["Hyperspace Hole", "Psychic", "Astonish", "Nasty Plot"];
+        }
+        else if (gift.Code.Contains("VOLCANION", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 70;
+            details.HeldItem = "Assault Vest";
+            details.Ability = "Water Absorb";
+            details.Nature = "Modest";
+            details.Moves = ["Steam Eruption", "Flamethrower", "Hydro Pump", "Explosion"];
+        }
+        else if (gift.Code.Contains("RAYQUAZA", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 70;
+            details.HeldItem = "Life Orb";
+            details.Ability = "Air Lock";
+            details.Nature = "Jolly";
+            details.Moves = ["Dragon Ascent", "Dragon Claw", "Extreme Speed", "Dragon Dance"];
+        }
+        else if (gift.Code.Contains("GF-MEW", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 100;
+            details.Ability = "Synchronize";
+            details.Moves = ["Pound"];
+        }
+        else if (gift.Code.Contains("GF-CELEBI", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 100;
+            details.Ability = "Natural Cure";
+            details.Moves = ["Confusion", "Recover", "Heal Bell", "Safeguard"];
+        }
+        else if (gift.Code.Contains("GF-JIRACHI", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 100;
+            details.Ability = "Serene Grace";
+            details.Moves = ["Wish", "Confusion", "Rest"];
+        }
+        else if (gift.Code.Contains("GF-DARKRAI", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 100;
+            details.Ability = "Bad Dreams";
+            details.Moves = ["Dark Void", "Ominous Wind", "Nightmare", "Feint Attack"];
+        }
+        else if (gift.Code.Contains("GF-ARCEUS", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 100;
+            details.Ability = "Multitype";
+            details.Moves = ["Judgment", "Recover", "Hyper Beam", "Perish Song"];
+        }
+        else if (gift.Code.Contains("GF-GENESECT", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 100;
+            details.Ability = "Download";
+            details.Moves = ["Techno Blast", "Magnet Bomb", "Solar Beam", "Signal Beam"];
+        }
+        else if (gift.Code.Contains("MAGEARNA", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 50;
+            details.HeldItem = "Silver Bottle Cap";
+            details.Ability = "Soul-Heart";
+            details.Nature = "Quiet";
+            details.Moves = ["Fleur Cannon", "Flash Cannon", "Lucky Chant", "Helping Hand"];
+        }
+        else if (gift.Code.Contains("ASH-GRENINJA", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 36;
+            details.Ability = "Battle Bond";
+            details.Nature = "Timid";
+            details.Pokeball = "Poké Ball";
+            details.Moves = ["Water Shuriken", "Aerial Ace", "Double Team", "Night Slash"];
+        }
+        else if (gift.Code.Contains("MUNCHLAX", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 5;
+            details.HeldItem = "Snorlium Z";
+            details.Ability = "Thick Fat";
+            details.Nature = "Careful";
+            details.Moves = ["Hold Back", "Happy Hour", "Tackle", "Metronome"];
+        }
+        else if (gift.Code.Contains("ROCKRUFF", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 10;
+            details.HeldItem = "Focus Band";
+            details.Ability = "Own Tempo";
+            details.Nature = "Jolly";
+            details.Moves = ["Tackle", "Bite", "Fire Fang", "Happy Hour"];
+        }
+        else if (gift.Code.Contains("MARSHADOW", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 50;
+            details.HeldItem = "Marshadium Z";
+            details.Ability = "Technician";
+            details.Nature = "Jolly";
+            details.Moves = ["Spectral Thief", "Close Combat", "Force Palm", "Shadow Sneak"];
+        }
+        else if (gift.Code.Contains("ZERAORA", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 50;
+            details.HeldItem = "Air Balloon";
+            details.Ability = "Volt Absorb";
+            details.Nature = "Hasty";
+            details.Moves = ["Plasma Fists", "Thunder Punch", "Close Combat", "Thunder"];
+        }
+        else if (gift.Code.Contains("TAPUKOKO", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 60;
+            details.HeldItem = "Electric Seed";
+            details.Ability = "Electric Surge";
+            details.Nature = "Timid";
+            details.Moves = ["Nature's Madness", "Discharge", "Agility", "Electro Ball"];
+        }
+        else if (gift.Code.Contains("POIPOLE", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 40;
+            details.Ability = "Beast Boost";
+            details.Nature = "Modest";
+            details.Moves = ["Venom Drench", "Nasty Plot", "Poison Jab", "Dragon Pulse"];
+        }
+        else if (gift.Code.Contains("PIKACHU20", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 1;
+            details.HeldItem = "Pikashunium Z";
+            details.Ability = "Static";
+            details.Nature = "Hardy";
+            details.Pokeball = "Poké Ball";
+            details.Moves = ["Thunderbolt", "Quick Attack", "Thunder", "Agility"];
+        }
+        else if (gift.Code.Contains("SOLGALEO", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 60;
+            details.HeldItem = "Master Ball";
+            details.Ability = "Full Metal Body";
+            details.Nature = "Adamant";
+            details.Moves = ["Sunsteel Strike", "Zen Headbutt", "Noble Roar", "Morning Sun"];
+        }
+        else if (gift.Code.Contains("LUNALA", StringComparison.OrdinalIgnoreCase))
+        {
+            entry.Level = 60;
+            details.HeldItem = "Master Ball";
+            details.Ability = "Shadow Shield";
+            details.Nature = "Modest";
+            details.Moves = ["Moongeist Beam", "Psychic", "Moonlight", "Magic Coat"];
         }
         else
         {

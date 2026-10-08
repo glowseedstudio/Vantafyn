@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.27}"
+VERSION="${1:-0.2.28}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.61}"
-CHANGELOG="Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking."
+TAG="${2:-v0.9.62}"
+CHANGELOG="Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.27.0",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.61/Vantafyn.Plugin.Companion_0.2.27_net9.zip",
+        "checksum": "455bb89f3b2d16f4694b05684d31c89b",
+        "timestamp": "2026-10-08T21:42:23Z"
+      },
+      {
+        "version": "0.2.27.1",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.61/Vantafyn.Plugin.Companion_0.2.27_net10.zip",
+        "checksum": "f100b58feac41ce42efdf9864bb8584c",
+        "timestamp": "2026-10-08T21:42:23Z"
       },
       {
         "version": "0.2.26.0",
