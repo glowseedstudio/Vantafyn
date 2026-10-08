@@ -436,13 +436,13 @@ private fun DiplomaMiniProgress(item: DiplomaCaseItem) {
 private fun DiplomaCaseItem.diplomaProgress(): DiplomaProgress {
     val caughtCount = save.pokedexCaught
     val storageDerivedSpeciesCount = save.caughtSpeciesIds.size
-    val nativeNdsStorageFallback = save.generation in 4..5 &&
+    val nativeStorageFallback = save.generation in 4..7 &&
         save.platform.isBlank() &&
         caughtCount != null &&
         caughtCount == storageDerivedSpeciesCount
 
     return when {
-        caughtCount != null && !nativeNdsStorageFallback ->
+        caughtCount != null && !nativeStorageFallback ->
             DiplomaProgress(caughtCount, isStrictSaveDex = true)
         save.generation in 1..3 && storageDerivedSpeciesCount > 0 ->
             DiplomaProgress(storageDerivedSpeciesCount, isStrictSaveDex = true)
@@ -483,6 +483,14 @@ private fun diplomaDefinitionsFor(save: PokemonGameSaveDto, gameTitle: String, b
             listOf(item("sinnoh-diploma", "Sinnoh Pokédex Diploma", "Sinnoh", 210, Color(0xFFF472B6)))
         gen == 5 && (key.contains("black") || key.contains("white") || key.contains("b2w2")) ->
             listOf(item("unova-diploma", "Unova Pokédex Diploma", "Unova", 156, Color(0xFF34D399)))
+        gen == 6 && (key.contains("omega ruby") || key.contains("alpha sapphire") || key.contains("oras")) ->
+            listOf(item("hoenn-diploma", "Hoenn Pokédex Diploma", "Hoenn", 211, Color(0xFF38BDF8)))
+        gen == 6 ->
+            listOf(item("kalos-diploma", "Kalos Pokédex Diploma", "Kalos", 454, Color(0xFF60A5FA)))
+        gen == 7 && (key.contains("ultra sun") || key.contains("ultra moon") || key.contains("usum")) ->
+            listOf(item("alola-diploma", "Alola Pokédex Diploma", "Alola", 400, Color(0xFFF59E0B)))
+        gen == 7 ->
+            listOf(item("alola-diploma", "Alola Pokédex Diploma", "Alola", 300, Color(0xFFF59E0B)))
         else -> emptyList()
     }
 }

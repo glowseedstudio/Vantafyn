@@ -139,7 +139,10 @@ fun GamesSavesScreen(
                 val files = savesDir.listFiles().orEmpty().filter {
                     it.isFile && (it.extension.equals("sram", ignoreCase = true) ||
                             it.extension.equals("srm", ignoreCase = true) ||
-                            it.extension.equals("sav", ignoreCase = true))
+                            it.extension.equals("sav", ignoreCase = true) ||
+                            it.extension.equals("main", ignoreCase = true) ||
+                            it.name.equals("main", ignoreCase = true) ||
+                            it.extension.equals("bin", ignoreCase = true))
                 }
                 for (file in files) {
                     val rawName = file.nameWithoutExtension

@@ -234,14 +234,8 @@ fun PokemonVaultScreen(
                     val gameId = target.game.id
                     val safeGameId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
 
-                    // 1. Locate local save file (.sram, .sav, .srm)
-                    var localSaveFile = storageManager.getLocalSaveFile(gameId, GameSaveKind.Sram)
-                    if (!localSaveFile.exists() || localSaveFile.length() == 0L) {
-                        val altSav = java.io.File(storageManager.savesDir, "$safeGameId.sav")
-                        val altSrm = java.io.File(storageManager.savesDir, "$safeGameId.srm")
-                        if (altSav.exists() && altSav.length() > 0L) localSaveFile = altSav
-                        else if (altSrm.exists() && altSrm.length() > 0L) localSaveFile = altSrm
-                    }
+                    // 1. Locate local save file (.sram, .sav, .srm, .main, etc.)
+                    val localSaveFile = storageManager.findExistingLocalSaveFile(gameId, GameSaveKind.Sram)
 
                     // If local save exists and is newer or local-only, push it to cloud so companion plugin can see it
                     if (session != null && localSaveFile.exists() && localSaveFile.length() > 0L) {
@@ -609,14 +603,7 @@ fun PokemonVaultScreen(
         lowerState.gameSave?.takeIf { isValidSave(it) }?.let { map[it.gameId] = it }
         for (game in availableGames) {
             if (!map.containsKey(game.id)) {
-                val safeGameId = game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-                var localSaveFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
-                if (!localSaveFile.exists() || localSaveFile.length() == 0L) {
-                    val altSav = java.io.File(storageManager.savesDir, "$safeGameId.sav")
-                    val altSrm = java.io.File(storageManager.savesDir, "$safeGameId.srm")
-                    if (altSav.exists() && altSav.length() > 0L) localSaveFile = altSav
-                    else if (altSrm.exists() && altSrm.length() > 0L) localSaveFile = altSrm
-                }
+                val localSaveFile = storageManager.findExistingLocalSaveFile(game.id, GameSaveKind.Sram)
                 if (localSaveFile.exists() && localSaveFile.length() > 0L) {
                     val bytes = runCatching { localSaveFile.readBytes() }.getOrNull()
                     if (bytes != null && bytes.isNotEmpty()) {

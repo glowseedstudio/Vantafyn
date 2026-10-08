@@ -359,6 +359,66 @@ object PokemonGymBadgeCatalog {
         BadgeDef("legend", "Legend Badge"),
     )
 
+    private val kalos = listOf(
+        BadgeDef("bug", "Bug Badge"),
+        BadgeDef("cliff", "Cliff Badge"),
+        BadgeDef("rumble", "Rumble Badge"),
+        BadgeDef("plant", "Plant Badge"),
+        BadgeDef("voltage", "Voltage Badge"),
+        BadgeDef("fairy", "Fairy Badge"),
+        BadgeDef("psychic", "Psychic Badge"),
+        BadgeDef("iceberg", "Iceberg Badge"),
+    )
+
+    private val alola = listOf(
+        BadgeDef("melemele", "Melemele Stamp"),
+        BadgeDef("akala", "Akala Stamp"),
+        BadgeDef("ulaula", "Ula'ula Stamp"),
+        BadgeDef("poni", "Poni Stamp"),
+        BadgeDef("champion", "Island Challenge Stamp"),
+    )
+
+    private val zCrystalsSm = listOf(
+        BadgeDef("normalium-z", "Normalium Z"),
+        BadgeDef("firium-z", "Firium Z"),
+        BadgeDef("waterium-z", "Waterium Z"),
+        BadgeDef("electrium-z", "Electrium Z"),
+        BadgeDef("grassium-z", "Grassium Z"),
+        BadgeDef("icium-z", "Icium Z"),
+        BadgeDef("fightinium-z", "Fightinium Z"),
+        BadgeDef("poisonium-z", "Poisonium Z"),
+        BadgeDef("groundium-z", "Groundium Z"),
+        BadgeDef("flyinium-z", "Flyinium Z"),
+        BadgeDef("psychium-z", "Psychium Z"),
+        BadgeDef("buginium-z", "Buginium Z"),
+        BadgeDef("rockium-z", "Rockium Z"),
+        BadgeDef("ghostium-z", "Ghostium Z"),
+        BadgeDef("dragonium-z", "Dragonium Z"),
+        BadgeDef("darkinium-z", "Darkinium Z"),
+        BadgeDef("steelium-z", "Steelium Z"),
+        BadgeDef("fairium-z", "Fairium Z"),
+        BadgeDef("pikanium-z", "Pikanium Z"),
+        BadgeDef("decidium-z", "Decidium Z"),
+        BadgeDef("incinium-z", "Incinium Z"),
+        BadgeDef("primarium-z", "Primarium Z"),
+        BadgeDef("tapunium-z", "Tapunium Z"),
+        BadgeDef("marshadium-z", "Marshadium Z"),
+        BadgeDef("aloraichium-z", "Aloraichium Z"),
+        BadgeDef("snorlium-z", "Snorlium Z"),
+        BadgeDef("eevium-z", "Eevium Z"),
+        BadgeDef("mewnium-z", "Mewnium Z"),
+        BadgeDef("pikashunium-z", "Pikashunium Z"),
+    )
+
+    private val zCrystalsUsum = zCrystalsSm + listOf(
+        BadgeDef("solganium-z", "Solganium Z"),
+        BadgeDef("lunalium-z", "Lunalium Z"),
+        BadgeDef("ultranecrozium-z", "Ultranecrozium Z"),
+        BadgeDef("mimikium-z", "Mimikium Z"),
+        BadgeDef("lycanium-z", "Lycanium Z"),
+        BadgeDef("kommonium-z", "Kommonium Z"),
+    )
+
     fun forGen1(kantoFlags: Int): List<PokemonGymBadgeRegionDto> =
         listOf(createRegion("kanto", "Kanto", 1, kanto, kantoFlags))
 
@@ -376,11 +436,11 @@ object PokemonGymBadgeCatalog {
             key.contains("leafgreen") ||
             key.contains("leaf_green") ||
             key.contains("leaf green")
-        val isHoenn = key.contains("emerald") ||
-            key.contains("omega ruby") ||
-            key.contains("alpha sapphire") ||
+        val isHoenn = (key.contains("emerald") ||
             key.contains("ruby") ||
-            key.contains("sapphire")
+            key.contains("sapphire")) &&
+            !key.contains("omega") &&
+            !key.contains("alpha")
         return when {
             isFrLg -> listOf(createRegion("kanto", "Kanto", 1, kanto, badgeFlags))
             isHoenn -> listOf(createRegion("hoenn", "Hoenn", 3, hoenn, badgeFlags))
@@ -418,6 +478,44 @@ object PokemonGymBadgeCatalog {
         } else {
             emptyList()
         }
+    }
+
+    fun forGen6(gameKey: String, badgeFlags: Int): List<PokemonGymBadgeRegionDto> {
+        val key = gameKey.lowercase()
+        val isOras = key.contains("omega ruby") ||
+            key.contains("alpha sapphire") ||
+            key.contains("oras")
+        return if (isOras) {
+            listOf(createRegion("hoenn", "Hoenn", 3, hoenn, badgeFlags))
+        } else {
+            listOf(createRegion("kalos", "Kalos", 6, kalos, badgeFlags))
+        }
+    }
+
+    fun forGen7(
+        gameKey: String,
+        stampFlags: Int,
+        unlockedZCrystals: Set<String> = emptySet(),
+        isUsum: Boolean = false,
+    ): List<PokemonGymBadgeRegionDto> {
+        val alolaRegion = createRegion("alola", "Alola", 7, alola, stampFlags)
+        val crystalDefs = if (isUsum) zCrystalsUsum else zCrystalsSm
+        val zCrystalsRegion = PokemonGymBadgeRegionDto(
+            region = "zcrystals",
+            displayName = "Z-Crystals",
+            generation = 7,
+            badges = crystalDefs.mapIndexed { index, crystal ->
+                PokemonGymBadgeDto(
+                    id = crystal.id,
+                    name = crystal.name,
+                    region = "zcrystals",
+                    generation = 7,
+                    order = index + 1,
+                    isEarned = unlockedZCrystals.contains(crystal.id),
+                )
+            },
+        )
+        return listOf(alolaRegion, zCrystalsRegion)
     }
 
     private fun createRegion(

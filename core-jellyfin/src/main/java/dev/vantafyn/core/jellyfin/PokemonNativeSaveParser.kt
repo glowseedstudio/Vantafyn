@@ -13,8 +13,10 @@ package dev.vantafyn.core.jellyfin
  */
 object PokemonNativeSaveParser {
 
-    private val NATIVE_POKEMON_PLATFORMS = setOf("gb", "gbc", "gba", "nds")
+    private val NATIVE_POKEMON_PLATFORMS = setOf("gb", "gbc", "gba", "nds", "3ds", "n3ds", "nintendo3ds")
 
+    private val GEN7_TITLE_TOKENS = listOf("ultra sun", "ultra moon", "usum", "pokemon sun", "pokemon moon")
+    private val GEN6_TITLE_TOKENS = listOf("omega ruby", "alpha sapphire", "oras", "pokemon x", "pokemon y")
     private val GEN4_TITLE_TOKENS = listOf(
         "heartgold", "soulsilver", "heart gold", "soul silver", "hgss",
         "platinum", "diamond", "pearl",
@@ -22,7 +24,7 @@ object PokemonNativeSaveParser {
     private val GEN5_TITLE_TOKENS = listOf("black 2", "white 2", "b2w2", "black", "white")
     private val GEN3_TITLE_TOKENS = listOf(
         "firered", "fire red", "leafgreen", "leaf green", "emerald",
-        "omega ruby", "alpha sapphire", "ruby", "sapphire",
+        "ruby", "sapphire",
     )
     private val GEN2_TITLE_TOKENS = listOf("crystal", "gold", "silver")
     private val GEN1_TITLE_TOKENS = listOf("yellow", "blue", "pikachu", "red")
@@ -37,13 +39,15 @@ object PokemonNativeSaveParser {
         if (saveBytes == null || saveBytes.isEmpty()) return null
         if (expectedPlatform.isNotBlank() && expectedPlatform !in NATIVE_POKEMON_PLATFORMS) return null
 
-        val expected = expectedGeneration.takeIf { it in 1..5 } ?: inferGeneration(gameTitle)
+        val expected = expectedGeneration.takeIf { it in 1..7 } ?: inferGeneration(gameTitle)
         val parsed = when (expected) {
             1 -> Gen1NativeSaveParser.parse(saveBytes, gameTitle, gameId)
             2 -> Gen2NativeSaveParser.parse(saveBytes, gameTitle, gameId)
             3 -> Gen3NativeSaveParser.parse(saveBytes, gameTitle, gameId)
             4 -> Gen4NativeSaveParser.parse(saveBytes, gameTitle, gameId)
             5 -> Gen5NativeSaveParser.parse(saveBytes, gameTitle, gameId)
+            6 -> Gen6NativeSaveParser.parse(saveBytes, gameTitle, gameId)
+            7 -> Gen7NativeSaveParser.parse(saveBytes, gameTitle, gameId)
             else -> probe(saveBytes, gameTitle, gameId)
         } ?: return null
 
@@ -58,18 +62,22 @@ object PokemonNativeSaveParser {
         Gen4NativeSaveParser.isGen4Save(saveBytes, gameTitle) -> Gen4NativeSaveParser.parse(saveBytes, gameTitle, gameId)
         Gen5NativeSaveParser.isGen5Save(saveBytes, gameTitle) -> Gen5NativeSaveParser.parse(saveBytes, gameTitle, gameId)
         Gen3NativeSaveParser.isGen3Save(saveBytes) -> Gen3NativeSaveParser.parse(saveBytes, gameTitle, gameId)
+        Gen6NativeSaveParser.isGen6Save(saveBytes, gameTitle) -> Gen6NativeSaveParser.parse(saveBytes, gameTitle, gameId)
+        Gen7NativeSaveParser.isGen7Save(saveBytes, gameTitle) -> Gen7NativeSaveParser.parse(saveBytes, gameTitle, gameId)
         else -> null
     }
 
-    private fun inferGeneration(gameTitle: String): Int? {
+    internal fun inferGeneration(gameTitle: String): Int? {
         val title = gameTitle.lowercase()
-        return when {
-            GEN4_TITLE_TOKENS.any { title.contains(it) } -> 4
-            GEN5_TITLE_TOKENS.any { title.contains(it) } -> 5
-            GEN3_TITLE_TOKENS.any { title.contains(it) } -> 3
-            GEN2_TITLE_TOKENS.any { title.contains(it) } -> 2
-            GEN1_TITLE_TOKENS.any { title.contains(it) } -> 1
-            else -> null
-        }
+        val words = title.split(Regex("[^a-z0-9]")).filter { it.isNotBlank() }
+
+        if (GEN7_TITLE_TOKENS.any { title.contains(it) } || words.contains("sun") || words.contains("moon")) return 7
+        if (GEN6_TITLE_TOKENS.any { title.contains(it) } || words.contains("x") || words.contains("y")) return 6
+        if (GEN4_TITLE_TOKENS.any { title.contains(it) }) return 4
+        if (GEN5_TITLE_TOKENS.any { title.contains(it) }) return 5
+        if (GEN3_TITLE_TOKENS.any { title.contains(it) }) return 3
+        if (GEN2_TITLE_TOKENS.any { title.contains(it) }) return 2
+        if (GEN1_TITLE_TOKENS.any { title.contains(it) }) return 1
+        return null
     }
 }

@@ -62,6 +62,71 @@ public static class PokemonGymBadgeCatalog
         new("legend", "Legend Badge")
     ];
 
+    private static readonly BadgeDef[] Kalos =
+    [
+        new("bug", "Bug Badge"),
+        new("cliff", "Cliff Badge"),
+        new("rumble", "Rumble Badge"),
+        new("plant", "Plant Badge"),
+        new("voltage", "Voltage Badge"),
+        new("fairy", "Fairy Badge"),
+        new("psychic", "Psychic Badge"),
+        new("iceberg", "Iceberg Badge")
+    ];
+
+    private static readonly BadgeDef[] Alola =
+    [
+        new("melemele", "Melemele Stamp"),
+        new("akala", "Akala Stamp"),
+        new("ulaula", "Ula'ula Stamp"),
+        new("poni", "Poni Stamp"),
+        new("champion", "Island Challenge Stamp")
+    ];
+
+    private static readonly BadgeDef[] ZCrystalsSm =
+    [
+        new("normalium-z", "Normalium Z"),
+        new("firium-z", "Firium Z"),
+        new("waterium-z", "Waterium Z"),
+        new("electrium-z", "Electrium Z"),
+        new("grassium-z", "Grassium Z"),
+        new("icium-z", "Icium Z"),
+        new("fightinium-z", "Fightinium Z"),
+        new("poisonium-z", "Poisonium Z"),
+        new("groundium-z", "Groundium Z"),
+        new("flyinium-z", "Flyinium Z"),
+        new("psychium-z", "Psychium Z"),
+        new("buginium-z", "Buginium Z"),
+        new("rockium-z", "Rockium Z"),
+        new("ghostium-z", "Ghostium Z"),
+        new("dragonium-z", "Dragonium Z"),
+        new("darkinium-z", "Darkinium Z"),
+        new("steelium-z", "Steelium Z"),
+        new("fairium-z", "Fairium Z"),
+        new("pikanium-z", "Pikanium Z"),
+        new("decidium-z", "Decidium Z"),
+        new("incinium-z", "Incinium Z"),
+        new("primarium-z", "Primarium Z"),
+        new("tapunium-z", "Tapunium Z"),
+        new("marshadium-z", "Marshadium Z"),
+        new("aloraichium-z", "Aloraichium Z"),
+        new("snorlium-z", "Snorlium Z"),
+        new("eevium-z", "Eevium Z"),
+        new("mewnium-z", "Mewnium Z"),
+        new("pikashunium-z", "Pikashunium Z")
+    ];
+
+    private static readonly BadgeDef[] ZCrystalsUsum =
+    [
+        ..ZCrystalsSm,
+        new("solganium-z", "Solganium Z"),
+        new("lunalium-z", "Lunalium Z"),
+        new("ultranecrozium-z", "Ultranecrozium Z"),
+        new("mimikium-z", "Mimikium Z"),
+        new("lycanium-z", "Lycanium Z"),
+        new("kommonium-z", "Kommonium Z")
+    ];
+
     public static List<PokemonGymBadgeRegionDto> ForGen1(byte kantoFlags) =>
     [
         CreateRegion("kanto", "Kanto", 1, Kanto, kantoFlags)
@@ -83,10 +148,12 @@ public static class PokemonGymBadgeCatalog
                      key.Contains("leaf_green", StringComparison.Ordinal) ||
                      key.Contains("leaf green", StringComparison.Ordinal);
 
-        var isHoenn = key.Contains("emerald", StringComparison.Ordinal) ||
+        var isHoenn = (key.Contains("emerald", StringComparison.Ordinal) ||
                       key.Contains("ruby", StringComparison.Ordinal) ||
                       key.Contains("sapphire", StringComparison.Ordinal) ||
-                      key.Contains("rse", StringComparison.Ordinal);
+                      key.Contains("rse", StringComparison.Ordinal)) &&
+                      !key.Contains("omega", StringComparison.Ordinal) &&
+                      !key.Contains("alpha", StringComparison.Ordinal);
 
         if (isFrLg)
         {
@@ -139,6 +206,44 @@ public static class PokemonGymBadgeCatalog
             return [ CreateRegion("unova", "Unova", 5, Unova, unovaFlags) ];
         }
         return [];
+    }
+
+    public static List<PokemonGymBadgeRegionDto> ForGen6(string gameId, byte badgeFlags)
+    {
+        var key = (gameId ?? string.Empty).ToLowerInvariant();
+        var isOras = key.Contains("omega", StringComparison.Ordinal) ||
+                     key.Contains("alpha", StringComparison.Ordinal) ||
+                     key.Contains("oras", StringComparison.Ordinal);
+
+        return isOras
+            ? [ CreateRegion("hoenn", "Hoenn", 3, Hoenn, badgeFlags) ]
+            : [ CreateRegion("kalos", "Kalos", 6, Kalos, badgeFlags) ];
+    }
+
+    public static List<PokemonGymBadgeRegionDto> ForGen7(
+        string gameId,
+        ushort stampFlags,
+        ISet<string>? unlockedZCrystals = null,
+        bool isUsum = false)
+    {
+        var alola = CreateRegion("alola", "Alola", 7, Alola, (byte)(stampFlags & 0xFF));
+        var crystals = isUsum ? ZCrystalsUsum : ZCrystalsSm;
+        var zCrystalsRegion = new PokemonGymBadgeRegionDto
+        {
+            Region = "zcrystals",
+            DisplayName = "Z-Crystals",
+            Generation = 7,
+            Badges = crystals.Select((c, idx) => new PokemonGymBadgeDto
+            {
+                Id = c.Id,
+                Name = c.Name,
+                Region = "zcrystals",
+                Generation = 7,
+                Order = idx + 1,
+                IsEarned = unlockedZCrystals != null && unlockedZCrystals.Contains(c.Id)
+            }).ToList()
+        };
+        return [ alola, zCrystalsRegion ];
     }
 
     private static PokemonGymBadgeRegionDto CreateRegion(string region, string displayName, int generation, IReadOnlyList<BadgeDef> badges, byte flags)

@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.27.0",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.61/Vantafyn.Plugin.Companion_0.2.27_net9.zip",
+        "checksum": "455bb89f3b2d16f4694b05684d31c89b",
+        "timestamp": "2026-10-08T21:42:23Z"
+      },
+      {
+        "version": "0.2.27.1",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.61/Vantafyn.Plugin.Companion_0.2.27_net10.zip",
+        "checksum": "f100b58feac41ce42efdf9864bb8584c",
+        "timestamp": "2026-10-08T21:42:23Z"
+      },
+      {
         "version": "0.2.26.0",
         "changelog": "Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search.",
         "targetAbi": "10.11.0.0",

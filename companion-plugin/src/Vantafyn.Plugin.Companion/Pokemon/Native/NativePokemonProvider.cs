@@ -39,8 +39,8 @@ public sealed class NativePokemonProvider : IPokemonProvider
             CanTransferSameGeneration = true,
             CanTransferCrossGeneration = true,
             CanValidateLegality = true,
-            SupportedGenerations = new[] { "1", "2", "3", "4", "5" },
-            SupportedPlatforms = new[] { "gb", "gbc", "gba", "nds" }
+            SupportedGenerations = new[] { "1", "2", "3", "4", "5", "6", "7" },
+            SupportedPlatforms = new[] { "gb", "gbc", "gba", "nds", "3ds" }
         });
     }
 
@@ -86,6 +86,12 @@ public sealed class NativePokemonProvider : IPokemonProvider
                 case 5:
                     result = Gen5SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
                     break;
+                case 6:
+                    result = Gen6SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
+                case 7:
+                    result = Gen7SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+                    break;
                 default:
                     result = Probe(saveBytes, pokemonGameId, platform);
                     break;
@@ -120,6 +126,18 @@ public sealed class NativePokemonProvider : IPokemonProvider
     private PokemonSaveParseResult Probe(byte[] saveBytes, string pokemonGameId, string platform)
     {
         var plat = (platform ?? string.Empty).ToLowerInvariant();
+        if (plat is "3ds" or "n3ds" or "nintendo3ds")
+        {
+            if (Gen6SaveParser.IsGen6Save(saveBytes, pokemonGameId))
+                return Gen6SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            if (Gen7SaveParser.IsGen7Save(saveBytes, pokemonGameId))
+                return Gen7SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+            return new PokemonSaveParseResult
+            {
+                IsSuccess = false,
+                ErrorMessage = "3DS save data does not match known Gen 6 or Gen 7 formats."
+            };
+        }
         if (plat == "nds")
         {
             if (Gen4SaveParser.IsGen4Save(saveBytes, pokemonGameId))
@@ -165,6 +183,10 @@ public sealed class NativePokemonProvider : IPokemonProvider
             return Gen5SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
         if (Gen3SaveParser.IsGen3Save(saveBytes))
             return Gen3SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+        if (Gen6SaveParser.IsGen6Save(saveBytes, pokemonGameId))
+            return Gen6SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
+        if (Gen7SaveParser.IsGen7Save(saveBytes, pokemonGameId))
+            return Gen7SaveParser.Parse(saveBytes, pokemonGameId, _catalog);
 
         return new PokemonSaveParseResult
         {
@@ -176,6 +198,24 @@ public sealed class NativePokemonProvider : IPokemonProvider
     private static int InferGeneration(string pokemonGameId, string platform)
     {
         var lower = (pokemonGameId ?? string.Empty).ToLowerInvariant();
+        var tokens = lower.Split([' ', '_', '-', ':'], StringSplitOptions.RemoveEmptyEntries);
+
+        if (lower.Contains("ultra sun", StringComparison.Ordinal) || lower.Contains("ultra moon", StringComparison.Ordinal) ||
+            lower.Contains("usum", StringComparison.Ordinal) || lower.Contains("pokemon sun", StringComparison.Ordinal) ||
+            lower.Contains("pokemon moon", StringComparison.Ordinal) ||
+            Array.Exists(tokens, t => t is "sun" or "moon"))
+        {
+            return 7;
+        }
+
+        if (lower.Contains("omega ruby", StringComparison.Ordinal) || lower.Contains("alpha sapphire", StringComparison.Ordinal) ||
+            lower.Contains("oras", StringComparison.Ordinal) || lower.Contains("pokemon x", StringComparison.Ordinal) ||
+            lower.Contains("pokemon y", StringComparison.Ordinal) ||
+            Array.Exists(tokens, t => t is "x" or "y"))
+        {
+            return 6;
+        }
+
         if (lower.Contains("heartgold") || lower.Contains("soulsilver") || lower.Contains("heart gold") ||
             lower.Contains("soul silver") || lower.Contains("hgss") || lower.Contains("diamond") ||
             lower.Contains("pearl") || lower.Contains("platinum"))
@@ -203,6 +243,7 @@ public sealed class NativePokemonProvider : IPokemonProvider
         }
 
         var plat = (platform ?? string.Empty).ToLowerInvariant();
+        if (plat is "3ds" or "n3ds" or "nintendo3ds") return 6;
         if (plat == "gba") return 3;
         return 0;
     }

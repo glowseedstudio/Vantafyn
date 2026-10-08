@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.26}"
+VERSION="${1:-0.2.27}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.60}"
-CHANGELOG="Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search."
+TAG="${2:-v0.9.61}"
+CHANGELOG="Adds 3DS Pokémon Gen 6/7 save parsing, Kalos badges, Alola Island Challenge stamps, and Z-Crystal collection tracking."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.26.0",
+        "changelog": "Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.60/Vantafyn.Plugin.Companion_0.2.26_net9.zip",
+        "checksum": "50baf45372dd2fa7927673b8059ac7aa",
+        "timestamp": "2026-10-08T12:35:52Z"
+      },
+      {
+        "version": "0.2.26.1",
+        "changelog": "Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.60/Vantafyn.Plugin.Companion_0.2.26_net10.zip",
+        "checksum": "4a8e047da5454a1ffae3d5472a8a41d4",
+        "timestamp": "2026-10-08T12:35:52Z"
       },
       {
         "version": "0.2.25.0",

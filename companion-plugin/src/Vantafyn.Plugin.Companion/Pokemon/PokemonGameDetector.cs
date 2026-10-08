@@ -206,8 +206,15 @@ public sealed class PokemonGameDetector : IPokemonGameDetector
         try
         {
             var safeGame = SanitizeFileName(gameId);
-            var savePath = Path.Combine(_paths.GameSavesRoot, userId.ToString("N"), $"{safeGame}.sram");
-            return File.Exists(savePath);
+            var userDir = Path.Combine(_paths.GameSavesRoot, userId.ToString("N"));
+            if (!Directory.Exists(userDir)) return false;
+
+            return File.Exists(Path.Combine(userDir, $"{safeGame}.sram")) ||
+                   File.Exists(Path.Combine(userDir, $"{safeGame}.sav")) ||
+                   File.Exists(Path.Combine(userDir, $"{safeGame}.srm")) ||
+                   File.Exists(Path.Combine(userDir, $"{safeGame}.main")) ||
+                   File.Exists(Path.Combine(userDir, $"{safeGame}.bin")) ||
+                   File.Exists(Path.Combine(userDir, "main"));
         }
         catch
         {

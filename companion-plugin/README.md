@@ -24,7 +24,7 @@ The easiest way to install and keep Vantafyn Companion updated is via Jellyfin's
 
 - **Jellyfin Server 10.11+** (`net9.0`, ABI `10.11.0.0`)
 - **Jellyfin Server 12.0+** (`net10.0`, ABI `12.0.0.0`)
-- Plugin version: `0.2.26`
+- Plugin version: `0.2.27`
 - API version: `1`
 
 ## Build

@@ -783,6 +783,114 @@ public sealed class PokemonSaveReaderTests
         Assert.Equal(expectedCrc, storedCrc);
     }
 
+    [Fact]
+    public void PokemonGymBadgeCatalog_Gen6ReturnsKalosOrHoenn()
+    {
+        var kalos = PokemonGymBadgeCatalog.ForGen6("pokemon_x", 0b00000011);
+        Assert.Single(kalos);
+        Assert.Equal("kalos", kalos[0].Region);
+        Assert.Equal(8, kalos[0].Badges.Count);
+        Assert.True(kalos[0].Badges.Single(b => b.Id == "bug").IsEarned);
+        Assert.True(kalos[0].Badges.Single(b => b.Id == "cliff").IsEarned);
+        Assert.False(kalos[0].Badges.Single(b => b.Id == "rumble").IsEarned);
+
+        var hoenn = PokemonGymBadgeCatalog.ForGen6("omegaruby", 0b00000001);
+        Assert.Single(hoenn);
+        Assert.Equal("hoenn", hoenn[0].Region);
+        Assert.Equal(8, hoenn[0].Badges.Count);
+        Assert.True(hoenn[0].Badges.Single(b => b.Id == "stone").IsEarned);
+        Assert.False(hoenn[0].Badges.Single(b => b.Id == "knuckle").IsEarned);
+    }
+
+    [Fact]
+    public void PokemonGymBadgeCatalog_Gen7ReturnsAlolaStamps()
+    {
+        var regions = PokemonGymBadgeCatalog.ForGen7("sun", 0b00011111, new HashSet<string> { "normalium-z", "firium-z" });
+        Assert.Equal(2, regions.Count);
+        Assert.Equal("alola", regions[0].Region);
+        Assert.Equal(5, regions[0].Badges.Count);
+        Assert.True(regions[0].Badges.All(b => b.IsEarned));
+        Assert.Equal("zcrystals", regions[1].Region);
+        Assert.Equal(29, regions[1].Badges.Count);
+        Assert.True(regions[1].Badges.Single(b => b.Id == "normalium-z").IsEarned);
+        Assert.True(regions[1].Badges.Single(b => b.Id == "firium-z").IsEarned);
+        Assert.False(regions[1].Badges.Single(b => b.Id == "waterium-z").IsEarned);
+    }
+
+    [Fact]
+    public async Task NativePokemonProvider_Gen6AndGen7_UninitializedSave_ReturnsFailure()
+    {
+        var provider = new NativePokemonProvider();
+        var blankBytes = new byte[0x100000]; // 1MB
+
+        var res6 = await provider.ParseSaveAsync(blankBytes, "x", "3ds", 6, CancellationToken.None);
+        Assert.False(res6.IsSuccess);
+        Assert.Empty(res6.Party);
+
+        var res7 = await provider.ParseSaveAsync(blankBytes, "sun", "3ds", 7, CancellationToken.None);
+        Assert.False(res7.IsSuccess);
+        Assert.Empty(res7.Party);
+    }
+
+    [Fact]
+    public async Task NativePokemonProvider_Gen6XY_WithValidData_ParsesSuccessfully()
+    {
+        var provider = new NativePokemonProvider();
+        var saveBytes = new byte[0x100000];
+
+        // Status at 0x14000: TID = 12345 (0x3039)
+        BitConverter.GetBytes((ushort)12345).CopyTo(saveBytes, 0x14000);
+        // OT name at 0x14048: "Calem" in UTF-16LE
+        System.Text.Encoding.Unicode.GetBytes("Calem").CopyTo(saveBytes, 0x14048);
+        // Misc at 0x04200: badges at 0x0420C = 0x05
+        saveBytes[0x0420C] = 0x05;
+
+        var result = await provider.ParseSaveAsync(saveBytes, "x", "3ds", 6, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(6, result.DetectedGeneration);
+        Assert.Equal("12345", result.TrainerId);
+        Assert.Equal("Calem", result.TrainerName);
+        Assert.Single(result.GymBadges);
+        Assert.Equal("kalos", result.GymBadges[0].Region);
+        Assert.True(result.GymBadges[0].Badges.Single(b => b.Id == "bug").IsEarned);
+        Assert.False(result.GymBadges[0].Badges.Single(b => b.Id == "cliff").IsEarned);
+        Assert.True(result.GymBadges[0].Badges.Single(b => b.Id == "rumble").IsEarned);
+    }
+
+    [Fact]
+    public async Task NativePokemonProvider_Gen7SM_WithValidData_ParsesSuccessfully()
+    {
+        var provider = new NativePokemonProvider();
+        var saveBytes = new byte[0x100000];
+
+        // Status at 0x01200: TID = 54321
+        BitConverter.GetBytes((ushort)54321).CopyTo(saveBytes, 0x01200);
+        // OT name at 0x01238: "Sun" in UTF-16LE
+        System.Text.Encoding.Unicode.GetBytes("Sun").CopyTo(saveBytes, 0x01238);
+        // Misc at 0x04000: rawStamps at 0x04008 = (0x07 << 4) = 0x70
+        BitConverter.GetBytes((ushort)0x70).CopyTo(saveBytes, 0x04008);
+        // Z-Crystals at 0x00D68: Slot 0 = 1831 (Normalium Z)
+        BitConverter.GetBytes((ushort)1831).CopyTo(saveBytes, 0x00D68);
+
+        var result = await provider.ParseSaveAsync(saveBytes, "sun", "3ds", 7, CancellationToken.None);
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(7, result.DetectedGeneration);
+        Assert.Equal("54321", result.TrainerId);
+        Assert.Equal("Sun", result.TrainerName);
+        Assert.Equal(2, result.GymBadges.Count);
+        Assert.Equal("alola", result.GymBadges[0].Region);
+        Assert.True(result.GymBadges[0].Badges.Single(b => b.Id == "melemele").IsEarned);
+        Assert.True(result.GymBadges[0].Badges.Single(b => b.Id == "akala").IsEarned);
+        Assert.True(result.GymBadges[0].Badges.Single(b => b.Id == "ulaula").IsEarned);
+        Assert.False(result.GymBadges[0].Badges.Single(b => b.Id == "poni").IsEarned);
+        Assert.Equal("zcrystals", result.GymBadges[1].Region);
+        Assert.Equal(29, result.GymBadges[1].Badges.Count);
+        Assert.True(result.GymBadges[1].Badges.Single(b => b.Id == "normalium-z").IsEarned);
+        Assert.False(result.GymBadges[1].Badges.Single(b => b.Id == "firium-z").IsEarned);
+    }
+
     private static byte[] CreateGen1Save()
     {
         var bytes = new byte[32768];

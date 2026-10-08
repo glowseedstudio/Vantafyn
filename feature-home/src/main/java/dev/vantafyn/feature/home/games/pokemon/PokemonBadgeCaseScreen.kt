@@ -484,8 +484,13 @@ private fun BadgeRegionCase(
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                     )
+                    val earnedUnit = when (region.region) {
+                        "alola" -> "stamps earned"
+                        "zcrystals" -> "Z-Crystals unlocked"
+                        else -> "badges earned"
+                    }
                     Text(
-                        text = "$earned of $total badges earned",
+                        text = "$earned of $total $earnedUnit",
                         color = VantafynColors.Muted,
                         fontSize = 11.sp,
                     )
@@ -520,7 +525,43 @@ private fun BadgeSlot(
     imageUrl: String?,
     modifier: Modifier = Modifier,
 ) {
+    val isZCrystal = badge.region == "zcrystals"
     val earnedAlpha = if (badge.isEarned) 1f else 0.36f
+
+    val backgroundBrush = when {
+        badge.isEarned && isZCrystal -> Brush.radialGradient(
+            listOf(
+                Color(0xFFC084FC).copy(alpha = 0.28f),
+                Color(0xFF38BDF8).copy(alpha = 0.12f),
+                Color(0xFF111827),
+            )
+        )
+        badge.isEarned -> Brush.radialGradient(
+            listOf(
+                Color(0xFFFBBF24).copy(alpha = 0.22f),
+                Color(0xFF111827),
+            )
+        )
+        else -> Brush.radialGradient(
+            listOf(
+                Color.White.copy(alpha = 0.05f),
+                Color(0xFF0F172A),
+            )
+        )
+    }
+
+    val borderColor = when {
+        badge.isEarned && isZCrystal -> Color(0xFFC084FC).copy(alpha = 0.55f)
+        badge.isEarned -> Color(0xFFFBBF24).copy(alpha = 0.42f)
+        else -> Color.White.copy(alpha = 0.07f)
+    }
+
+    val fallbackIcon = if (isZCrystal) Icons.Rounded.AutoAwesome else Icons.Rounded.Star
+    val fallbackTint = when {
+        badge.isEarned && isZCrystal -> Color(0xFFC084FC)
+        badge.isEarned -> Color(0xFFFBBF24)
+        else -> VantafynColors.Muted
+    }
 
     Column(
         modifier = modifier,
@@ -532,26 +573,10 @@ private fun BadgeSlot(
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(14.dp))
-                .background(
-                    if (badge.isEarned) {
-                        Brush.radialGradient(
-                            listOf(
-                                Color(0xFFFBBF24).copy(alpha = 0.22f),
-                                Color(0xFF111827),
-                            )
-                        )
-                    } else {
-                        Brush.radialGradient(
-                            listOf(
-                                Color.White.copy(alpha = 0.05f),
-                                Color(0xFF0F172A),
-                            )
-                        )
-                    }
-                )
+                .background(backgroundBrush)
                 .border(
                     width = 1.dp,
-                    color = if (badge.isEarned) Color(0xFFFBBF24).copy(alpha = 0.42f) else Color.White.copy(alpha = 0.07f),
+                    color = borderColor,
                     shape = RoundedCornerShape(14.dp),
                 )
                 .padding(9.dp),
@@ -567,9 +592,9 @@ private fun BadgeSlot(
                         .alpha(earnedAlpha),
                     error = {
                         Icon(
-                            imageVector = Icons.Rounded.Star,
+                            imageVector = fallbackIcon,
                             contentDescription = badge.name,
-                            tint = if (badge.isEarned) Color(0xFFFBBF24) else VantafynColors.Muted,
+                            tint = fallbackTint,
                             modifier = Modifier
                                 .size(30.dp)
                                 .alpha(earnedAlpha),
@@ -578,9 +603,9 @@ private fun BadgeSlot(
                 )
             } else {
                 Icon(
-                    imageVector = Icons.Rounded.Star,
+                    imageVector = fallbackIcon,
                     contentDescription = badge.name,
-                    tint = if (badge.isEarned) Color(0xFFFBBF24) else VantafynColors.Muted,
+                    tint = fallbackTint,
                     modifier = Modifier
                         .size(30.dp)
                         .alpha(earnedAlpha),
@@ -588,7 +613,7 @@ private fun BadgeSlot(
             }
         }
         Text(
-            text = badge.name.removeSuffix(" Badge"),
+            text = badge.name.removeSuffix(" Badge").removeSuffix(" Stamp"),
             color = if (badge.isEarned) VantafynColors.Ink else VantafynColors.Muted,
             fontSize = 10.sp,
             fontWeight = if (badge.isEarned) FontWeight.Bold else FontWeight.Medium,

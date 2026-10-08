@@ -51,14 +51,16 @@ object BatterySaveImportNormalizer {
                 }
                 Result(input, convertedFromDsv = false)
             }
-            extension.isBlank() || extension in setOf("sav", "srm", "sram") -> {
+            extension.isBlank() || extension in setOf("sav", "srm", "sram", "bin", "dat", "main") ||
+                fileName.orEmpty().equals("main", ignoreCase = true) ||
+                fileName.orEmpty().startsWith("main.", ignoreCase = true) -> {
                 if (isDs && input.size > 16 * 1024 * 1024) {
                     throw IllegalArgumentException("That DS battery save is too large to load safely.")
                 }
                 Result(input, convertedFromDsv = false)
             }
             else -> throw IllegalArgumentException(
-                "Unsupported save format .$extension. Choose a raw .sav, .srm, or .sram file" +
+                "Unsupported save format .$extension. Choose a raw .sav, .srm, .sram, or 3DS main save file" +
                     if (isDs) ", or a valid DeSmuME/DraStic .dsv file." else ".",
             )
         }

@@ -175,6 +175,24 @@ class GameStorageManager(
         return File(savesDir, "$safeId.${kind.value}")
     }
 
+    fun findExistingLocalSaveFile(gameId: String, kind: GameSaveKind): File {
+        val standard = getLocalSaveFile(gameId, kind)
+        if (standard.exists() && standard.length() > 0) return standard
+
+        val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val altCandidates = listOf(
+            File(savesDir, "$safeId.sav"),
+            File(savesDir, "$safeId.srm"),
+            File(savesDir, "$safeId.main"),
+            File(savesDir, "$safeId.bin"),
+            File(savesDir, "main"),
+        )
+        for (alt in altCandidates) {
+            if (alt.exists() && alt.length() > 0) return alt
+        }
+        return standard
+    }
+
     suspend fun downloadRomIfNeeded(
         session: JellyfinSession?,
         libraryId: String,
@@ -329,7 +347,7 @@ class GameStorageManager(
 
     fun backupSave(gameId: String, kind: GameSaveKind): File? {
         val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val localFile = getLocalSaveFile(gameId, kind)
+        val localFile = findExistingLocalSaveFile(gameId, kind)
         if (!localFile.exists() || localFile.length() <= 0) return null
 
         val backupDir = savesBackupDir
@@ -443,7 +461,7 @@ class GameStorageManager(
         gameId: String,
         kind: GameSaveKind,
     ): SaveSyncInfo = withContext(Dispatchers.IO) {
-        val localFile = getLocalSaveFile(gameId, kind)
+        val localFile = findExistingLocalSaveFile(gameId, kind)
         val localExists = localFile.exists() && localFile.length() > 0
         val localBytes = if (localExists) runCatching { localFile.readBytes() }.getOrNull() else null
         val localModified = if (localExists) localFile.lastModified() else 0L
@@ -535,7 +553,7 @@ class GameStorageManager(
         kind: GameSaveKind,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val localFile = getLocalSaveFile(gameId, kind)
+            val localFile = findExistingLocalSaveFile(gameId, kind)
             if (!localFile.exists() || localFile.length() <= 0) {
                 throw IllegalStateException("Local save file does not exist.")
             }
@@ -557,7 +575,7 @@ class GameStorageManager(
             backupSave(gameId, kind)
             val data = cloudData ?: gamesRepository.getCloudSave(session, gameId, kind).getOrThrow()
                 ?: throw IllegalStateException("Cloud save not found on server.")
-            val localFile = getLocalSaveFile(gameId, kind)
+            val localFile = findExistingLocalSaveFile(gameId, kind)
             localFile.parentFile?.mkdirs()
             localFile.writeBytes(data)
             val hash = computeHash(data)
@@ -572,7 +590,7 @@ class GameStorageManager(
         kind: GameSaveKind = GameSaveKind.Sram,
         forceCloud: Boolean = false,
     ): ByteArray? = withContext(Dispatchers.IO) {
-        val localFile = getLocalSaveFile(gameId, kind)
+        val localFile = findExistingLocalSaveFile(gameId, kind)
 
         if (forceCloud && session != null) {
             val cloudEntry = gamesRepository.getCloudSaveWithMetadata(session, gameId, kind).getOrNull()
@@ -589,24 +607,13 @@ class GameStorageManager(
             return@withContext localFile.readBytes()
         }
 
-        if (kind == GameSaveKind.Sram) {
-            val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            val altSrm = File(savesDir, "$safeId.srm")
-            if (altSrm.exists() && altSrm.length() > 0) {
-                return@withContext altSrm.readBytes()
-            }
-            val altSav = File(savesDir, "$safeId.sav")
-            if (altSav.exists() && altSav.length() > 0) {
-                return@withContext altSav.readBytes()
-            }
-        }
-
         if (session != null) {
             val cloudEntry = gamesRepository.getCloudSaveWithMetadata(session, gameId, kind).getOrNull()
             if (cloudEntry != null && cloudEntry.data.isNotEmpty()) {
-                localFile.parentFile?.mkdirs()
-                localFile.writeBytes(cloudEntry.data)
-                markSynced(gameId, kind, computeHash(cloudEntry.data), localFile.lastModified())
+                val targetFile = getLocalSaveFile(gameId, kind)
+                targetFile.parentFile?.mkdirs()
+                targetFile.writeBytes(cloudEntry.data)
+                markSynced(gameId, kind, computeHash(cloudEntry.data), targetFile.lastModified())
                 return@withContext cloudEntry.data
             }
         }
@@ -656,7 +663,7 @@ class GameStorageManager(
         kind: GameSaveKind = GameSaveKind.Sram,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val localFile = getLocalSaveFile(gameId, kind)
+            val localFile = findExistingLocalSaveFile(gameId, kind)
             if (localFile.exists()) {
                 backupSave(gameId, kind)
                 localFile.delete()

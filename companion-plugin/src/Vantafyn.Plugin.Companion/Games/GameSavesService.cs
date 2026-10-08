@@ -23,7 +23,31 @@ public sealed class GameSavesService : IGameSavesService
     public async Task<byte[]?> GetAsync(Guid userId, string gameId, string kind, CancellationToken cancellationToken)
     {
         var path = ResolvePath(userId, gameId, kind);
-        if (path == null || !File.Exists(path))
+        if (path == null)
+        {
+            return null;
+        }
+
+        if (!File.Exists(path) && string.Equals(kind, "sram", StringComparison.OrdinalIgnoreCase))
+        {
+            var userDir = Path.GetDirectoryName(path);
+            var safeGame = SanitizeFileName(gameId);
+            if (userDir != null && Directory.Exists(userDir))
+            {
+                var candidateSav = Path.Combine(userDir, $"{safeGame}.sav");
+                var candidateSrm = Path.Combine(userDir, $"{safeGame}.srm");
+                var candidateMainExt = Path.Combine(userDir, $"{safeGame}.main");
+                var candidateBin = Path.Combine(userDir, $"{safeGame}.bin");
+                var candidateMain = Path.Combine(userDir, "main");
+                if (File.Exists(candidateSav)) path = candidateSav;
+                else if (File.Exists(candidateSrm)) path = candidateSrm;
+                else if (File.Exists(candidateMainExt)) path = candidateMainExt;
+                else if (File.Exists(candidateBin)) path = candidateBin;
+                else if (File.Exists(candidateMain)) path = candidateMain;
+            }
+        }
+
+        if (!File.Exists(path))
         {
             return null;
         }
@@ -64,7 +88,31 @@ public sealed class GameSavesService : IGameSavesService
     public async Task<bool> DeleteAsync(Guid userId, string gameId, string kind, CancellationToken cancellationToken)
     {
         var path = ResolvePath(userId, gameId, kind);
-        if (path == null || !File.Exists(path))
+        if (path == null)
+        {
+            return false;
+        }
+
+        if (!File.Exists(path) && string.Equals(kind, "sram", StringComparison.OrdinalIgnoreCase))
+        {
+            var userDir = Path.GetDirectoryName(path);
+            var safeGame = SanitizeFileName(gameId);
+            if (userDir != null && Directory.Exists(userDir))
+            {
+                var candidateSav = Path.Combine(userDir, $"{safeGame}.sav");
+                var candidateSrm = Path.Combine(userDir, $"{safeGame}.srm");
+                var candidateMainExt = Path.Combine(userDir, $"{safeGame}.main");
+                var candidateBin = Path.Combine(userDir, $"{safeGame}.bin");
+                var candidateMain = Path.Combine(userDir, "main");
+                if (File.Exists(candidateSav)) path = candidateSav;
+                else if (File.Exists(candidateSrm)) path = candidateSrm;
+                else if (File.Exists(candidateMainExt)) path = candidateMainExt;
+                else if (File.Exists(candidateBin)) path = candidateBin;
+                else if (File.Exists(candidateMain)) path = candidateMain;
+            }
+        }
+
+        if (!File.Exists(path))
         {
             return false;
         }
