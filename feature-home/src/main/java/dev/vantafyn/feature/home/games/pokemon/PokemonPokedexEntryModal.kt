@@ -1320,14 +1320,14 @@ fun PokemonPokedexEntryModal(
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(Color.Black.copy(alpha = 0.28f))
-                                    .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                                    .background(Color.Black.copy(alpha = 0.35f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.22f), CircleShape),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 var useFallbackUrl by remember(stoneSlug) { mutableStateOf(false) }
@@ -1344,8 +1344,8 @@ fun PokemonPokedexEntryModal(
                                         model = effectiveStoneUrl,
                                         contentDescription = null,
                                         modifier = Modifier
-                                            .size(28.dp)
-                                            .padding(1.dp),
+                                            .fillMaxSize()
+                                            .padding(2.dp),
                                         contentScale = ContentScale.Fit,
                                         onError = {
                                             if (!useFallbackUrl && pokeApiStoneUrl != null && serverStoneUrl != null) {
@@ -1362,11 +1362,14 @@ fun PokemonPokedexEntryModal(
                                         imageVector = Icons.Rounded.AutoAwesome,
                                         contentDescription = null,
                                         tint = Color(0xFFFFF7AD),
-                                        modifier = Modifier.size(18.dp),
+                                        modifier = Modifier.size(22.dp),
                                     )
                                 }
                             }
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Column(
+                                modifier = Modifier.weight(1f, fill = false),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
                                 Text(
                                     text = "MEGA EVOLUTION",
                                     color = Color(0xFFFF6FE5),
