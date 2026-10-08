@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.29.0",
+        "changelog": "Adds Nintendo 3DS ROM format (.cci, .3ds, .cxi, .3dsx, .cia) detection and 3DS console library resolution.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.63/Vantafyn.Plugin.Companion_0.2.29_net9.zip",
+        "checksum": "e22e88b4937a23689d32b2cd8b908d10",
+        "timestamp": "2026-10-08T22:52:42Z"
+      },
+      {
+        "version": "0.2.29.1",
+        "changelog": "Adds Nintendo 3DS ROM format (.cci, .3ds, .cxi, .3dsx, .cia) detection and 3DS console library resolution.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.63/Vantafyn.Plugin.Companion_0.2.29_net10.zip",
+        "checksum": "f3fc75021ac37849049f6aa9757a9b78",
+        "timestamp": "2026-10-08T22:52:42Z"
+      },
+      {
         "version": "0.2.28.0",
         "changelog": "Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery.",
         "targetAbi": "10.11.0.0",

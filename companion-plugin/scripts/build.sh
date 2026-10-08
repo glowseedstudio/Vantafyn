@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.28}"
+VERSION="${1:-0.2.29}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.62}"
-CHANGELOG="Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery."
+TAG="${2:-v0.9.63}"
+CHANGELOG="Adds Nintendo 3DS ROM format (.cci, .3ds, .cxi, .3dsx, .cia) detection and 3DS console library resolution."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.28.0",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.62/Vantafyn.Plugin.Companion_0.2.28_net9.zip",
+        "checksum": "c9cd9731f49255eaf49c9721abf73090",
+        "timestamp": "2026-10-08T22:27:52Z"
+      },
+      {
+        "version": "0.2.28.1",
+        "changelog": "Adds 3DS Pokémon Gen 6/7 Mystery Gifts and Events screen integration with save file unlock tracking and Personal Vault delivery.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.62/Vantafyn.Plugin.Companion_0.2.28_net10.zip",
+        "checksum": "1e98c0ff26cc6e62714356e75a0beb8e",
+        "timestamp": "2026-10-08T22:27:52Z"
       },
       {
         "version": "0.2.27.0",

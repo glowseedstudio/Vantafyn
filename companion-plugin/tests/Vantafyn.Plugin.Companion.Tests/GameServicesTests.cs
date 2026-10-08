@@ -25,9 +25,14 @@ public sealed class GameServicesTests
         Assert.Equal("segaMD", GameSystemCoreResolver.ResolveCore("MegaDrive", "sonic.gen"));
         Assert.Equal("n64", GameSystemCoreResolver.ResolveCore("N64", "mario64.z64"));
         Assert.Equal("nds", GameSystemCoreResolver.ResolveCore("NDS", "mario_kart.nds"));
+        Assert.Equal("citra", GameSystemCoreResolver.ResolveCore("3DS", "pokemon_x.3ds"));
+        Assert.Equal("citra", GameSystemCoreResolver.ResolveCore("3DS", "pokemon_y.cci"));
+        Assert.Equal("citra", GameSystemCoreResolver.ResolveCore("3DS", "pokemon_sun.cxi"));
         Assert.Equal("psx", GameSystemCoreResolver.ResolveCore("PS1", "crash.chd"));
         Assert.Equal("psp", GameSystemCoreResolver.ResolveCore("PSP", "god_of_war.cso"));
         Assert.Equal("arcade", GameSystemCoreResolver.ResolveCore("Arcade", "pacman.zip"));
+        Assert.True(GameSystemCoreResolver.IsRomFile("pokemon_x.cci"));
+        Assert.True(GameSystemCoreResolver.IsRomFile("pokemon_y.3ds"));
     }
 
     [Fact]
@@ -36,6 +41,8 @@ public sealed class GameServicesTests
         Assert.Equal("snes", GameSystemCoreResolver.ResolveCore("Super Nintendo"));
         Assert.Equal("gba", GameSystemCoreResolver.ResolveCore("Game Boy Advance"));
         Assert.Equal("n64", GameSystemCoreResolver.ResolveCore("Nintendo 64"));
+        Assert.Equal("citra", GameSystemCoreResolver.ResolveCore("Nintendo 3DS"));
+        Assert.Equal("citra", GameSystemCoreResolver.ResolveCore("3DS"));
         Assert.Equal("segaMD", GameSystemCoreResolver.ResolveCore("Sega Genesis"));
         Assert.Equal("psx", GameSystemCoreResolver.ResolveCore("PlayStation"));
     }
