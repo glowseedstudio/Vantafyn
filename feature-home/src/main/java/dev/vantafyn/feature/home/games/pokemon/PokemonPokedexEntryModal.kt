@@ -14,6 +14,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -71,9 +72,11 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.Shadow
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -84,6 +87,7 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.DefaultJellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
@@ -459,7 +463,13 @@ fun PokemonPokedexEntryModal(
     val isMegaArtwork = selectedMegaIndex >= 0
     val megaSymbolUrl = remember(session) {
         session?.let {
-            "${it.server.url.trimEnd('/')}/Vantafyn/Pokemon/MegaEvolution/Symbol?api_key=${it.accessToken}"
+            val base = it.server.url.trimEnd('/')
+            val token = it.accessToken
+            if (token.isBlank()) {
+                "$base/Vantafyn/Pokemon/MegaEvolution/Symbol"
+            } else {
+                "$base/Vantafyn/Pokemon/MegaEvolution/Symbol?api_key=$token&X-Emby-Token=$token"
+            }
         }
     }
 
@@ -708,74 +718,59 @@ fun PokemonPokedexEntryModal(
                         )
                     }
 
-                    // Gender toggle chip (for species with visual gender differences)
+                    // Flat Gender toggle (for species with visual gender differences)
                     if (hasGenderDiff) {
-                        Box(
+                        val unselectedGenderColor = Color(0xFF121624).copy(alpha = 0.88f)
+                        Row(
                             modifier = Modifier
                                 .align(Alignment.TopStart)
-                                .padding(10.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF131625).copy(alpha = 0.85f))
-                                .border(1.dp, Color(0xFF282F48), RoundedCornerShape(14.dp))
-                                .padding(3.dp),
+                                .padding(start = 14.dp, top = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                         ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(3.dp),
-                            ) {
-                                // Male ♂
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (!showFemaleArtwork) Color(0xFF0284C7).copy(alpha = 0.35f)
-                                            else Color.Transparent
-                                        )
-                                        .border(
-                                            1.dp,
-                                            if (!showFemaleArtwork) Color(0xFF38BDF8) else Color.Transparent,
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { showFemaleArtwork = false },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = "♂",
-                                        color = if (!showFemaleArtwork) Color(0xFF38BDF8) else Color(0xFF64748B),
-                                        fontSize = 19.sp,
-                                        fontWeight = FontWeight.Black,
+                            Text(
+                                text = "♂",
+                                color = if (!showFemaleArtwork) Color(0xFF38BDF8) else unselectedGenderColor,
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Black,
+                                style = TextStyle(
+                                    shadow = Shadow(
+                                        color = Color.Black.copy(alpha = 0.90f),
+                                        offset = Offset(0f, 1.5f),
+                                        blurRadius = 4f,
                                     )
-                                }
-
-                                // Female ♀
-                                Box(
-                                    modifier = Modifier
-                                        .size(34.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .background(
-                                            if (showFemaleArtwork) Color(0xFFE11D48).copy(alpha = 0.35f)
-                                            else Color.Transparent
-                                        )
-                                        .border(
-                                            1.dp,
-                                            if (showFemaleArtwork) Color(0xFFFB7185) else Color.Transparent,
-                                            RoundedCornerShape(10.dp)
-                                        )
-                                        .clickable { showFemaleArtwork = true },
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    Text(
-                                        text = "♀",
-                                        color = if (showFemaleArtwork) Color(0xFFFB7185) else Color(0xFF64748B),
-                                        fontSize = 19.sp,
-                                        fontWeight = FontWeight.Black,
+                                ),
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) { showFemaleArtwork = false }
+                                    .padding(4.dp),
+                            )
+                            Text(
+                                text = "♀",
+                                color = if (showFemaleArtwork) Color(0xFFFB7185) else unselectedGenderColor,
+                                fontSize = 26.sp,
+                                fontWeight = FontWeight.Black,
+                                style = TextStyle(
+                                    shadow = Shadow(
+                                        color = Color.Black.copy(alpha = 0.90f),
+                                        offset = Offset(0f, 1.5f),
+                                        blurRadius = 4f,
                                     )
-                                }
-                            }
+                                ),
+                                modifier = Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) { showFemaleArtwork = true }
+                                    .padding(4.dp),
+                            )
                         }
-                        // Difference note at bottom of artwork if female selected
-                        if (showFemaleArtwork) {
+                    }
+
+                    // Difference note at bottom of artwork if female selected
+                    if (showFemaleArtwork) {
                             val diffDesc = remember(currentSpeciesId) {
                                 PokemonGenderCatalog.getGenderDifferenceDescription(currentSpeciesId)
                             }
@@ -800,7 +795,6 @@ fun PokemonPokedexEntryModal(
                                 }
                             }
                         }
-                    }
 
                     // Shiny toggle chip (if user has unlocked shiny in their save archive)
                     if (hasShiny) {
@@ -932,6 +926,47 @@ fun PokemonPokedexEntryModal(
                             }
                         }
                     }
+
+                    // Flat form / regional / variant label in bottom-right corner of hero card
+                    if (alternateForms.size > 1 && !isUnown) {
+                        val activeFormName = activeForm?.name
+                        val isBaseName = activeFormName.isNullOrBlank() || activeFormName.equals("Base", ignoreCase = true)
+                        val displayText = if (isBaseName) null else activeFormName
+
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomEnd)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) {
+                                    val currentIdx = alternateForms.indexOfFirst { it.spriteKey == selectedFormKey }
+                                        .let { if (it < 0) 0 else it }
+                                    val nextIdx = (currentIdx + 1) % alternateForms.size
+                                    selectedFormKey = if (nextIdx == 0) null else alternateForms[nextIdx].spriteKey
+                                    showFemaleArtwork = false
+                                }
+                                .padding(end = 14.dp, bottom = 12.dp),
+                            contentAlignment = Alignment.BottomEnd,
+                        ) {
+                            if (displayText != null) {
+                                Text(
+                                    text = displayText,
+                                    color = Color.White.copy(alpha = 0.92f),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.6.sp,
+                                    style = TextStyle(
+                                        shadow = Shadow(
+                                            color = Color.Black.copy(alpha = 0.85f),
+                                            offset = Offset(0f, 1.5f),
+                                            blurRadius = 4f,
+                                        )
+                                    ),
+                                )
+                            }
+                        }
+                    }
                 } else {
                     // Strong Ambient Backlight Glow behind the unregistered silhouette
                     Box(
@@ -989,153 +1024,7 @@ fun PokemonPokedexEntryModal(
                 PokemonFormsCatalog.isSpinda(currentSpeciesId)
             }
 
-            if (alternateForms.isNotEmpty() && !isUnown) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = if (alternateForms.any { it.isMega }) "FORMS & MEGA EVOLUTION" else "FORMS & VARIATIONS",
-                            color = if (alternateForms.any { it.isMega }) Color(0xFFFF6FE5) else VantafynColors.Muted,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        alternateForms.forEach { form ->
-                            val isSelected = (selectedFormKey == form.spriteKey) ||
-                                (selectedFormKey == null && form == alternateForms.first())
-                            val formAccent = if (form.isMega) Color(0xFFFF4FD8) else primaryType.accentColor
-
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(
-                                        if (isSelected) formAccent.copy(alpha = if (form.isMega) 0.30f else 0.25f)
-                                        else Color(0xFF141726)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) formAccent
-                                        else if (form.isMega) Color(0xFFFF4FD8).copy(alpha = 0.45f)
-                                        else Color(0xFF282F48),
-                                        RoundedCornerShape(12.dp),
-                                    )
-                                    .clickable {
-                                        selectedFormKey = if (form == alternateForms.first()) null else form.spriteKey
-                                    }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    text = form.name,
-                                    color = if (isSelected) Color.White else if (form.isMega) Color(0xFFF0ABFC) else Color(0xFF94A3B8),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                )
-                            }
-                        }
-                    }
-
-                    if (activeForm?.isMega == true && !activeForm.description.isNullOrBlank()) {
-                        val megaStoneUrl = remember(session, activeForm) {
-                            val stoneSlug = PokemonFormsCatalog.getMegaStoneSlug(activeForm)
-                            if (session != null && stoneSlug != null) {
-                                "${session.server.url.trimEnd('/')}/Vantafyn/Pokemon/MegaEvolution/Stones/$stoneSlug/Image?api_key=${session.accessToken}"
-                            } else {
-                                null
-                            }
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(
-                                    Brush.linearGradient(
-                                        colors = listOf(
-                                            Color(0xFFFF4FD8).copy(alpha = 0.18f),
-                                            Color(0xFF7C3AED).copy(alpha = 0.12f),
-                                            Color(0xFF22D3EE).copy(alpha = 0.10f),
-                                            Color(0xFF121625),
-                                        ),
-                                    ),
-                                )
-                                .border(1.dp, Color(0xFFFF4FD8).copy(alpha = 0.38f), RoundedCornerShape(16.dp))
-                                .padding(12.dp),
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.Black.copy(alpha = 0.28f))
-                                        .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
-                                    contentAlignment = Alignment.Center,
-                                ) {
-                                    var hasStoneError by remember(megaStoneUrl) { mutableStateOf(false) }
-
-                                    if (megaStoneUrl != null && !hasStoneError) {
-                                        AsyncImage(
-                                            model = megaStoneUrl,
-                                            contentDescription = null,
-                                            modifier = Modifier
-                                                .size(28.dp)
-                                                .padding(1.dp),
-                                            contentScale = ContentScale.Fit,
-                                            onError = { hasStoneError = true },
-                                        )
-                                    }
-
-                                    if (megaStoneUrl == null || hasStoneError) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.AutoAwesome,
-                                            contentDescription = null,
-                                            tint = Color(0xFFFFF7AD),
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                }
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Text(
-                                        text = "MEGA EVOLUTION",
-                                        color = Color(0xFFFF6FE5),
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        letterSpacing = 1.sp,
-                                    )
-                                    Text(
-                                        text = activeForm.description,
-                                        color = Color.White.copy(alpha = 0.88f),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        lineHeight = 16.sp,
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(10.dp))
-            } else if (isSpinda) {
+            if (isSpinda) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1390,6 +1279,114 @@ fun PokemonPokedexEntryModal(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
+
+                // Mega Evolution Awakening & Stone Card (when Mega form is active)
+                if (activeForm?.isMega == true && !activeForm.description.isNullOrBlank()) {
+                    val stoneSlug = remember(activeForm) { PokemonFormsCatalog.getMegaStoneSlug(activeForm) }
+                    val serverStoneUrl = remember(session, stoneSlug) {
+                        if (session != null && stoneSlug != null) {
+                            val base = session.server.url.trimEnd('/')
+                            val token = session.accessToken
+                            if (token.isBlank()) {
+                                "$base/Vantafyn/Pokemon/MegaEvolution/Stones/$stoneSlug/Image"
+                            } else {
+                                "$base/Vantafyn/Pokemon/MegaEvolution/Stones/$stoneSlug/Image?api_key=$token&X-Emby-Token=$token"
+                            }
+                        } else {
+                            null
+                        }
+                    }
+                    val pokeApiStoneUrl = remember(stoneSlug) {
+                        stoneSlug?.let { "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/items/$it.png" }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 18.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF4FD8).copy(alpha = 0.18f),
+                                        Color(0xFF7C3AED).copy(alpha = 0.12f),
+                                        Color(0xFF22D3EE).copy(alpha = 0.10f),
+                                        Color(0xFF121625),
+                                    ),
+                                ),
+                            )
+                            .border(1.dp, Color(0xFFFF4FD8).copy(alpha = 0.38f), RoundedCornerShape(16.dp))
+                            .padding(12.dp),
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.28f))
+                                    .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                var useFallbackUrl by remember(stoneSlug) { mutableStateOf(false) }
+                                var hasStoneError by remember(stoneSlug) { mutableStateOf(false) }
+
+                                val effectiveStoneUrl = when {
+                                    !useFallbackUrl && serverStoneUrl != null -> serverStoneUrl
+                                    pokeApiStoneUrl != null -> pokeApiStoneUrl
+                                    else -> null
+                                }
+
+                                if (effectiveStoneUrl != null && !hasStoneError) {
+                                    AsyncImage(
+                                        model = effectiveStoneUrl,
+                                        contentDescription = null,
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .padding(1.dp),
+                                        contentScale = ContentScale.Fit,
+                                        onError = {
+                                            if (!useFallbackUrl && pokeApiStoneUrl != null && serverStoneUrl != null) {
+                                                useFallbackUrl = true
+                                            } else {
+                                                hasStoneError = true
+                                            }
+                                        },
+                                    )
+                                }
+
+                                if (effectiveStoneUrl == null || hasStoneError) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.AutoAwesome,
+                                        contentDescription = null,
+                                        tint = Color(0xFFFFF7AD),
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "MEGA EVOLUTION",
+                                    color = Color(0xFFFF6FE5),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 1.sp,
+                                )
+                                Text(
+                                    text = activeForm.description,
+                                    color = Color.White.copy(alpha = 0.88f),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    lineHeight = 16.sp,
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
 
                 // Physical Attributes Card (Height / Weight / Archetype)
                 Row(
@@ -1845,8 +1842,6 @@ private fun MegaEvolutionQuickToggle(
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
 ) {
-    var hasSymbolError by remember(symbolUrl) { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .size(36.dp)
@@ -1875,14 +1870,21 @@ private fun MegaEvolutionQuickToggle(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        if (!symbolUrl.isNullOrBlank() && !hasSymbolError) {
-            AsyncImage(
+        if (!symbolUrl.isNullOrBlank()) {
+            SubcomposeAsyncImage(
                 model = symbolUrl,
                 contentDescription = "Mega Evolution",
                 modifier = Modifier
                     .size(if (isActive) 26.dp else 28.dp),
                 contentScale = ContentScale.Fit,
-                onError = { hasSymbolError = true },
+                error = {
+                    Icon(
+                        imageVector = Icons.Rounded.AutoAwesome,
+                        contentDescription = "Mega Evolution",
+                        tint = if (isActive) Color(0xFFFF6FE5) else Color.White.copy(alpha = 0.70f),
+                        modifier = Modifier.size(20.dp),
+                    )
+                },
             )
         } else {
             Icon(

@@ -322,6 +322,27 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "Touch";
                 return true;
             }
+            // Essential defaults for Citra / Azahar 3DS core
+            if (strcmp(var->key, "citra_layout_option") == 0 || strcmp(var->key, "azahar_layout_option") == 0) {
+                var->value = "Default Top-Bottom Screen";
+                return true;
+            }
+            if (strcmp(var->key, "citra_screen_layout") == 0 || strcmp(var->key, "azahar_screen_layout") == 0) {
+                var->value = "top_bottom";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_cpu_jit") == 0 || strcmp(var->key, "azahar_use_cpu_jit") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_is_new_3ds") == 0 || strcmp(var->key, "azahar_is_new_3ds") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_resolution_factor") == 0 || strcmp(var->key, "azahar_resolution_factor") == 0) {
+                var->value = "1x (400x240)";
+                return true;
+            }
             if (strcmp(var->key, "gpsp_bios") == 0) {
                 var->value = "auto";
                 return true;
@@ -587,23 +608,48 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
     ANativeWindow *win_top = s->swap_dual_screens ? s->window_secondary : s->window;
     ANativeWindow *win_bottom = s->swap_dual_screens ? s->window : s->window_secondary;
 
-    if (s->window_secondary && (height >= 384 || width >= 512)) {
-        // Dual physical displays mode: slice into twin 256x192 DS screens
-        unsigned single_w = 256;
-        unsigned single_h = 192;
+    if (s->window_secondary && (height >= 384 || width >= 512 || height >= 480 || width >= 720)) {
+        // Dual physical displays mode: slice into twin DS / 3DS screens
+        unsigned top_w, top_h, bot_w, bot_h;
+        const uint32_t *src_bottom;
+
+        if (height >= width) {
+            // Vertical stacked layout (Top/Bottom)
+            top_w = width;
+            top_h = height / 2;
+            bot_w = width;
+            bot_h = height - top_h;
+            src_bottom = s->frame_buffer + top_h * width;
+        } else {
+            // Horizontal side-by-side layout (Left/Right)
+            if (width == 720 || width == 1440) {
+                // 3DS: 400x240 top, 320x240 bottom
+                top_w = (width == 1440) ? 800 : 400;
+                top_h = height;
+                bot_w = width - top_w;
+                bot_h = height;
+                src_bottom = s->frame_buffer + top_w;
+            } else {
+                top_w = width / 2;
+                top_h = height;
+                bot_w = width - top_w;
+                bot_h = height;
+                src_bottom = s->frame_buffer + top_w;
+            }
+        }
 
         if (win_top) {
             if (!s->crisp_pixels) {
-                if (s->last_buffer_w != (int)single_w || s->last_buffer_h != (int)single_h) {
-                    ANativeWindow_setBuffersGeometry(win_top, (int32_t)single_w, (int32_t)single_h, WINDOW_FORMAT_RGBA_8888);
-                    s->last_buffer_w = (int)single_w;
-                    s->last_buffer_h = (int)single_h;
+                if (s->last_buffer_w != (int)top_w || s->last_buffer_h != (int)top_h) {
+                    ANativeWindow_setBuffersGeometry(win_top, (int32_t)top_w, (int32_t)top_h, WINDOW_FORMAT_RGBA_8888);
+                    s->last_buffer_w = (int)top_w;
+                    s->last_buffer_h = (int)top_h;
                 }
                 ANativeWindow_Buffer top_buf;
                 if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
                     uint32_t *dst = (uint32_t *)top_buf.bits;
-                    for (unsigned y = 0; y < single_h && y < (unsigned)top_buf.height; y++) {
-                        memcpy(dst + y * top_buf.stride, s->frame_buffer + y * width, single_w * sizeof(uint32_t));
+                    for (unsigned y = 0; y < top_h && y < (unsigned)top_buf.height; y++) {
+                        memcpy(dst + y * top_buf.stride, s->frame_buffer + y * width, top_w * sizeof(uint32_t));
                     }
                     ANativeWindow_unlockAndPost(win_top);
                 }
@@ -616,7 +662,7 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 ANativeWindow_Buffer top_buf;
                 if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
                     blit_frame_nearest(
-                        s->frame_buffer, (int)single_w, (int)single_h, width,
+                        s->frame_buffer, (int)top_w, (int)top_h, width,
                         (uint32_t *)top_buf.bits, top_buf.width, top_buf.height, top_buf.stride,
                         &s->lut_x, &s->lut_x_capacity, &s->lut_x_src_w, &s->lut_x_dst_w,
                         &s->lut_y, &s->lut_y_capacity, &s->lut_y_src_h, &s->lut_y_dst_h
@@ -627,24 +673,17 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         }
 
         if (win_bottom) {
-            const uint32_t *src_line;
-            if (height >= 384) {
-                src_line = s->frame_buffer + 192 * width;
-            } else {
-                src_line = s->frame_buffer + 256;
-            }
-
             if (!s->crisp_pixels) {
-                if (s->last_buffer_secondary_w != (int)single_w || s->last_buffer_secondary_h != (int)single_h) {
-                    ANativeWindow_setBuffersGeometry(win_bottom, (int32_t)single_w, (int32_t)single_h, WINDOW_FORMAT_RGBA_8888);
-                    s->last_buffer_secondary_w = (int)single_w;
-                    s->last_buffer_secondary_h = (int)single_h;
+                if (s->last_buffer_secondary_w != (int)bot_w || s->last_buffer_secondary_h != (int)bot_h) {
+                    ANativeWindow_setBuffersGeometry(win_bottom, (int32_t)bot_w, (int32_t)bot_h, WINDOW_FORMAT_RGBA_8888);
+                    s->last_buffer_secondary_w = (int)bot_w;
+                    s->last_buffer_secondary_h = (int)bot_h;
                 }
                 ANativeWindow_Buffer bot_buf;
                 if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
                     uint32_t *dst = (uint32_t *)bot_buf.bits;
-                    for (unsigned y = 0; y < single_h && y < (unsigned)bot_buf.height; y++) {
-                        memcpy(dst + y * bot_buf.stride, src_line + y * width, single_w * sizeof(uint32_t));
+                    for (unsigned y = 0; y < bot_h && y < (unsigned)bot_buf.height; y++) {
+                        memcpy(dst + y * bot_buf.stride, src_bottom + y * width, bot_w * sizeof(uint32_t));
                     }
                     ANativeWindow_unlockAndPost(win_bottom);
                 }
@@ -657,7 +696,7 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 ANativeWindow_Buffer bot_buf;
                 if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
                     blit_frame_nearest(
-                        src_line, (int)single_w, (int)single_h, width,
+                        src_bottom, (int)bot_w, (int)bot_h, width,
                         (uint32_t *)bot_buf.bits, bot_buf.width, bot_buf.height, bot_buf.stride,
                         &s->lut_x, &s->lut_x_capacity, &s->lut_x_src_w, &s->lut_x_dst_w,
                         &s->lut_y, &s->lut_y_capacity, &s->lut_y_src_h, &s->lut_y_dst_h

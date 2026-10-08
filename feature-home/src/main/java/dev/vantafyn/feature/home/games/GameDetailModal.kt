@@ -155,6 +155,20 @@ fun getAvailableCoresForSystem(systemId: String): List<SystemCoreOption> {
                 isRecommended = false,
             ),
         )
+        "3ds", "n3ds", "nintendo3ds" -> listOf(
+            SystemCoreOption(
+                id = "azahar",
+                name = "Azahar",
+                description = "Modern Nintendo 3DS Libretro core with dual-screen support.",
+                isRecommended = true,
+            ),
+            SystemCoreOption(
+                id = "citra",
+                name = "Citra",
+                description = "Classic Nintendo 3DS Libretro core.",
+                isRecommended = false,
+            ),
+        )
         else -> emptyList()
     }
 }

@@ -8,20 +8,36 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.26.0",
+        "changelog": "Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.60/Vantafyn.Plugin.Companion_0.2.26_net9.zip",
+        "checksum": "50baf45372dd2fa7927673b8059ac7aa",
+        "timestamp": "2026-10-08T12:35:52Z"
+      },
+      {
+        "version": "0.2.26.1",
+        "changelog": "Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.60/Vantafyn.Plugin.Companion_0.2.26_net10.zip",
+        "checksum": "4a8e047da5454a1ffae3d5472a8a41d4",
+        "timestamp": "2026-10-08T12:35:52Z"
+      },
+      {
         "version": "0.2.25.0",
         "changelog": "Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops.",
         "targetAbi": "10.11.0.0",
         "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.59/Vantafyn.Plugin.Companion_0.2.25_net9.zip",
-        "checksum": "598c4bf693e14d746fc17163fc637019",
-        "timestamp": "2026-10-08T09:32:27Z"
+        "checksum": "712052b18ead3356043b9e65d90a4134",
+        "timestamp": "2026-10-08T12:29:08Z"
       },
       {
         "version": "0.2.25.1",
         "changelog": "Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops.",
         "targetAbi": "12.0.0.0",
         "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.59/Vantafyn.Plugin.Companion_0.2.25_net10.zip",
-        "checksum": "1e95e6cd84aa2c88582a4006cc8b9069",
-        "timestamp": "2026-10-08T09:32:27Z"
+        "checksum": "42e602be72ef53ad4445ac00fc1d66c2",
+        "timestamp": "2026-10-08T12:29:08Z"
       },
       {
         "version": "0.2.24.0",

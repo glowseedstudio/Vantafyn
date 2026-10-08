@@ -183,12 +183,18 @@ fun GamePlayerScreen(
     val isNativeMode = remember(game.systemId, game.core) {
         val s = game.systemId.lowercase().trim()
         val c = game.core.lowercase().trim()
-        s in setOf("nds", "ds", "gba", "gb", "gbc") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") || c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy")
+        s in setOf("nds", "ds", "gba", "gb", "gbc", "3ds", "n3ds", "nintendo3ds") ||
+            c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") ||
+            c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy") ||
+            c.contains("azahar") || c.contains("citra")
     }
     val isHandheld = remember(game.systemId, game.core) {
         val s = game.systemId.lowercase().trim()
         val c = game.core.lowercase().trim()
-        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp") || c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") || c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy")
+        s in setOf("nds", "ds", "gba", "gb", "gbc", "psp", "3ds", "n3ds", "nintendo3ds") ||
+            c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") ||
+            c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy") ||
+            c.contains("azahar") || c.contains("citra")
     }
 
     val initialFilter = remember(isHandheld) {
@@ -446,6 +452,7 @@ fun GamePlayerScreen(
                     android.util.Log.i("GamePlayerScreen", "No existing SRAM found for ${game.id}, starting clean.")
                 }
                 if (isNativeMode) {
+                    val is3dsSystem = game.systemId.lowercase() in listOf("3ds", "n3ds", "nintendo3ds") || game.core.contains("azahar", ignoreCase = true) || game.core.contains("citra", ignoreCase = true)
                     val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
                     val preferredCore = prefs.getString("selected_core_${game.id}", null)
                     val effectiveCore = (preferredCore ?: game.core).trim()
@@ -454,7 +461,9 @@ fun GamePlayerScreen(
                             effectiveCore.contains("sameboy", ignoreCase = true) ||
                             effectiveCore.contains("gpsp", ignoreCase = true) ||
                             effectiveCore.contains("mgba", ignoreCase = true) ||
-                            effectiveCore.contains("melonds", ignoreCase = true))) {
+                            effectiveCore.contains("melonds", ignoreCase = true) ||
+                            effectiveCore.contains("azahar", ignoreCase = true) ||
+                            effectiveCore.contains("citra", ignoreCase = true))) {
                         when {
                             effectiveCore.contains("gambatte", ignoreCase = true) -> "gambatte"
                             effectiveCore.contains("tgbdual", ignoreCase = true) -> "tgbdual"
@@ -462,6 +471,8 @@ fun GamePlayerScreen(
                             effectiveCore.contains("gpsp", ignoreCase = true) -> "gpsp"
                             effectiveCore.contains("mgba", ignoreCase = true) -> "mgba"
                             effectiveCore.contains("melonds", ignoreCase = true) -> "melonds"
+                            effectiveCore.contains("azahar", ignoreCase = true) -> "azahar"
+                            effectiveCore.contains("citra", ignoreCase = true) -> "citra"
                             else -> storageManager.nativeCoreManager.getCoreIdForSystem(game.systemId)
                         }
                     } else {
@@ -496,6 +507,17 @@ fun GamePlayerScreen(
                     if (av != null) {
                         if (isNdsSystem) {
                             engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                        } else if (is3dsSystem) {
+                            val (citraLayout, citraSwap) = when (ndsScreenLayout) {
+                                NdsScreenLayout.TopBottom -> "Default Top-Bottom Screen" to "Top"
+                                NdsScreenLayout.LeftRight -> "Side by Side" to "Top"
+                                NdsScreenLayout.TopOnly -> "Single Screen Only" to "Top"
+                                NdsScreenLayout.BottomOnly -> "Single Screen Only" to "Bottom"
+                            }
+                            engine.setOption("citra_layout_option", citraLayout)
+                            engine.setOption("azahar_layout_option", citraLayout)
+                            engine.setOption("citra_swap_screen", citraSwap)
+                            engine.setOption("azahar_swap_screen", citraSwap)
                         }
                         engine.setColorCorrection(gbaColorCorrection)
                         engine.setAudioFiltering(gbaAudioFiltering)
@@ -636,11 +658,22 @@ fun GamePlayerScreen(
         val totalWidth = maxWidth
         val totalHeight = maxHeight
         val isPortraitLayout = totalHeight > (totalWidth * 1.1f) && !isTv
+        val is3dsGame = game.systemId.lowercase() in listOf("3ds", "n3ds", "nintendo3ds") || game.core.contains("azahar", ignoreCase = true) || game.core.contains("citra", ignoreCase = true)
         val isNdsGame = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
+        val isDualScreenGame = isNdsGame || is3dsGame
         val isGbaGame = game.systemId.lowercase() == "gba" || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
         val isGbGame = game.systemId.lowercase() in listOf("gb", "gbc") || game.core.contains("gambatte", ignoreCase = true) || game.core.contains("tgbdual", ignoreCase = true) || game.core.contains("sameboy", ignoreCase = true)
-        val ratioFloat = if (hasSecondaryDisplay && isNdsGame) {
+        val ratioFloat = if (hasSecondaryDisplay && is3dsGame) {
+            if (swapDualScreens) 4f / 3f else 5f / 3f // Secondary physical display: 5:3 top, 4:3 bottom
+        } else if (hasSecondaryDisplay && isNdsGame) {
             4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
+        } else if (is3dsGame) {
+            when (ndsScreenLayout) {
+                NdsScreenLayout.LeftRight -> 720f / 240f // 3:1 widescreen side-by-side (400+320 x 240)
+                NdsScreenLayout.TopBottom -> 400f / 480f // 5:6 vertical stack (400 x 240+240)
+                NdsScreenLayout.TopOnly -> 400f / 240f // 5:3 top screen
+                NdsScreenLayout.BottomOnly -> 320f / 240f // 4:3 bottom touch screen
+            }
         } else if (isNdsGame) {
             when (ndsScreenLayout) {
                 NdsScreenLayout.LeftRight -> 512f / 192f // 8:3 = ~2.67 widescreen side-by-side
@@ -703,10 +736,11 @@ fun GamePlayerScreen(
                     NativeEmulatorSurface(
                         engine = nativeEngine!!,
                         modifier = Modifier.fillMaxSize(),
-                        isDualScreen = !hasSecondaryDisplay && isNdsGame,
+                        isDualScreen = !hasSecondaryDisplay && isDualScreenGame,
                         layout = if (hasSecondaryDisplay) {
                             if (swapDualScreens) NdsScreenLayout.BottomOnly else NdsScreenLayout.TopOnly
                         } else ndsScreenLayout,
+                        is3ds = is3dsGame,
                     )
                 } else {
                     key(webViewReloadKey) {
@@ -1135,6 +1169,16 @@ fun GamePlayerScreen(
                 ndsScreenLayout = ndsScreenLayout.next()
                 if (isNativeMode) {
                     nativeEngine?.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                    val (citraLayout, citraSwap) = when (ndsScreenLayout) {
+                        NdsScreenLayout.TopBottom -> "Default Top-Bottom Screen" to "Top"
+                        NdsScreenLayout.LeftRight -> "Side by Side" to "Top"
+                        NdsScreenLayout.TopOnly -> "Single Screen Only" to "Top"
+                        NdsScreenLayout.BottomOnly -> "Single Screen Only" to "Bottom"
+                    }
+                    nativeEngine?.setOption("citra_layout_option", citraLayout)
+                    nativeEngine?.setOption("azahar_layout_option", citraLayout)
+                    nativeEngine?.setOption("citra_swap_screen", citraSwap)
+                    nativeEngine?.setOption("azahar_swap_screen", citraSwap)
                 }
             },
             hasSecondaryDisplay = hasSecondaryDisplay,

@@ -38,6 +38,7 @@ fun NativeEmulatorSurface(
     modifier: Modifier = Modifier,
     isDualScreen: Boolean = true,
     layout: NdsScreenLayout = NdsScreenLayout.TopBottom,
+    is3ds: Boolean = false,
 ) {
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
@@ -61,17 +62,17 @@ fun NativeEmulatorSurface(
             },
         )
 
-        // DS Touchscreen input interceptor (maps touches based on current screen layout)
+        // DS / 3DS Touchscreen input interceptor (maps touches based on current screen layout)
         if (isDualScreen) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(layout) {
+                    .pointerInput(layout, is3ds) {
                         detectTapGestures(
                             onPress = { offset ->
                                 val viewW = size.width.toFloat()
                                 val viewH = size.height.toFloat()
-                                val retroCoords = mapTouchToRetro(offset, viewW, viewH, layout)
+                                val retroCoords = mapTouchToRetro(offset, viewW, viewH, layout, is3ds)
 
                                 if (retroCoords != null) {
                                     engine.setTouch(retroCoords.first, retroCoords.second, true)
@@ -81,12 +82,12 @@ fun NativeEmulatorSurface(
                             },
                         )
                     }
-                    .pointerInput(layout) {
+                    .pointerInput(layout, is3ds) {
                         detectDragGestures(
                             onDragStart = { offset ->
                                 val viewW = size.width.toFloat()
                                 val viewH = size.height.toFloat()
-                                val retroCoords = mapTouchToRetro(offset, viewW, viewH, layout)
+                                val retroCoords = mapTouchToRetro(offset, viewW, viewH, layout, is3ds)
                                 if (retroCoords != null) {
                                     engine.setTouch(retroCoords.first, retroCoords.second, true)
                                 }
@@ -100,7 +101,7 @@ fun NativeEmulatorSurface(
                             onDrag = { change, _ ->
                                 val viewW = size.width.toFloat()
                                 val viewH = size.height.toFloat()
-                                val retroCoords = mapTouchToRetro(change.position, viewW, viewH, layout)
+                                val retroCoords = mapTouchToRetro(change.position, viewW, viewH, layout, is3ds)
                                 if (retroCoords != null) {
                                     engine.setTouch(retroCoords.first, retroCoords.second, true)
                                 }
@@ -117,28 +118,59 @@ private fun mapTouchToRetro(
     viewW: Float,
     viewH: Float,
     layout: NdsScreenLayout,
+    is3ds: Boolean = false,
 ): Pair<Short, Short>? {
     val relX: Float
     val relY: Float
-    when (layout) {
-        NdsScreenLayout.TopBottom -> {
-            val topScreenBottom = viewH * 0.5f
-            if (offset.y < topScreenBottom) return null
-            relX = (offset.x / viewW).coerceIn(0f, 1f)
-            relY = ((offset.y - topScreenBottom) / (viewH - topScreenBottom)).coerceIn(0f, 1f)
+    if (is3ds) {
+        when (layout) {
+            NdsScreenLayout.TopBottom -> {
+                // In stacked 3DS: Top screen is 400x240, Bottom is 320x240. Total canvas aspect 400x480.
+                val topScreenBottom = viewH * 0.5f
+                if (offset.y < topScreenBottom) return null
+                // Bottom screen (320w) is centered inside 400w:
+                // (400 - 320) / 2 = 40 pixels on each side (10% of width)
+                val marginX = viewW * 0.10f
+                if (offset.x < marginX || offset.x > (viewW - marginX)) return null
+                relX = ((offset.x - marginX) / (viewW - 2f * marginX)).coerceIn(0f, 1f)
+                relY = ((offset.y - topScreenBottom) / (viewH - topScreenBottom)).coerceIn(0f, 1f)
+            }
+            NdsScreenLayout.LeftRight -> {
+                // In side-by-side 3DS: Top is 400x240, Bottom is 320x240. Total width 720.
+                val leftScreenRight = viewW * (400f / 720f)
+                if (offset.x < leftScreenRight) return null
+                relX = ((offset.x - leftScreenRight) / (viewW - leftScreenRight)).coerceIn(0f, 1f)
+                relY = (offset.y / viewH).coerceIn(0f, 1f)
+            }
+            NdsScreenLayout.BottomOnly -> {
+                relX = (offset.x / viewW).coerceIn(0f, 1f)
+                relY = (offset.y / viewH).coerceIn(0f, 1f)
+            }
+            NdsScreenLayout.TopOnly -> {
+                return null
+            }
         }
-        NdsScreenLayout.LeftRight -> {
-            val leftScreenRight = viewW * 0.5f
-            if (offset.x < leftScreenRight) return null
-            relX = ((offset.x - leftScreenRight) / (viewW - leftScreenRight)).coerceIn(0f, 1f)
-            relY = (offset.y / viewH).coerceIn(0f, 1f)
-        }
-        NdsScreenLayout.BottomOnly -> {
-            relX = (offset.x / viewW).coerceIn(0f, 1f)
-            relY = (offset.y / viewH).coerceIn(0f, 1f)
-        }
-        NdsScreenLayout.TopOnly -> {
-            return null
+    } else {
+        when (layout) {
+            NdsScreenLayout.TopBottom -> {
+                val topScreenBottom = viewH * 0.5f
+                if (offset.y < topScreenBottom) return null
+                relX = (offset.x / viewW).coerceIn(0f, 1f)
+                relY = ((offset.y - topScreenBottom) / (viewH - topScreenBottom)).coerceIn(0f, 1f)
+            }
+            NdsScreenLayout.LeftRight -> {
+                val leftScreenRight = viewW * 0.5f
+                if (offset.x < leftScreenRight) return null
+                relX = ((offset.x - leftScreenRight) / (viewW - leftScreenRight)).coerceIn(0f, 1f)
+                relY = (offset.y / viewH).coerceIn(0f, 1f)
+            }
+            NdsScreenLayout.BottomOnly -> {
+                relX = (offset.x / viewW).coerceIn(0f, 1f)
+                relY = (offset.y / viewH).coerceIn(0f, 1f)
+            }
+            NdsScreenLayout.TopOnly -> {
+                return null
+            }
         }
     }
     val retroX = ((relX * 2f - 1f) * 0x7fff).toInt().toShort()

@@ -23,12 +23,18 @@ class NativeCoreManager(private val context: Context) {
         // Map system identifier to Libretro core name
         private val SYSTEM_TO_CORE = mapOf(
             "nds" to "melonds",
+            "ds" to "melonds",
+            "3ds" to "azahar",
+            "n3ds" to "azahar",
+            "nintendo3ds" to "azahar",
             "gba" to "gpsp",
             "gb" to "gambatte",
             "gbc" to "gambatte",
             "snes" to "snes9x",
             "nes" to "fceumm",
         )
+        private const val AZAHAR_RELEASE_VERSION = "2126.1.2"
+        private const val AZAHAR_GITHUB_BASE = "https://github.com/azahar-emu/azahar/releases/download/$AZAHAR_RELEASE_VERSION"
     }
 
     private val coresDir: File by lazy {
@@ -81,73 +87,106 @@ class NativeCoreManager(private val context: Context) {
         }
 
         val abi = getSupportedAbi()
-        val urlString = "$BUILDBOT_BASE/$abi/${coreId}_libretro_android.so.zip"
-        Log.i(TAG, "Fetching native core from: $urlString")
+        val candidateUrls = if (coreId.equals("azahar", ignoreCase = true)) {
+            listOf(
+                "$AZAHAR_GITHUB_BASE/azahar-libretro-android-$abi-$AZAHAR_RELEASE_VERSION.zip",
+                "$BUILDBOT_BASE/$abi/citra_libretro_android.so.zip"
+            )
+        } else {
+            listOf("$BUILDBOT_BASE/$abi/${coreId}_libretro_android.so.zip")
+        }
 
-        try {
-            val url = URL(urlString)
-            val conn = (url.openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 30_000
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; Vantafyn Native Core Downloader)")
-                instanceFollowRedirects = true
-            }
+        var lastException: Exception? = null
 
-            if (conn.responseCode !in 200..299) {
-                return@withContext Result.failure(Exception("HTTP Error ${conn.responseCode} while downloading $coreId"))
-            }
-
-            val totalBytes = conn.contentLength.toLong()
-            var downloadedBytes = 0L
-
-            val tempZip = File(coresDir, "${coreId}_temp.zip")
-            conn.inputStream.use { input ->
-                FileOutputStream(tempZip).use { output ->
-                    val buffer = ByteArray(8192)
-                    var bytesRead: Int
-                    while (input.read(buffer).also { bytesRead = it } != -1) {
-                        output.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
-                        if (totalBytes > 0) {
-                            onProgress(downloadedBytes.toFloat() / totalBytes)
+        for (urlString in candidateUrls) {
+            Log.i(TAG, "Fetching native core from: $urlString")
+            try {
+                var currentUrl = urlString
+                var conn: HttpURLConnection? = null
+                var redirectCount = 0
+                while (redirectCount < 5) {
+                    val url = URL(currentUrl)
+                    val candidateConn = (url.openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15_000
+                        readTimeout = 30_000
+                        setRequestProperty("User-Agent", "Mozilla/5.0 (Android; Mobile; Vantafyn Native Core Downloader)")
+                        instanceFollowRedirects = true
+                    }
+                    val code = candidateConn.responseCode
+                    if (code in listOf(301, 302, 303, 307, 308)) {
+                        val location = candidateConn.getHeaderField("Location")
+                        candidateConn.disconnect()
+                        if (!location.isNullOrBlank()) {
+                            currentUrl = location
+                            redirectCount++
+                            continue
                         }
                     }
+                    conn = candidateConn
+                    break
                 }
-            }
 
-            // Extract .so from zip
-            var extracted = false
-            tempZip.inputStream().use { fileIn ->
-                ZipInputStream(fileIn).use { zipIn ->
-                    var entry = zipIn.nextEntry
-                    while (entry != null) {
-                        if (entry.name.endsWith(".so")) {
-                            FileOutputStream(targetFile).use { outSo ->
-                                zipIn.copyTo(outSo)
+                if (conn == null || conn.responseCode !in 200..299) {
+                    val code = conn?.responseCode ?: -1
+                    conn?.disconnect()
+                    lastException = Exception("HTTP Error $code while downloading $coreId from $urlString")
+                    continue
+                }
+
+                    val totalBytes = conn.contentLength.toLong()
+                    var downloadedBytes = 0L
+
+                    val tempZip = File(coresDir, "${coreId}_temp.zip")
+                    conn.inputStream.use { input ->
+                        FileOutputStream(tempZip).use { output ->
+                            val buffer = ByteArray(8192)
+                            var bytesRead: Int
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                output.write(buffer, 0, bytesRead)
+                                downloadedBytes += bytesRead
+                                if (totalBytes > 0) {
+                                    onProgress(downloadedBytes.toFloat() / totalBytes)
+                                }
                             }
-                            extracted = true
-                            break
                         }
-                        zipIn.closeEntry()
-                        entry = zipIn.nextEntry
                     }
+
+                    // Extract .so from zip
+                    var extracted = false
+                    tempZip.inputStream().use { fileIn ->
+                        ZipInputStream(fileIn).use { zipIn ->
+                            var entry = zipIn.nextEntry
+                            while (entry != null) {
+                                if (entry.name.endsWith(".so")) {
+                                    FileOutputStream(targetFile).use { outSo ->
+                                        zipIn.copyTo(outSo)
+                                    }
+                                    extracted = true
+                                    break
+                                }
+                                zipIn.closeEntry()
+                                entry = zipIn.nextEntry
+                            }
+                        }
+                    }
+                    tempZip.delete()
+
+                    if (extracted && targetFile.exists() && targetFile.length() > 0) {
+                        targetFile.setExecutable(true, false)
+                        targetFile.setReadable(true, false)
+                        Log.i(TAG, "Core $coreId installed successfully (${targetFile.length()} bytes)")
+                        return@withContext Result.success(targetFile)
+                    } else {
+                        targetFile.delete()
+                        lastException = Exception("Failed to extract valid .so from core archive for $urlString")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error installing core $coreId from $urlString", e)
+                    targetFile.delete()
+                    lastException = e
                 }
             }
-            tempZip.delete()
 
-            if (extracted && targetFile.exists() && targetFile.length() > 0) {
-                targetFile.setExecutable(true, false)
-                targetFile.setReadable(true, false)
-                Log.i(TAG, "Core $coreId installed successfully (${targetFile.length()} bytes)")
-                Result.success(targetFile)
-            } else {
-                targetFile.delete()
-                Result.failure(Exception("Failed to extract valid .so from core archive"))
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error installing core $coreId", e)
-            targetFile.delete()
-            Result.failure(e)
+            Result.failure(lastException ?: Exception("Failed to install core $coreId from any available source"))
         }
     }
-}

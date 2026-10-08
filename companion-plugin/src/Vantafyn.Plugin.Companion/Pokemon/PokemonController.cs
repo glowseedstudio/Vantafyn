@@ -3444,36 +3444,132 @@ public sealed class PokemonController : ControllerBase
         };
     }
 
-    private (string Path, string ContentType)? ResolveMegaEvolutionSymbolPath(PokemonConfiguration config)
+    private List<string> ResolveBadgeArtRoots(PokemonConfiguration config)
     {
-        var root = config.BadgeArtPath?.Trim('\"', '\'').Trim();
-        if (string.IsNullOrWhiteSpace(root))
+        var roots = new List<string>();
+
+        void AddIfValid(string? path)
         {
-            root = Path.Combine(_paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon"), "badge-art");
+            if (string.IsNullOrWhiteSpace(path)) return;
+            try
+            {
+                var full = Path.GetFullPath(path.Trim('\"', '\'').Trim());
+                if (Directory.Exists(full) && !roots.Contains(full, StringComparer.OrdinalIgnoreCase))
+                {
+                    roots.Add(full);
+                }
+            }
+            catch { }
         }
 
-        var fullRoot = Path.GetFullPath(root);
-        var megaRoot = Path.GetFullPath(Path.Combine(fullRoot, "mega"));
-        if (!IsPathInside(megaRoot, fullRoot) || !Directory.Exists(megaRoot)) return null;
+        var configured = config.BadgeArtPath;
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            AddIfValid(configured);
+            try
+            {
+                var parent = Path.GetDirectoryName(Path.GetFullPath(configured.Trim('\"', '\'').Trim()));
+                if (parent != null && Directory.Exists(parent))
+                {
+                    AddIfValid(Path.Combine(parent, "badges"));
+                    AddIfValid(Path.Combine(parent, "badge-art"));
+                    AddIfValid(parent);
+                }
+            }
+            catch { }
+        }
 
-        var names = new[]
+        if (_paths?.PokemonRoot != null)
+        {
+            AddIfValid(Path.Combine(_paths.PokemonRoot, "badges"));
+            AddIfValid(Path.Combine(_paths.PokemonRoot, "badge-art"));
+            AddIfValid(_paths.PokemonRoot);
+        }
+
+        var pluginData = Plugin.Instance?.DataRootPath;
+        if (!string.IsNullOrWhiteSpace(pluginData))
+        {
+            AddIfValid(Path.Combine(pluginData, "pokemon", "badges"));
+            AddIfValid(Path.Combine(pluginData, "pokemon", "badge-art"));
+            AddIfValid(Path.Combine(pluginData, "badges"));
+            AddIfValid(Path.Combine(pluginData, "badge-art"));
+        }
+
+        return roots;
+    }
+
+    private static string? ResolveSubfolder(string parent, string subfolderName)
+    {
+        var exact = Path.Combine(parent, subfolderName);
+        if (Directory.Exists(exact)) return exact;
+
+        try
+        {
+            return Directory.EnumerateDirectories(parent)
+                .FirstOrDefault(dir => string.Equals(Path.GetFileName(dir), subfolderName, StringComparison.OrdinalIgnoreCase));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private (string Path, string ContentType)? ResolveMegaEvolutionSymbolPath(PokemonConfiguration config)
+    {
+        var roots = ResolveBadgeArtRoots(config);
+        if (roots.Count == 0) return null;
+
+        var targetNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "mega-evolution-symbol",
             "mega-evolution",
             "mega-evolution-icon",
             "mega-symbol",
+            "mega_symbol",
             "mega_icon",
+            "mega-icon",
             "mega"
         };
-        var extensions = new[] { ".png", ".webp", ".jpg", ".jpeg", ".svg" };
+        var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".webp", ".jpg", ".jpeg", ".svg" };
 
-        foreach (var name in names)
+        foreach (var root in roots)
         {
-            foreach (var extension in extensions)
+            var candidateFolders = new List<string>();
+            var megaDir = ResolveSubfolder(root, "mega") ?? ResolveSubfolder(root, "mega-evolution") ?? ResolveSubfolder(root, "symbols");
+            if (megaDir != null) candidateFolders.Add(megaDir);
+            candidateFolders.Add(root);
+
+            foreach (var folder in candidateFolders.Distinct())
             {
-                var candidate = Path.GetFullPath(Path.Combine(megaRoot, name + extension));
-                if (!IsPathInside(candidate, megaRoot) || !System.IO.File.Exists(candidate)) continue;
-                return (candidate, ImageContentType(candidate));
+                if (!Directory.Exists(folder)) continue;
+
+                foreach (var name in targetNames)
+                {
+                    foreach (var ext in extensions)
+                    {
+                        var candidate = Path.Combine(folder, name + ext);
+                        if (System.IO.File.Exists(candidate))
+                        {
+                            return (candidate, ImageContentType(candidate));
+                        }
+                    }
+                }
+
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(folder))
+                    {
+                        var ext = Path.GetExtension(file);
+                        if (!extensions.Contains(ext)) continue;
+
+                        var stem = Path.GetFileNameWithoutExtension(file);
+                        if (targetNames.Contains(stem))
+                        {
+                            return (file, ImageContentType(file));
+                        }
+                    }
+                }
+                catch { }
             }
         }
 
@@ -3489,57 +3585,85 @@ public sealed class PokemonController : ControllerBase
             return null;
         }
 
-        var root = config.BadgeArtPath?.Trim('\"', '\'').Trim();
-        if (string.IsNullOrWhiteSpace(root))
+        var roots = ResolveBadgeArtRoots(config);
+        if (roots.Count == 0) return null;
+
+        var cleanStem = normalizedId.Replace("-", "").Replace("_", "").Replace(" ", "");
+        var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".png", ".webp", ".jpg", ".jpeg", ".svg" };
+
+        foreach (var root in roots)
         {
-            root = Path.Combine(_paths?.PokemonRoot ?? Path.Combine(Plugin.Instance?.DataRootPath ?? Path.GetTempPath(), "pokemon"), "badge-art");
-        }
+            var candidateFolders = new List<string>();
 
-        var fullRoot = Path.GetFullPath(root);
-        if (!Directory.Exists(fullRoot)) return null;
-
-        var candidateFolders = new[]
-        {
-            Path.Combine(fullRoot, "mega-stones"),
-            Path.Combine(fullRoot, "mega", "stones"),
-            Path.Combine(fullRoot, "mega"),
-            Path.Combine(fullRoot, "stones"),
-            fullRoot
-        };
-
-        var nameVariants = new[]
-        {
-            normalizedId,
-            normalizedId.Replace("-", "_"),
-            normalizedId.Replace("_", "-"),
-            normalizedId.Replace("-", "").Replace("_", "")
-        }.Distinct();
-
-        var extensions = new[] { ".png", ".webp", ".jpg", ".jpeg", ".svg" };
-
-        foreach (var folder in candidateFolders)
-        {
-            var fullFolder = Path.GetFullPath(folder);
-            if (!IsPathInside(fullFolder, fullRoot) || !Directory.Exists(fullFolder)) continue;
-
-            foreach (var name in nameVariants)
+            // 1. root/mega/stones or root/badges/mega/stones
+            var megaDir = ResolveSubfolder(root, "mega") ?? ResolveSubfolder(root, "mega-evolution");
+            if (megaDir != null)
             {
-                foreach (var extension in extensions)
+                var stonesInMega = ResolveSubfolder(megaDir, "stones") ?? ResolveSubfolder(megaDir, "mega-stones");
+                if (stonesInMega != null) candidateFolders.Add(stonesInMega);
+                candidateFolders.Add(megaDir);
+            }
+
+            // 2. root/mega-stones or root/stones
+            var megaStonesDir = ResolveSubfolder(root, "mega-stones") ?? ResolveSubfolder(root, "stones");
+            if (megaStonesDir != null) candidateFolders.Add(megaStonesDir);
+
+            // 3. root itself
+            candidateFolders.Add(root);
+
+            foreach (var folder in candidateFolders.Distinct())
+            {
+                if (!Directory.Exists(folder)) continue;
+
+                var directNames = new[]
                 {
-                    var candidate = Path.GetFullPath(Path.Combine(fullFolder, name + extension));
-                    if (!IsPathInside(candidate, fullFolder) || !System.IO.File.Exists(candidate)) continue;
-                    return (candidate, ImageContentType(candidate));
+                    normalizedId,
+                    normalizedId.Replace("-", "_"),
+                    normalizedId.Replace("_", "-"),
+                    normalizedId.Replace("-", " "),
+                    $"{normalizedId}-stone",
+                    $"{normalizedId}_stone",
+                    $"{normalizedId} stone",
+                    $"mega-{normalizedId}",
+                    $"mega_{normalizedId}"
+                };
+
+                foreach (var name in directNames)
+                {
+                    foreach (var ext in extensions)
+                    {
+                        var candidate = Path.Combine(folder, name + ext);
+                        if (System.IO.File.Exists(candidate))
+                        {
+                            return (candidate, ImageContentType(candidate));
+                        }
+                    }
                 }
+
+                try
+                {
+                    foreach (var file in Directory.EnumerateFiles(folder))
+                    {
+                        var ext = Path.GetExtension(file);
+                        if (!extensions.Contains(ext)) continue;
+
+                        var stem = Path.GetFileNameWithoutExtension(file).ToLowerInvariant();
+                        var cleanFileStem = stem.Replace("-", "").Replace("_", "").Replace(" ", "");
+
+                        if (cleanFileStem == cleanStem ||
+                            cleanFileStem == $"{cleanStem}stone" ||
+                            cleanFileStem == $"mega{cleanStem}" ||
+                            cleanFileStem == $"stone{cleanStem}")
+                        {
+                            return (file, ImageContentType(file));
+                        }
+                    }
+                }
+                catch { }
             }
         }
 
         return null;
-    }
-
-    private static bool IsPathInside(string childPath, string parentPath)
-    {
-        var parent = parentPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        return childPath.StartsWith(parent, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string ImageContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch

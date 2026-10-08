@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.25}"
+VERSION="${1:-0.2.26}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.59}"
-CHANGELOG="Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops."
+TAG="${2:-v0.9.60}"
+CHANGELOG="Fixes Mega Stone and Mega Evolution symbol art resolution with case-insensitive subfolder search."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.25.0",
+        "changelog": "Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.59/Vantafyn.Plugin.Companion_0.2.25_net9.zip",
+        "checksum": "712052b18ead3356043b9e65d90a4134",
+        "timestamp": "2026-10-08T12:29:08Z"
+      },
+      {
+        "version": "0.2.25.1",
+        "changelog": "Adds Pokémon Mystery Gift code redemption, Wonder Card save injection, and box art card backdrops.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.59/Vantafyn.Plugin.Companion_0.2.25_net10.zip",
+        "checksum": "42e602be72ef53ad4445ac00fc1d66c2",
+        "timestamp": "2026-10-08T12:29:08Z"
       },
       {
         "version": "0.2.24.0",

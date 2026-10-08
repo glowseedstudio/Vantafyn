@@ -236,7 +236,9 @@ fun GamePauseHud(
                         )
 
                         // Speed & Screen Layout / Aspect Ratio Row
+                        val is3dsSystem = game.systemId.lowercase() in listOf("3ds", "n3ds", "nintendo3ds") || game.core.contains("azahar", ignoreCase = true) || game.core.contains("citra", ignoreCase = true)
                         val isNdsSystem = game.systemId.lowercase() in listOf("nds", "ds") || game.core.contains("melonds", ignoreCase = true)
+                        val isDualScreenSystem = isNdsSystem || is3dsSystem
                         val isGbaSystem = game.systemId.lowercase() in listOf("gba", "gameboy advance", "game boy advance") || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
                         val isGbSystem = game.systemId.lowercase() in listOf("gb", "gbc", "gameboy", "game boy", "gameboy color", "game boy color") || game.core.contains("gambatte", ignoreCase = true) || game.core.contains("tgbdual", ignoreCase = true) || game.core.contains("sameboy", ignoreCase = true)
                         Row(
@@ -256,7 +258,7 @@ fun GamePauseHud(
                                     onClick = onToggleSwapDualScreens,
                                     modifier = Modifier.weight(1.3f),
                                 )
-                            } else if (isNdsSystem) {
+                            } else if (isDualScreenSystem) {
                                 HudMenuButton(
                                     label = ndsLayout.label,
                                     icon = Icons.Rounded.Dashboard,
@@ -395,9 +397,9 @@ fun GamePauseHud(
                                 icon = Icons.Rounded.TouchApp,
                                 onClick = onToggleTouchControls,
                             )
-                            if (isNdsSystem) {
+                            if (isDualScreenSystem) {
                                 Text(
-                                    text = "Stylus touch is active directly on the lower DS screen",
+                                    text = if (is3dsSystem) "Stylus touch is active directly on the lower 3DS screen" else "Stylus touch is active directly on the lower DS screen",
                                     color = VantafynColors.Muted,
                                     fontSize = 11.sp,
                                     modifier = Modifier.padding(horizontal = 4.dp),

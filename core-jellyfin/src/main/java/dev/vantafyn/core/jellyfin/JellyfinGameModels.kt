@@ -51,6 +51,7 @@ fun resolveSystemDisplayName(id: String, rawName: String): String {
         key == "gb" || key == "gameboy" -> "Game Boy"
         key == "gbc" || key == "gameboycolor" -> "Game Boy Color"
         key == "nds" || key == "ds" || key == "nintendods" -> "Nintendo DS"
+        key == "3ds" || key == "n3ds" || key == "nintendo3ds" -> "Nintendo 3DS"
         key == "psx" || key == "ps1" || key == "playstation" -> "Sony PlayStation"
         key == "psp" || key == "playstationportable" -> "PlayStation Portable"
         key == "segamd" || key == "genesis" || key == "megadrive" -> "Sega Genesis"
@@ -70,6 +71,9 @@ fun resolveSystemDisplayName(id: String, rawName: String): String {
 
 fun resolveSystemLogoUrl(id: String, core: String): String {
     val key = (if (id.isNotBlank()) id else core).lowercase().trim()
+    if (key.contains("3ds") || key.contains("citra") || key.contains("azahar")) {
+        return "https://upload.wikimedia.org/wikipedia/commons/8/89/Nintendo_3DS_logo.svg"
+    }
     val themeFolder = when {
         key.contains("gba") || key.contains("advance") -> "gba"
         key.contains("snes") || key.contains("sfc") -> "snes"
