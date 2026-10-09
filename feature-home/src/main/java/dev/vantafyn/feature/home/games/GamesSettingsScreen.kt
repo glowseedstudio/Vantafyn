@@ -298,19 +298,13 @@ fun GamesSettingsScreen(
             ) {
                 CompactBackButton(onClick = onBack)
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Retro Settings",
-                        color = VantafynColors.Ink,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "Emulation, controls & storage",
-                        color = VantafynColors.Muted,
-                        fontSize = 12.sp,
-                    )
-                }
+                Text(
+                    text = "Retro Settings",
+                    color = VantafynColors.Ink,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
 

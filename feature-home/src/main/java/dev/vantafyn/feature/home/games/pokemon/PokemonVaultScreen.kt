@@ -785,31 +785,12 @@ fun PokemonVaultScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     CompactBackButton(onClick = { subScreen = VaultSubScreen.Home })
-                                    Column {
-                                        Text(
-                                            text = "Move Pokémon",
-                                            color = VantafynColors.Ink,
-                                            fontSize = 18.sp,
-                                            fontWeight = FontWeight.Bold,
-                                        )
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Security,
-                                                contentDescription = "Protected",
-                                                tint = Color(0xFF10B981),
-                                                modifier = Modifier.size(11.dp),
-                                            )
-                                            Text(
-                                                text = "Protected",
-                                                color = Color(0xFF10B981),
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                            )
-                                        }
-                                    }
+                                    Text(
+                                        text = "Move Pokémon",
+                                        color = VantafynColors.Ink,
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
                                 }
 
             Row(

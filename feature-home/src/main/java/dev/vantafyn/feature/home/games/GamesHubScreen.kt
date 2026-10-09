@@ -171,27 +171,13 @@ fun GamesHubScreen(
                     },
                 )
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
-                        color = VantafynColors.Ink,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = if (isOfflineFilterSelected) {
-                            "$downloadedCount downloaded offline"
-                        } else if (selectedSystem != null) {
-                            "${filteredGames.size} of $totalLibraryGamesCount games"
-                        } else if (searchQuery.isNotBlank()) {
-                            "${filteredGames.size} matching \"$searchQuery\""
-                        } else {
-                            "$totalLibraryGamesCount games across ${systems.size} systems"
-                        },
-                        color = VantafynColors.Muted,
-                        fontSize = 11.sp,
-                    )
-                }
+                Text(
+                    text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
+                    color = VantafynColors.Ink,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
 
                 Box(modifier = Modifier.width(260.dp)) {
                     VantafynTextField(
@@ -241,27 +227,13 @@ fun GamesHubScreen(
                     },
                 )
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
-                        color = VantafynColors.Ink,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = if (isOfflineFilterSelected) {
-                            "Showing $downloadedCount downloaded offline games"
-                        } else if (selectedSystem != null) {
-                            "Showing ${filteredGames.size} of $totalLibraryGamesCount games"
-                        } else if (searchQuery.isNotBlank()) {
-                            "Found ${filteredGames.size} games matching \"$searchQuery\""
-                        } else {
-                            "$totalLibraryGamesCount games available across ${systems.size} systems"
-                        },
-                        color = VantafynColors.Muted,
-                        fontSize = 12.sp,
-                    )
-                }
+                Text(
+                    text = if (isOfflineFilterSelected) "Downloaded Games" else if (selectedSystem != null) selectedSystem.displayName else "All Consoles",
+                    color = VantafynColors.Ink,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
             }
 
             // Search Field

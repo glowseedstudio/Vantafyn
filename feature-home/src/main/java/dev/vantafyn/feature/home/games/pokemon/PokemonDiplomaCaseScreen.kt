@@ -229,10 +229,7 @@ private fun DiplomaHeader(onBack: () -> Unit, onRefresh: () -> Unit) {
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CompactBackButton(onClick = onBack)
-            Column {
-                Text("Diploma Case", color = VantafynColors.Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Text("Pokédex completion certificates", color = VantafynColors.Muted, fontSize = 11.sp)
-            }
+            Text("Diploma Case", color = VantafynColors.Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold)
         }
         IconButton(onClick = onRefresh) {
             Icon(Icons.Rounded.Refresh, null, tint = VantafynColors.Muted)
@@ -258,10 +255,33 @@ private fun DiplomaSelector(items: List<DiplomaCaseItem>, selectedIndex: Int, on
                         if (selected) item.accent.copy(alpha = 0.78f) else Color.White.copy(alpha = 0.08f),
                         RoundedCornerShape(18.dp),
                     )
-                    .clickable { onSelect(index) }
-                    .padding(14.dp),
+                    .clickable { onSelect(index) },
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!item.boxartUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = item.boxartUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF090B13).copy(alpha = if (selected) 0.80f else 0.88f),
+                                        Color(0xFF06070B).copy(alpha = if (selected) 0.90f else 0.95f),
+                                    )
+                                )
+                            )
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icon(Icons.Rounded.Diamond, null, tint = if (selected) item.accent else VantafynColors.Muted, modifier = Modifier.size(16.dp))
                         Text(item.region, color = if (selected) item.accent else VantafynColors.Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold)

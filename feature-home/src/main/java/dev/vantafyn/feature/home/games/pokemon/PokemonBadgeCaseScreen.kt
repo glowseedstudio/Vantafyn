@@ -1,5 +1,6 @@
 package dev.vantafyn.feature.home.games.pokemon
 
+import android.content.Context
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -49,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -56,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
@@ -75,6 +78,7 @@ private data class BadgeCaseGame(
     val save: PokemonGameSaveDto,
     val title: String,
     val subtitle: String,
+    val boxartUrl: String? = null,
 )
 
 @Composable
@@ -87,6 +91,7 @@ fun PokemonBadgeCaseScreen(
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = LocalContext.current
     val scrollState = rememberScrollState()
     val games = remember(availableGames, detectedSaves) {
         detectedSaves
@@ -109,6 +114,11 @@ fun PokemonBadgeCaseScreen(
                 val title = game?.pokemon?.canonicalTitle
                     ?: game?.cleanTitle
                     ?: cleanGameTitle(save.title).ifBlank { save.title.ifBlank { "Pokémon Save" } }
+                val localBoxart = game?.let {
+                    context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+                        .getString("boxart_${it.id}", null)
+                }
+                val boxartUrl = GameBoxartScraper.convertToCdnUrl(localBoxart ?: game?.boxartUrl)
                 BadgeCaseGame(
                     save = save,
                     title = title,
@@ -116,6 +126,7 @@ fun PokemonBadgeCaseScreen(
                         append("Gen ${save.generation.takeIf { it > 0 } ?: "?"}")
                         if (!save.trainerName.isNullOrBlank()) append(" • ${save.trainerName}")
                     },
+                    boxartUrl = boxartUrl,
                 )
             }
             .sortedWith(compareBy({ it.save.generation }, { it.title }))
@@ -218,20 +229,12 @@ private fun BadgeCaseHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CompactBackButton(onClick = onBack)
-            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
-                Text(
-                    text = "Badge Case",
-                    color = VantafynColors.Ink,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    text = "Gym badges by save file",
-                    color = VantafynColors.Muted,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                )
-            }
+            Text(
+                text = "Badge Case",
+                color = VantafynColors.Ink,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+            )
         }
 
         IconButton(
@@ -278,10 +281,33 @@ private fun BadgeCaseGameSelector(
                         },
                         shape = RoundedCornerShape(14.dp),
                     )
-                    .clickable { onSelect(index) }
-                    .padding(12.dp),
+                    .clickable { onSelect(index) },
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (!game.boxartUrl.isNullOrBlank()) {
+                    AsyncImage(
+                        model = game.boxartUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.matchParentSize(),
+                    )
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF090B13).copy(alpha = if (selected) 0.80f else 0.88f),
+                                        Color(0xFF06070B).copy(alpha = if (selected) 0.90f else 0.95f),
+                                    )
+                                )
+                            )
+                    )
+                }
+
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -349,10 +375,33 @@ private fun BadgeCaseHero(game: BadgeCaseGame) {
                     )
                 ),
                 shape = RoundedCornerShape(22.dp),
-            )
-            .padding(18.dp),
+            ),
     ) {
-        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (!game.boxartUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = game.boxartUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.matchParentSize(),
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF090B13).copy(alpha = 0.78f),
+                                Color(0xFF06070B).copy(alpha = 0.92f),
+                            )
+                        )
+                    )
+            )
+        }
+
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.Top,

@@ -278,27 +278,12 @@ fun PokemonVaultHomeScreen(
                 shinyCount = totalShinyCount,
             )
 
-            // Primary Feature Actions
-            VaultPrimaryFeatures(
-                onMovePokemon = onMovePokemon,
-                onImportSave = onImportSave,
-                onOpenTradeCenter = onOpenTradeCenter,
+            // Top Action Tiles (Pokédex, Achievements, Backups)
+            VaultTopActionTiles(
                 onOpenPokedex = onOpenPokedex,
-                onOpenBadgeCase = onOpenBadgeCase,
-                onOpenDiplomaCase = onOpenDiplomaCase,
-                onOpenEventVault = onOpenEventVault,
                 onOpenAchievements = onOpenAchievements,
                 onOpenBackups = onOpenBackups,
             )
-
-            // Connected Games Horizontal Rail
-            if (availableGames.isNotEmpty()) {
-                VaultConnectedGamesRail(
-                    games = availableGames,
-                    detectedSaves = allDetectedSaves,
-                    onSelectGame = onSelectGameForTransfer,
-                )
-            }
 
             // Recent Pokémon / Activity Section
             if (allCandidatePokemon.isNotEmpty()) {
@@ -316,6 +301,25 @@ fun PokemonVaultHomeScreen(
                 // Empty state explanation banner for fresh 0/900 vaults
                 VaultEmptyGuideBanner(onOpenMove = onMovePokemon)
             }
+
+            // Connected Games Horizontal Rail
+            if (availableGames.isNotEmpty()) {
+                VaultConnectedGamesRail(
+                    games = availableGames,
+                    detectedSaves = allDetectedSaves,
+                    onSelectGame = onSelectGameForTransfer,
+                )
+            }
+
+            // Primary Feature Actions
+            VaultPrimaryFeatures(
+                onMovePokemon = onMovePokemon,
+                onImportSave = onImportSave,
+                onOpenTradeCenter = onOpenTradeCenter,
+                onOpenBadgeCase = onOpenBadgeCase,
+                onOpenDiplomaCase = onOpenDiplomaCase,
+                onOpenEventVault = onOpenEventVault,
+            )
 
             Spacer(modifier = Modifier.height(110.dp))
         }
@@ -341,31 +345,13 @@ private fun VaultHomeHeader(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             CompactBackButton(onClick = onBack)
-            Column {
-                Text(
-                    text = "Pokémon Vault",
-                    color = VantafynColors.Ink,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.2.sp,
-                )
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Security,
-                        contentDescription = "Protected",
-                        tint = Color(0xFF10B981),
-                        modifier = Modifier.size(11.dp),
-                    )
-                    Text(
-                        text = "Protected",
-                        color = Color(0xFF10B981),
-                        fontSize = 11.sp,
-                    )
-                }
-            }
+            Text(
+                text = "Pokémon Vault",
+                color = VantafynColors.Ink,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.2.sp,
+            )
         }
 
         IconButton(
@@ -957,658 +943,301 @@ private fun VaultStatTile(
 }
 
 @Composable
+private fun VaultTopActionTiles(
+    onOpenPokedex: () -> Unit,
+    onOpenAchievements: () -> Unit,
+    onOpenBackups: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        VaultActionTile(
+            modifier = Modifier.weight(1f),
+            title = "Pokédex",
+            subtitle = "Gens 1-9",
+            icon = Icons.AutoMirrored.Rounded.MenuBook,
+            accentColor = Color(0xFFF43F5E),
+            onClick = onOpenPokedex,
+        )
+
+        VaultActionTile(
+            modifier = Modifier.weight(1f),
+            title = "Achievements",
+            subtitle = "Trainer Hub",
+            icon = Icons.Rounded.Star,
+            accentColor = Color(0xFFF59E0B),
+            onClick = onOpenAchievements,
+        )
+
+        VaultActionTile(
+            modifier = Modifier.weight(1f),
+            title = "Backups",
+            subtitle = "Snapshots",
+            icon = Icons.Rounded.Security,
+            accentColor = Color(0xFF10B981),
+            onClick = onOpenBackups,
+        )
+    }
+}
+
+private data class VaultFeatureCardData(
+    val title: String,
+    val subtitle: String,
+    val badge: String,
+    val icon: ImageVector,
+    val iconGradient: List<Color>,
+    val cardGradient: List<Color>,
+    val borderBrush: Brush,
+    val accentColor: Color,
+    val onClick: () -> Unit,
+)
+
+@Composable
 private fun VaultPrimaryFeatures(
     onMovePokemon: () -> Unit,
     onImportSave: () -> Unit,
     onOpenTradeCenter: () -> Unit,
-    onOpenPokedex: () -> Unit,
     onOpenBadgeCase: () -> Unit,
     onOpenDiplomaCase: () -> Unit,
     onOpenEventVault: () -> Unit,
-    onOpenAchievements: () -> Unit,
-    onOpenBackups: () -> Unit,
 ) {
+    val features = remember(
+        onMovePokemon,
+        onImportSave,
+        onOpenTradeCenter,
+        onOpenBadgeCase,
+        onOpenDiplomaCase,
+        onOpenEventVault,
+    ) {
+        listOf(
+            VaultFeatureCardData(
+                title = "Move Pokémon",
+                subtitle = "Storage Manager",
+                badge = "30 Boxes",
+                icon = Icons.Rounded.SwapHoriz,
+                iconGradient = listOf(Color(0xFF00E5FF), Color(0xFF3B82F6)),
+                cardGradient = listOf(Color(0xFF0F1E33), Color(0xFF0A0F1D)),
+                borderBrush = Brush.horizontalGradient(
+                    listOf(Color(0xFF00E5FF).copy(alpha = 0.50f), Color(0xFF8B5CF6).copy(alpha = 0.25f))
+                ),
+                accentColor = Color(0xFF00E5FF),
+                onClick = onMovePokemon,
+            ),
+            VaultFeatureCardData(
+                title = "Import Save",
+                subtitle = "Cartridge & Emulator",
+                badge = "Gen 6–9",
+                icon = Icons.Rounded.UploadFile,
+                iconGradient = listOf(Color(0xFF8B5CF6), Color(0xFF38BDF8)),
+                cardGradient = listOf(Color(0xFF1E1435), Color(0xFF0E101E)),
+                borderBrush = Brush.horizontalGradient(
+                    listOf(Color(0xFFA78BFA).copy(alpha = 0.50f), Color(0xFF38BDF8).copy(alpha = 0.25f))
+                ),
+                accentColor = Color(0xFFA78BFA),
+                onClick = onImportSave,
+            ),
+            VaultFeatureCardData(
+                title = "Trade Center",
+                subtitle = "Real-Time P2P",
+                badge = "Live Link",
+                icon = Icons.Rounded.Cable,
+                iconGradient = listOf(Color(0xFFEC4899), Color(0xFF8B5CF6)),
+                cardGradient = listOf(Color(0xFF26112C), Color(0xFF110E1C)),
+                borderBrush = Brush.horizontalGradient(
+                    listOf(Color(0xFFEC4899).copy(alpha = 0.50f), Color(0xFF8B5CF6).copy(alpha = 0.25f))
+                ),
+                accentColor = Color(0xFFEC4899),
+                onClick = onOpenTradeCenter,
+            ),
+            VaultFeatureCardData(
+                title = "Badge Case",
+                subtitle = "Gym Collections",
+                badge = "Trophies",
+                icon = Icons.Rounded.Star,
+                iconGradient = listOf(Color(0xFFF59E0B), Color(0xFFFBBF24)),
+                cardGradient = listOf(Color(0xFF26190C), Color(0xFF111018)),
+                borderBrush = Brush.horizontalGradient(
+                    listOf(Color(0xFFF59E0B).copy(alpha = 0.50f), Color(0xFF38BDF8).copy(alpha = 0.20f))
+                ),
+                accentColor = Color(0xFFFBBF24),
+                onClick = onOpenBadgeCase,
+            ),
+            VaultFeatureCardData(
+                title = "Diploma Case",
+                subtitle = "Pokédex Proofs",
+                badge = "Certificates",
+                icon = Icons.Rounded.EmojiEvents,
+                iconGradient = listOf(Color(0xFF10B981), Color(0xFF34D399)),
+                cardGradient = listOf(Color(0xFF0C2419), Color(0xFF0B1417)),
+                borderBrush = Brush.horizontalGradient(
+                    listOf(Color(0xFF34D399).copy(alpha = 0.50f), Color(0xFFFBBF24).copy(alpha = 0.20f))
+                ),
+                accentColor = Color(0xFF34D399),
+                onClick = onOpenDiplomaCase,
+            ),
+            VaultFeatureCardData(
+                title = "Event Vault",
+                subtitle = "Preserved Events",
+                badge = "Mythical",
+                icon = Icons.Rounded.AutoAwesome,
+                iconGradient = listOf(Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFFA855F7)),
+                cardGradient = listOf(Color(0xFF1F122D), Color(0xFF0F101E)),
+                borderBrush = Brush.horizontalGradient(
+                    listOf(Color(0xFF34D399).copy(alpha = 0.45f), Color(0xFFA855F7).copy(alpha = 0.35f), Color(0xFFFBBF24).copy(alpha = 0.30f))
+                ),
+                accentColor = Color(0xFFC084FC),
+                onClick = onOpenEventVault,
+            ),
+        )
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        // Quick links stay visible before the larger action cards.
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            VaultActionTile(
-                modifier = Modifier.weight(1f),
-                title = "Pokédex",
-                subtitle = "Gens 1-9",
-                icon = Icons.AutoMirrored.Rounded.MenuBook,
-                accentColor = Color(0xFFF43F5E),
-                onClick = onOpenPokedex,
+            Text(
+                text = "Vault Features",
+                color = VantafynColors.Ink,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Bold,
             )
-
-            VaultActionTile(
-                modifier = Modifier.weight(1f),
-                title = "Achievements",
-                subtitle = "Trainer Hub",
-                icon = Icons.Rounded.Star,
-                accentColor = Color(0xFFF59E0B),
-                onClick = onOpenAchievements,
-            )
-
-            VaultActionTile(
-                modifier = Modifier.weight(1f),
-                title = "Backups",
-                subtitle = "Snapshots",
-                icon = Icons.Rounded.Security,
-                accentColor = Color(0xFF10B981),
-                onClick = onOpenBackups,
+            Text(
+                text = "Swipe to explore",
+                color = VantafynColors.Muted,
+                fontSize = 11.sp,
             )
         }
 
-        // Move Pokémon (Primary Action Card)
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF1B2238),
-                            Color(0xFF141728),
-                        )
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFF00E5FF).copy(alpha = 0.40f),
-                            Color(0xFF8B5CF6).copy(alpha = 0.30f),
-                        )
-                    ),
-                    shape = RoundedCornerShape(18.dp)
-                )
-                .clickable { onMovePokemon() }
-                .padding(16.dp),
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(VantafynGradients.accentHorizontal()),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.SwapHoriz,
-                            contentDescription = "Move Pokémon",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Move Pokémon",
-                            color = VantafynColors.Ink,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Organise 30 storage boxes, deposit or withdraw from cartridge saves",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        )
-                    }
-                }
-
+            features.forEach { card ->
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
+                        .width(204.dp)
+                        .height(134.dp)
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Brush.linearGradient(card.cardGradient))
+                        .border(1.dp, card.borderBrush, RoundedCornerShape(20.dp))
+                        .clickable { card.onClick() },
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = "Manage",
-                            color = Color(0xFF00E5FF),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFF00E5FF),
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-            }
-        }
-
-        // External Gen 6–9 emulator saves are copied into the Vault; the selected file is never changed.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF201B38),
-                            Color(0xFF151827),
-                        )
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFF8B5CF6).copy(alpha = 0.44f),
-                            Color(0xFF38BDF8).copy(alpha = 0.24f),
-                        )
-                    ),
-                    shape = RoundedCornerShape(18.dp)
-                )
-                .clickable { onImportSave() }
-                .padding(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
+                    // Ambient radial glow in top-right
                     Box(
                         modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .size(96.dp)
+                            .align(Alignment.TopEnd)
                             .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        Color(0xFF8B5CF6),
-                                        Color(0xFF38BDF8),
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        card.accentColor.copy(alpha = 0.16f),
+                                        Color.Transparent,
                                     )
                                 )
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.UploadFile,
-                            contentDescription = "Import emulator save",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Import emulator save",
-                            color = VantafynColors.Ink,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Copy Pokémon from a Gen 6-9 save without changing the original file",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF8B5CF6).copy(alpha = 0.18f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = "Import",
-                            color = Color(0xFFB8A4FF),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFFB8A4FF),
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Trade Center (Prominent Featured Action - Preserves exact PIN flow)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            Color(0xFF231B38),
-                            Color(0xFF161528),
-                        )
+                            )
                     )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFF8B5CF6).copy(alpha = 0.40f),
-                            Color(0xFFEC4899).copy(alpha = 0.30f),
-                        )
-                    ),
-                    shape = RoundedCornerShape(18.dp)
-                )
-                .clickable { onOpenTradeCenter() }
-                .padding(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(
+
+                    Column(
                         modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        Color(0xFF8B5CF6),
-                                        Color(0xFFEC4899),
-                                    )
+                            .fillMaxSize()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        // Top row: Glowing Icon badge + Tag Chip
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(Brush.linearGradient(card.iconGradient)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = card.icon,
+                                    contentDescription = card.title,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp),
                                 )
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Cable,
-                            contentDescription = "Trade Center",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
+                            }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Trade Center",
-                            color = VantafynColors.Ink,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Real-time peer trading with nearby trainers via PIN pairing code",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        )
-                    }
-                }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(card.accentColor.copy(alpha = 0.14f))
+                                    .border(1.dp, card.accentColor.copy(alpha = 0.28f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    text = card.badge,
+                                    color = card.accentColor,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 0.3.sp,
+                                )
+                            }
+                        }
 
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF8B5CF6).copy(alpha = 0.18f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = "Trade",
-                            color = Color(0xFFC084FC),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFFC084FC),
-                            modifier = Modifier.size(13.dp),
-                        )
+                        // Bottom row: Title + Subtitle + Chevron
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(2.dp),
+                            ) {
+                                Text(
+                                    text = card.title,
+                                    color = VantafynColors.Ink,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = card.subtitle,
+                                    color = VantafynColors.Muted,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.06f)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.ChevronRight,
+                                    contentDescription = null,
+                                    tint = card.accentColor.copy(alpha = 0.85f),
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            Color(0xFF2A2418),
-                            Color(0xFF171827),
-                        )
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFFF59E0B).copy(alpha = 0.48f),
-                            Color(0xFF00E5FF).copy(alpha = 0.24f),
-                        )
-                    ),
-                    shape = RoundedCornerShape(18.dp),
-                )
-                .clickable { onOpenBadgeCase() }
-                .padding(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        Color(0xFFF59E0B),
-                                        Color(0xFF38BDF8),
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.Star,
-                            contentDescription = "Badge Case",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Badge Case",
-                            color = VantafynColors.Ink,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Showcase gym badges earned across linked cartridge saves",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFFF59E0B).copy(alpha = 0.16f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = "View",
-                            color = Color(0xFFFBBF24),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFFFBBF24),
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            Color(0xFF17251F),
-                            Color(0xFF111827),
-                        )
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFF34D399).copy(alpha = 0.46f),
-                            Color(0xFFFBBF24).copy(alpha = 0.26f),
-                        )
-                    ),
-                    shape = RoundedCornerShape(18.dp),
-                )
-                .clickable { onOpenDiplomaCase() }
-                .padding(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        Color(0xFF34D399),
-                                        Color(0xFFFBBF24),
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.EmojiEvents,
-                            contentDescription = "Diploma Case",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Diploma Case",
-                            color = VantafynColors.Ink,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Archive completed Pokédex certificates and proof screenshots",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF34D399).copy(alpha = 0.15f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = "View",
-                            color = Color(0xFF34D399),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFF34D399),
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-            }
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(18.dp))
-                .background(
-                    Brush.linearGradient(
-                        listOf(
-                            Color(0xFF18251D),
-                            Color(0xFF17172A),
-                            Color(0xFF111827),
-                        )
-                    )
-                )
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            Color(0xFF34D399).copy(alpha = 0.48f),
-                            Color(0xFFA78BFA).copy(alpha = 0.24f),
-                            Color(0xFFFBBF24).copy(alpha = 0.28f),
-                        )
-                    ),
-                    shape = RoundedCornerShape(18.dp),
-                )
-                .clickable { onOpenEventVault() }
-                .padding(16.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(46.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(
-                                        Color(0xFF34D399),
-                                        Color(0xFFA78BFA),
-                                        Color(0xFFFBBF24),
-                                    )
-                                )
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = Icons.Rounded.AutoAwesome,
-                            contentDescription = "Event Vault",
-                            tint = Color.White,
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
-
-                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Text(
-                            text = "Event Vault",
-                            color = VantafynColors.Ink,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Unlock preserved mythical events from linked cartridge saves",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                            lineHeight = 15.sp,
-                        )
-                    }
-                }
-
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF34D399).copy(alpha = 0.15f))
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        Text(
-                            text = "View",
-                            color = Color(0xFF34D399),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Icon(
-                            imageVector = Icons.Rounded.ChevronRight,
-                            contentDescription = null,
-                            tint = Color(0xFF34D399),
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                }
-            }
-        }
-
     }
 }
 

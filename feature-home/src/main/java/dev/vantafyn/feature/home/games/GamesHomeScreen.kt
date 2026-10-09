@@ -148,20 +148,13 @@ fun GamesHomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 CompactBackButton(onClick = onNavigateBack)
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Games Hub",
-                        color = VantafynColors.Ink,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = if (systems.isNotEmpty()) "${systems.size} systems • $totalGamesCount games" else "Retro arcade & collection",
-                        color = VantafynColors.Muted,
-                        fontSize = 12.sp,
-                    )
-                }
+                Text(
+                    text = "Games Hub",
+                    color = VantafynColors.Ink,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
 

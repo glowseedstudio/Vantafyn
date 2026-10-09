@@ -256,19 +256,13 @@ fun GamesSavesScreen(
             ) {
                 CompactBackButton(onClick = onBack)
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Cloud Saves",
-                        color = VantafynColors.Ink,
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "Manage battery saves & snapshot states",
-                        color = VantafynColors.Muted,
-                        fontSize = 12.sp,
-                    )
-                }
+                Text(
+                    text = "Cloud Saves",
+                    color = VantafynColors.Ink,
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f),
+                )
 
                 // Refresh button
                 IconButton(
