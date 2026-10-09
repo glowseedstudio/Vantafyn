@@ -142,9 +142,15 @@ class LinkSessionManager(private val context: Context) {
         get() = prefs.getString("link_server_base_url", "") ?: ""
         set(value) = prefs.edit().putString("link_server_base_url", value).apply()
 
-    var serverAuthToken: String
-        get() = prefs.getString("link_server_auth_token", "") ?: ""
-        set(value) = prefs.edit().putString("link_server_auth_token", value).apply()
+    @Volatile
+    var serverAuthToken: String = ""
+
+    init {
+        // Scrub legacy plaintext serverAuthToken from SharedPreferences if previously saved
+        if (prefs.contains("link_server_auth_token")) {
+            prefs.edit().remove("link_server_auth_token").apply()
+        }
+    }
 
     private var heartbeatJob: Job? = null
 

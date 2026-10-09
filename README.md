@@ -444,9 +444,9 @@ To install the official **Vantafyn Companion** plugin directly through Jellyfin'
 ## 🚀 Quick Start
 
 ### Direct Download
-Production minified APKs are available on the **[Releases Page](https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.65)** for your initial setup:
-- **Phone / Tablet / Auto**: [`app-mobile-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.65/app-mobile-release.apk)
-- **Android TV**: [`app-tv-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.65/app-tv-release.apk)
+Production minified APKs are available on the **[Releases Page](https://github.com/glowseedstudio/Vantafyn/releases/tag/v0.9.66)** for your initial setup:
+- **Phone / Tablet / Auto**: [`app-mobile-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.66/app-mobile-release.apk)
+- **Android TV**: [`app-tv-release.apk`](https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.66/app-tv-release.apk)
 
 > [!NOTE]
 > **📲 Automatic In-App Updates (First Download Only!)**

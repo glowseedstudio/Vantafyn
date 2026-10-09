@@ -352,32 +352,28 @@ fun PokemonPokedexModal(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
             // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                Box(
+                    modifier = Modifier.align(Alignment.CenterStart),
                 ) {
                     CompactBackButton(onClick = onDismiss)
-                    Column {
-                        Text(
-                            text = "National Pokédex",
-                            color = Color.White,
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "Aggregated Cross-Game Archive (1025 Species)",
-                            color = VantafynColors.Muted,
-                            fontSize = 11.sp,
-                        )
-                    }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "National Pokédex",
+                    color = Color.White,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+
+                Box(
+                    modifier = Modifier.align(Alignment.CenterEnd),
+                ) {
                     IconButton(
                         onClick = { loadPokedex() },
                         modifier = Modifier.size(36.dp),

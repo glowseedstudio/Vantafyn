@@ -74,6 +74,9 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.material.icons.automirrored.rounded.MenuBook
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
@@ -126,8 +129,28 @@ fun PokemonVaultHomeScreen(
 ) {
     val scrollState = rememberScrollState()
 
+    // Filter connected games to only vault-compatible mainline games (Gen 1 through 7, excluding spin-offs like Mystery Dungeon, Conquest, Pinball, Stadium, Snap, etc.)
+    val vaultCapableGames = remember(availableGames) {
+        val nonVaultKeywords = setOf(
+            "mystery dungeon", "dungeon", "conquest", "pinball", "stadium", "snap", "colosseum",
+            "xd", "trozei", "link!", "dash", "ranger", "rumble", "pokepark", "duel", "shuffle",
+            "tcg", "trading card", "puzzle", "channel", "box ruby", "battle revolution", "magikarp jump",
+            "detective", "masters", "cafe", "unite", "go", "sleep"
+        )
+        availableGames.filter { game ->
+            val meta = game.pokemon
+            val isVaultSupported = meta?.vaultSupported == true
+            val gen = meta?.generation ?: 0
+            val titleLower = (meta?.canonicalTitle ?: game.cleanTitle).lowercase()
+            val isSpinOff = nonVaultKeywords.any { kw -> titleLower.contains(kw) }
+
+            // Must be vault-supported, in Gen 1..7, and not a non-compatible spin-off title
+            isVaultSupported && gen in 1..7 && !isSpinOff
+        }
+    }
+
     // Aggregate all Pokémon across vault boxes and detected game saves
-    val allCandidatePokemon = remember(allVaultBoxes, allDetectedSaves, availableGames) {
+    val allCandidatePokemon = remember(allVaultBoxes, allDetectedSaves, vaultCapableGames) {
         val list = mutableListOf<VaultFeaturedCandidate>()
 
         // 1. Vault storage
@@ -149,7 +172,7 @@ fun PokemonVaultHomeScreen(
 
         // 2. Detected game saves (Party + Boxes)
         for (save in allDetectedSaves) {
-            val matched = availableGames.firstOrNull { it.id == save.gameId }
+            val matched = vaultCapableGames.firstOrNull { it.id == save.gameId }
             val gameTitle = matched?.pokemon?.canonicalTitle
                 ?: matched?.cleanTitle
                 ?: dev.vantafyn.core.jellyfin.cleanGameTitle(save.title).ifBlank { "Cartridge" }
@@ -258,7 +281,7 @@ fun PokemonVaultHomeScreen(
             // Large Hero Area Carousel
             VaultHeroCard(
                 candidates = heroCandidates,
-                availableGames = availableGames,
+                availableGames = vaultCapableGames,
                 session = session,
                 onInspect = { candidate ->
                     val summaries = heroCandidates.map { it.summary }
@@ -273,7 +296,7 @@ fun PokemonVaultHomeScreen(
                 totalOccupied = totalOccupied,
                 totalCapacity = vaultSummary?.totalCapacity ?: 900,
                 discoveredSpecies = distinctSpeciesCount,
-                connectedGamesCount = availableGames.size,
+                connectedGamesCount = vaultCapableGames.size,
                 activeSavesCount = activeSavesCount,
                 shinyCount = totalShinyCount,
             )
@@ -290,7 +313,7 @@ fun PokemonVaultHomeScreen(
                 val recentCandidates = remember(allCandidatePokemon) { allCandidatePokemon.take(16) }
                 VaultRecentPokemonRail(
                     candidates = recentCandidates,
-                    availableGames = availableGames,
+                    availableGames = vaultCapableGames,
                     onInspectPokemon = { candidate ->
                         val summaries = recentCandidates.map { it.summary }
                         val idx = summaries.indexOfFirst { it.id == candidate.summary.id }
@@ -302,10 +325,10 @@ fun PokemonVaultHomeScreen(
                 VaultEmptyGuideBanner(onOpenMove = onMovePokemon)
             }
 
-            // Connected Games Horizontal Rail
-            if (availableGames.isNotEmpty()) {
+            // Connected Games Horizontal Rail (strictly Vault-compatible Gen 1-7 games)
+            if (vaultCapableGames.isNotEmpty()) {
                 VaultConnectedGamesRail(
-                    games = availableGames,
+                    games = vaultCapableGames,
                     detectedSaves = allDetectedSaves,
                     onSelectGame = onSelectGameForTransfer,
                 )
@@ -653,11 +676,15 @@ private fun VaultHeroCard(
         var currentIndex by remember { mutableIntStateOf(0) }
         var totalDrag by remember { mutableFloatStateOf(0f) }
 
+        val lifecycleOwner = LocalLifecycleOwner.current
         // Slower, leisurely rotation (8.5 seconds) with smooth auto-advancing crossfade
-        LaunchedEffect(candidates.size, currentIndex) {
+        // Pauses automatically when backgrounded or when screen is off to preserve battery.
+        LaunchedEffect(candidates.size, currentIndex, lifecycleOwner) {
             if (candidates.size > 1) {
-                delay(8500)
-                currentIndex = (currentIndex + 1) % candidates.size
+                lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                    delay(8500)
+                    currentIndex = (currentIndex + 1) % candidates.size
+                }
             }
         }
 

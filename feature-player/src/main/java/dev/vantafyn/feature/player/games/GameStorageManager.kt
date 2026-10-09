@@ -501,16 +501,22 @@ class GameStorageManager(
             if (!redirectUrl.isNullOrBlank()) {
                 conn.disconnect()
                 currentUrl = redirectUrl
+                val originHost = runCatching { URL(session.server.url).host.lowercase() }.getOrNull()
+                val targetHost = runCatching { URL(currentUrl).host.lowercase() }.getOrNull()
+                val isSameHost = originHost != null && targetHost != null && originHost == targetHost
+
                 conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 30_000
                     readTimeout = 90_000
                     instanceFollowRedirects = true
                     setRequestProperty("Accept", "*/*")
-                    val authHeader = session.mediaBrowserAuthHeader()
-                    setRequestProperty("Authorization", authHeader)
-                    setRequestProperty("X-Emby-Token", session.accessToken)
-                    setRequestProperty("X-MediaBrowser-Token", session.accessToken)
-                    setRequestProperty("X-Emby-Authorization", authHeader)
+                    if (isSameHost) {
+                        val authHeader = session.mediaBrowserAuthHeader()
+                        setRequestProperty("Authorization", authHeader)
+                        setRequestProperty("X-Emby-Token", session.accessToken)
+                        setRequestProperty("X-MediaBrowser-Token", session.accessToken)
+                        setRequestProperty("X-Emby-Authorization", authHeader)
+                    }
                 }
                 responseCode = conn.responseCode
             }

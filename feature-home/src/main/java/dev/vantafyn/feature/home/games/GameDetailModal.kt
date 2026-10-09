@@ -47,6 +47,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import dev.vantafyn.core.emulator.net.LinkSessionManager
@@ -942,9 +943,12 @@ private fun LinkChoiceModal(
     val discoveredPeers by linkManager.discoveredPeers.collectAsState()
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    LaunchedEffect(Unit) {
+    DisposableEffect(game.id) {
         if (linkManager.autoDiscoveryEnabled) {
             linkManager.startDiscovery(filterGameId = game.id)
+        }
+        onDispose {
+            linkManager.stopDiscovery()
         }
     }
 

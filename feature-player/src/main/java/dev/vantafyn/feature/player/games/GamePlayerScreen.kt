@@ -281,7 +281,7 @@ fun GamePlayerScreen(
     DisposableEffect(lifecycleOwner, webViewInstance, nativeEngine) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_STOP -> {
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     if (isNativeMode) {
                         val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                         nativeEngine?.saveSram(sramFile)
@@ -295,7 +295,7 @@ fun GamePlayerScreen(
                         webViewInstance?.onPause()
                     }
                 }
-                Lifecycle.Event.ON_START -> {
+                Lifecycle.Event.ON_RESUME -> {
                     if (isNativeMode) {
                         if (!isPaused) {
                             nativeEngine?.resume()
