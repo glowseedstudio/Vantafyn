@@ -239,14 +239,12 @@ fun PokemonPokedexModal(
     }
 
     // 3. National Pokédex: synthesize full 1025 catalog merging server + local saves + vault
-    val allEntries = remember(pokedex, localCaughtIds, localSeenIds, localShinyIds, localFirstGameMap) {
+    val allEntries = remember(pokedex, localCaughtIds, localSeenIds, localShinyIds, localFirstGameMap, localSaves) {
         val serverMap = pokedex?.entries?.associateBy { it.speciesId } ?: emptyMap()
         (1..1025).map { speciesId ->
             val serverEntry = serverMap[speciesId]
-            // If local collection is small (e.g. <= 10 pokemon), don't trust server saying all 151 are caught if local has no gen 1 complete save
-            val trustServerCaught = serverEntry?.isCaught == true && (localCaughtIds.size >= 100 || localPokemon.isEmpty())
-            val isCaught = trustServerCaught || (speciesId in localCaughtIds)
-            val isSeen = isCaught || (serverEntry?.isSeen == true) || (speciesId in localSeenIds)
+            val isCaught = (speciesId in localCaughtIds) || (serverEntry?.isCaught == true && localSaves.isEmpty())
+            val isSeen = isCaught || (speciesId in localSeenIds) || (serverEntry?.isSeen == true && localSaves.isEmpty())
             val hasShiny = (serverEntry?.hasShiny == true) || (speciesId in localShinyIds)
             val firstGame = serverEntry?.firstEncounteredGame ?: localFirstGameMap[speciesId]
             val name = serverEntry?.speciesName?.ifBlank { null } ?: PokemonSpeciesCatalog.resolveSpeciesName(speciesId)

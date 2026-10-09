@@ -52,7 +52,7 @@ object PokemonNativeSaveParser {
         } ?: return null
 
         if (expected != null && parsed.generation != expected) return null
-        if (expectedPlatform.isNotBlank() && parsed.platform != expectedPlatform) return null
+        if (expectedPlatform.isNotBlank() && !parsed.platform.equals(expectedPlatform, ignoreCase = true)) return null
         return parsed
     }
 

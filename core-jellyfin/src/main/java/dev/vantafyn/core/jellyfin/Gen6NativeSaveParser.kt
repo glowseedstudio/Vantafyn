@@ -70,7 +70,7 @@ object Gen6NativeSaveParser {
     )
 
     fun isGen6Save(saveBytes: ByteArray?, gameTitle: String = ""): Boolean {
-        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE) return false
+        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE || saveBytes.size > 0x180000) return false
         val lower = gameTitle.lowercase()
         if (isOrasTitle(lower) || isXyTitle(lower)) return true
         return hasBeefSignature(saveBytes)
@@ -120,7 +120,11 @@ object Gen6NativeSaveParser {
     )
 
     fun parse(saveBytes: ByteArray?, gameTitle: String = "Pokemon Gen 6", gameId: String = ""): PokemonGameSaveDto? {
-        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE) return null
+        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE || saveBytes.size > 0x180000) return null
+        val headerPartyCount = if (PARTY_COUNT_OFFSET + 4 <= saveBytes.size) {
+            readUInt32LE(saveBytes, PARTY_COUNT_OFFSET).toInt()
+        } else 0
+        if (headerPartyCount !in 0..6) return null
 
         val isOras = isOrasTitle(gameTitle.lowercase()) || saveBytes.size >= ORAS_SAVE_MIN_SIZE
         val boxOffset = if (isOras) ORAS_BOX_OFFSET else XY_BOX_OFFSET

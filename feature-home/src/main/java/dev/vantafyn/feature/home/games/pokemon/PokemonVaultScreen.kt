@@ -238,18 +238,6 @@ fun PokemonVaultScreen(
                     // 1. Locate local save file (.sram, .sav, .srm, .main, etc.)
                     val localSaveFile = storageManager.findExistingLocalSaveFile(gameId, GameSaveKind.Sram)
 
-                    // If local save exists and is newer or local-only, push it to cloud so companion plugin can see it
-                    if (session != null && localSaveFile.exists() && localSaveFile.length() > 0L) {
-                        try {
-                            val syncInfo = storageManager.checkSaveSync(session, gameId, GameSaveKind.Sram)
-                            if (syncInfo.status == SaveSyncStatus.LOCAL_NEWER || syncInfo.status == SaveSyncStatus.LOCAL_ONLY) {
-                                storageManager.replaceCloudWithLocalSave(session, gameId, GameSaveKind.Sram)
-                            }
-                        } catch (e: Exception) {
-                            android.util.Log.w("PokemonVault", "Save sync check error: ${e.message}")
-                        }
-                    }
-
                     // 2. Query companion plugin for game save and lock state
                     var saveDto: dev.vantafyn.core.jellyfin.PokemonGameSaveDto? = null
                     var lockState: dev.vantafyn.core.jellyfin.SaveLockStateDto? = null
@@ -261,8 +249,15 @@ fun PokemonVaultScreen(
                         val lockRes = pokemonRepository.getGameLockState(session, libId, gameId)
                         saveDto = saveRes.getOrNull()
                         lockState = lockRes.getOrNull()
+                        val targetPokemon = target.game.pokemon
                         if (saveDto == null || !saveDto.saveFound || !saveDto.providerAvailable) {
                             errorMsg = saveRes.exceptionOrNull()?.message
+                        } else if (targetPokemon != null) {
+                            val genMismatch = targetPokemon.generation > 0 && saveDto.generation > 0 && saveDto.generation != targetPokemon.generation
+                            val platMismatch = targetPokemon.platform.isNotBlank() && saveDto.platform.isNotBlank() && !saveDto.platform.equals(targetPokemon.platform, ignoreCase = true)
+                            if (genMismatch || platMismatch) {
+                                saveDto = null
+                            }
                         }
                     }
 
@@ -611,16 +606,23 @@ fun PokemonVaultScreen(
 
     val allDetectedSaves = remember(upperState.gameSave, lowerState.gameSave, availableGames) {
         val map = mutableMapOf<String, dev.vantafyn.core.jellyfin.PokemonGameSaveDto>()
-        fun isValidSave(save: dev.vantafyn.core.jellyfin.PokemonGameSaveDto?): Boolean {
+        fun isValidSave(save: dev.vantafyn.core.jellyfin.PokemonGameSaveDto?, game: GameSummary?): Boolean {
             if (save == null || !save.saveFound || !save.providerAvailable) return false
+            val meta = game?.pokemon
+            if (meta != null) {
+                if (meta.generation > 0 && save.generation > 0 && save.generation != meta.generation) return false
+                if (meta.platform.isNotBlank() && save.platform.isNotBlank() && !save.platform.equals(meta.platform, ignoreCase = true)) return false
+            }
             return save.party.isNotEmpty() ||
                 save.boxes.any { it.entries.isNotEmpty() } ||
                 save.totalPokemonCount > 0 ||
                 (save.pokedexCaught ?: 0) > 0 ||
                 save.gymBadges.any { r -> r.badges.any { it.isEarned } }
         }
-        upperState.gameSave?.takeIf { isValidSave(it) }?.let { map[it.gameId] = it }
-        lowerState.gameSave?.takeIf { isValidSave(it) }?.let { map[it.gameId] = it }
+        val upperGame = (upperState.containerType as? StorageContainerType.GameCartridge)?.game
+        val lowerGame = (lowerState.containerType as? StorageContainerType.GameCartridge)?.game
+        upperState.gameSave?.takeIf { isValidSave(it, upperGame) }?.let { map[it.gameId] = it }
+        lowerState.gameSave?.takeIf { isValidSave(it, lowerGame) }?.let { map[it.gameId] = it }
         for (game in availableGames) {
             if (!map.containsKey(game.id)) {
                 val localSaveFile = storageManager.findExistingLocalSaveFile(game.id, GameSaveKind.Sram)
@@ -634,7 +636,7 @@ fun PokemonVaultScreen(
                             expectedGeneration = game.pokemon?.generation ?: 0,
                             expectedPlatform = game.pokemon?.platform ?: "",
                         )
-                        if (parsed != null && isValidSave(parsed)) {
+                        if (parsed != null && isValidSave(parsed, game)) {
                             map[game.id] = parsed.copy(
                                 gameId = game.id,
                                 title = game.title,

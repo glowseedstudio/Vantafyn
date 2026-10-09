@@ -159,21 +159,34 @@ object Gen4NativeSaveParser {
 
     private fun getActiveSlot(saveBytes: ByteArray, blockStart: Int, blockSize: Int): Int {
         val footerOffset = blockStart + blockSize - 0x14
+        if (footerOffset + 8 > saveBytes.size) return -1
         val c1 = readUInt32LE(saveBytes, footerOffset)
-        if (footerOffset + PARTITION_SIZE + 4 > saveBytes.size) {
-            return if (c1 != 0xFFFFFFFFL) 0 else -1
+        val size1 = readUInt32LE(saveBytes, footerOffset + 4)
+        val v1 = c1 != 0xFFFFFFFFL && size1 == blockSize.toLong()
+
+        if (footerOffset + PARTITION_SIZE + 8 > saveBytes.size) {
+            return if (v1) 0 else -1
         }
         val c2 = readUInt32LE(saveBytes, footerOffset + PARTITION_SIZE)
-        return if (c2 != 0xFFFFFFFFL && (c1 == 0xFFFFFFFFL || c2 > c1)) 1 else 0
+        val size2 = readUInt32LE(saveBytes, footerOffset + PARTITION_SIZE + 4)
+        val v2 = c2 != 0xFFFFFFFFL && size2 == blockSize.toLong()
+
+        return when {
+            v1 && v2 -> if (c2 > c1) 1 else 0
+            v2 -> 1
+            v1 -> 0
+            else -> -1
+        }
     }
 
     fun parse(saveBytes: ByteArray, gameTitle: String = "Pokemon Gen 4", gameId: String = ""): PokemonGameSaveDto? {
-        if (saveBytes.size < 0x40000) return null
+        if (saveBytes.size !in 524288..524410) return null
 
         val offsets = detectVariant(saveBytes, gameTitle)
 
         val activeSlotGeneral = getActiveSlot(saveBytes, 0, offsets.generalSize)
         val activeSlotStorage = getActiveSlot(saveBytes, offsets.storageStart, offsets.storageSize)
+        if (activeSlotGeneral < 0 || activeSlotStorage < 0) return null
 
         val generalBase = if (activeSlotGeneral == 1) PARTITION_SIZE else 0
         val storageBase = (if (activeSlotStorage == 1) PARTITION_SIZE else 0) + offsets.storageStart

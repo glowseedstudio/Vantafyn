@@ -91,7 +91,7 @@ object Gen5NativeSaveParser {
     }
 
     fun parse(saveBytes: ByteArray, gameTitle: String = "Pokemon Gen 5", gameId: String = ""): PokemonGameSaveDto? {
-        if (saveBytes.size < 0x80000) return null
+        if (saveBytes.size !in 524288..524410) return null
 
         val pokedex = readPokedexFlags(saveBytes, variantOffsets(gameTitle))
         val partyList = mutableListOf<PokemonSummaryDto>()

@@ -233,50 +233,72 @@ class GameStorageManager(
         val altCandidates = mutableListOf(
             File(savesDir, "$safeId.sav"),
             File(savesDir, "$safeId.srm"),
-            File(savesDir, "$safeId.main"),
+            File(savesDir, "$safeId.dsv"),
             File(savesDir, "$safeId.bin"),
             File(savesDir, "$altId.sav"),
             File(savesDir, "$altId.srm"),
-            File(savesDir, "$altId.main"),
-            File(savesDir, "main"),
+            File(savesDir, "$altId.dsv"),
             File(nativeSaveDir, "$safeId.sav"),
             File(nativeSaveDir, "$safeId.srm"),
-            File(nativeSaveDir, "$safeId.main"),
+            File(nativeSaveDir, "$safeId.dsv"),
             File(nativeSaveDir, "$altId.sav"),
             File(nativeSaveDir, "$altId.srm"),
-            File(nativeSaveDir, "$altId.main"),
-            File(nativeSaveDir, "main"),
+            File(nativeSaveDir, "$altId.dsv"),
         )
 
-        // Check if save file is stored alongside ROM in local 3DS directory
-        val local3dsDir = getLocal3dsDirectory()
-        if (local3dsDir.exists() && local3dsDir.isDirectory) {
-            altCandidates.add(File(local3dsDir, "$altId.sav"))
-            altCandidates.add(File(local3dsDir, "$altId.srm"))
-            altCandidates.add(File(local3dsDir, "$altId.main"))
+        // Only for local 3DS games: check alongside ROM in local 3DS directory using the game's actual ROM base name
+        if (safeId.startsWith("local_3ds_")) {
+            val local3dsDir = getLocal3dsDirectory()
+            if (local3dsDir.exists() && local3dsDir.isDirectory) {
+                altCandidates.add(File(local3dsDir, "$altId.sav"))
+                altCandidates.add(File(local3dsDir, "$altId.srm"))
+                altCandidates.add(File(local3dsDir, "$altId.main"))
+            }
+
+            // Citra SDMC save directory: must strictly match THIS 3DS game's title ID
+            val titleIds = get3dsTitleIds(altId)
+            if (titleIds.isNotEmpty()) {
+                val citraRoots = listOf(
+                    File(nativeSaveDir, "Citra/sdmc/Nintendo 3DS"),
+                    File(nativeSaveDir, "citra/sdmc/Nintendo 3DS"),
+                    File(savesDir, "Citra/sdmc/Nintendo 3DS"),
+                    File(savesDir, "citra/sdmc/Nintendo 3DS"),
+                )
+                for (root in citraRoots) {
+                    if (root.exists() && root.isDirectory) {
+                        for (tid in titleIds) {
+                            val candidate = root.walkTopDown()
+                                .maxDepth(6)
+                                .filter { it.isDirectory && it.name.equals(tid, ignoreCase = true) }
+                                .flatMap { it.walkTopDown().maxDepth(4).filter { f -> f.isFile && f.name.equals("main", ignoreCase = true) } }
+                                .firstOrNull { it.length() > 0 }
+                            if (candidate != null) return candidate
+                        }
+                    }
+                }
+            }
         }
 
         for (alt in altCandidates) {
             if (alt.exists() && alt.length() > 0) return alt
         }
 
-        // Citra sdmc title save search fallback (00000001/main)
-        val citraSearchRoots = listOf(
-            File(nativeSaveDir, "Citra/sdmc/Nintendo 3DS"),
-            File(nativeSaveDir, "citra/sdmc/Nintendo 3DS"),
-            File(savesDir, "Citra/sdmc/Nintendo 3DS"),
-            File(savesDir, "citra/sdmc/Nintendo 3DS"),
-        )
-        for (root in citraSearchRoots) {
-            if (root.exists() && root.isDirectory) {
-                val found = root.walkTopDown()
-                    .filter { it.isFile && (it.name.equals("main", ignoreCase = true) || it.name.endsWith(".sav") || it.name.endsWith(".srm")) }
-                    .maxByOrNull { it.lastModified() }
-                if (found != null && found.length() > 0) return found
-            }
-        }
-
         return standard
+    }
+
+    private fun get3dsTitleIds(altId: String): Set<String> {
+        val lower = altId.lowercase()
+        return when {
+            lower.contains("ultra") && lower.contains("sun") -> setOf("001b5000", "001b5100", "001b4f00")
+            lower.contains("ultra") && lower.contains("moon") -> setOf("001b5100", "001b5200", "001b5000")
+            lower.contains("sun") -> setOf("00164800", "00164900", "00175e00")
+            lower.contains("moon") -> setOf("00175d00", "00175e00", "00175f00")
+            lower.contains("omega") || lower.contains("ruby") -> setOf("0011c300", "0011c400", "0011c500")
+            lower.contains("alpha") || lower.contains("sapphire") -> setOf("0011c500", "0011c600", "0011c700")
+            lower.contains("pokemon x") || lower.contains("pokemon_x") || lower.endsWith("_x") -> setOf("00055c00", "00055d00", "00055e00")
+            lower.contains("pokemon y") || lower.contains("pokemon_y") || lower.endsWith("_y") -> setOf("00055e00", "00055f00", "00056000")
+            else -> emptySet()
+        }
     }
 
     suspend fun downloadRomIfNeeded(

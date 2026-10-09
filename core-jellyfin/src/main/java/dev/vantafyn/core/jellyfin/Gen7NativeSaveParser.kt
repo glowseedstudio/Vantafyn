@@ -80,7 +80,7 @@ object Gen7NativeSaveParser {
     )
 
     fun isGen7Save(saveBytes: ByteArray?, gameTitle: String = ""): Boolean {
-        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE) return false
+        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE || saveBytes.size > 0x180000) return false
         val lower = gameTitle.lowercase()
         if (isGen7Title(lower)) return true
         return hasBeefSignature(saveBytes)
@@ -174,7 +174,7 @@ object Gen7NativeSaveParser {
     )
 
     fun parse(saveBytes: ByteArray?, gameTitle: String = "Pokemon Gen 7", gameId: String = ""): PokemonGameSaveDto? {
-        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE) return null
+        if (saveBytes == null || saveBytes.size < SAVE_MIN_SIZE || saveBytes.size > 0x180000) return null
 
         val titleLower = gameTitle.lowercase()
         val isUsum = when {
@@ -183,9 +183,14 @@ object Gen7NativeSaveParser {
             else -> saveBytes.size == USUM_SAVE_MIN_SIZE
         }
 
+        val partyCountOffset = if (isUsum) USUM_PARTY_COUNT_OFFSET else SM_PARTY_COUNT_OFFSET
+        val headerPartyCount = if (partyCountOffset + 4 <= saveBytes.size) {
+            readUInt32LE(saveBytes, partyCountOffset).toInt()
+        } else 0
+        if (headerPartyCount !in 0..6) return null
+
         val statusOffset = if (isUsum) USUM_STATUS_OFFSET else SM_STATUS_OFFSET
         val partyOffset = if (isUsum) USUM_PARTY_OFFSET else SM_PARTY_OFFSET
-        val partyCountOffset = if (isUsum) USUM_PARTY_COUNT_OFFSET else SM_PARTY_COUNT_OFFSET
         val zukanOffset = if (isUsum) USUM_ZUKAN_OFFSET else SM_ZUKAN_OFFSET
         val zukanCaughtOffset = if (isUsum) USUM_ZUKAN_CAUGHT_OFFSET else SM_ZUKAN_CAUGHT_OFFSET
         val zukanSeenOffset = if (isUsum) USUM_ZUKAN_SEEN_OFFSET else SM_ZUKAN_SEEN_OFFSET
