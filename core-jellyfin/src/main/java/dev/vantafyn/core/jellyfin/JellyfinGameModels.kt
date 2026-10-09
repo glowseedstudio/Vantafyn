@@ -72,7 +72,7 @@ fun resolveSystemDisplayName(id: String, rawName: String): String {
 fun resolveSystemLogoUrl(id: String, core: String): String {
     val key = (if (id.isNotBlank()) id else core).lowercase().trim()
     if (key.contains("3ds") || key.contains("citra") || key.contains("azahar")) {
-        return "https://raw.githubusercontent.com/EmuELEC/es-theme-EmuELEC-clean-style/master/3ds/_inc/system.svg"
+        return "https://raw.githubusercontent.com/batocera-linux/batocera-themes/master/themes/batocera/3ds/_data/svg/logo.svg"
     }
     val themeFolder = when {
         key.contains("gba") || key.contains("advance") -> "gba"

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.SwapVert
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -127,6 +128,8 @@ fun GamePauseHud(
     onCycleGbPalette: () -> Unit = {},
     lcdGhosting: Boolean = false,
     onToggleLcdGhosting: () -> Unit = {},
+    citraResolution: String = "1x (400x240)",
+    onCycleCitraResolution: () -> Unit = {},
     onResume: () -> Unit,
     onToggleSpeed: () -> Unit,
     onCycleAspectRatio: () -> Unit,
@@ -301,6 +304,27 @@ fun GamePauseHud(
                                 onClick = onCycleVideoFilter,
                                 modifier = Modifier.weight(1f),
                             )
+                        }
+
+                        // 3DS Internal Resolution Scale & Screen Prominence Row
+                        if (is3dsSystem) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                HudMenuButton(
+                                    label = "Scale: ${citraResolution.substringBefore(" ")}",
+                                    icon = Icons.Rounded.Tune,
+                                    onClick = onCycleCitraResolution,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                HudMenuButton(
+                                    label = if (swapDualScreens) "Prominent: Touch" else "Prominent: Top",
+                                    icon = Icons.Rounded.SwapVert,
+                                    onClick = onToggleSwapDualScreens,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
 
                         // GBA Color Profile & Audio Anti-Aliasing Profile

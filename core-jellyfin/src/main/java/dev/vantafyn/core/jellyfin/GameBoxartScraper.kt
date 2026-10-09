@@ -38,6 +38,7 @@ object GameBoxartScraper {
         PlatformInfo("Nintendo - Game Boy", "Nintendo_-_Game_Boy"),
         PlatformInfo("Nintendo - Game Boy Color", "Nintendo_-_Game_Boy_Color"),
         PlatformInfo("Nintendo - Nintendo DS", "Nintendo_-_Nintendo_DS"),
+        PlatformInfo("Nintendo - Nintendo 3DS", "Nintendo_-_Nintendo_3DS"),
         PlatformInfo("Nintendo - Virtual Boy", "Nintendo_-_Virtual_Boy"),
         PlatformInfo("Sony - PlayStation", "Sony_-_PlayStation"),
         PlatformInfo("Sony - PlayStation Portable", "Sony_-_PlayStation_Portable"),
@@ -69,6 +70,7 @@ object GameBoxartScraper {
             "gb", "gameboy", "nintendogameboy" -> PlatformInfo("Nintendo - Game Boy", "Nintendo_-_Game_Boy")
             "gbc", "gameboycolor", "nintendogameboycolor" -> PlatformInfo("Nintendo - Game Boy Color", "Nintendo_-_Game_Boy_Color")
             "nds", "ds", "nintendods", "nintendonintendods" -> PlatformInfo("Nintendo - Nintendo DS", "Nintendo_-_Nintendo_DS")
+            "3ds", "n3ds", "nintendo3ds" -> PlatformInfo("Nintendo - Nintendo 3DS", "Nintendo_-_Nintendo_3DS")
             "vb", "virtualboy", "nintendovirtualboy" -> PlatformInfo("Nintendo - Virtual Boy", "Nintendo_-_Virtual_Boy")
             "psx", "ps1", "psone", "playstation", "sonyplaystation" -> PlatformInfo("Sony - PlayStation", "Sony_-_PlayStation")
             "psp", "playstationportable", "sonyplaystationportable" -> PlatformInfo("Sony - PlayStation Portable", "Sony_-_PlayStation_Portable")
@@ -312,7 +314,20 @@ object GameBoxartScraper {
             .replace("%28", "(")
             .replace("%29", ")")
             .replace("%2C", ",")
+        if (platform.githubRepo.contains("3DS", ignoreCase = true)) {
+            return "https://raw.githubusercontent.com/libretro-thumbnails/${platform.githubRepo}/master/Named_Boxarts/$encodedFilename"
+        }
         return "https://cdn.jsdelivr.net/gh/libretro-thumbnails/${platform.githubRepo}@master/Named_Boxarts/$encodedFilename"
+    }
+
+    fun resolve3dsBoxartUrl(fileName: String): String {
+        val nameWithoutExt = fileName.substringBeforeLast('.')
+        val encodedFilename = URLEncoder.encode("$nameWithoutExt.png", "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS/master/Named_Boxarts/$encodedFilename"
     }
 
     /**
@@ -331,7 +346,7 @@ object GameBoxartScraper {
 
         val platform = resolvePlatform(platformPart)
         return if (platform != null) {
-            "https://cdn.jsdelivr.net/gh/libretro-thumbnails/${platform.githubRepo}@master/Named_Boxarts/$filenamePart"
+            buildCdnUrl(platform, URLDecoder.decode(filenamePart, "UTF-8"))
         } else {
             originalUrl
         }

@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.30}"
+VERSION="${1:-0.2.31}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.64}"
-CHANGELOG="Fixes Nintendo 3DS console logo URL resolution using high-resolution clean vector art from GitHub CDN."
+TAG="${2:-v0.9.65}"
+CHANGELOG="Updates Nintendo 3DS console logo vector resolution with clean SVG artwork."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.30.0",
+        "changelog": "Fixes Nintendo 3DS console logo URL resolution using high-resolution clean vector art from GitHub CDN.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.64/Vantafyn.Plugin.Companion_0.2.30_net9.zip",
+        "checksum": "c2153d30a403d9404adf171826c87789",
+        "timestamp": "2026-10-08T23:41:53Z"
+      },
+      {
+        "version": "0.2.30.1",
+        "changelog": "Fixes Nintendo 3DS console logo URL resolution using high-resolution clean vector art from GitHub CDN.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.64/Vantafyn.Plugin.Companion_0.2.30_net10.zip",
+        "checksum": "d9026f2eadfc1885927bb5b2093a9448",
+        "timestamp": "2026-10-08T23:41:53Z"
       },
       {
         "version": "0.2.29.0",

@@ -1,7 +1,11 @@
 package dev.vantafyn.feature.player.games
 
 import android.content.Context
+import android.os.Build
+import android.os.Environment
 import dev.vantafyn.core.jellyfin.GameDetail
+import dev.vantafyn.core.jellyfin.GameSummary
+import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
@@ -96,10 +100,52 @@ class GameStorageManager(
     }
 
     fun listDownloadedGameKeys(): Set<String> {
-        return persistentRomsDir.listFiles().orEmpty()
+        val keys = persistentRomsDir.listFiles().orEmpty()
             .filter { it.isFile && it.length() > 0 }
             .map { it.nameWithoutExtension }
-            .toSet()
+            .toMutableSet()
+        val dir = getLocal3dsDirectory()
+        if (dir.exists() && dir.isDirectory) {
+            val validExts = setOf("3ds", "cci", "cxi", "3dsx", "cia")
+            dir.listFiles().orEmpty()
+                .filter { it.isFile && it.extension.lowercase() in validExts }
+                .forEach { file ->
+                    keys.add(file.name)
+                    keys.add(file.nameWithoutExtension)
+                    keys.add("local_3ds_${file.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")}")
+                }
+        }
+        return keys
+    }
+
+    fun scanLocal3dsGameSummaries(): List<GameSummary> {
+        val dir = getLocal3dsDirectory()
+        if (!dir.exists() || !dir.isDirectory) return emptyList()
+        val files = dir.listFiles() ?: return emptyList()
+        val validExts = setOf("3ds", "cci", "cxi", "3dsx", "cia")
+        return files
+            .filter { it.isFile && it.extension.lowercase() in validExts }
+            .sortedBy { it.name.lowercase() }
+            .map { file ->
+                val baseName = file.nameWithoutExtension
+                val cleanTitle = baseName
+                    .replace(Regex("\\[.*?\\]"), "")
+                    .replace(Regex("\\(.*?\\)"), "")
+                    .replace(Regex("^[0-9]{3,5}\\s*[-_]\\s*"), "")
+                    .trim()
+                    .ifEmpty { baseName }
+                val safeId = "local_3ds_${file.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")}"
+                GameSummary(
+                    id = safeId,
+                    title = cleanTitle,
+                    systemId = "3ds",
+                    filename = file.name,
+                    sizeBytes = file.length(),
+                    token = file.name,
+                    extension = file.extension,
+                    boxartUrl = GameBoxartScraper.resolve3dsBoxartUrl(file.name),
+                )
+            }
     }
 
     fun resolveCoreDataFileName(systemId: String, core: String): String {
@@ -120,52 +166,51 @@ class GameStorageManager(
     }
 
     suspend fun preCacheEmulatorCore(systemId: String, core: String) = withContext(Dispatchers.IO) {
-        val baseCdn = "https://cdn.emulatorjs.org/stable/data/"
-        val coreFile = resolveCoreDataFileName(systemId, core)
-        val filesToCache = listOf(
-            "loader.js" to File(emulatorCacheDir, "loader.js"),
-            "emulator.min.js" to File(emulatorCacheDir, "emulator.min.js"),
-            "emulator.min.css" to File(emulatorCacheDir, "emulator.min.css"),
-            "cores/$coreFile" to File(emulatorCacheDir, "cores/$coreFile"),
-            "compression/extract7z.js" to File(emulatorCacheDir, "compression/extract7z.js"),
-            "compression/extract7z-wasm.data" to File(emulatorCacheDir, "compression/extract7z-wasm.data"),
-            "compression/extract7z-wasm.wasm" to File(emulatorCacheDir, "compression/extract7z-wasm.wasm"),
-        )
-        for ((relPath, target) in filesToCache) {
-            if (target.exists() && target.length() > 0) continue
-            try {
-                val url = "$baseCdn$relPath"
-                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 15_000
-                    readTimeout = 30_000
-                    instanceFollowRedirects = true
-                }
-                if (conn.responseCode in 200..299) {
-                    target.parentFile?.mkdirs()
-                    val temp = File(target.parentFile, "${target.name}.tmp")
-                    conn.inputStream.use { input ->
-                        FileOutputStream(temp).use { output ->
-                            input.copyTo(output)
-                        }
+        val isNative = systemId.lowercase() in listOf("nds", "ds", "gba", "gb", "gbc", "3ds", "n3ds", "nintendo3ds") ||
+            core.contains("melonds", ignoreCase = true) || core.contains("gpsp", ignoreCase = true) ||
+            core.contains("mgba", ignoreCase = true) || core.contains("gambatte", ignoreCase = true) ||
+            core.contains("tgbdual", ignoreCase = true) || core.contains("sameboy", ignoreCase = true) ||
+            core.contains("azahar", ignoreCase = true) || core.contains("citra", ignoreCase = true)
+
+        if (!isNative) {
+            val baseCdn = "https://cdn.emulatorjs.org/stable/data/"
+            val coreFile = resolveCoreDataFileName(systemId, core)
+            val filesToCache = listOf(
+                "loader.js" to File(emulatorCacheDir, "loader.js"),
+                "emulator.min.js" to File(emulatorCacheDir, "emulator.min.js"),
+                "emulator.min.css" to File(emulatorCacheDir, "emulator.min.css"),
+                "cores/$coreFile" to File(emulatorCacheDir, "cores/$coreFile"),
+                "compression/extract7z.js" to File(emulatorCacheDir, "compression/extract7z.js"),
+                "compression/extract7z-wasm.data" to File(emulatorCacheDir, "compression/extract7z-wasm.data"),
+                "compression/extract7z-wasm.wasm" to File(emulatorCacheDir, "compression/extract7z-wasm.wasm"),
+            )
+            for ((relPath, target) in filesToCache) {
+                if (target.exists() && target.length() > 0) continue
+                try {
+                    val url = "$baseCdn$relPath"
+                    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 15_000
+                        readTimeout = 30_000
+                        instanceFollowRedirects = true
                     }
-                    temp.renameTo(target)
+                    if (conn.responseCode in 200..299) {
+                        target.parentFile?.mkdirs()
+                        val temp = File(target.parentFile, "${target.name}.tmp")
+                        conn.inputStream.use { input ->
+                            FileOutputStream(temp).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        temp.renameTo(target)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("GameStorageManager", "Could not pre-cache emulator asset $relPath: ${e.message}")
                 }
-            } catch (e: Exception) {
-                android.util.Log.w("GameStorageManager", "Could not pre-cache emulator asset $relPath: ${e.message}")
             }
         }
         // Pre-cache native core if this is a Nintendo DS, 3DS, Game Boy Advance, or supported native system
         val nativeCoreId = nativeCoreManager.getCoreIdForSystem(systemId)
-        if (systemId.equals("nds", ignoreCase = true) || 
-            systemId.equals("gba", ignoreCase = true) || 
-            systemId.equals("3ds", ignoreCase = true) ||
-            systemId.equals("n3ds", ignoreCase = true) ||
-            systemId.equals("nintendo3ds", ignoreCase = true) ||
-            core.contains("melonds", ignoreCase = true) || 
-            core.contains("gpsp", ignoreCase = true) ||
-            core.contains("mgba", ignoreCase = true) ||
-            core.contains("azahar", ignoreCase = true) ||
-            core.contains("citra", ignoreCase = true)) {
+        if (isNative) {
             nativeCoreManager.ensureCoreInstalled(nativeCoreId)
         }
     }
@@ -221,6 +266,166 @@ class GameStorageManager(
         downloadRomInternal(session, libraryId, game, cacheTarget, onProgress)
     }
 
+    fun normalizeDirectoryPath(raw: String): File {
+        var trimmed = raw.trim().trimEnd('/')
+        // Fix common mobile keyboard typo: letter 'O' instead of digit '0' in /storage/emulated/0
+        trimmed = trimmed
+            .replace("/emulated/O/", "/emulated/0/")
+            .replace("/emulated/o/", "/emulated/0/")
+            .replace("/emulated/O", "/emulated/0")
+            .replace("/emulated/o", "/emulated/0")
+
+        val candidate = when {
+            trimmed.startsWith("/storage/") || trimmed.startsWith("/sdcard/") -> File(trimmed)
+            trimmed.startsWith("/sdcard") -> File(trimmed)
+            trimmed.startsWith("/") -> {
+                val direct = File(trimmed)
+                if (direct.exists()) direct else File("/sdcard$trimmed")
+            }
+            else -> File("/sdcard/$trimmed")
+        }
+        if (candidate.exists()) return candidate
+
+        if (candidate.absolutePath.startsWith("/storage/emulated/0")) {
+            val alt = File(candidate.absolutePath.replaceFirst("/storage/emulated/0", "/sdcard"))
+            if (alt.exists()) return alt
+        } else if (candidate.absolutePath.startsWith("/sdcard")) {
+            val alt = File(candidate.absolutePath.replaceFirst("/sdcard", "/storage/emulated/0"))
+            if (alt.exists()) return alt
+        }
+
+        val parent = candidate.parentFile
+        if (parent != null && parent.exists()) {
+            val match = parent.listFiles()?.firstOrNull { it.name.equals(candidate.name, ignoreCase = true) }
+            if (match != null) return match
+        }
+        return candidate
+    }
+
+    fun getLocal3dsDirectory(): File {
+        val prefs = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+        val customPath = prefs.getString("local_3ds_rom_directory", null)?.takeIf { it.isNotBlank() }
+        if (customPath != null) {
+            val dir = normalizeDirectoryPath(customPath)
+            if (dir.exists() && dir.isDirectory) return dir
+        }
+        val commonCandidates = listOf(
+            File("/sdcard/Roms/3DS"),
+            File("/sdcard/ROMs/3ds"),
+            File("/sdcard/ROMs/3DS"),
+            File("/sdcard/Roms/3ds"),
+            File("/sdcard/Download/3ds"),
+            File("/sdcard/Download"),
+            File(context.getExternalFilesDir(null), "3ds"),
+        )
+        for (cand in commonCandidates) {
+            if (cand.exists() && cand.isDirectory) return cand
+        }
+        val appExtDir = File(context.getExternalFilesDir(null), "3ds")
+        if (!appExtDir.exists()) appExtDir.mkdirs()
+        return appExtDir
+    }
+
+    private fun normalizeTitle(raw: String): String {
+        return raw.lowercase()
+            .replace(Regex("\\[.*?\\]"), "")
+            .replace(Regex("\\(.*?\\)"), "")
+            .replace(Regex("^[0-9]{3,5}\\s*[-_]\\s*"), "")
+            .replace(Regex("[^a-z0-9]"), "")
+            .trim()
+    }
+
+    fun findLocal3dsRom(game: GameDetail): File? {
+        val prefs = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+        val customPath = prefs.getString("local_3ds_rom_directory", null)?.takeIf { it.isNotBlank() }
+
+        val candidateDirs = mutableListOf<File>()
+        if (customPath != null) {
+            candidateDirs.add(normalizeDirectoryPath(customPath))
+        }
+
+        candidateDirs.add(File("/sdcard/Roms/3DS"))
+        candidateDirs.add(File("/sdcard/ROMs/3ds"))
+        candidateDirs.add(File("/sdcard/ROMs/3DS"))
+        candidateDirs.add(File("/sdcard/Roms/3ds"))
+        candidateDirs.add(File("/sdcard/Download/3ds"))
+        candidateDirs.add(File("/sdcard/Download/3DS"))
+        candidateDirs.add(File("/sdcard/Download"))
+        candidateDirs.add(File("/sdcard/3ds"))
+        candidateDirs.add(File("/sdcard/3DS"))
+        candidateDirs.add(File(context.getExternalFilesDir(null), "3ds"))
+        candidateDirs.add(File(context.getExternalFilesDir(null), "roms/3ds"))
+        candidateDirs.add(File(context.filesDir, "3ds"))
+
+        val extStorage = Environment.getExternalStorageDirectory()
+        if (extStorage != null && extStorage.exists()) {
+            candidateDirs.add(File(extStorage, "Roms/3DS"))
+            candidateDirs.add(File(extStorage, "ROMs/3ds"))
+        }
+
+        val hasAllFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            Environment.isExternalStorageManager()
+        } else true
+        android.util.Log.i(
+            "Vantafyn3DS",
+            "findLocal3dsRom searching for '${game.title}' (id=${game.id}, filename='${game.filename}', cleanTitle='${game.cleanTitle}'). AllFilesAccess=$hasAllFiles"
+        )
+
+        val targetFilename = game.filename.lowercase().trim()
+        val targetWithoutExt = targetFilename.substringBeforeLast('.')
+        val cleanGameTitle = game.cleanTitle.ifEmpty { game.title }.lowercase().trim()
+        val normTargetTitle = normalizeTitle(cleanGameTitle)
+        val validExts = setOf("cci", "3ds", "cxi", "3dsx", "cia")
+
+        val distinctDirs = candidateDirs.distinctBy { it.absolutePath }
+        for (dir in distinctDirs) {
+            if (!dir.exists() || !dir.isDirectory) {
+                continue
+            }
+            val files = try {
+                dir.walkTopDown().maxDepth(3).filter { it.isFile && it.length() > 0L }.toList()
+            } catch (e: Exception) {
+                android.util.Log.w("Vantafyn3DS", "Error walking ${dir.absolutePath}: ${e.message}")
+                dir.listFiles()?.filter { it.isFile && it.length() > 0L } ?: emptyList()
+            }
+            android.util.Log.i("Vantafyn3DS", "Scanning ${dir.absolutePath} (${files.size} total files found)")
+            for (f in files) {
+                val fExt = f.extension.lowercase()
+                if (fExt !in validExts) continue
+                val fName = f.name.lowercase()
+                val fNameWithoutExt = f.nameWithoutExtension.lowercase()
+
+                // 1. Exact filename match
+                if (targetFilename.isNotBlank() && fName == targetFilename) {
+                    android.util.Log.i("Vantafyn3DS", "MATCH SUCCESS (exact filename): ${f.absolutePath}")
+                    return f
+                }
+                // 2. Exact name without extension match
+                if (targetWithoutExt.isNotBlank() && fNameWithoutExt == targetWithoutExt) {
+                    android.util.Log.i("Vantafyn3DS", "MATCH SUCCESS (name without ext): ${f.absolutePath}")
+                    return f
+                }
+                // 3. Clean title match
+                if (cleanGameTitle.isNotBlank() && (fNameWithoutExt == cleanGameTitle ||
+                        fNameWithoutExt.startsWith(cleanGameTitle) ||
+                        cleanGameTitle.startsWith(fNameWithoutExt))) {
+                    android.util.Log.i("Vantafyn3DS", "MATCH SUCCESS (clean title): ${f.absolutePath}")
+                    return f
+                }
+                // 4. Normalized title match (ignores brackets, regions, scene numbers, hyphens)
+                val normFile = normalizeTitle(fNameWithoutExt)
+                if (normTargetTitle.isNotBlank() && normFile.isNotBlank()) {
+                    if (normFile == normTargetTitle || normFile.contains(normTargetTitle) || normTargetTitle.contains(normFile)) {
+                        android.util.Log.i("Vantafyn3DS", "MATCH SUCCESS (normalized title '$normTargetTitle' == '$normFile'): ${f.absolutePath}")
+                        return f
+                    }
+                }
+            }
+        }
+        android.util.Log.w("Vantafyn3DS", "NO MATCH found for '${game.title}' across ${distinctDirs.size} folders.")
+        return null
+    }
+
     suspend fun downloadRomForOffline(
         session: JellyfinSession?,
         libraryId: String,
@@ -267,10 +472,11 @@ class GameStorageManager(
         val tempFile = File(target.parentFile, "${target.name}.tmp")
         if (tempFile.exists()) tempFile.delete()
 
-        val downloadUrl = if (game.downloadUrl.isNotBlank() && !game.downloadUrl.contains("/ROM/?")) {
+        val downloadUrl = if (game.downloadUrl.isNotBlank() && !game.downloadUrl.contains("/ROM/?") && !game.downloadUrl.contains("/ROM//")) {
             game.downloadUrl
         } else {
-            gamesRepository.getRomDownloadUrl(session, libraryId, token)
+            val effLibId = libraryId.ifBlank { "default" }
+            gamesRepository.getRomDownloadUrl(session, effLibId, token)
         }
 
         var currentUrl = downloadUrl
@@ -312,14 +518,19 @@ class GameStorageManager(
 
         if (responseCode !in 200..299) {
             val safeUrl = currentUrl.substringBefore('?')
-            val rawError = conn.errorStream?.bufferedReader()?.use { it.readText() } ?: ""
+            val rawError = conn.errorStream?.bufferedReader()?.use { reader ->
+                val charBuf = CharArray(4096)
+                val read = reader.read(charBuf)
+                if (read > 0) String(charBuf, 0, read) else ""
+            } ?: ""
             val sanitizedError = if (session.accessToken.isNotBlank()) {
                 rawError.replace(session.accessToken, "[REDACTED]")
             } else rawError
             throw IllegalStateException("Server returned HTTP $responseCode downloading ROM ($safeUrl). $sanitizedError".trim())
         }
 
-        val totalLength = conn.contentLengthLong.coerceAtLeast(1L)
+        val serverLength = conn.contentLengthLong
+        val totalLength = if (serverLength > 0L) serverLength else if (game.sizeBytes > 0L) game.sizeBytes else 1L
         var downloaded = 0L
 
         conn.inputStream.use { input ->
@@ -329,7 +540,7 @@ class GameStorageManager(
                 while (input.read(buffer).also { bytesRead = it } != -1) {
                     output.write(buffer, 0, bytesRead)
                     downloaded += bytesRead
-                    if (totalLength > 0) {
+                    if (totalLength > 0L) {
                         onProgress((downloaded.toFloat() / totalLength).coerceIn(0f, 1f))
                     }
                 }

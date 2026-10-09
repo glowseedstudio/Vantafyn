@@ -170,6 +170,8 @@ fun GamePlayerScreen(
     var downloadProgress by remember { mutableFloatStateOf(0f) }
     var statusMessage by remember { mutableStateOf("Preparing game environment...") }
     var romFile by remember { mutableStateOf<File?>(null) }
+    var missingLocal3dsRom by remember { mutableStateOf(false) }
+    var retryTrigger by remember { mutableIntStateOf(0) }
 
     val prefs = remember { context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE) }
     val initialAspect = remember {
@@ -195,6 +197,11 @@ fun GamePlayerScreen(
             c.contains("melonds") || c.contains("desmume") || c.contains("gpsp") || c.contains("mgba") ||
             c.contains("gambatte") || c.contains("tgbdual") || c.contains("sameboy") ||
             c.contains("azahar") || c.contains("citra")
+    }
+    val is3dsSystem = remember(game.systemId, game.core) {
+        val s = game.systemId.lowercase().trim()
+        val c = game.core.lowercase().trim()
+        s in setOf("3ds", "n3ds", "nintendo3ds") || c.contains("azahar") || c.contains("citra")
     }
 
     val initialFilter = remember(isHandheld) {
@@ -245,6 +252,8 @@ fun GamePlayerScreen(
     var pendingDownloadedRom by remember { mutableStateOf<File?>(null) }
     var nativeEngine by remember { mutableStateOf<NativeEmulatorEngine?>(null) }
     var nativeCoreLoaded by remember { mutableStateOf(false) }
+    var coreGeometry by remember { mutableStateOf<Triple<Int, Int, Double>?>(null) }
+    var citraResolutionFactor by remember { mutableStateOf(prefs.getString("citra_resolution_factor", "1x (400x240)") ?: "1x (400x240)") }
 
     val hasSecondaryDisplay = rememberNdsDualDisplayManager(
         engine = nativeEngine,
@@ -411,22 +420,42 @@ fun GamePlayerScreen(
     }
 
     // Step 1: Download / Cache ROM & Preload Saved Game
-    LaunchedEffect(game.id) {
+    LaunchedEffect(game.id, retryTrigger) {
         isDownloading = true
-        statusMessage = "Loading game & saves..."
+        missingLocal3dsRom = false
+        statusMessage = "Connecting to server..."
         try {
-            val file = storageManager.downloadRomIfNeeded(session, libraryId, game) { progress ->
-                downloadProgress = progress
-                statusMessage = "Downloading ROM: ${(progress * 100).toInt()}%"
+            val file = if (is3dsSystem) {
+                statusMessage = "Searching device storage for 3DS ROM..."
+                val localRom = storageManager.findLocal3dsRom(game)
+                if (localRom == null) {
+                    missingLocal3dsRom = true
+                    isDownloading = false
+                    statusMessage = "3DS ROM not found on device"
+                    return@LaunchedEffect
+                }
+                localRom
+            } else {
+                storageManager.downloadRomIfNeeded(session, libraryId, game) { progress ->
+                    downloadProgress = progress
+                    val totalMb = game.sizeBytes / (1024 * 1024)
+                    statusMessage = if (totalMb > 0L) {
+                        val downloadedMb = (progress * totalMb).toLong()
+                        "Downloading ROM: ${(progress * 100).toInt()}% ($downloadedMb MB / $totalMb MB)"
+                    } else {
+                        "Downloading ROM: ${(progress * 100).toInt()}%"
+                    }
+                }
             }
 
-            // Ensure the exact EmulatorJS runtime and core are available before the WebView
-            // starts. NDS resolves to melonDS by default; DeSmuME crashes older Android
-            // WebView renderers on some Retroid builds.
-            statusMessage = "Preparing emulation core..."
-            storageManager.preCacheEmulatorCore(game.systemId, game.core)
+            if (!isNativeMode) {
+                // Only pre-cache EmulatorJS web core assets if running in WebView mode
+                statusMessage = "Preparing emulation core..."
+                storageManager.preCacheEmulatorCore(game.systemId, game.core)
+            }
 
             // Check save synchronization between cloud and local
+            statusMessage = "Checking saved game..."
             val syncInfo = storageManager.checkSaveSync(session, game.id, GameSaveKind.Sram)
             if (syncInfo.status == SaveSyncStatus.CLOUD_NEWER || syncInfo.status == SaveSyncStatus.CONFLICT) {
                 pendingDownloadedRom = file
@@ -486,6 +515,10 @@ fun GamePlayerScreen(
                     val coreFile = coreResult.getOrThrow()
                     
                     val engine = NativeEmulatorEngine(
+                        onGeometryChangedCallback = { w, h, aspect ->
+                            android.util.Log.i("GamePlayerScreen", "Geometry changed from core: ${w}x${h}, aspect=$aspect")
+                            coreGeometry = Triple(w, h, aspect)
+                        },
                         onFatalErrorCallback = { err ->
                             android.util.Log.e("GamePlayerScreen", "Native emulator fatal error: $err")
                         },
@@ -494,6 +527,66 @@ fun GamePlayerScreen(
                         },
                     )
 
+                    // Configure options BEFORE loadGame so the core queries them during retro_load_game
+                    if (isNdsSystem) {
+                        engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
+                    } else if (is3dsSystem) {
+                        val (citraLayout, citraScreenLayout, citraSwap) = when (ndsScreenLayout) {
+                            NdsScreenLayout.TopBottom -> Triple("Default Top-Bottom Screen", "top_bottom", "Top")
+                            NdsScreenLayout.LeftRight -> Triple("Side by Side", "left_right", "Top")
+                            NdsScreenLayout.TopOnly -> Triple("Single Screen Only", "top_only", "Top")
+                            NdsScreenLayout.BottomOnly -> Triple("Single Screen Only", "bottom_only", "Bottom")
+                        }
+                        engine.setOption("citra_layout_option", citraLayout)
+                        engine.setOption("azahar_layout_option", citraLayout)
+                        engine.setOption("citra_screen_layout", citraScreenLayout)
+                        engine.setOption("azahar_screen_layout", citraScreenLayout)
+                        engine.setOption("citra_swap_screen", citraSwap)
+                        engine.setOption("azahar_swap_screen", citraSwap)
+                        engine.setOption("citra_resolution_factor", citraResolutionFactor)
+                        engine.setOption("azahar_resolution_factor", citraResolutionFactor)
+                        engine.setOption("citra_graphics_api", "OpenGL")
+                        engine.setOption("azahar_graphics_api", "OpenGL")
+                        engine.setOption("citra_use_hw_renderer", "enabled")
+                        engine.setOption("azahar_use_hw_renderer", "enabled")
+                        engine.setOption("citra_use_software_renderer", "disabled")
+                        engine.setOption("azahar_use_software_renderer", "disabled")
+                        engine.setOption("citra_use_hw_shaders", "enabled")
+                        engine.setOption("azahar_use_hw_shaders", "enabled")
+                        engine.setOption("citra_use_hw_shader", "enabled")
+                        engine.setOption("azahar_use_hw_shader", "enabled")
+                        engine.setOption("citra_use_cpu_jit", "enabled")
+                        engine.setOption("azahar_use_cpu_jit", "enabled")
+                        engine.setOption("citra_use_shader_jit", "enabled")
+                        engine.setOption("azahar_use_shader_jit", "enabled")
+                        engine.setOption("citra_use_hw_shader_cache", "enabled")
+                        engine.setOption("azahar_use_hw_shader_cache", "enabled")
+                        engine.setOption("citra_is_new_3ds", "disabled")
+                        engine.setOption("azahar_is_new_3ds", "disabled")
+                        engine.setOption("citra_use_acc_geo_shaders", "disabled")
+                        engine.setOption("azahar_use_acc_geo_shaders", "disabled")
+                        engine.setOption("citra_use_acc_mul", "disabled")
+                        engine.setOption("azahar_use_acc_mul", "disabled")
+                    }
+                    engine.setColorCorrection(gbaColorCorrection)
+                    engine.setAudioFiltering(gbaAudioFiltering)
+                    engine.setGbcColorCorrection(gbcColorCorrection)
+                    engine.setGbPalette(gbPalette)
+                    engine.setLcdGhosting(lcdGhosting)
+                    engine.setVideoFilter(videoFilter.id)
+
+                    // Configure Wireless Link Cable networking if active
+                    val linkManager = dev.vantafyn.core.emulator.net.LinkSessionManager.getInstance(context)
+                    if (linkManager.transportMode != dev.vantafyn.core.emulator.net.LinkTransportMode.OFFLINE) {
+                        val activeSession = linkManager.activeSession.value
+                        if (activeSession != null) {
+                            linkManager.configureEngineForLink(engine, activeSession)
+                        } else if (isNdsSystem) {
+                            engine.setOption("melonds_nifi", "enabled")
+                        }
+                    }
+
+                    statusMessage = "Booting game..."
                     val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                     val av = withContext(Dispatchers.IO) {
                         engine.loadGame(
@@ -505,38 +598,6 @@ fun GamePlayerScreen(
                     }
 
                     if (av != null) {
-                        if (isNdsSystem) {
-                            engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
-                        } else if (is3dsSystem) {
-                            val (citraLayout, citraSwap) = when (ndsScreenLayout) {
-                                NdsScreenLayout.TopBottom -> "Default Top-Bottom Screen" to "Top"
-                                NdsScreenLayout.LeftRight -> "Side by Side" to "Top"
-                                NdsScreenLayout.TopOnly -> "Single Screen Only" to "Top"
-                                NdsScreenLayout.BottomOnly -> "Single Screen Only" to "Bottom"
-                            }
-                            engine.setOption("citra_layout_option", citraLayout)
-                            engine.setOption("azahar_layout_option", citraLayout)
-                            engine.setOption("citra_swap_screen", citraSwap)
-                            engine.setOption("azahar_swap_screen", citraSwap)
-                        }
-                        engine.setColorCorrection(gbaColorCorrection)
-                        engine.setAudioFiltering(gbaAudioFiltering)
-                        engine.setGbcColorCorrection(gbcColorCorrection)
-                        engine.setGbPalette(gbPalette)
-                        engine.setLcdGhosting(lcdGhosting)
-                        engine.setVideoFilter(videoFilter.id)
-
-                        // Configure Wireless Link Cable networking if active
-                        val linkManager = dev.vantafyn.core.emulator.net.LinkSessionManager.getInstance(context)
-                        if (linkManager.transportMode != dev.vantafyn.core.emulator.net.LinkTransportMode.OFFLINE) {
-                            val activeSession = linkManager.activeSession.value
-                            if (activeSession != null) {
-                                linkManager.configureEngineForLink(engine, activeSession)
-                            } else if (isNdsSystem) {
-                                engine.setOption("melonds_nifi", "enabled")
-                            }
-                        }
-
                         if (sramFile.exists()) {
                             engine.loadSram(sramFile)
                         }
@@ -552,8 +613,9 @@ fun GamePlayerScreen(
                 statusMessage = "Starting emulation core..."
                 isDownloading = false
             }
-        } catch (e: Exception) {
-            statusMessage = "Error loading game: ${e.message}"
+        } catch (e: Throwable) {
+            android.util.Log.e("GamePlayerScreen", "Error loading game: ${e.message}", e)
+            statusMessage = "Error loading game: ${e.message ?: e.javaClass.simpleName}"
         }
     }
 
@@ -667,6 +729,8 @@ fun GamePlayerScreen(
             if (swapDualScreens) 4f / 3f else 5f / 3f // Secondary physical display: 5:3 top, 4:3 bottom
         } else if (hasSecondaryDisplay && isNdsGame) {
             4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
+        } else if (coreGeometry != null && (coreGeometry!!.third > 0.1)) {
+            coreGeometry!!.third.toFloat()
         } else if (is3dsGame) {
             when (ndsScreenLayout) {
                 NdsScreenLayout.LeftRight -> 720f / 240f // 3:1 widescreen side-by-side (400+320 x 240)
@@ -1000,9 +1064,18 @@ fun GamePlayerScreen(
                     )
                     Text(
                         text = statusMessage,
-                        color = VantafynColors.Muted,
+                        color = if (statusMessage.startsWith("Error loading game")) Color(0xFFFF5277) else VantafynColors.Muted,
                         fontSize = 14.sp,
                     )
+                    if (statusMessage.startsWith("Error loading game")) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = onExit,
+                            shape = RoundedCornerShape(12.dp),
+                        ) {
+                            Text("Back to Library")
+                        }
+                    }
                 }
             }
         }
@@ -1169,14 +1242,16 @@ fun GamePlayerScreen(
                 ndsScreenLayout = ndsScreenLayout.next()
                 if (isNativeMode) {
                     nativeEngine?.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
-                    val (citraLayout, citraSwap) = when (ndsScreenLayout) {
-                        NdsScreenLayout.TopBottom -> "Default Top-Bottom Screen" to "Top"
-                        NdsScreenLayout.LeftRight -> "Side by Side" to "Top"
-                        NdsScreenLayout.TopOnly -> "Single Screen Only" to "Top"
-                        NdsScreenLayout.BottomOnly -> "Single Screen Only" to "Bottom"
+                    val (citraLayout, citraScreenLayout, citraSwap) = when (ndsScreenLayout) {
+                        NdsScreenLayout.TopBottom -> Triple("Default Top-Bottom Screen", "top_bottom", "Top")
+                        NdsScreenLayout.LeftRight -> Triple("Side by Side", "left_right", "Top")
+                        NdsScreenLayout.TopOnly -> Triple("Single Screen Only", "top_only", "Top")
+                        NdsScreenLayout.BottomOnly -> Triple("Single Screen Only", "bottom_only", "Bottom")
                     }
                     nativeEngine?.setOption("citra_layout_option", citraLayout)
                     nativeEngine?.setOption("azahar_layout_option", citraLayout)
+                    nativeEngine?.setOption("citra_screen_layout", citraScreenLayout)
+                    nativeEngine?.setOption("azahar_screen_layout", citraScreenLayout)
                     nativeEngine?.setOption("citra_swap_screen", citraSwap)
                     nativeEngine?.setOption("azahar_swap_screen", citraSwap)
                 }
@@ -1185,6 +1260,24 @@ fun GamePlayerScreen(
             swapDualScreens = swapDualScreens,
             onToggleSwapDualScreens = {
                 swapDualScreens = !swapDualScreens
+                if (isNativeMode) {
+                    val swapVal = if (swapDualScreens) "Bottom" else "Top"
+                    nativeEngine?.setOption("citra_swap_screen", swapVal)
+                    nativeEngine?.setOption("azahar_swap_screen", swapVal)
+                }
+            },
+            citraResolution = citraResolutionFactor,
+            onCycleCitraResolution = {
+                val nextFactor = when (citraResolutionFactor) {
+                    "1x (400x240)" -> "2x (800x480)"
+                    "2x (800x480)" -> "3x (1200x720)"
+                    "3x (1200x720)" -> "4x (1600x960)"
+                    else -> "1x (400x240)"
+                }
+                citraResolutionFactor = nextFactor
+                prefs.edit().putString("citra_resolution_factor", nextFactor).apply()
+                nativeEngine?.setOption("citra_resolution_factor", nextFactor)
+                nativeEngine?.setOption("azahar_resolution_factor", nextFactor)
             },
             onSyncCloudSave = {
                 if (isNativeMode) {
@@ -1343,6 +1436,19 @@ fun GamePlayerScreen(
                 pendingDownloadedRom = null
                 onExit()
             },
+        )
+    }
+
+    if (missingLocal3dsRom) {
+        MissingLocal3dsRomDialog(
+            gameTitle = game.cleanTitle.ifEmpty { game.title },
+            expectedFilename = game.filename,
+            activePath = storageManager.getLocal3dsDirectory().absolutePath,
+            onRetry = {
+                missingLocal3dsRom = false
+                retryTrigger++
+            },
+            onDismiss = onExit,
         )
     }
 

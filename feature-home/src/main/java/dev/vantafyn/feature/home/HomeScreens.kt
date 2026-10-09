@@ -4017,11 +4017,11 @@ private fun MobileShellScreen(
                     }
                     val gameToPlay = state.activeGamePlaying
                     val session = state.session
-                    val library = state.selectedGameLibrary
+                    val library = state.selectedGameLibrary ?: state.gameLibraries.firstOrNull()
                     if (gameToPlay != null) {
                         GamePlayerScreen(
                             game = gameToPlay,
-                            libraryId = library?.id.orEmpty(),
+                            libraryId = library?.id?.ifBlank { "default" } ?: "default",
                             session = session,
                             gamesRepository = viewModel.gamesRepository,
                             isTv = false,

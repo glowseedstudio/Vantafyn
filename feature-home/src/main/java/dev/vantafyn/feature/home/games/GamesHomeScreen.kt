@@ -1,6 +1,7 @@
 package dev.vantafyn.feature.home.games
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -67,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.ui.res.painterResource
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
 import dev.vantafyn.core.jellyfin.GamePlayTracker
@@ -977,7 +979,19 @@ internal fun SystemQuickCard(
                 .height(44.dp),
             contentAlignment = Alignment.Center,
         ) {
-            if (system.officialLogoUrl.isNotBlank()) {
+            val is3ds = system.id.equals("3ds", ignoreCase = true) ||
+                system.id.contains("3ds", ignoreCase = true) ||
+                system.name.contains("3ds", ignoreCase = true)
+            if (is3ds) {
+                Image(
+                    painter = painterResource(dev.vantafyn.feature.home.R.drawable.system_logo_3ds),
+                    contentDescription = system.displayName,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxHeight(0.85f)
+                        .fillMaxWidth(0.9f),
+                )
+            } else if (system.officialLogoUrl.isNotBlank()) {
                 AsyncImage(
                     model = system.officialLogoUrl,
                     contentDescription = system.displayName,

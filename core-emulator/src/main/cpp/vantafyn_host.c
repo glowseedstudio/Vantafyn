@@ -5,6 +5,11 @@
 #include "vantafyn_host.h"
 #include "libretro.h"
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES3/gl3.h>
+#include <GLES3/gl3ext.h>
+
 #include <android/log.h>
 #include <android/native_window.h>
 #include <dlfcn.h>
@@ -90,6 +95,18 @@ struct vf_session {
     ANativeWindow *window;
     ANativeWindow *window_secondary;
     bool swap_dual_screens;
+
+    // Hardware Rendering (OpenGL ES / EGL)
+    bool is_hw_render;
+    struct retro_hw_render_callback hw_render;
+    bool hw_context_reset_done;
+    EGLDisplay egl_display;
+    EGLConfig egl_config;
+    EGLContext egl_context;
+    EGLSurface egl_pbuffer_surface;
+    EGLSurface egl_window_surface;
+    EGLSurface egl_surface;
+    ANativeWindow *active_egl_window;
     
     // Framebuffer conversion cache
     uint32_t *frame_buffer;
@@ -163,6 +180,15 @@ static void ring_free(audio_ring_t *ring) {
     }
 }
 
+static size_t ring_occupancy(const audio_ring_t *ring) {
+    if (!ring || !ring->buffer) return 0;
+    size_t r = atomic_load(&ring->read_idx);
+    size_t w = atomic_load(&ring->write_idx);
+    size_t cap = ring->capacity;
+    if (w >= r) return w - r;
+    return cap - (r - w);
+}
+
 static void ring_write_samples(audio_ring_t *ring, const int16_t *data, size_t frames, bool filter, int32_t *prev_l, int32_t *prev_r) {
     if (!ring->buffer || frames == 0) return;
     size_t r = atomic_load(&ring->read_idx);
@@ -231,6 +257,124 @@ static void core_log_printf(enum retro_log_level level, const char *fmt, ...) {
     va_end(va);
 }
 
+// ---------------------------------------------------------------------------
+// Libretro Hardware Rendering / EGL Support
+// ---------------------------------------------------------------------------
+
+static retro_proc_address_t vf_hw_get_proc_address(const char *sym) {
+    if (!sym) return NULL;
+    retro_proc_address_t proc = (retro_proc_address_t)eglGetProcAddress(sym);
+    if (!proc) {
+        proc = (retro_proc_address_t)dlsym(RTLD_DEFAULT, sym);
+    }
+    return proc;
+}
+
+static uintptr_t vf_hw_get_current_framebuffer(void) {
+    return 0;
+}
+
+static bool vf_egl_init(vf_session_t *s, struct retro_hw_render_callback *cb) {
+    if (!s || !cb) return false;
+    LOGI("Initializing EGL for libretro HW rendering (context_type=%d, depth=%d, stencil=%d, v=%u.%u)",
+         cb->context_type, cb->depth, cb->stencil, cb->version_major, cb->version_minor);
+
+    s->egl_display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if (s->egl_display == EGL_NO_DISPLAY) {
+        LOGE("eglGetDisplay failed: 0x%x", eglGetError());
+        return false;
+    }
+
+    EGLint major = 0, minor = 0;
+    if (!eglInitialize(s->egl_display, &major, &minor)) {
+        LOGE("eglInitialize failed: 0x%x", eglGetError());
+        return false;
+    }
+    LOGI("EGL initialized successfully: version %d.%d", major, minor);
+
+    // Citra on Android requests GLES 3.0+ or GLES 2.0 fallback
+    EGLint gles_version = 3;
+    EGLint renderable_bit = EGL_OPENGL_ES3_BIT_KHR;
+    if (cb->context_type == RETRO_HW_CONTEXT_OPENGLES2) {
+        gles_version = 2;
+        renderable_bit = EGL_OPENGL_ES2_BIT;
+    }
+
+    const EGLint config_attribs[] = {
+        EGL_RENDERABLE_TYPE, renderable_bit,
+        EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
+        EGL_RED_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE, 8,
+        EGL_ALPHA_SIZE, 8,
+        EGL_DEPTH_SIZE, cb->depth ? 24 : 0,
+        EGL_STENCIL_SIZE, cb->stencil ? 8 : 0,
+        EGL_NONE
+    };
+
+    EGLint num_configs = 0;
+    if (!eglChooseConfig(s->egl_display, config_attribs, &s->egl_config, 1, &num_configs) || num_configs < 1) {
+        LOGW("eglChooseConfig with 24-bit depth failed, trying 16-bit depth fallback...");
+        const EGLint fallback_attribs[] = {
+            EGL_RENDERABLE_TYPE, renderable_bit,
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_ALPHA_SIZE, 8,
+            EGL_DEPTH_SIZE, cb->depth ? 16 : 0,
+            EGL_NONE
+        };
+        if (!eglChooseConfig(s->egl_display, fallback_attribs, &s->egl_config, 1, &num_configs) || num_configs < 1) {
+            LOGE("eglChooseConfig completely failed: 0x%x", eglGetError());
+            return false;
+        }
+    }
+
+    const EGLint ctx_attribs[] = {
+        EGL_CONTEXT_CLIENT_VERSION, gles_version,
+        EGL_NONE
+    };
+
+    s->egl_context = eglCreateContext(s->egl_display, s->egl_config, EGL_NO_CONTEXT, ctx_attribs);
+    if (s->egl_context == EGL_NO_CONTEXT) {
+        LOGE("eglCreateContext failed for GLES %d: 0x%x", gles_version, eglGetError());
+        return false;
+    }
+
+    // Create a 1x1 pbuffer surface as initial surface so the context is valid before SurfaceView arrives
+    const EGLint pbuffer_attribs[] = {
+        EGL_WIDTH, 1,
+        EGL_HEIGHT, 1,
+        EGL_NONE
+    };
+    s->egl_pbuffer_surface = eglCreatePbufferSurface(s->egl_display, s->egl_config, pbuffer_attribs);
+    if (s->egl_pbuffer_surface == EGL_NO_SURFACE) {
+        LOGE("eglCreatePbufferSurface failed: 0x%x", eglGetError());
+        return false;
+    }
+
+    s->egl_surface = s->egl_pbuffer_surface;
+
+    // Provide callbacks to the core
+    cb->get_proc_address = vf_hw_get_proc_address;
+    cb->get_current_framebuffer = vf_hw_get_current_framebuffer;
+
+    s->hw_render = *cb;
+    s->is_hw_render = true;
+    s->hw_context_reset_done = false;
+
+    // Make current on this loader thread so core can query extensions during retro_load_game
+    if (!eglMakeCurrent(s->egl_display, s->egl_surface, s->egl_surface, s->egl_context)) {
+        LOGE("eglMakeCurrent failed during vf_egl_init: 0x%x", eglGetError());
+        return false;
+    }
+
+    LOGI("EGL HW render context initialized successfully on loader thread (GLES %s, Vendor: %s)",
+         (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_VENDOR));
+    return true;
+}
+
 static bool core_environment(unsigned cmd, void *data) {
     vf_session_t *s = s_current_session;
     if (!s) return false;
@@ -264,11 +408,16 @@ static bool core_environment(unsigned cmd, void *data) {
         }
         case RETRO_ENVIRONMENT_SET_GEOMETRY: {
             const struct retro_game_geometry *geom = (const struct retro_game_geometry *)data;
+            LOGI("Core updated geometry: %ux%u (aspect: %.3f)", geom->base_width, geom->base_height, geom->aspect_ratio);
             s->av_info.width = (int)geom->base_width;
             s->av_info.height = (int)geom->base_height;
             s->av_info.aspect_ratio = (geom->aspect_ratio > 0.0) 
                 ? geom->aspect_ratio 
                 : ((double)geom->base_width / (double)geom->base_height);
+            pthread_mutex_lock(&s->window_mutex);
+            s->last_buffer_w = -1;
+            s->last_buffer_h = -1;
+            pthread_mutex_unlock(&s->window_mutex);
             if (s->callbacks.on_geometry_changed) {
                 s->callbacks.on_geometry_changed(s->callbacks.user_data, s->av_info.width, s->av_info.height, s->av_info.aspect_ratio);
             }
@@ -287,6 +436,15 @@ static bool core_environment(unsigned cmd, void *data) {
                 return true;
             }
             return false;
+        }
+        case RETRO_ENVIRONMENT_SET_VARIABLES: {
+            const struct retro_variable *vars = (const struct retro_variable *)data;
+            if (vars) {
+                for (int i = 0; vars[i].key != NULL; i++) {
+                    LOGI("Core registered variable: key='%s', value='%s'", vars[i].key, vars[i].value ? vars[i].value : "");
+                }
+            }
+            return true;
         }
         case RETRO_ENVIRONMENT_GET_VARIABLE: {
             struct retro_variable *var = (struct retro_variable *)data;
@@ -328,7 +486,22 @@ static bool core_environment(unsigned cmd, void *data) {
                 return true;
             }
             if (strcmp(var->key, "citra_screen_layout") == 0 || strcmp(var->key, "azahar_screen_layout") == 0) {
+                for (int i = 0; i < s->option_count; i++) {
+                    if (strcmp(s->options[i].key, "citra_layout_option") == 0 || strcmp(s->options[i].key, "azahar_layout_option") == 0) {
+                        if (strcmp(s->options[i].value, "Side by Side") == 0) {
+                            var->value = "left_right";
+                            return true;
+                        } else if (strcmp(s->options[i].value, "Single Screen Only") == 0) {
+                            var->value = "top_only";
+                            return true;
+                        }
+                    }
+                }
                 var->value = "top_bottom";
+                return true;
+            }
+            if (strcmp(var->key, "citra_swap_screen") == 0 || strcmp(var->key, "azahar_swap_screen") == 0) {
+                var->value = "Top";
                 return true;
             }
             if (strcmp(var->key, "citra_use_cpu_jit") == 0 || strcmp(var->key, "azahar_use_cpu_jit") == 0) {
@@ -336,11 +509,53 @@ static bool core_environment(unsigned cmd, void *data) {
                 return true;
             }
             if (strcmp(var->key, "citra_is_new_3ds") == 0 || strcmp(var->key, "azahar_is_new_3ds") == 0) {
-                var->value = "enabled";
+                var->value = "disabled";
                 return true;
             }
             if (strcmp(var->key, "citra_resolution_factor") == 0 || strcmp(var->key, "azahar_resolution_factor") == 0) {
                 var->value = "1x (400x240)";
+                return true;
+            }
+            if (strcmp(var->key, "citra_graphics_api") == 0 || strcmp(var->key, "azahar_graphics_api") == 0) {
+                var->value = "OpenGL";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_hw_renderer") == 0 || strcmp(var->key, "azahar_use_hw_renderer") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_software_renderer") == 0 || strcmp(var->key, "azahar_use_software_renderer") == 0) {
+                var->value = "disabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_hw_shaders") == 0 || strcmp(var->key, "azahar_use_hw_shaders") == 0 ||
+                strcmp(var->key, "citra_use_hw_shader") == 0 || strcmp(var->key, "azahar_use_hw_shader") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_shader_jit") == 0 || strcmp(var->key, "azahar_use_shader_jit") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_hw_shader_cache") == 0 || strcmp(var->key, "azahar_use_hw_shader_cache") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_acc_geo_shaders") == 0 || strcmp(var->key, "azahar_use_acc_geo_shaders") == 0) {
+                var->value = "disabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_acc_mul") == 0 || strcmp(var->key, "azahar_use_acc_mul") == 0) {
+                var->value = "disabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_limit_framerate") == 0 || strcmp(var->key, "azahar_limit_framerate") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_dup_30hz") == 0 || strcmp(var->key, "azahar_dup_30hz") == 0 ||
+                strcmp(var->key, "citra_duplicate_frames") == 0 || strcmp(var->key, "azahar_duplicate_frames") == 0) {
+                var->value = "enabled";
                 return true;
             }
             if (strcmp(var->key, "gpsp_bios") == 0) {
@@ -360,6 +575,28 @@ static bool core_environment(unsigned cmd, void *data) {
         }
         case RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS: {
             return true;
+        }
+        case RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER: {
+            if (data) {
+                *(enum retro_hw_context_type *)data = RETRO_HW_CONTEXT_OPENGLES3;
+                LOGI("Core queried RETRO_ENVIRONMENT_GET_PREFERRED_HW_RENDER -> returning RETRO_HW_CONTEXT_OPENGLES3");
+                return true;
+            }
+            return false;
+        }
+        case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
+            LOGI("Core requested RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE (unsupported)");
+            return false;
+        }
+        case RETRO_ENVIRONMENT_SET_HW_RENDER: {
+            struct retro_hw_render_callback *cb = (struct retro_hw_render_callback *)data;
+            if (!cb) return false;
+            LOGI("Core requested RETRO_ENVIRONMENT_SET_HW_RENDER (context_type=%d)", cb->context_type);
+            if (cb->context_type == RETRO_HW_CONTEXT_VULKAN) {
+                LOGW("Core requested Vulkan context, but Vantafyn host provides OpenGL ES 3.0. Rejecting Vulkan so core falls back to GLES.");
+                return false;
+            }
+            return vf_egl_init(s, cb);
         }
         default:
             return false;
@@ -430,7 +667,78 @@ static void blit_frame_nearest(
 
 static void core_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch) {
     vf_session_t *s = s_current_session;
-    if (!s || !data || width == 0 || height == 0) return;
+    if (!s) return;
+
+    // Fast-path for Hardware-Accelerated (OpenGL ES) cores
+    if (s->is_hw_render || data == RETRO_HW_FRAME_BUFFER_VALID) {
+        pthread_mutex_lock(&s->window_mutex);
+        if (s->window && width > 0 && height > 0) {
+            if (s->last_buffer_w != (int)width || s->last_buffer_h != (int)height) {
+                EGLint format = 0;
+                if (s->egl_display && s->egl_config) {
+                    eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
+                }
+                eglMakeCurrent(s->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                if (s->egl_window_surface != EGL_NO_SURFACE) {
+                    eglDestroySurface(s->egl_display, s->egl_window_surface);
+                    s->egl_window_surface = EGL_NO_SURFACE;
+                }
+                ANativeWindow_setBuffersGeometry(s->window, (int32_t)width, (int32_t)height, format);
+                s->last_buffer_w = (int)width;
+                s->last_buffer_h = (int)height;
+                s->egl_window_surface = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window, NULL);
+                s->egl_surface = (s->egl_window_surface != EGL_NO_SURFACE) ? s->egl_window_surface : s->egl_pbuffer_surface;
+                eglMakeCurrent(s->egl_display, s->egl_surface, s->egl_surface, s->egl_context);
+                LOGI("EGL HW render updated window buffer geometry to %ux%u", width, height);
+            }
+        }
+        if (s->egl_display && s->egl_surface && s->egl_surface != s->egl_pbuffer_surface) {
+            // Guarantee unrendered pillarbox margins (e.g. 3DS bottom touchscreen margins
+            // in 400x480 top-bottom stacked layout) are 100% solid black and never leak
+            // uninitialized GPU VRAM tile memory / TV static.
+            if (width > 0 && height > 0) {
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glEnable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+                // 3DS Top-Bottom stack: Top is 400x240 (full width), Bottom is 320x240 (centered).
+                // Left margin is 40px (10%), Right margin is 40px (10%).
+                if (height >= width) {
+                    int margin_w = (int)(width * 40 / 400); // 40px at 1x, 80px at 2x, etc.
+                    int half_h = (int)(height / 2);
+                    if (margin_w > 0 && half_h > 0) {
+                        // Clear lower-left margin (y in [0, half_h])
+                        glScissor(0, 0, margin_w, half_h);
+                        glClear(GL_COLOR_BUFFER_BIT);
+
+                        // Clear lower-right margin (y in [0, half_h])
+                        glScissor(width - margin_w, 0, margin_w, half_h);
+                        glClear(GL_COLOR_BUFFER_BIT);
+
+                        // If bottom_left_origin is false (origin at top-left), clear upper margins instead
+                        if (!s->hw_render.bottom_left_origin) {
+                            glScissor(0, half_h, margin_w, half_h);
+                            glClear(GL_COLOR_BUFFER_BIT);
+                            glScissor(width - margin_w, half_h, margin_w, half_h);
+                            glClear(GL_COLOR_BUFFER_BIT);
+                        }
+                    }
+                }
+                glDisable(GL_SCISSOR_TEST);
+            }
+
+            eglSwapBuffers(s->egl_display, s->egl_surface);
+        }
+        pthread_mutex_unlock(&s->window_mutex);
+
+        if (s->callbacks.on_frame_rendered) {
+            s->callbacks.on_frame_rendered(s->callbacks.user_data);
+        }
+        return;
+    }
+
+    if (!data || width == 0 || height == 0) return;
 
     pthread_mutex_lock(&s->window_mutex);
     if (!s->window) {
@@ -442,7 +750,7 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
     size_t needed_pixels = (size_t)width * (size_t)height;
     if (!s->frame_buffer || s->frame_buffer_size < needed_pixels) {
         free(s->frame_buffer);
-        s->frame_buffer = (uint32_t *)malloc(needed_pixels * sizeof(uint32_t));
+        s->frame_buffer = (uint32_t *)calloc(needed_pixels, sizeof(uint32_t));
         s->frame_buffer_size = needed_pixels;
     }
 
@@ -450,13 +758,22 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
     bool cc = s->gba_color_correction || s->gbc_color_correction;
     int pal = s->gb_palette_mode;
 
+    bool is_3ds_stacked = (height >= width && width >= 400);
+    unsigned margin_w = is_3ds_stacked ? (width * 40 / 400) : 0;
+    unsigned half_h = height / 2;
+
     if (s->pixel_format == RETRO_PIXEL_FORMAT_XRGB8888) {
         const uint32_t *src = (const uint32_t *)data;
         size_t src_stride = pitch / sizeof(uint32_t);
         for (unsigned y = 0; y < height; y++) {
             const uint32_t *line = src + y * src_stride;
             uint32_t *dst_line = s->frame_buffer + y * width;
+            bool is_bottom_row = is_3ds_stacked && (y >= half_h);
             for (unsigned x = 0; x < width; x++) {
+                if (is_bottom_row && (x < margin_w || x >= width - margin_w)) {
+                    dst_line[x] = 0xFF000000;
+                    continue;
+                }
                 uint32_t pixel = line[x];
                 uint32_t r = (pixel >> 16) & 0xFF;
                 uint32_t g = (pixel >> 8) & 0xFF;
@@ -498,7 +815,12 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         for (unsigned y = 0; y < height; y++) {
             const uint16_t *line = src + y * src_stride;
             uint32_t *dst_line = s->frame_buffer + y * width;
+            bool is_bottom_row = is_3ds_stacked && (y >= half_h);
             for (unsigned x = 0; x < width; x++) {
+                if (is_bottom_row && (x < margin_w || x >= width - margin_w)) {
+                    dst_line[x] = 0xFF000000;
+                    continue;
+                }
                 uint16_t pixel = line[x];
                 uint32_t r = ((pixel >> 11) & 0x1F) * 255 / 31;
                 uint32_t g = ((pixel >> 5) & 0x3F) * 255 / 63;
@@ -540,7 +862,12 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         for (unsigned y = 0; y < height; y++) {
             const uint16_t *line = src + y * src_stride;
             uint32_t *dst_line = s->frame_buffer + y * width;
+            bool is_bottom_row = is_3ds_stacked && (y >= half_h);
             for (unsigned x = 0; x < width; x++) {
+                if (is_bottom_row && (x < margin_w || x >= width - margin_w)) {
+                    dst_line[x] = 0xFF000000;
+                    continue;
+                }
                 uint16_t pixel = line[x];
                 uint32_t r = ((pixel >> 10) & 0x1F) * 255 / 31;
                 uint32_t g = ((pixel >> 5) & 0x1F) * 255 / 31;
@@ -831,6 +1158,45 @@ static void* run_loop_thread(void *arg) {
     vf_session_t *s = (vf_session_t *)arg;
     LOGI("Vantafyn native emulation thread started.");
 
+    // Bind EGL context to this worker thread if HW render is active
+    if (s->is_hw_render && s->egl_display && s->egl_context) {
+        pthread_mutex_lock(&s->window_mutex);
+        EGLSurface initial_surf = s->egl_pbuffer_surface;
+        if (s->window) {
+            EGLint format = 0;
+            eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
+            int target_w = (s->last_buffer_w > 0) ? s->last_buffer_w : ((s->av_info.width > 0) ? s->av_info.width : 400);
+            int target_h = (s->last_buffer_h > 0) ? s->last_buffer_h : ((s->av_info.height > 0) ? s->av_info.height : 480);
+            ANativeWindow_setBuffersGeometry(s->window, (int32_t)target_w, (int32_t)target_h, format);
+            s->last_buffer_w = target_w;
+            s->last_buffer_h = target_h;
+            s->egl_window_surface = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window, NULL);
+            if (s->egl_window_surface != EGL_NO_SURFACE) {
+                initial_surf = s->egl_window_surface;
+                s->active_egl_window = s->window;
+                eglMakeCurrent(s->egl_display, s->egl_window_surface, s->egl_window_surface, s->egl_context);
+                glDisable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+                eglSwapBuffers(s->egl_display, s->egl_window_surface);
+                glClear(GL_COLOR_BUFFER_BIT);
+            }
+        }
+        s->egl_surface = initial_surf;
+        if (eglMakeCurrent(s->egl_display, s->egl_surface, s->egl_surface, s->egl_context)) {
+            LOGI("EGL context successfully bound to emulation worker thread");
+            if (s->hw_render.context_reset && !s->hw_context_reset_done) {
+                LOGI("Calling core hw_render context_reset()...");
+                s->hw_render.context_reset();
+                s->hw_context_reset_done = true;
+            }
+        } else {
+            LOGE("Failed to make EGL context current on emulation worker thread: 0x%x", eglGetError());
+        }
+        pthread_mutex_unlock(&s->window_mutex);
+    }
+
     double target_fps = (s->av_info.fps > 10.0) ? s->av_info.fps : 60.0;
     long frame_period_ns = (long)(1e9 / target_fps);
 
@@ -845,10 +1211,72 @@ static void* run_loop_thread(void *arg) {
             }
         }
 
+        // Dynamically track SurfaceView / ANativeWindow changes on the render thread
+        if (s->is_hw_render) {
+            pthread_mutex_lock(&s->window_mutex);
+            if (s->active_egl_window != s->window) {
+                eglMakeCurrent(s->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                if (s->egl_window_surface != EGL_NO_SURFACE) {
+                    eglDestroySurface(s->egl_display, s->egl_window_surface);
+                    s->egl_window_surface = EGL_NO_SURFACE;
+                }
+                s->active_egl_window = s->window;
+                if (s->window) {
+                    EGLint format = 0;
+                    eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
+                    int target_w = (s->last_buffer_w > 0) ? s->last_buffer_w : ((s->av_info.width > 0) ? s->av_info.width : 400);
+                    int target_h = (s->last_buffer_h > 0) ? s->last_buffer_h : ((s->av_info.height > 0) ? s->av_info.height : 480);
+                    ANativeWindow_setBuffersGeometry(s->window, (int32_t)target_w, (int32_t)target_h, format);
+                    s->last_buffer_w = target_w;
+                    s->last_buffer_h = target_h;
+                    s->egl_window_surface = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window, NULL);
+                    if (s->egl_window_surface == EGL_NO_SURFACE) {
+                        LOGE("eglCreateWindowSurface failed during surface switch: 0x%x", eglGetError());
+                    } else {
+                        eglMakeCurrent(s->egl_display, s->egl_window_surface, s->egl_window_surface, s->egl_context);
+                        glDisable(GL_SCISSOR_TEST);
+                        glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                        glClear(GL_COLOR_BUFFER_BIT);
+                        eglSwapBuffers(s->egl_display, s->egl_window_surface);
+                        glClear(GL_COLOR_BUFFER_BIT);
+                    }
+                }
+                EGLSurface cur_surf = (s->egl_window_surface != EGL_NO_SURFACE)
+                    ? s->egl_window_surface
+                    : s->egl_pbuffer_surface;
+                s->egl_surface = cur_surf;
+                if (eglMakeCurrent(s->egl_display, cur_surf, cur_surf, s->egl_context)) {
+                    LOGI("EGL surface switched to %s on emulation worker thread",
+                         (s->egl_window_surface != EGL_NO_SURFACE) ? "ANativeWindow" : "pbuffer");
+                    if (s->hw_render.context_reset && !s->hw_context_reset_done) {
+                        LOGI("Invoking hw_render context_reset on new window surface...");
+                        s->hw_render.context_reset();
+                        s->hw_context_reset_done = true;
+                    }
+                } else {
+                    LOGE("eglMakeCurrent failed during surface switch: 0x%x", eglGetError());
+                }
+            }
+            pthread_mutex_unlock(&s->window_mutex);
+        }
+
         if (atomic_load(&s->is_paused)) {
             usleep(15000); // 15ms sleep when paused
             clock_gettime(CLOCK_MONOTONIC, &next_frame_time);
             continue;
+        }
+
+        // For hardware-rendered cores (OpenGL ES), clear entire buffer to solid black before rendering.
+        // This ensures unrendered margins (such as the 40px left/right borders of the
+        // 3DS bottom screen in 400x480 top-bottom layout) never contain uninitialized
+        // GPU VRAM (which causes TV static noise and violent flashing on buffer swap).
+        if (s->is_hw_render && s->egl_display && s->egl_surface != EGL_NO_SURFACE && s->egl_surface != s->egl_pbuffer_surface) {
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glDisable(GL_SCISSOR_TEST);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT);
         }
 
         // Run emulation frame
@@ -870,12 +1298,16 @@ static void* run_loop_thread(void *arg) {
         clock_gettime(CLOCK_MONOTONIC, &now);
 
         long diff_ns = (next_frame_time.tv_sec - now.tv_sec) * 1000000000L + (next_frame_time.tv_nsec - now.tv_nsec);
-        if (diff_ns > 1000000L) { // > 1ms
+        if (diff_ns > 1000000L && diff_ns < 1000000000L) { // > 1ms and < 1s
             struct timespec req = {0, diff_ns};
             nanosleep(&req, NULL);
-        } else if (diff_ns < -50000000L) { // Lagged by more than 50ms, resync clock
+        } else if (diff_ns < -50000000L || diff_ns >= 1000000000L) { // Lagged by more than 50ms or clock jumped, resync
             clock_gettime(CLOCK_MONOTONIC, &next_frame_time);
         }
+    }
+
+    if (s->is_hw_render && s->egl_display) {
+        eglMakeCurrent(s->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 
     LOGI("Vantafyn native emulation thread stopped.");
@@ -927,6 +1359,15 @@ vf_session_t* vf_session_create(const vf_callbacks_t *callbacks) {
     session->lut_y_src_h = 0;
     session->lut_y_dst_h = 0;
 
+    session->is_hw_render = false;
+    session->hw_context_reset_done = false;
+    session->egl_display = EGL_NO_DISPLAY;
+    session->egl_context = EGL_NO_CONTEXT;
+    session->egl_surface = EGL_NO_SURFACE;
+    session->egl_pbuffer_surface = EGL_NO_SURFACE;
+    session->egl_window_surface = EGL_NO_SURFACE;
+    session->active_egl_window = NULL;
+
     s_current_session = session;
     pthread_mutex_unlock(&s_session_lock);
     return session;
@@ -976,6 +1417,14 @@ void vf_session_destroy(vf_session_t *session) {
     pthread_mutex_unlock(&s_session_lock);
 }
 
+static void vf_close_core_handle(void *handle) {
+#if !defined(__ANDROID__)
+    if (handle) dlclose(handle);
+#else
+    (void)handle;
+#endif
+}
+
 vf_result_t vf_session_load_game(
     vf_session_t *session,
     const char *core_path,
@@ -1002,7 +1451,7 @@ vf_result_t vf_session_load_game(
         session->name = dlsym(session->core_handle, #name); \
         if (!session->name) { \
             LOGE("Missing required symbol: %s", #name); \
-            dlclose(session->core_handle); \
+            vf_close_core_handle(session->core_handle); \
             session->core_handle = NULL; \
             return VF_ERR_SYMBOLS_MISSING; \
         }
@@ -1040,62 +1489,96 @@ vf_result_t vf_session_load_game(
 
     session->retro_init();
 
-    // Read ROM file into memory
-    FILE *f = fopen(rom_path, "rb");
-    if (!f) {
-        LOGE("Failed to open ROM file: %s", rom_path);
-        session->retro_deinit();
-        dlclose(session->core_handle);
-        session->core_handle = NULL;
-        return VF_ERR_ROM_READ;
-    }
-
-    fseek(f, 0, SEEK_END);
-    long rom_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    void *rom_data = malloc(rom_size);
-    if (!rom_data) {
-        fclose(f);
-        session->retro_deinit();
-        dlclose(session->core_handle);
-        session->core_handle = NULL;
-        return VF_ERR_OOM;
-    }
-
-    if (fread(rom_data, 1, rom_size, f) != (size_t)rom_size) {
-        fclose(f);
-        free(rom_data);
-        session->retro_deinit();
-        dlclose(session->core_handle);
-        session->core_handle = NULL;
-        return VF_ERR_ROM_READ;
-    }
-    fclose(f);
-
-    session->rom_data = rom_data;
-    session->rom_size = (size_t)rom_size;
+    // Query core system info to check if full file path is required directly
+    struct retro_system_info sys_info;
+    memset(&sys_info, 0, sizeof(sys_info));
+    session->retro_get_system_info(&sys_info);
+    bool need_fullpath = sys_info.need_fullpath;
 
     struct retro_game_info game_info = {
         .path = rom_path,
-        .data = session->rom_data,
-        .size = session->rom_size,
+        .data = NULL,
+        .size = 0,
         .meta = NULL
     };
+
+    if (!need_fullpath) {
+        // Read ROM file into memory for small cartridge systems (GB, GBC, GBA, NES, SNES)
+        FILE *f = fopen(rom_path, "rb");
+        if (!f) {
+            LOGE("Failed to open ROM file: %s", rom_path);
+            session->retro_deinit();
+            vf_close_core_handle(session->core_handle);
+            session->core_handle = NULL;
+            return VF_ERR_ROM_READ;
+        }
+
+        fseek(f, 0, SEEK_END);
+        long rom_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        void *rom_data = malloc(rom_size);
+        if (!rom_data) {
+            fclose(f);
+            session->retro_deinit();
+            vf_close_core_handle(session->core_handle);
+            session->core_handle = NULL;
+            return VF_ERR_OOM;
+        }
+
+        if (fread(rom_data, 1, rom_size, f) != (size_t)rom_size) {
+            fclose(f);
+            free(rom_data);
+            session->retro_deinit();
+            vf_close_core_handle(session->core_handle);
+            session->core_handle = NULL;
+            return VF_ERR_ROM_READ;
+        }
+        fclose(f);
+
+        session->rom_data = rom_data;
+        session->rom_size = (size_t)rom_size;
+        game_info.data = session->rom_data;
+        game_info.size = session->rom_size;
+    } else {
+        LOGI("Core specifies need_fullpath=true (%s). Passing ROM path without buffering into RAM: %s", 
+             sys_info.library_name ? sys_info.library_name : "core", rom_path);
+        session->rom_data = NULL;
+        session->rom_size = 0;
+    }
 
     bool loaded = session->retro_load_game(&game_info);
 
     if (!loaded) {
         LOGE("retro_load_game rejected ROM");
+        if (session->is_hw_render && session->egl_display) {
+            eglMakeCurrent(session->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (session->egl_pbuffer_surface != EGL_NO_SURFACE) {
+                eglDestroySurface(session->egl_display, session->egl_pbuffer_surface);
+                session->egl_pbuffer_surface = EGL_NO_SURFACE;
+            }
+            if (session->egl_context != EGL_NO_CONTEXT) {
+                eglDestroyContext(session->egl_display, session->egl_context);
+                session->egl_context = EGL_NO_CONTEXT;
+            }
+            eglTerminate(session->egl_display);
+            session->egl_display = EGL_NO_DISPLAY;
+            session->is_hw_render = false;
+        }
         if (session->rom_data) {
             free(session->rom_data);
             session->rom_data = NULL;
             session->rom_size = 0;
         }
         session->retro_deinit();
-        dlclose(session->core_handle);
+        vf_close_core_handle(session->core_handle);
         session->core_handle = NULL;
         return VF_ERR_CONTENT_FAILED;
+    }
+
+    if (session->is_hw_render && session->egl_display) {
+        // Release context from loader thread so emulation worker thread can bind it
+        eglMakeCurrent(session->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
 
     // Retrieve AV info
@@ -1132,8 +1615,38 @@ void vf_session_unload(vf_session_t *session) {
         pthread_join(session->thread, NULL);
     }
 
+    if (session->is_hw_render && session->egl_display && session->egl_context) {
+        // Hardware-accelerated cores (OpenGL ES) require an active GL context
+        // during retro_unload_game() and retro_deinit() to delete GPU shaders, textures, and FBOs.
+        EGLSurface surf = (session->egl_surface != EGL_NO_SURFACE) 
+            ? session->egl_surface 
+            : session->egl_pbuffer_surface;
+        eglMakeCurrent(session->egl_display, surf, surf, session->egl_context);
+    }
+
     if (session->retro_unload_game) session->retro_unload_game();
     if (session->retro_deinit) session->retro_deinit();
+
+    if (session->is_hw_render) {
+        if (session->egl_display && session->egl_context) {
+            eglMakeCurrent(session->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (session->egl_window_surface != EGL_NO_SURFACE) {
+                eglDestroySurface(session->egl_display, session->egl_window_surface);
+                session->egl_window_surface = EGL_NO_SURFACE;
+            }
+            if (session->egl_pbuffer_surface != EGL_NO_SURFACE) {
+                eglDestroySurface(session->egl_display, session->egl_pbuffer_surface);
+                session->egl_pbuffer_surface = EGL_NO_SURFACE;
+            }
+            eglDestroyContext(session->egl_display, session->egl_context);
+            session->egl_context = EGL_NO_CONTEXT;
+            eglTerminate(session->egl_display);
+            session->egl_display = EGL_NO_DISPLAY;
+        }
+        session->is_hw_render = false;
+        session->active_egl_window = NULL;
+        session->hw_context_reset_done = false;
+    }
 
     if (session->rom_data) {
         free(session->rom_data);
@@ -1141,7 +1654,9 @@ void vf_session_unload(vf_session_t *session) {
         session->rom_size = 0;
     }
 
-    dlclose(session->core_handle);
+    // On Android, calling dlclose() on heavy C++ cores with JIT/TLS (like Citra)
+    // frequently causes fatal SIGSEGV in bionic libc due to unmapped memory and static destructors.
+    vf_close_core_handle(session->core_handle);
     session->core_handle = NULL;
     atomic_store(&session->is_active, false);
 }

@@ -17,7 +17,7 @@ public sealed class CompanionDiagnostics : ICompanionDiagnostics
 
         return new
         {
-            pluginVersion = "0.2.30",
+            pluginVersion = "0.2.31",
             apiVersion = 1,
             jellyfinTarget = "10.11.11",
             userSettings = new { state = configuration.UserSettingsEnabled ? ModuleState.Ready.ToString().ToLowerInvariant() : "disabled" },

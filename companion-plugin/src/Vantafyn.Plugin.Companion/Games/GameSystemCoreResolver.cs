@@ -268,7 +268,7 @@ public static class GameSystemCoreResolver
         var core = ResolveCore(systemName);
         if (string.Equals(core, "citra", StringComparison.OrdinalIgnoreCase))
         {
-            return "https://raw.githubusercontent.com/EmuELEC/es-theme-EmuELEC-clean-style/master/3ds/_inc/system.svg";
+            return "https://raw.githubusercontent.com/batocera-linux/batocera-themes/master/themes/batocera/3ds/_data/svg/logo.svg";
         }
 
         var themeFolder = core switch

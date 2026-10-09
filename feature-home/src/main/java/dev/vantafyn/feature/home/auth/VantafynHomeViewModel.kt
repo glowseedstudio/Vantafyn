@@ -1523,7 +1523,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination == MobileDestination.Games) {
             refreshGameTrackerData()
             refreshDownloadedGameKeys()
-            if (_state.value.allGamesList.isEmpty()) {
+            val has3dsInSystems = _state.value.gameSystems.any { it.id.equals("3ds", ignoreCase = true) }
+            val hasLocalGames = gameStorageManager.scanLocal3dsGameSummaries().isNotEmpty()
+            if (_state.value.allGamesList.isEmpty() || (hasLocalGames && !has3dsInSystems)) {
                 loadGames()
             }
         }
@@ -1565,6 +1567,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 is IntegrationResult.Failure -> false
             }
             val gamesReady = gamesRepository.isGamesAvailable(session).getOrDefault(false)
+            val hasLocalGames = gameStorageManager.scanLocal3dsGameSummaries().isNotEmpty()
             val pokemonReady = pokemonRepository.isPokemonAvailable(session).getOrDefault(false)
             _state.update {
                 val latestConfig = ombiRepository.config()
@@ -1575,11 +1578,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     ombiRequestsEnabledForUsers = ready || latestConfig.isEnabledForUsers && latestHasKey,
                     ombiRequestsEnabledForAdmins = ready || latestConfig.isEnabledForAdmins && latestHasKey,
                     pendingOmbiAccessRequestCount = ombiRepository.pendingAccessRequestCount(),
-                    isGamesAvailable = gamesReady,
+                    isGamesAvailable = gamesReady || hasLocalGames,
                     isPokemonVaultAvailable = pokemonReady,
                 )
             }
-            if (gamesReady && _state.value.gameSystems.isEmpty()) {
+            if ((gamesReady || hasLocalGames) && _state.value.gameSystems.isEmpty()) {
                 loadGames()
             }
         }
@@ -1657,70 +1660,114 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         }
     }
 
+    private fun mergeLocalGames(
+        systems: MutableList<GameSystem>,
+        allGames: MutableList<GameSummary>,
+    ) {
+        val local3dsGames = gameStorageManager.scanLocal3dsGameSummaries()
+        if (local3dsGames.isNotEmpty()) {
+            val existingSysIdx = systems.indexOfFirst {
+                it.id.equals("3ds", ignoreCase = true) || it.name.contains("3ds", ignoreCase = true)
+            }
+            if (existingSysIdx >= 0) {
+                val existing = systems[existingSysIdx]
+                systems[existingSysIdx] = existing.copy(
+                    gameCount = maxOf(existing.gameCount, local3dsGames.size)
+                )
+            } else {
+                systems.add(
+                    GameSystem(
+                        id = "3ds",
+                        name = "Nintendo 3DS",
+                        core = "citra",
+                        gameCount = local3dsGames.size,
+                        extensions = listOf("3ds", "cci", "cxi", "3dsx", "cia"),
+                        icon = "",
+                        logoUrl = null,
+                    )
+                )
+            }
+
+            val existingFiles = allGames.map { it.filename.lowercase() }.toSet()
+            val existingTitles = allGames.map { it.cleanTitle.lowercase() }.toSet()
+            for (g in local3dsGames) {
+                if (g.filename.lowercase() !in existingFiles && g.cleanTitle.lowercase() !in existingTitles) {
+                    allGames.add(g)
+                }
+            }
+        }
+    }
+
     private fun loadCachedOfflineGames() {
         try {
             val file = File(getApplication<Application>().filesDir, "games/cached_catalog.json")
-            if (!file.exists()) {
-                _state.update { it.copy(isLoadingGames = false) }
-                return
-            }
-            val text = file.readText()
-            val root = org.json.JSONObject(text)
-
-            val libsArr = root.optJSONArray("libraries") ?: org.json.JSONArray()
             val libraries = mutableListOf<GameLibrary>()
-            for (i in 0 until libsArr.length()) {
-                val obj = libsArr.getJSONObject(i)
-                libraries.add(
-                    GameLibrary(
-                        id = obj.optString("id"),
-                        name = obj.optString("name"),
-                        path = obj.optString("path", ""),
-                    )
-                )
-            }
-
-            val sysArr = root.optJSONArray("systems") ?: org.json.JSONArray()
             val systems = mutableListOf<GameSystem>()
-            for (i in 0 until sysArr.length()) {
-                val obj = sysArr.getJSONObject(i)
-                val extArr = obj.optJSONArray("extensions") ?: org.json.JSONArray()
-                val exts = mutableListOf<String>()
-                for (j in 0 until extArr.length()) {
-                    exts.add(extArr.getString(j))
-                }
-                systems.add(
-                    GameSystem(
-                        id = obj.optString("id"),
-                        name = obj.optString("name"),
-                        core = obj.optString("core"),
-                        extensions = exts,
-                        gameCount = obj.optInt("gameCount", 0),
-                        icon = obj.optString("icon", ""),
-                        logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
-                    )
-                )
-            }
-
-            val gamesArr = root.optJSONArray("games") ?: org.json.JSONArray()
             val games = mutableListOf<GameSummary>()
-            for (i in 0 until gamesArr.length()) {
-                val obj = gamesArr.getJSONObject(i)
-                games.add(
-                    GameSummary(
-                        id = obj.optString("id"),
-                        title = obj.optString("title"),
-                        systemId = obj.optString("systemId"),
-                        filename = obj.optString("filename"),
-                        sizeBytes = obj.optLong("sizeBytes", 0L),
-                        token = obj.optString("token", ""),
-                        extension = obj.optString("extension", ""),
-                        boxartUrl = obj.optString("boxartUrl").takeIf { it.isNotBlank() },
+
+            if (file.exists()) {
+                val text = file.readText()
+                val root = org.json.JSONObject(text)
+
+                val libsArr = root.optJSONArray("libraries") ?: org.json.JSONArray()
+                for (i in 0 until libsArr.length()) {
+                    val obj = libsArr.getJSONObject(i)
+                    libraries.add(
+                        GameLibrary(
+                            id = obj.optString("id"),
+                            name = obj.optString("name"),
+                            path = obj.optString("path", ""),
+                        )
                     )
-                )
+                }
+
+                val sysArr = root.optJSONArray("systems") ?: org.json.JSONArray()
+                for (i in 0 until sysArr.length()) {
+                    val obj = sysArr.getJSONObject(i)
+                    val extArr = obj.optJSONArray("extensions") ?: org.json.JSONArray()
+                    val exts = mutableListOf<String>()
+                    for (j in 0 until extArr.length()) {
+                        exts.add(extArr.getString(j))
+                    }
+                    systems.add(
+                        GameSystem(
+                            id = obj.optString("id"),
+                            name = obj.optString("name"),
+                            core = obj.optString("core"),
+                            extensions = exts,
+                            gameCount = obj.optInt("gameCount", 0),
+                            icon = obj.optString("icon", ""),
+                            logoUrl = obj.optString("logoUrl").takeIf { it.isNotBlank() },
+                        )
+                    )
+                }
+
+                val gamesArr = root.optJSONArray("games") ?: org.json.JSONArray()
+                for (i in 0 until gamesArr.length()) {
+                    val obj = gamesArr.getJSONObject(i)
+                    games.add(
+                        GameSummary(
+                            id = obj.optString("id"),
+                            title = obj.optString("title"),
+                            systemId = obj.optString("systemId"),
+                            filename = obj.optString("filename"),
+                            sizeBytes = obj.optLong("sizeBytes", 0L),
+                            token = obj.optString("token", ""),
+                            extension = obj.optString("extension", ""),
+                            boxartUrl = obj.optString("boxartUrl").takeIf { it.isNotBlank() },
+                        )
+                    )
+                }
             }
 
-            val library = libraries.firstOrNull()
+            mergeLocalGames(systems, games)
+
+            val effectiveLibraries = if (libraries.isEmpty() && systems.isNotEmpty()) {
+                listOf(GameLibrary(id = "local", name = "Local Games", path = ""))
+            } else {
+                libraries
+            }
+            val library = effectiveLibraries.firstOrNull()
             val currentSelectedSystem = _state.value.selectedGameSystem
             val activeSys = systems.firstOrNull { it.id == currentSelectedSystem?.id }
             val filteredGames = if (activeSys != null) {
@@ -1731,7 +1778,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
             _state.update {
                 it.copy(
-                    gameLibraries = libraries,
+                    gameLibraries = effectiveLibraries,
                     selectedGameLibrary = library,
                     gameSystems = systems,
                     selectedGameSystem = activeSys,
@@ -1758,44 +1805,50 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             _state.update { it.copy(isLoadingGames = true) }
             val libraries = gamesRepository.getGameLibraries(session).getOrDefault(emptyList())
             val library = libraries.firstOrNull()
-            _state.update {
-                it.copy(
-                    gameLibraries = libraries,
-                    selectedGameLibrary = library,
-                )
+            val systems = if (library != null) {
+                gamesRepository.getGameSystems(session, library.id).getOrDefault(emptyList()).toMutableList()
+            } else {
+                mutableListOf()
             }
+            val allGames = mutableListOf<GameSummary>()
             if (library != null) {
-                val systems = gamesRepository.getGameSystems(session, library.id).getOrDefault(emptyList())
-                val currentSelectedSystem = _state.value.selectedGameSystem
-                val activeSys = systems.firstOrNull { it.id == currentSelectedSystem?.id }
-                _state.update {
-                    it.copy(
-                        gameSystems = systems,
-                        selectedGameSystem = activeSys,
-                    )
-                }
-                val allGames = mutableListOf<GameSummary>()
                 for (sys in systems) {
                     val res = gamesRepository.getGames(session, library.id, sys.id).getOrDefault(emptyList())
                     allGames.addAll(res)
                 }
-                val filteredGames = if (activeSys != null) {
-                    allGames.filter { it.systemId == activeSys.id }
-                } else {
-                    allGames
-                }
-                _state.update {
-                    it.copy(
-                        allGamesList = allGames,
-                        gamesList = filteredGames,
-                        isLoadingGames = false,
-                        isGamesAvailable = true,
-                    )
-                }
-                saveGamesCatalogCache(libraries, systems, allGames)
+            }
+
+            // Merge local on-device 3DS ROMs
+            mergeLocalGames(systems, allGames)
+
+            val effectiveLibraries = if (libraries.isEmpty() && systems.isNotEmpty()) {
+                listOf(GameLibrary(id = "local", name = "Local Games", path = ""))
             } else {
-                loadCachedOfflineGames()
-                _state.update { it.copy(isLoadingGames = false) }
+                libraries
+            }
+            val effectiveLibrary = effectiveLibraries.firstOrNull()
+
+            val currentSelectedSystem = _state.value.selectedGameSystem
+            val activeSys = systems.firstOrNull { it.id == currentSelectedSystem?.id }
+            val filteredGames = if (activeSys != null) {
+                allGames.filter { it.systemId == activeSys.id }
+            } else {
+                allGames
+            }
+            _state.update {
+                it.copy(
+                    gameLibraries = effectiveLibraries,
+                    selectedGameLibrary = effectiveLibrary,
+                    gameSystems = systems,
+                    selectedGameSystem = activeSys,
+                    allGamesList = allGames,
+                    gamesList = filteredGames,
+                    isLoadingGames = false,
+                    isGamesAvailable = allGames.isNotEmpty(),
+                )
+            }
+            if (allGames.isNotEmpty()) {
+                saveGamesCatalogCache(effectiveLibraries, systems, allGames)
             }
         }
     }
@@ -1833,13 +1886,13 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             sizeBytes = summary.sizeBytes,
             token = summary.token,
             extension = summary.extension,
-            core = sys?.core ?: summary.systemId,
+            core = if (summary.systemId.equals("3ds", ignoreCase = true)) "citra" else (sys?.core ?: summary.systemId),
             cleanTitle = summary.cleanTitle,
             region = summary.region,
             downloadUrl = "",
             boxartUrl = summary.boxartUrl,
         )
-        if (session == null || library == null) {
+        if (session == null || library == null || summary.id.startsWith("local_") || summary.systemId.equals("3ds", ignoreCase = true)) {
             _state.update { it.copy(activeGameDetail = fallback) }
             return
         }
@@ -1883,6 +1936,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     fun deleteOfflineGame(game: GameDetail) {
+        if (game.id.startsWith("local_")) return
         viewModelScope.launch(Dispatchers.IO) {
             gameStorageManager.deleteOfflineGame(game.id, game.token, game.extension)
             refreshDownloadedGameKeys()
@@ -1921,6 +1975,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             )
         }
         refreshGameTrackerData()
+        refreshDownloadedGameKeys()
+        val has3dsInSystems = _state.value.gameSystems.any { it.id.equals("3ds", ignoreCase = true) }
+        val hasLocalGames = gameStorageManager.scanLocal3dsGameSummaries().isNotEmpty()
+        if (hasLocalGames && !has3dsInSystems) {
+            loadGames()
+        }
     }
 
     fun refreshGameTrackerData() {

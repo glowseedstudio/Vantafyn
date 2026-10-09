@@ -45,6 +45,7 @@ fun NativeEmulatorSurface(
             modifier = Modifier.fillMaxSize(),
             factory = { context: Context ->
                 SurfaceView(context).apply {
+                    holder.setFormat(android.graphics.PixelFormat.RGBA_8888)
                     holder.addCallback(object : SurfaceHolder.Callback {
                         override fun surfaceCreated(holder: SurfaceHolder) {
                             engine.setSurface(holder.surface)

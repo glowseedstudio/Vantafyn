@@ -162,7 +162,10 @@ fun GamesScreen(
                         games = games,
                         allGames = allGames,
                         systems = systems,
-                        onBack = { onSelectTab(GamesTab.Home) },
+                        onBack = {
+                            onRefresh()
+                            onSelectTab(GamesTab.Home)
+                        },
                     )
                 }
             }

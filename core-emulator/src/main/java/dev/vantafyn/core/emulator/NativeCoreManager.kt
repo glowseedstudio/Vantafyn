@@ -49,8 +49,12 @@ class NativeCoreManager(private val context: Context) {
         File(context.filesDir, "saves").apply { mkdirs() }
     }
 
-    fun getSystemDirectory(): File = systemDir
-    fun getSaveDirectory(): File = savesDir
+    fun getSystemDirectory(): File = systemDir.apply {
+        File(this, "citra/sysdata").mkdirs()
+    }
+    fun getSaveDirectory(): File = savesDir.apply {
+        File(this, "Citra/sysdata").mkdirs()
+    }
 
     fun getSupportedAbi(): String {
         val supported = Build.SUPPORTED_ABIS

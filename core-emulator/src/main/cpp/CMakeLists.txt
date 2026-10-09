@@ -21,4 +21,6 @@ target_compile_options(vantafyn_emulator PRIVATE
 target_link_libraries(vantafyn_emulator PRIVATE
     android
     log
+    EGL
+    GLESv3
 )
