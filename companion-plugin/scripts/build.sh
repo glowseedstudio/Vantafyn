@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.31}"
+VERSION="${1:-0.2.32}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.67}"
-CHANGELOG="Updates Nintendo 3DS console logo vector resolution with clean SVG artwork."
+TAG="${2:-v0.9.67-companion.1}"
+CHANGELOG="Removes phonetic pronunciation substitutions for Pokémon and species names in TTS Pokédex narration."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.31.0",
+        "changelog": "Updates Nintendo 3DS console logo vector resolution with clean SVG artwork.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.67/Vantafyn.Plugin.Companion_0.2.31_net9.zip",
+        "checksum": "022c758d8c4242b8c8636bfebd99591f",
+        "timestamp": "2026-10-09T09:18:11Z"
+      },
+      {
+        "version": "0.2.31.1",
+        "changelog": "Updates Nintendo 3DS console logo vector resolution with clean SVG artwork.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.67/Vantafyn.Plugin.Companion_0.2.31_net10.zip",
+        "checksum": "1d8e3ec21e6e82553d625f0780fe2441",
+        "timestamp": "2026-10-09T09:18:11Z"
       },
       {
         "version": "0.2.30.0",

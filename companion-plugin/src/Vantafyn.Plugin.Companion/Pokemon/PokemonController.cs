@@ -21,7 +21,7 @@ public sealed class PokemonController : ControllerBase
 {
     // Bump this whenever the synthesis prompt or client-side narration profile changes in a
     // way that should not reuse previously rendered species audio.
-    private const string NarrationRenderProfile = "pokedex-voice-v4";
+    private const string NarrationRenderProfile = "pokedex-voice-v5";
     private static readonly ConcurrentDictionary<string, (Guid UserId, DateTimeOffset ExpiresAt, PokemonSaveParseResult Parsed, int Generation)> ExternalSavePreviews = new();
     private readonly IGamesService _gamesService;
     private readonly IGameSavesService _gameSavesService;
@@ -241,80 +241,23 @@ public sealed class PokemonController : ControllerBase
         return $"{name}. The {FormatNarrationText(category)}. {FormatNarrationText(flavor)}";
     }
 
-    // Kokoro is a general English narrator, rather than a Pokémon-specific voice model.
-    // Use plain, continuous phonetic spellings without artificial hyphens so the neural model
-    // maintains smooth prosody and does not introduce glottal stops or robotic pauses.
+    // Allow the TTS engine to read Pokémon names, species descriptions, and Pokédex text naturally.
     private static string FormatNarrationText(string text) => text
-        .Replace("Pokémon", "Pokaymon", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokemon", "Pokaymon", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokédex", "Pokaydex", StringComparison.OrdinalIgnoreCase)
-        .Replace("Pokedex", "Pokaydex", StringComparison.OrdinalIgnoreCase)
         .Replace("TM", "T M", StringComparison.OrdinalIgnoreCase)
         .Replace("HP", "H P", StringComparison.OrdinalIgnoreCase);
 
     private static string FormatNarrationName(string? name)
     {
         var displayName = string.IsNullOrWhiteSpace(name) ? "Unknown Pokémon" : name.Trim();
-        var phoneticName = displayName switch
+        var naturalName = displayName switch
         {
-            // Punctuation, symbols, abbreviations, and gender suffixes
             "Nidoran F" or "Nidoran-f" => "Nidoran Female",
             "Nidoran M" or "Nidoran-m" => "Nidoran Male",
-            "Mr Mime" or "Mr. Mime" or "Mr-Mime" => "Mister Mime",
-            "Mime Jr" or "Mime Jr." or "Mime-Jr" => "Mime Junior",
             "Type: Null" or "Type Null" or "Type-Null" => "Type Null",
-            "Farfetch'd" or "Farfetchd" => "Farfetched",
-            "Sirfetch'd" or "Sirfetchd" or "Sirfetch D" => "Sirfetched",
-            "Ho-Oh" or "Ho Oh" => "Ho Oh",
-            "Porygon-Z" or "Porygon Z" => "Porygon Zee",
-            "Porygon2" => "Porygon Two",
-            "Jangmo-o" or "Jangmo O" => "Jangmo Oh",
-            "Hakamo-o" or "Hakamo O" => "Hakamo Oh",
-            "Kommo-o" or "Kommo O" => "Kommo Oh",
-            "Wo-Chien" or "Wo Chien" => "Wo Chien",
-            "Chien-Pao" or "Chien Pao" => "Chien Pow",
-            "Ting-Lu" or "Ting Lu" => "Ting Loo",
-            "Chi-Yu" or "Chi Yu" => "Chee Yoo",
-            "Flabébé" or "Flabebe" => "Flabaybay",
-
-            // Tricky phonetics requiring non-standard English phonemization (smooth, unbroken words)
-            "Arceus" => "Arkeus",
-            "Suicune" => "Sweecoon",
-            "Kyogre" => "Kyoger",
-            "Gyarados" => "Gairados",
-            "Rayquaza" => "Raykwayza",
-            "Deoxys" => "Deeoxiss",
-            "Xerneas" => "Zerneas",
-            "Xurkitree" => "Zurkitree",
-            "Yveltal" => "Eeveltall",
-            "Zygarde" => "Zyegard",
-            "Aegislash" => "Eegislash",
-            "Calyrex" => "Calirex",
-            "Milotic" => "Mylowtic",
-            "Giratina" => "Geeratina",
-            "Regice" => "Reji Ice",
-            "Regirock" => "Rejirock",
-            "Registeel" => "Rejisteel",
-            "Regigigas" => "Rejigigas",
-            "Regieleki" => "Rejieleki",
-            "Regidrago" => "Rejidrago",
-            "Necrozma" => "Nekrozma",
-            "Eternatus" => "Eeternatus",
-            "Basculegion" => "Baskulegion",
-            "Gholdengo" => "Goldengo",
-            "Koraidon" => "Koridon",
-            "Miraidon" => "Miridon",
-            "Armarouge" => "Armaroozh",
-            "Ceruledge" => "Seruledge",
-            "Toxtricity" => "Toxtrisity",
-            "Vivillon" => "Viviyon",
-            "Sneasler" => "Sneezler",
-            "Overqwil" => "Overquill",
-
-            // All standard English Pokémon names are natively pronounced smoothly by Kokoro
+            "Porygon2" => "Porygon 2",
             _ => displayName
         };
-        return FormatNarrationText(phoneticName);
+        return FormatNarrationText(naturalName);
     }
 
     private static string HumanizeSpeciesName(string? name)

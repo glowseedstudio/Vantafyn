@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.32.0",
+        "changelog": "Removes phonetic pronunciation substitutions for Pokémon and species names in TTS Pokédex narration.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.67-companion.1/Vantafyn.Plugin.Companion_0.2.32_net9.zip",
+        "checksum": "855e715eff3f00ff694a1cbef8670353",
+        "timestamp": "2026-10-09T10:07:11Z"
+      },
+      {
+        "version": "0.2.32.1",
+        "changelog": "Removes phonetic pronunciation substitutions for Pokémon and species names in TTS Pokédex narration.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.67-companion.1/Vantafyn.Plugin.Companion_0.2.32_net10.zip",
+        "checksum": "fb28b59c59903161ad47226958a96b64",
+        "timestamp": "2026-10-09T10:07:11Z"
+      },
+      {
         "version": "0.2.31.0",
         "changelog": "Updates Nintendo 3DS console logo vector resolution with clean SVG artwork.",
         "targetAbi": "10.11.0.0",
