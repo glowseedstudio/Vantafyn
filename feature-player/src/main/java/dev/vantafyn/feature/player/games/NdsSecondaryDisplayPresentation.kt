@@ -28,7 +28,8 @@ class NdsSecondaryDisplayPresentation(
     context: Context,
     display: Display,
     private val engine: NativeEmulatorEngine,
-    private val isTouchScreen: Boolean = true,
+    var isTouchScreen: Boolean = false,
+    var is3ds: Boolean = false,
 ) : Presentation(context, display) {
 
     private var surfaceView: SurfaceView? = null
@@ -59,28 +60,28 @@ class NdsSecondaryDisplayPresentation(
                 }
             })
 
-            // Full-screen touch tracking for Nintendo DS stylus input
-            if (isTouchScreen) {
-                setOnTouchListener { _, event ->
-                    val w = width.toFloat()
-                    val h = height.toFloat()
-                    if (w <= 0f || h <= 0f) return@setOnTouchListener false
+            // Dynamic touch tracking for Nintendo DS / 3DS stylus input (active when this screen is the touch screen)
+            setOnTouchListener { _, event ->
+                if (!isTouchScreen) return@setOnTouchListener false
+                val w = width.toFloat()
+                val h = height.toFloat()
+                if (w <= 0f || h <= 0f) return@setOnTouchListener false
 
-                    when (event.actionMasked) {
-                        MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
-                            val relX = (event.x / w).coerceIn(0f, 1f)
-                            val relY = (event.y / h).coerceIn(0f, 1f)
-                            val retroX = ((relX * 2f - 1f) * 0x7fff).toInt().toShort()
-                            val retroY = ((relY * 2f - 1f) * 0x7fff).toInt().toShort()
-                            engine.setTouch(retroX, retroY, true)
-                            true
-                        }
-                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                            engine.setTouch(0, 0, false)
-                            true
-                        }
-                        else -> false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                        val normX = (event.x / w).coerceIn(0f, 1f)
+                        val relX = if (is3ds) (400f + normX * 320f) / 720f else normX
+                        val relY = (event.y / h).coerceIn(0f, 1f)
+                        val retroX = ((relX * 2f - 1f) * 0x7fff).toInt().toShort()
+                        val retroY = ((relY * 2f - 1f) * 0x7fff).toInt().toShort()
+                        engine.setTouch(retroX, retroY, true)
+                        true
                     }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        engine.setTouch(0, 0, false)
+                        true
+                    }
+                    else -> false
                 }
             }
         }
@@ -104,32 +105,46 @@ fun rememberNdsDualDisplayManager(
     engine: NativeEmulatorEngine?,
     isNativeMode: Boolean,
     swapDualScreens: Boolean = false,
+    is3ds: Boolean = false,
 ): Boolean {
     val context = LocalContext.current
     var hasSecondaryDisplay by remember { mutableStateOf(false) }
+    var currentPresentation by remember { mutableStateOf<NdsSecondaryDisplayPresentation?>(null) }
 
-    DisposableEffect(context, engine, isNativeMode, swapDualScreens) {
+    // Reactively swap screens in the native emulator engine without recreating presentation
+    androidx.compose.runtime.LaunchedEffect(swapDualScreens, engine) {
+        engine?.setDualScreenSwap(swapDualScreens)
+    }
+
+    // Dynamically update secondary presentation touch mode without tearing down SurfaceView
+    androidx.compose.runtime.LaunchedEffect(swapDualScreens, is3ds, currentPresentation) {
+        currentPresentation?.isTouchScreen = swapDualScreens
+        currentPresentation?.is3ds = is3ds
+    }
+
+    DisposableEffect(context, engine, isNativeMode) {
         if (!isNativeMode || engine == null) {
             hasSecondaryDisplay = false
             return@DisposableEffect onDispose {}
         }
 
-        engine.setDualScreenSwap(swapDualScreens)
         val displayManager = context.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
-
-        var presentation: NdsSecondaryDisplayPresentation? = null
 
         fun attachPresentation(display: Display) {
             try {
-                presentation?.dismiss()
+                if (currentPresentation?.display?.displayId == display.displayId && currentPresentation?.isShowing == true) {
+                    return
+                }
+                currentPresentation?.dismiss()
                 val pres = NdsSecondaryDisplayPresentation(
                     context = context,
                     display = display,
                     engine = engine,
-                    isTouchScreen = !swapDualScreens,
+                    isTouchScreen = swapDualScreens,
+                    is3ds = is3ds,
                 )
                 pres.show()
-                presentation = pres
+                currentPresentation = pres
                 hasSecondaryDisplay = true
                 android.util.Log.i("NdsDualDisplay", "Attached secondary presentation to display: ${display.name}")
             } catch (e: Exception) {
@@ -139,9 +154,9 @@ fun rememberNdsDualDisplayManager(
 
         fun detachPresentation() {
             try {
-                presentation?.dismiss()
+                currentPresentation?.dismiss()
             } catch (_: Exception) {}
-            presentation = null
+            currentPresentation = null
             engine.setSecondarySurface(null)
             hasSecondaryDisplay = false
         }

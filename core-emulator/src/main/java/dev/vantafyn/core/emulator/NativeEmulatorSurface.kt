@@ -144,7 +144,8 @@ private fun mapTouchToRetro(
                 relY = (offset.y / viewH).coerceIn(0f, 1f)
             }
             NdsScreenLayout.BottomOnly -> {
-                relX = (offset.x / viewW).coerceIn(0f, 1f)
+                val normX = (offset.x / viewW).coerceIn(0f, 1f)
+                relX = (400f + normX * 320f) / 720f
                 relY = (offset.y / viewH).coerceIn(0f, 1f)
             }
             NdsScreenLayout.TopOnly -> {

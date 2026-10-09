@@ -259,6 +259,7 @@ fun GamePlayerScreen(
         engine = nativeEngine,
         isNativeMode = isNativeMode,
         swapDualScreens = swapDualScreens,
+        is3ds = is3dsSystem,
     )
 
     // Release the screen-on lock while the pause HUD (or crash screen) is up so the panel can sleep.
@@ -531,11 +532,15 @@ fun GamePlayerScreen(
                     if (isNdsSystem) {
                         engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
                     } else if (is3dsSystem) {
-                        val (citraLayout, citraScreenLayout, citraSwap) = when (ndsScreenLayout) {
-                            NdsScreenLayout.TopBottom -> Triple("Default Top-Bottom Screen", "top_bottom", "Top")
-                            NdsScreenLayout.LeftRight -> Triple("Side by Side", "left_right", "Top")
-                            NdsScreenLayout.TopOnly -> Triple("Single Screen Only", "top_only", "Top")
-                            NdsScreenLayout.BottomOnly -> Triple("Single Screen Only", "bottom_only", "Bottom")
+                        val (citraLayout, citraScreenLayout, citraSwap) = if (hasSecondaryDisplay) {
+                            Triple("Side by Side", "left_right", "Top")
+                        } else {
+                            when (ndsScreenLayout) {
+                                NdsScreenLayout.TopBottom -> Triple("Default Top-Bottom Screen", "top_bottom", "Top")
+                                NdsScreenLayout.LeftRight -> Triple("Side by Side", "left_right", "Top")
+                                NdsScreenLayout.TopOnly -> Triple("Single Screen Only", "top_only", "Top")
+                                NdsScreenLayout.BottomOnly -> Triple("Single Screen Only", "bottom_only", "Bottom")
+                            }
                         }
                         engine.setOption("citra_layout_option", citraLayout)
                         engine.setOption("azahar_layout_option", citraLayout)
@@ -726,7 +731,7 @@ fun GamePlayerScreen(
         val isGbaGame = game.systemId.lowercase() == "gba" || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
         val isGbGame = game.systemId.lowercase() in listOf("gb", "gbc") || game.core.contains("gambatte", ignoreCase = true) || game.core.contains("tgbdual", ignoreCase = true) || game.core.contains("sameboy", ignoreCase = true)
         val ratioFloat = if (hasSecondaryDisplay && is3dsGame) {
-            if (swapDualScreens) 4f / 3f else 5f / 3f // Secondary physical display: 5:3 top, 4:3 bottom
+            if (swapDualScreens) 5f / 3f else 4f / 3f // Primary handheld screen: 4:3 bottom (default), 5:3 top (swapped)
         } else if (hasSecondaryDisplay && isNdsGame) {
             4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
         } else if (coreGeometry != null && (coreGeometry!!.third > 0.1)) {
@@ -800,9 +805,9 @@ fun GamePlayerScreen(
                     NativeEmulatorSurface(
                         engine = nativeEngine!!,
                         modifier = Modifier.fillMaxSize(),
-                        isDualScreen = !hasSecondaryDisplay && isDualScreenGame,
+                        isDualScreen = isDualScreenGame,
                         layout = if (hasSecondaryDisplay) {
-                            if (swapDualScreens) NdsScreenLayout.BottomOnly else NdsScreenLayout.TopOnly
+                            if (swapDualScreens) NdsScreenLayout.TopOnly else NdsScreenLayout.BottomOnly
                         } else ndsScreenLayout,
                         is3ds = is3dsGame,
                     )
@@ -1260,7 +1265,7 @@ fun GamePlayerScreen(
             swapDualScreens = swapDualScreens,
             onToggleSwapDualScreens = {
                 swapDualScreens = !swapDualScreens
-                if (isNativeMode) {
+                if (isNativeMode && !hasSecondaryDisplay) {
                     val swapVal = if (swapDualScreens) "Bottom" else "Top"
                     nativeEngine?.setOption("citra_swap_screen", swapVal)
                     nativeEngine?.setOption("azahar_swap_screen", swapVal)

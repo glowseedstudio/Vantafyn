@@ -256,7 +256,7 @@ fun GamePauseHud(
                             )
                             if (hasSecondaryDisplay) {
                                 HudMenuButton(
-                                    label = if (swapDualScreens) "Attached: Top" else "Attached: Touch",
+                                    label = if (swapDualScreens) "Attached: Touch" else "Attached: Top",
                                     icon = Icons.Rounded.SwapVert,
                                     onClick = onToggleSwapDualScreens,
                                     modifier = Modifier.weight(1.3f),
@@ -318,12 +318,14 @@ fun GamePauseHud(
                                     onClick = onCycleCitraResolution,
                                     modifier = Modifier.weight(1f),
                                 )
-                                HudMenuButton(
-                                    label = if (swapDualScreens) "Prominent: Touch" else "Prominent: Top",
-                                    icon = Icons.Rounded.SwapVert,
-                                    onClick = onToggleSwapDualScreens,
-                                    modifier = Modifier.weight(1f),
-                                )
+                                if (!hasSecondaryDisplay) {
+                                    HudMenuButton(
+                                        label = if (swapDualScreens) "Prominent: Touch" else "Prominent: Top",
+                                        icon = Icons.Rounded.SwapVert,
+                                        onClick = onToggleSwapDualScreens,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
 

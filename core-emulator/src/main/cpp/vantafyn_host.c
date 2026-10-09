@@ -105,8 +105,15 @@ struct vf_session {
     EGLContext egl_context;
     EGLSurface egl_pbuffer_surface;
     EGLSurface egl_window_surface;
+    EGLSurface egl_surface_secondary;
     EGLSurface egl_surface;
     ANativeWindow *active_egl_window;
+    ANativeWindow *active_egl_window_secondary;
+    GLuint hw_fbo;
+    GLuint hw_texture;
+    GLuint hw_depth_rb;
+    int hw_fbo_w;
+    int hw_fbo_h;
     
     // Framebuffer conversion cache
     uint32_t *frame_buffer;
@@ -271,6 +278,10 @@ static retro_proc_address_t vf_hw_get_proc_address(const char *sym) {
 }
 
 static uintptr_t vf_hw_get_current_framebuffer(void) {
+    vf_session_t *s = s_current_session;
+    if (s && s->window_secondary && s->hw_fbo) {
+        return (uintptr_t)s->hw_fbo;
+    }
     return 0;
 }
 
@@ -672,63 +683,176 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
     // Fast-path for Hardware-Accelerated (OpenGL ES) cores
     if (s->is_hw_render || data == RETRO_HW_FRAME_BUFFER_VALID) {
         pthread_mutex_lock(&s->window_mutex);
-        if (s->window && width > 0 && height > 0) {
-            if (s->last_buffer_w != (int)width || s->last_buffer_h != (int)height) {
-                EGLint format = 0;
-                if (s->egl_display && s->egl_config) {
-                    eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
-                }
+        if (s->window_secondary && (height >= 384 || width >= 512 || height >= 480 || width >= 720)) {
+            // Dual physical displays mode in Hardware Rendering (3DS Citra / Azahar)
+            ANativeWindow *win_top = s->swap_dual_screens ? s->window : s->window_secondary;
+            ANativeWindow *win_bottom = s->swap_dual_screens ? s->window_secondary : s->window;
+
+            unsigned top_w, top_h, bot_w, bot_h;
+            int top_src_x0, top_src_y0, top_src_x1, top_src_y1;
+            int bot_src_x0, bot_src_y0, bot_src_x1, bot_src_y1;
+
+            if (height >= width) {
+                // Vertical stacked layout (400x480 at 1x, etc.)
+                top_w = width;
+                top_h = height / 2;
+                bot_w = width * 320 / 400;
+                bot_h = height - top_h;
+                int margin_w = (int)((width - bot_w) / 2);
+                top_src_x0 = 0; top_src_y0 = (int)top_h; top_src_x1 = (int)width; top_src_y1 = (int)height;
+                bot_src_x0 = margin_w; bot_src_y0 = 0; bot_src_x1 = margin_w + (int)bot_w; bot_src_y1 = (int)top_h;
+            } else {
+                // Horizontal side-by-side layout (720x240 at 1x, 1440x480 at 2x, etc.)
+                top_w = (width == 1440) ? 800 : (width == 720 ? 400 : width * 400 / 720);
+                top_h = height;
+                bot_w = width - top_w;
+                bot_h = height;
+                top_src_x0 = 0; top_src_y0 = 0; top_src_x1 = (int)top_w; top_src_y1 = (int)height;
+                bot_src_x0 = (int)top_w; bot_src_y0 = 0; bot_src_x1 = (int)width; bot_src_y1 = (int)height;
+            }
+
+            EGLint format = 0;
+            if (s->egl_display && s->egl_config) {
+                eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
+            }
+
+            int target_main_w = (s->window == win_top) ? (int)top_w : (int)bot_w;
+            int target_main_h = (s->window == win_top) ? (int)top_h : (int)bot_h;
+            if (s->last_buffer_w != target_main_w || s->last_buffer_h != target_main_h || s->egl_window_surface == EGL_NO_SURFACE) {
                 eglMakeCurrent(s->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
                 if (s->egl_window_surface != EGL_NO_SURFACE) {
                     eglDestroySurface(s->egl_display, s->egl_window_surface);
                     s->egl_window_surface = EGL_NO_SURFACE;
                 }
-                ANativeWindow_setBuffersGeometry(s->window, (int32_t)width, (int32_t)height, format);
-                s->last_buffer_w = (int)width;
-                s->last_buffer_h = (int)height;
+                ANativeWindow_setBuffersGeometry(s->window, (int32_t)target_main_w, (int32_t)target_main_h, format);
+                s->last_buffer_w = target_main_w;
+                s->last_buffer_h = target_main_h;
                 s->egl_window_surface = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window, NULL);
-                s->egl_surface = (s->egl_window_surface != EGL_NO_SURFACE) ? s->egl_window_surface : s->egl_pbuffer_surface;
-                eglMakeCurrent(s->egl_display, s->egl_surface, s->egl_surface, s->egl_context);
-                LOGI("EGL HW render updated window buffer geometry to %ux%u", width, height);
+                s->active_egl_window = s->window;
+                LOGI("EGL HW render updated main window geometry to %dx%d", target_main_w, target_main_h);
             }
-        }
-        if (s->egl_display && s->egl_surface && s->egl_surface != s->egl_pbuffer_surface) {
-            // Guarantee unrendered pillarbox margins (e.g. 3DS bottom touchscreen margins
-            // in 400x480 top-bottom stacked layout) are 100% solid black and never leak
-            // uninitialized GPU VRAM tile memory / TV static.
-            if (width > 0 && height > 0) {
-                glBindFramebuffer(GL_FRAMEBUFFER, 0);
-                glEnable(GL_SCISSOR_TEST);
-                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 
-                // 3DS Top-Bottom stack: Top is 400x240 (full width), Bottom is 320x240 (centered).
-                // Left margin is 40px (10%), Right margin is 40px (10%).
-                if (height >= width) {
-                    int margin_w = (int)(width * 40 / 400); // 40px at 1x, 80px at 2x, etc.
-                    int half_h = (int)(height / 2);
-                    if (margin_w > 0 && half_h > 0) {
-                        // Clear lower-left margin (y in [0, half_h])
-                        glScissor(0, 0, margin_w, half_h);
-                        glClear(GL_COLOR_BUFFER_BIT);
+            int target_sec_w = (s->window_secondary == win_top) ? (int)top_w : (int)bot_w;
+            int target_sec_h = (s->window_secondary == win_top) ? (int)top_h : (int)bot_h;
+            if (s->last_buffer_secondary_w != target_sec_w || s->last_buffer_secondary_h != target_sec_h || s->egl_surface_secondary == EGL_NO_SURFACE) {
+                eglMakeCurrent(s->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                if (s->egl_surface_secondary != EGL_NO_SURFACE) {
+                    eglDestroySurface(s->egl_display, s->egl_surface_secondary);
+                    s->egl_surface_secondary = EGL_NO_SURFACE;
+                }
+                ANativeWindow_setBuffersGeometry(s->window_secondary, (int32_t)target_sec_w, (int32_t)target_sec_h, format);
+                s->last_buffer_secondary_w = target_sec_w;
+                s->last_buffer_secondary_h = target_sec_h;
+                s->egl_surface_secondary = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window_secondary, NULL);
+                s->active_egl_window_secondary = s->window_secondary;
+                LOGI("EGL HW render updated secondary window geometry to %dx%d", target_sec_w, target_sec_h);
+            }
 
-                        // Clear lower-right margin (y in [0, half_h])
-                        glScissor(width - margin_w, 0, margin_w, half_h);
-                        glClear(GL_COLOR_BUFFER_BIT);
+            if (s->hw_fbo == 0 || s->hw_fbo_w != (int)width || s->hw_fbo_h != (int)height) {
+                if (s->hw_fbo) {
+                    glDeleteFramebuffers(1, &s->hw_fbo);
+                    glDeleteTextures(1, &s->hw_texture);
+                    glDeleteRenderbuffers(1, &s->hw_depth_rb);
+                    s->hw_fbo = 0;
+                }
+                glGenTextures(1, &s->hw_texture);
+                glBindTexture(GL_TEXTURE_2D, s->hw_texture);
+                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-                        // If bottom_left_origin is false (origin at top-left), clear upper margins instead
-                        if (!s->hw_render.bottom_left_origin) {
-                            glScissor(0, half_h, margin_w, half_h);
+                glGenRenderbuffers(1, &s->hw_depth_rb);
+                glBindRenderbuffer(GL_RENDERBUFFER, s->hw_depth_rb);
+                glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, width, height);
+
+                glGenFramebuffers(1, &s->hw_fbo);
+                glBindFramebuffer(GL_FRAMEBUFFER, s->hw_fbo);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s->hw_texture, 0);
+                glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s->hw_depth_rb);
+                s->hw_fbo_w = (int)width;
+                s->hw_fbo_h = (int)height;
+                LOGI("Created EGL HW dual-display FBO %u (%dx%d)", s->hw_fbo, width, height);
+            }
+
+            EGLSurface surf_top = (win_top == s->window) ? s->egl_window_surface : s->egl_surface_secondary;
+            EGLSurface surf_bottom = (win_bottom == s->window) ? s->egl_window_surface : s->egl_surface_secondary;
+
+            if (surf_top != EGL_NO_SURFACE) {
+                eglMakeCurrent(s->egl_display, surf_top, surf_top, s->egl_context);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, s->hw_fbo);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+                glBlitFramebuffer(top_src_x0, top_src_y0, top_src_x1, top_src_y1,
+                                  0, 0, (int)top_w, (int)top_h,
+                                  GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                eglSwapBuffers(s->egl_display, surf_top);
+            }
+
+            if (surf_bottom != EGL_NO_SURFACE) {
+                eglMakeCurrent(s->egl_display, surf_bottom, surf_bottom, s->egl_context);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, s->hw_fbo);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+                glBlitFramebuffer(bot_src_x0, bot_src_y0, bot_src_x1, bot_src_y1,
+                                  0, 0, (int)bot_w, (int)bot_h,
+                                  GL_COLOR_BUFFER_BIT, GL_NEAREST);
+                eglSwapBuffers(s->egl_display, surf_bottom);
+            }
+
+            // Restore context to pbuffer surface and bind hw_fbo ready for next frame
+            eglMakeCurrent(s->egl_display, s->egl_pbuffer_surface, s->egl_pbuffer_surface, s->egl_context);
+            glBindFramebuffer(GL_FRAMEBUFFER, s->hw_fbo);
+        } else {
+            // Single display mode: render full composite directly to s->window
+            if (s->window && width > 0 && height > 0) {
+                if (s->last_buffer_w != (int)width || s->last_buffer_h != (int)height) {
+                    EGLint format = 0;
+                    if (s->egl_display && s->egl_config) {
+                        eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
+                    }
+                    eglMakeCurrent(s->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+                    if (s->egl_window_surface != EGL_NO_SURFACE) {
+                        eglDestroySurface(s->egl_display, s->egl_window_surface);
+                        s->egl_window_surface = EGL_NO_SURFACE;
+                    }
+                    ANativeWindow_setBuffersGeometry(s->window, (int32_t)width, (int32_t)height, format);
+                    s->last_buffer_w = (int)width;
+                    s->last_buffer_h = (int)height;
+                    s->egl_window_surface = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window, NULL);
+                    s->egl_surface = (s->egl_window_surface != EGL_NO_SURFACE) ? s->egl_window_surface : s->egl_pbuffer_surface;
+                    eglMakeCurrent(s->egl_display, s->egl_surface, s->egl_surface, s->egl_context);
+                    LOGI("EGL HW render updated window buffer geometry to %ux%u", width, height);
+                }
+            }
+            if (s->egl_display && s->egl_surface && s->egl_surface != s->egl_pbuffer_surface) {
+                if (width > 0 && height > 0) {
+                    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                    glEnable(GL_SCISSOR_TEST);
+                    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+
+                    if (height >= width) {
+                        int margin_w = (int)(width * 40 / 400);
+                        int half_h = (int)(height / 2);
+                        if (margin_w > 0 && half_h > 0) {
+                            glScissor(0, 0, margin_w, half_h);
                             glClear(GL_COLOR_BUFFER_BIT);
-                            glScissor(width - margin_w, half_h, margin_w, half_h);
+                            glScissor(width - margin_w, 0, margin_w, half_h);
                             glClear(GL_COLOR_BUFFER_BIT);
+
+                            if (!s->hw_render.bottom_left_origin) {
+                                glScissor(0, half_h, margin_w, half_h);
+                                glClear(GL_COLOR_BUFFER_BIT);
+                                glScissor(width - margin_w, half_h, margin_w, half_h);
+                                glClear(GL_COLOR_BUFFER_BIT);
+                            }
                         }
                     }
+                    glDisable(GL_SCISSOR_TEST);
                 }
-                glDisable(GL_SCISSOR_TEST);
-            }
 
-            eglSwapBuffers(s->egl_display, s->egl_surface);
+                eglSwapBuffers(s->egl_display, s->egl_surface);
+            }
         }
         pthread_mutex_unlock(&s->window_mutex);
 
@@ -932,8 +1056,8 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         memcpy(s->prev_frame_buffer, s->frame_buffer, needed_pixels * sizeof(uint32_t));
     }
 
-    ANativeWindow *win_top = s->swap_dual_screens ? s->window_secondary : s->window;
-    ANativeWindow *win_bottom = s->swap_dual_screens ? s->window : s->window_secondary;
+    ANativeWindow *win_top = s->swap_dual_screens ? s->window : s->window_secondary;
+    ANativeWindow *win_bottom = s->swap_dual_screens ? s->window_secondary : s->window;
 
     if (s->window_secondary && (height >= 384 || width >= 512 || height >= 480 || width >= 720)) {
         // Dual physical displays mode: slice into twin DS / 3DS screens
@@ -966,11 +1090,13 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         }
 
         if (win_top) {
+            int *last_w = (win_top == s->window) ? &s->last_buffer_w : &s->last_buffer_secondary_w;
+            int *last_h = (win_top == s->window) ? &s->last_buffer_h : &s->last_buffer_secondary_h;
             if (!s->crisp_pixels) {
-                if (s->last_buffer_w != (int)top_w || s->last_buffer_h != (int)top_h) {
+                if (*last_w != (int)top_w || *last_h != (int)top_h) {
                     ANativeWindow_setBuffersGeometry(win_top, (int32_t)top_w, (int32_t)top_h, WINDOW_FORMAT_RGBA_8888);
-                    s->last_buffer_w = (int)top_w;
-                    s->last_buffer_h = (int)top_h;
+                    *last_w = (int)top_w;
+                    *last_h = (int)top_h;
                 }
                 ANativeWindow_Buffer top_buf;
                 if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
@@ -981,10 +1107,10 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                     ANativeWindow_unlockAndPost(win_top);
                 }
             } else {
-                if (s->last_buffer_w != 0 || s->last_buffer_h != 0) {
+                if (*last_w != 0 || *last_h != 0) {
                     ANativeWindow_setBuffersGeometry(win_top, 0, 0, WINDOW_FORMAT_RGBA_8888);
-                    s->last_buffer_w = 0;
-                    s->last_buffer_h = 0;
+                    *last_w = 0;
+                    *last_h = 0;
                 }
                 ANativeWindow_Buffer top_buf;
                 if (ANativeWindow_lock(win_top, &top_buf, NULL) == 0) {
@@ -1000,11 +1126,13 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
         }
 
         if (win_bottom) {
+            int *last_w = (win_bottom == s->window) ? &s->last_buffer_w : &s->last_buffer_secondary_w;
+            int *last_h = (win_bottom == s->window) ? &s->last_buffer_h : &s->last_buffer_secondary_h;
             if (!s->crisp_pixels) {
-                if (s->last_buffer_secondary_w != (int)bot_w || s->last_buffer_secondary_h != (int)bot_h) {
+                if (*last_w != (int)bot_w || *last_h != (int)bot_h) {
                     ANativeWindow_setBuffersGeometry(win_bottom, (int32_t)bot_w, (int32_t)bot_h, WINDOW_FORMAT_RGBA_8888);
-                    s->last_buffer_secondary_w = (int)bot_w;
-                    s->last_buffer_secondary_h = (int)bot_h;
+                    *last_w = (int)bot_w;
+                    *last_h = (int)bot_h;
                 }
                 ANativeWindow_Buffer bot_buf;
                 if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
@@ -1015,10 +1143,10 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                     ANativeWindow_unlockAndPost(win_bottom);
                 }
             } else {
-                if (s->last_buffer_secondary_w != 0 || s->last_buffer_secondary_h != 0) {
+                if (*last_w != 0 || *last_h != 0) {
                     ANativeWindow_setBuffersGeometry(win_bottom, 0, 0, WINDOW_FORMAT_RGBA_8888);
-                    s->last_buffer_secondary_w = 0;
-                    s->last_buffer_secondary_h = 0;
+                    *last_w = 0;
+                    *last_h = 0;
                 }
                 ANativeWindow_Buffer bot_buf;
                 if (ANativeWindow_lock(win_bottom, &bot_buf, NULL) == 0) {
@@ -1634,6 +1762,20 @@ void vf_session_unload(vf_session_t *session) {
                 eglDestroySurface(session->egl_display, session->egl_window_surface);
                 session->egl_window_surface = EGL_NO_SURFACE;
             }
+            if (session->egl_surface_secondary != EGL_NO_SURFACE) {
+                eglDestroySurface(session->egl_display, session->egl_surface_secondary);
+                session->egl_surface_secondary = EGL_NO_SURFACE;
+            }
+            if (session->hw_fbo) {
+                glDeleteFramebuffers(1, &session->hw_fbo);
+                glDeleteTextures(1, &session->hw_texture);
+                glDeleteRenderbuffers(1, &session->hw_depth_rb);
+                session->hw_fbo = 0;
+                session->hw_texture = 0;
+                session->hw_depth_rb = 0;
+                session->hw_fbo_w = 0;
+                session->hw_fbo_h = 0;
+            }
             if (session->egl_pbuffer_surface != EGL_NO_SURFACE) {
                 eglDestroySurface(session->egl_display, session->egl_pbuffer_surface);
                 session->egl_pbuffer_surface = EGL_NO_SURFACE;
@@ -1645,6 +1787,7 @@ void vf_session_unload(vf_session_t *session) {
         }
         session->is_hw_render = false;
         session->active_egl_window = NULL;
+        session->active_egl_window_secondary = NULL;
         session->hw_context_reset_done = false;
     }
 
@@ -1691,6 +1834,12 @@ bool vf_session_is_running(const vf_session_t *session) {
 void vf_session_set_window(vf_session_t *session, void *native_window) {
     if (!session) return;
     pthread_mutex_lock(&session->window_mutex);
+    if (session->is_hw_render && session->egl_display) {
+        if (session->egl_window_surface != EGL_NO_SURFACE) {
+            eglDestroySurface(session->egl_display, session->egl_window_surface);
+            session->egl_window_surface = EGL_NO_SURFACE;
+        }
+    }
     if (session->window) {
         ANativeWindow_release(session->window);
     }
@@ -1700,12 +1849,19 @@ void vf_session_set_window(vf_session_t *session, void *native_window) {
     }
     session->last_buffer_w = -1;
     session->last_buffer_h = -1;
+    session->active_egl_window = NULL;
     pthread_mutex_unlock(&session->window_mutex);
 }
 
 void vf_session_set_secondary_window(vf_session_t *session, void *native_window) {
     if (!session) return;
     pthread_mutex_lock(&session->window_mutex);
+    if (session->is_hw_render && session->egl_display) {
+        if (session->egl_surface_secondary != EGL_NO_SURFACE) {
+            eglDestroySurface(session->egl_display, session->egl_surface_secondary);
+            session->egl_surface_secondary = EGL_NO_SURFACE;
+        }
+    }
     if (session->window_secondary) {
         ANativeWindow_release(session->window_secondary);
     }
@@ -1715,6 +1871,7 @@ void vf_session_set_secondary_window(vf_session_t *session, void *native_window)
     }
     session->last_buffer_secondary_w = -1;
     session->last_buffer_secondary_h = -1;
+    session->active_egl_window_secondary = NULL;
     pthread_mutex_unlock(&session->window_mutex);
 }
 
@@ -1722,6 +1879,20 @@ void vf_session_set_dual_screen_swap(vf_session_t *session, bool swap) {
     if (!session) return;
     pthread_mutex_lock(&session->window_mutex);
     session->swap_dual_screens = swap;
+    session->last_buffer_w = -1;
+    session->last_buffer_h = -1;
+    session->last_buffer_secondary_w = -1;
+    session->last_buffer_secondary_h = -1;
+    if (session->is_hw_render && session->egl_display) {
+        if (session->egl_window_surface != EGL_NO_SURFACE) {
+            eglDestroySurface(session->egl_display, session->egl_window_surface);
+            session->egl_window_surface = EGL_NO_SURFACE;
+        }
+        if (session->egl_surface_secondary != EGL_NO_SURFACE) {
+            eglDestroySurface(session->egl_display, session->egl_surface_secondary);
+            session->egl_surface_secondary = EGL_NO_SURFACE;
+        }
+    }
     pthread_mutex_unlock(&session->window_mutex);
 }
 
