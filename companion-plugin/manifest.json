@@ -11,17 +11,17 @@
         "version": "0.2.31.0",
         "changelog": "Updates Nintendo 3DS console logo vector resolution with clean SVG artwork.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.65/Vantafyn.Plugin.Companion_0.2.31_net9.zip",
-        "checksum": "454daa97233a1921ae85c73225d9981b",
-        "timestamp": "2026-10-09T05:35:44Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.67/Vantafyn.Plugin.Companion_0.2.31_net9.zip",
+        "checksum": "022c758d8c4242b8c8636bfebd99591f",
+        "timestamp": "2026-10-09T09:18:11Z"
       },
       {
         "version": "0.2.31.1",
         "changelog": "Updates Nintendo 3DS console logo vector resolution with clean SVG artwork.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.65/Vantafyn.Plugin.Companion_0.2.31_net10.zip",
-        "checksum": "f839505aa59076c4e4b1c0c9d028904b",
-        "timestamp": "2026-10-09T05:35:44Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.67/Vantafyn.Plugin.Companion_0.2.31_net10.zip",
+        "checksum": "1d8e3ec21e6e82553d625f0780fe2441",
+        "timestamp": "2026-10-09T09:18:11Z"
       },
       {
         "version": "0.2.30.0",

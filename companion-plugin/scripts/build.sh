@@ -7,7 +7,7 @@ PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
 VERSION="${1:-0.2.31}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.66}"
+TAG="${2:-v0.9.67}"
 CHANGELOG="Updates Nintendo 3DS console logo vector resolution with clean SVG artwork."
 
 rm -rf "$ARTIFACTS"
