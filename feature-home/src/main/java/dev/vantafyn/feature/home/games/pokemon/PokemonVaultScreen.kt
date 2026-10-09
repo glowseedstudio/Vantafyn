@@ -110,6 +110,7 @@ fun PokemonVaultScreen(
     session: JellyfinSession?,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    allGames: List<GameSummary> = emptyList(),
     vaultHomeTrigger: Long = 0L,
     pokemonRepository: JellyfinPokemonRepository = remember { DefaultJellyfinPokemonRepository() },
 ) {
@@ -314,19 +315,36 @@ fun PokemonVaultScreen(
     }
 
     fun loadAll() {
-        if (session == null) return
         coroutineScope.launch(Dispatchers.IO) {
             isLoadingInitial = true
-            pokemonRepository.getStatus(session).onSuccess { st ->
-                integrationStatus = st
+            if (session != null) {
+                pokemonRepository.getStatus(session).onSuccess { st ->
+                    integrationStatus = st
+                }
             }
-            val gamesRes = pokemonRepository.getPokemonGames(session)
-            gamesRes.onSuccess { games ->
-                availableGames = games
+            val serverGames = if (session != null) {
+                pokemonRepository.getPokemonGames(session).getOrDefault(emptyList())
+            } else emptyList()
+
+            val local3ds = storageManager.scanLocal3dsGameSummaries()
+            val candidateGames = (allGames + serverGames + local3ds)
+
+            val mergedGames = candidateGames
+                .map { game ->
+                    if (game.pokemon == null) {
+                        val detected = dev.vantafyn.core.jellyfin.PokemonGameDetector.detect(game.cleanTitle, game.filename, game.systemId)
+                        if (detected != null) game.copy(pokemon = detected) else game
+                    } else game
+                }
+                .filter { it.pokemon?.isPokemonGame == true || dev.vantafyn.core.jellyfin.PokemonGameDetector.detect(it.cleanTitle, it.filename, it.systemId) != null }
+                .distinctBy { it.id }
+
+            withContext(Dispatchers.Main) {
+                availableGames = mergedGames
                 // If lower state is PersonalVault, but games exist, default lower to first game for convenience
-                if (lowerState.containerType is StorageContainerType.PersonalVault && games.isNotEmpty()) {
+                if (lowerState.containerType is StorageContainerType.PersonalVault && mergedGames.isNotEmpty()) {
                     lowerState = lowerState.copy(
-                        containerType = StorageContainerType.GameCartridge(games.first()),
+                        containerType = StorageContainerType.GameCartridge(mergedGames.first()),
                         gameSave = null,
                         vaultBox = null,
                     )
@@ -335,7 +353,9 @@ fun PokemonVaultScreen(
             loadVaultSummary()
             loadContainerData(TransferSide.Source)
             loadContainerData(TransferSide.Destination)
-            isLoadingInitial = false
+            withContext(Dispatchers.Main) {
+                isLoadingInitial = false
+            }
         }
     }
 

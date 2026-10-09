@@ -1386,6 +1386,22 @@ static void* run_loop_thread(void *arg) {
                     LOGE("eglMakeCurrent failed during surface switch: 0x%x", eglGetError());
                 }
             }
+
+            if (s->active_egl_window_secondary != s->window_secondary) {
+                if (s->egl_surface_secondary != EGL_NO_SURFACE) {
+                    eglDestroySurface(s->egl_display, s->egl_surface_secondary);
+                    s->egl_surface_secondary = EGL_NO_SURFACE;
+                }
+                s->active_egl_window_secondary = s->window_secondary;
+                if (s->window_secondary) {
+                    EGLint format = 0;
+                    eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_NATIVE_VISUAL_ID, &format);
+                    int target_sec_w = (s->last_buffer_secondary_w > 0) ? s->last_buffer_secondary_w : 400;
+                    int target_sec_h = (s->last_buffer_secondary_h > 0) ? s->last_buffer_secondary_h : 240;
+                    ANativeWindow_setBuffersGeometry(s->window_secondary, (int32_t)target_sec_w, (int32_t)target_sec_h, format);
+                    s->egl_surface_secondary = eglCreateWindowSurface(s->egl_display, s->egl_config, s->window_secondary, NULL);
+                }
+            }
             pthread_mutex_unlock(&s->window_mutex);
         }
 
@@ -1834,12 +1850,6 @@ bool vf_session_is_running(const vf_session_t *session) {
 void vf_session_set_window(vf_session_t *session, void *native_window) {
     if (!session) return;
     pthread_mutex_lock(&session->window_mutex);
-    if (session->is_hw_render && session->egl_display) {
-        if (session->egl_window_surface != EGL_NO_SURFACE) {
-            eglDestroySurface(session->egl_display, session->egl_window_surface);
-            session->egl_window_surface = EGL_NO_SURFACE;
-        }
-    }
     if (session->window) {
         ANativeWindow_release(session->window);
     }
@@ -1849,19 +1859,12 @@ void vf_session_set_window(vf_session_t *session, void *native_window) {
     }
     session->last_buffer_w = -1;
     session->last_buffer_h = -1;
-    session->active_egl_window = NULL;
     pthread_mutex_unlock(&session->window_mutex);
 }
 
 void vf_session_set_secondary_window(vf_session_t *session, void *native_window) {
     if (!session) return;
     pthread_mutex_lock(&session->window_mutex);
-    if (session->is_hw_render && session->egl_display) {
-        if (session->egl_surface_secondary != EGL_NO_SURFACE) {
-            eglDestroySurface(session->egl_display, session->egl_surface_secondary);
-            session->egl_surface_secondary = EGL_NO_SURFACE;
-        }
-    }
     if (session->window_secondary) {
         ANativeWindow_release(session->window_secondary);
     }
@@ -1871,7 +1874,6 @@ void vf_session_set_secondary_window(vf_session_t *session, void *native_window)
     }
     session->last_buffer_secondary_w = -1;
     session->last_buffer_secondary_h = -1;
-    session->active_egl_window_secondary = NULL;
     pthread_mutex_unlock(&session->window_mutex);
 }
 

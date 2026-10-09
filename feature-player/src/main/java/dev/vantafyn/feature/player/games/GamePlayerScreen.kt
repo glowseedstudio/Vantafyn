@@ -282,11 +282,13 @@ fun GamePlayerScreen(
     DisposableEffect(lifecycleOwner, webViewInstance, nativeEngine) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                Lifecycle.Event.ON_PAUSE -> {
                     if (isNativeMode) {
-                        val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
-                        nativeEngine?.saveSram(sramFile)
                         nativeEngine?.pause()
+                        val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                        GameStorageManager.saveScope.launch {
+                            nativeEngine?.saveSram(sramFile)
+                        }
                     } else {
                         webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
                         if (!isPaused) {

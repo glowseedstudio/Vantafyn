@@ -135,6 +135,7 @@ class GameStorageManager(
                     .trim()
                     .ifEmpty { baseName }
                 val safeId = "local_3ds_${file.name.replace(Regex("[^a-zA-Z0-9_-]"), "_")}"
+                val pokemonMeta = dev.vantafyn.core.jellyfin.PokemonGameDetector.detect(cleanTitle, file.name, "3ds")
                 GameSummary(
                     id = safeId,
                     title = cleanTitle,
@@ -144,6 +145,7 @@ class GameStorageManager(
                     token = file.name,
                     extension = file.extension,
                     boxartUrl = GameBoxartScraper.resolve3dsBoxartUrl(file.name),
+                    pokemon = pokemonMeta,
                 )
             }
     }
@@ -225,16 +227,55 @@ class GameStorageManager(
         if (standard.exists() && standard.length() > 0) return standard
 
         val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-        val altCandidates = listOf(
+        val altId = if (safeId.startsWith("local_3ds_")) safeId.removePrefix("local_3ds_") else safeId
+        val nativeSaveDir = nativeCoreManager.getSaveDirectory()
+
+        val altCandidates = mutableListOf(
             File(savesDir, "$safeId.sav"),
             File(savesDir, "$safeId.srm"),
             File(savesDir, "$safeId.main"),
             File(savesDir, "$safeId.bin"),
+            File(savesDir, "$altId.sav"),
+            File(savesDir, "$altId.srm"),
+            File(savesDir, "$altId.main"),
             File(savesDir, "main"),
+            File(nativeSaveDir, "$safeId.sav"),
+            File(nativeSaveDir, "$safeId.srm"),
+            File(nativeSaveDir, "$safeId.main"),
+            File(nativeSaveDir, "$altId.sav"),
+            File(nativeSaveDir, "$altId.srm"),
+            File(nativeSaveDir, "$altId.main"),
+            File(nativeSaveDir, "main"),
         )
+
+        // Check if save file is stored alongside ROM in local 3DS directory
+        val local3dsDir = getLocal3dsDirectory()
+        if (local3dsDir.exists() && local3dsDir.isDirectory) {
+            altCandidates.add(File(local3dsDir, "$altId.sav"))
+            altCandidates.add(File(local3dsDir, "$altId.srm"))
+            altCandidates.add(File(local3dsDir, "$altId.main"))
+        }
+
         for (alt in altCandidates) {
             if (alt.exists() && alt.length() > 0) return alt
         }
+
+        // Citra sdmc title save search fallback (00000001/main)
+        val citraSearchRoots = listOf(
+            File(nativeSaveDir, "Citra/sdmc/Nintendo 3DS"),
+            File(nativeSaveDir, "citra/sdmc/Nintendo 3DS"),
+            File(savesDir, "Citra/sdmc/Nintendo 3DS"),
+            File(savesDir, "citra/sdmc/Nintendo 3DS"),
+        )
+        for (root in citraSearchRoots) {
+            if (root.exists() && root.isDirectory) {
+                val found = root.walkTopDown()
+                    .filter { it.isFile && (it.name.equals("main", ignoreCase = true) || it.name.endsWith(".sav") || it.name.endsWith(".srm")) }
+                    .maxByOrNull { it.lastModified() }
+                if (found != null && found.length() > 0) return found
+            }
+        }
+
         return standard
     }
 

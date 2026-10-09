@@ -137,7 +137,12 @@ fun PokemonVaultHomeScreen(
             "tcg", "trading card", "puzzle", "channel", "box ruby", "battle revolution", "magikarp jump",
             "detective", "masters", "cafe", "unite", "go", "sleep"
         )
-        availableGames.filter { game ->
+        availableGames.map { game ->
+            if (game.pokemon == null) {
+                val detected = dev.vantafyn.core.jellyfin.PokemonGameDetector.detect(game.cleanTitle, game.filename, game.systemId)
+                if (detected != null) game.copy(pokemon = detected) else game
+            } else game
+        }.filter { game ->
             val meta = game.pokemon
             val isVaultSupported = meta?.vaultSupported == true
             val gen = meta?.generation ?: 0

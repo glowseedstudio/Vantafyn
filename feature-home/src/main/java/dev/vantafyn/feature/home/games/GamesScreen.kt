@@ -142,6 +142,7 @@ fun GamesScreen(
                 GamesTab.Vault -> {
                     PokemonVaultScreen(
                         session = session,
+                        allGames = allGames,
                         pokemonRepository = pokemonRepository ?: remember { DefaultJellyfinPokemonRepository() },
                         onBack = { onSelectTab(GamesTab.Home) },
                         vaultHomeTrigger = vaultHomeTrigger,
