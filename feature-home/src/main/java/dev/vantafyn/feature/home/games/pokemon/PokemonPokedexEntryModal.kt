@@ -1445,6 +1445,16 @@ fun PokemonPokedexEntryModal(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Encyclopedic Lore Description Card
+                val formLore = remember(activeForm, selectedFormKey) {
+                    if (selectedFormKey != null) PokemonFormsCatalog.getFormLore(activeForm) else null
+                }
+                val effectiveLoreTitle = if (formLore != null && activeForm != null) {
+                    "${activeForm.name.uppercase()} LORE ENTRY"
+                } else {
+                    "POKÉDEX LORE ENTRY"
+                }
+                val effectiveLoreText = formLore ?: dexData.flavorText
+
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1466,7 +1476,7 @@ fun PokemonPokedexEntryModal(
                             modifier = Modifier.size(16.dp),
                         )
                         Text(
-                            text = "POKÉDEX LORE ENTRY",
+                            text = effectiveLoreTitle,
                             color = primaryType.accentColor,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
@@ -1475,7 +1485,7 @@ fun PokemonPokedexEntryModal(
                     }
 
                     Text(
-                        text = dexData.flavorText,
+                        text = effectiveLoreText,
                         color = Color.White.copy(alpha = 0.9f),
                         fontSize = 13.5.sp,
                         lineHeight = 20.sp,

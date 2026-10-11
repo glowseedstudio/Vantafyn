@@ -80,6 +80,13 @@ object PokemonFormsCatalog {
     const val SPINDA_LORE: String =
         "4,294,967,296 Spot Patterns: Spinda's facial spots are procedurally placed by a 32-bit personality value, rendering virtually every specimen uniquely distinct."
 
+    fun getFormLore(form: PokemonFormModel?): String? {
+        if (form == null) return null
+        val desc = form.description?.trim() ?: return null
+        if (desc.isEmpty() || desc.equals("Standard Pokédex form", ignoreCase = true)) return null
+        return desc
+    }
+
     private fun base(speciesId: Int) = PokemonFormModel("Base", speciesId.toString(), "Standard Pokédex form")
 
     private fun mega(name: String, spriteKey: String, description: String) =

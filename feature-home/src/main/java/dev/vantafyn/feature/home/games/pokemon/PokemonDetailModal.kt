@@ -2057,8 +2057,8 @@ private fun PokemonLegalityReportDialog(
                     isPass = true,
                 )
                 LegalityCheckRow(
-                    label = "Met Location",
-                    value = pokemon.currentLocation.ifBlank { "Wild Encounter" },
+                    label = "Current Storage",
+                    value = pokemon.currentLocation.ifBlank { "Party (Team)" },
                     isPass = true,
                 )
                 val ivsValid = details?.iv?.let { it.hp in 0..31 && it.attack in 0..31 && it.defense in 0..31 && it.speed in 0..31 && it.specialAttack in 0..31 && it.specialDefense in 0..31 } ?: true
