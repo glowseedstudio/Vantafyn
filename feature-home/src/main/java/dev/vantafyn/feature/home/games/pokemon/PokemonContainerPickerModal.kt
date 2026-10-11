@@ -63,6 +63,32 @@ fun PokemonContainerPickerModal(
     onSelectContainer: (StorageContainerType) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val nonVaultKeywords = remember {
+        setOf(
+            "mystery dungeon", "dungeon", "conquest", "pinball", "stadium", "snap", "colosseum",
+            "xd", "trozei", "link!", "dash", "ranger", "rumble", "pokepark", "duel", "shuffle",
+            "tcg", "trading card", "puzzle", "channel", "box ruby", "battle revolution", "magikarp jump",
+            "detective", "masters", "cafe", "unite", "go", "sleep"
+        )
+    }
+
+    val vaultCompatibleGames = remember(availableGames) {
+        availableGames.map { game ->
+            if (game.pokemon == null) {
+                val detected = dev.vantafyn.core.jellyfin.PokemonGameDetector.detect(game.cleanTitle, game.filename, game.systemId)
+                if (detected != null) game.copy(pokemon = detected) else game
+            } else game
+        }.filter { game ->
+            val meta = game.pokemon
+            val isVaultSupported = meta?.vaultSupported == true
+            val gen = meta?.generation ?: 0
+            val titleLower = (meta?.canonicalTitle ?: game.cleanTitle).lowercase()
+            val isSpinOff = nonVaultKeywords.any { kw -> titleLower.contains(kw) }
+
+            isVaultSupported && gen in 1..7 && !isSpinOff
+        }
+    }
+
     val isVaultSelected = currentContainer is StorageContainerType.PersonalVault
     val selectedGameId = (currentContainer as? StorageContainerType.GameCartridge)?.game?.id
 
@@ -212,7 +238,7 @@ fun PokemonContainerPickerModal(
                                         fontWeight = FontWeight.Bold,
                                     )
                                     Text(
-                                        text = "32 Storage Boxes • 960 Slots • Cross-Game Compatible",
+                                        text = "100 Storage Boxes • 3,000 Slots • Cross-Game Compatible",
                                         color = VantafynColors.Muted,
                                         fontSize = 11.sp,
                                     )
@@ -240,10 +266,10 @@ fun PokemonContainerPickerModal(
                 }
 
                 // 2. Section Header: Game Cartridges
-                if (availableGames.isNotEmpty()) {
+                if (vaultCompatibleGames.isNotEmpty()) {
                     item(span = { GridItemSpan(2) }) {
                         Text(
-                            text = "Detected Pokémon Games (${availableGames.size})",
+                            text = "Compatible Pokémon Games (${vaultCompatibleGames.size})",
                             color = VantafynColors.Muted,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -252,7 +278,7 @@ fun PokemonContainerPickerModal(
                     }
 
                     // 3. Grid of Game Cards with Box Art
-                    items(availableGames, key = { it.id }) { game ->
+                    items(vaultCompatibleGames, key = { it.id }) { game ->
                         GameBoxArtPickerCard(
                             game = game,
                             isSelected = selectedGameId == game.id,

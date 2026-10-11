@@ -34,13 +34,13 @@ class JellyfinPokemonRepositoryTest {
         assertEquals(5, status.supportedGenerations.size)
 
         val summary = PokemonVaultSummary(
-            totalCapacity = 900,
+            totalCapacity = 3000,
             totalOccupied = 42,
-            boxCount = 30,
+            boxCount = 100,
             shinyCount = 3,
             speciesCount = 35,
         )
-        assertEquals(900, summary.totalCapacity)
+        assertEquals(3000, summary.totalCapacity)
         assertEquals(42, summary.totalOccupied)
         assertEquals(3, summary.shinyCount)
 

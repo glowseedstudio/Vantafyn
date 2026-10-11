@@ -16,9 +16,9 @@ data class PokemonIntegrationStatus(
 ) : Serializable
 
 data class PokemonVaultSummary(
-    val totalCapacity: Int = 900,
+    val totalCapacity: Int = 3000,
     val totalOccupied: Int = 0,
-    val boxCount: Int = 30,
+    val boxCount: Int = 100,
     val shinyCount: Int = 0,
     val speciesCount: Int = 0,
 ) : Serializable

@@ -299,7 +299,7 @@ fun PokemonVaultHomeScreen(
             // Collection Summary
             VaultCollectionSummaryRow(
                 totalOccupied = totalOccupied,
-                totalCapacity = vaultSummary?.totalCapacity ?: 900,
+                totalCapacity = vaultSummary?.totalCapacity ?: 3000,
                 discoveredSpecies = distinctSpeciesCount,
                 connectedGamesCount = vaultCapableGames.size,
                 activeSavesCount = activeSavesCount,
@@ -1705,7 +1705,7 @@ private fun VaultEmptyGuideBanner(
                     fontWeight = FontWeight.Bold,
                 )
                 Text(
-                    text = "Transfer Pokémon from your emulator saves into the 30 cloud boxes for safe-keeping and cross-generational trading.",
+                    text = "Transfer Pokémon from your emulator saves into the 100 cloud boxes for safe-keeping and cross-generational trading.",
                     color = VantafynColors.Muted,
                     fontSize = 11.sp,
                     lineHeight = 15.sp,

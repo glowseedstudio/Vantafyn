@@ -189,9 +189,9 @@ class DefaultJellyfinPokemonRepository(
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 val json = JSONObject(body)
                 PokemonVaultSummary(
-                    totalCapacity = json.optInt("totalCapacity", 900),
+                    totalCapacity = json.optInt("totalCapacity", 3000),
                     totalOccupied = json.optInt("totalOccupied", 0),
-                    boxCount = json.optInt("boxCount", 30),
+                    boxCount = json.optInt("boxCount", 100),
                     shinyCount = json.optInt("shinyCount", 0),
                     speciesCount = json.optInt("speciesCount", 0),
                 )
