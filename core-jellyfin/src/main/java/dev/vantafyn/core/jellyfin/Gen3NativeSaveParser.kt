@@ -651,6 +651,25 @@ object Gen3NativeSaveParser {
         val abilityBit = ((ivData ushr 31) and 1L).toInt()
         val abilityName = resolveGen3Ability(speciesId, abilityBit)
 
+        val ribbonData = ByteBuffer.wrap(decrypted, mOffset + 8, 4).order(ByteOrder.LITTLE_ENDIAN).int.toLong() and 0xFFFFFFFFL
+        val explicitRibbons = mutableMapOf<String, Byte>()
+        if ((ribbonData and (1L shl 15)) != 0L) explicitRibbons["champion"] = 1
+        if ((ribbonData and (1L shl 16)) != 0L) explicitRibbons["winning"] = 1
+        if ((ribbonData and (1L shl 17)) != 0L) explicitRibbons["victory"] = 1
+        if ((ribbonData and (1L shl 18)) != 0L) explicitRibbons["artist"] = 1
+        if ((ribbonData and (1L shl 19)) != 0L) explicitRibbons["effort"] = 1
+        if ((ribbonData and (1L shl 23)) != 0L) explicitRibbons["country"] = 1
+        if ((ribbonData and (1L shl 24)) != 0L) explicitRibbons["national"] = 1
+        if ((ribbonData and (1L shl 25)) != 0L) explicitRibbons["earth"] = 1
+        if ((ribbonData and (1L shl 26)) != 0L) explicitRibbons["world"] = 1
+        if ((ribbonData and 7L) > 0L) explicitRibbons["cool"] = 1
+        if (((ribbonData ushr 3) and 7L) > 0L) explicitRibbons["beauty"] = 1
+        if (((ribbonData ushr 6) and 7L) > 0L) explicitRibbons["cute"] = 1
+        if (((ribbonData ushr 9) and 7L) > 0L) explicitRibbons["smart"] = 1
+        if (((ribbonData ushr 12) and 7L) > 0L) explicitRibbons["tough"] = 1
+
+        val hasChampionRibbon = (ribbonData and (1L shl 15)) != 0L
+
         val origins = (decrypted[mOffset + 2].toInt() and 0xFF) or ((decrypted[mOffset + 3].toInt() and 0xFF) shl 8)
         val ballId = (origins ushr 11) and 0x0F
         val pokeballName = resolveBallName(ballId)
@@ -708,7 +727,19 @@ object Gen3NativeSaveParser {
             boxIndex = boxIndex,
             slotIndex = partySlot,
             isInParty = isParty,
+            isHallOfFameMember = hasChampionRibbon,
             legalityStatus = "valid",
+        )
+
+        val ribbons = PokemonRibbonCatalog.evaluateRibbons(
+            explicitRibbons = explicitRibbons,
+            evs = evStats,
+            level = level,
+            friendship = friendship,
+            originGame = gameTitle,
+            generation = 3,
+            isParty = isParty,
+            isChampionRibbonSet = hasChampionRibbon,
         )
 
         val details = PokemonDetailsDto(
@@ -724,6 +755,8 @@ object Gen3NativeSaveParser {
             friendship = friendship,
             pokeball = pokeballName,
             legalityStatus = "valid",
+            ribbons = ribbons,
+            isHallOfFameMember = hasChampionRibbon,
         )
 
         return ParsedGen3Pokemon(summary = summary, details = details)

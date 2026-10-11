@@ -299,7 +299,7 @@ fun PokemonVaultHomeScreen(
             // Collection Summary
             VaultCollectionSummaryRow(
                 totalOccupied = totalOccupied,
-                totalCapacity = vaultSummary?.totalCapacity ?: 3000,
+                totalCapacity = maxOf(vaultSummary?.totalCapacity ?: 3000, 3000),
                 discoveredSpecies = distinctSpeciesCount,
                 connectedGamesCount = vaultCapableGames.size,
                 activeSavesCount = activeSavesCount,
@@ -313,9 +313,15 @@ fun PokemonVaultHomeScreen(
                 onOpenBackups = onOpenBackups,
             )
 
-            // Recent Pokémon / Activity Section
+            // Recent Pokémon / Activity Section: Prioritize newly deposited/caught Pokémon (PC boxes & vault) over static initial party
             if (allCandidatePokemon.isNotEmpty()) {
-                val recentCandidates = remember(allCandidatePokemon) { allCandidatePokemon.take(16) }
+                val recentCandidates = remember(allCandidatePokemon) {
+                    val boxOrVaultMons = allCandidatePokemon.filter { it.isVault || (it.summary.boxIndex ?: 0) > 0 || !it.summary.isInParty }
+                    val partyMons = allCandidatePokemon.filter { !it.isVault && it.summary.isInParty }
+                    (boxOrVaultMons.reversed() + partyMons)
+                        .distinctBy { it.summary.id }
+                        .take(16)
+                }
                 VaultRecentPokemonRail(
                     candidates = recentCandidates,
                     availableGames = vaultCapableGames,
@@ -1046,7 +1052,7 @@ private fun VaultPrimaryFeatures(
             VaultFeatureCardData(
                 title = "Move Pokémon",
                 subtitle = "Storage Manager",
-                badge = "30 Boxes",
+                badge = "100 Boxes",
                 icon = Icons.Rounded.SwapHoriz,
                 iconGradient = listOf(Color(0xFF00E5FF), Color(0xFF3B82F6)),
                 cardGradient = listOf(Color(0xFF0F1E33), Color(0xFF0A0F1D)),

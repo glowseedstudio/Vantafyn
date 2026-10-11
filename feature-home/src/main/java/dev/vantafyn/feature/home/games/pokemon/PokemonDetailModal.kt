@@ -157,6 +157,22 @@ fun PokemonDetailModal(
                     isVault = isVault,
                 ).onSuccess { netDetails ->
                     val existing = details ?: initialDetails ?: canonicalFallback
+                    val mergedRibbons = if (netDetails.ribbons.isNotEmpty()) {
+                        netDetails.ribbons
+                    } else if (existing?.ribbons?.isNotEmpty() == true) {
+                        existing.ribbons
+                    } else {
+                        dev.vantafyn.core.jellyfin.PokemonRibbonCatalog.evaluateRibbons(
+                            evs = netDetails.ev ?: existing?.ev,
+                            level = pokemon.level,
+                            friendship = netDetails.friendship ?: existing?.friendship ?: 0,
+                            originGame = pokemon.originGame,
+                            generation = 3,
+                            isParty = pokemon.isInParty,
+                            isChampionRibbonSet = netDetails.isHallOfFameMember || (existing?.isHallOfFameMember == true) || pokemon.isHallOfFameMember,
+                        )
+                    }
+
                     details = netDetails.copy(
                         iv = netDetails.iv ?: existing?.iv ?: canonicalFallback.iv,
                         ev = netDetails.ev ?: existing?.ev ?: canonicalFallback.ev,
@@ -167,8 +183,8 @@ fun PokemonDetailModal(
                         currentHp = netDetails.currentHp ?: existing?.currentHp,
                         maxHp = netDetails.maxHp ?: existing?.maxHp,
                         friendship = if ((netDetails.friendship ?: 0) > 0) netDetails.friendship else existing?.friendship,
-                        ribbons = if (netDetails.ribbons.isNotEmpty()) netDetails.ribbons else existing?.ribbons ?: emptyList(),
-                        isHallOfFameMember = netDetails.isHallOfFameMember || (existing?.isHallOfFameMember == true),
+                        ribbons = mergedRibbons,
+                        isHallOfFameMember = netDetails.isHallOfFameMember || (existing?.isHallOfFameMember == true) || pokemon.isHallOfFameMember || mergedRibbons.any { it.category.equals("Champion", ignoreCase = true) },
                     )
                 }
             }
@@ -524,8 +540,21 @@ fun PokemonDetailModal(
                     }
 
                     // Hall of Fame Champion, Ribbons, and Evolve Action
-                    val isHallOfFame = details?.isHallOfFameMember == true || pokemon.isHallOfFameMember
-                    val ribbonCount = details?.ribbons?.size ?: 0
+                    val effectiveRibbons = if (!details?.ribbons.isNullOrEmpty()) {
+                        details!!.ribbons
+                    } else {
+                        dev.vantafyn.core.jellyfin.PokemonRibbonCatalog.evaluateRibbons(
+                            evs = details?.ev,
+                            level = pokemon.level,
+                            friendship = details?.friendship ?: 0,
+                            originGame = pokemon.originGame,
+                            generation = 3,
+                            isParty = pokemon.isInParty,
+                            isChampionRibbonSet = details?.isHallOfFameMember == true || pokemon.isHallOfFameMember,
+                        )
+                    }
+                    val isHallOfFame = details?.isHallOfFameMember == true || pokemon.isHallOfFameMember || effectiveRibbons.any { it.category.equals("Champion", ignoreCase = true) }
+                    val ribbonCount = effectiveRibbons.size
                     val evos = details?.availableEvolutions?.ifEmpty { null }
                         ?: dev.vantafyn.core.jellyfin.PokemonSpeciesCatalog.getAvailableEvolutions(pokemon.speciesId, pokemon.level)
                     if (isHallOfFame || ribbonCount > 0 || evos.isNotEmpty()) {
@@ -1103,7 +1132,21 @@ fun PokemonDetailModal(
             }
 
             // Ribbons & Hall of Fame Trophy Cabinet Section
-            val ribbons = details?.ribbons ?: emptyList()
+            val ribbons = remember(details?.ribbons, details?.isHallOfFameMember, pokemon.isHallOfFameMember, pokemon.level) {
+                if (!details?.ribbons.isNullOrEmpty()) {
+                    details!!.ribbons
+                } else {
+                    dev.vantafyn.core.jellyfin.PokemonRibbonCatalog.evaluateRibbons(
+                        evs = details?.ev,
+                        level = pokemon.level,
+                        friendship = details?.friendship ?: 0,
+                        originGame = pokemon.originGame,
+                        generation = 3,
+                        isParty = pokemon.isInParty,
+                        isChampionRibbonSet = details?.isHallOfFameMember == true || pokemon.isHallOfFameMember,
+                    )
+                }
+            }
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

@@ -410,6 +410,16 @@ object PokemonSpeciesCatalog {
         val moves = getCanonicalMoves(speciesId, level)
         val ball = if (isLegendary) "Master Ball" else if (summary.isShiny) "Luxury Ball" else "Poké Ball"
 
+        val evaluatedRibbons = PokemonRibbonCatalog.evaluateRibbons(
+            evs = evStats,
+            level = level,
+            friendship = if (summary.isShiny) 200 else 120,
+            originGame = summary.originGame,
+            generation = 3,
+            isParty = summary.isInParty,
+            isChampionRibbonSet = summary.isHallOfFameMember,
+        )
+
         return PokemonDetailsDto(
             summary = summary,
             nature = nature,
@@ -423,6 +433,8 @@ object PokemonSpeciesCatalog {
             friendship = if (summary.isShiny) 200 else 120,
             pokeball = ball,
             legalityStatus = "valid",
+            ribbons = evaluatedRibbons,
+            isHallOfFameMember = summary.isHallOfFameMember || evaluatedRibbons.any { it.category.equals("Champion", ignoreCase = true) },
             availableEvolutions = getAvailableEvolutions(speciesId, level),
         )
     }

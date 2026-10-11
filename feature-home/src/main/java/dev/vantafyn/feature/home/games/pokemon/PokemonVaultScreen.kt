@@ -195,11 +195,13 @@ fun PokemonVaultScreen(
         if (session == null) return
         coroutineScope.launch(Dispatchers.IO) {
             pokemonRepository.getVaultSummary(session).onSuccess { summary ->
-                vaultSummary = summary
-                if (summary.boxCount > 0) {
-                    upperState = upperState.copy(vaultBoxCount = summary.boxCount)
-                    lowerState = lowerState.copy(vaultBoxCount = summary.boxCount)
-                }
+                val effectiveCount = maxOf(summary.boxCount, 100)
+                vaultSummary = summary.copy(
+                    totalCapacity = maxOf(summary.totalCapacity, 3000),
+                    boxCount = effectiveCount,
+                )
+                upperState = upperState.copy(vaultBoxCount = effectiveCount)
+                lowerState = lowerState.copy(vaultBoxCount = effectiveCount)
             }
         }
     }
@@ -841,8 +843,9 @@ fun PokemonVaultScreen(
                             tint = Color(0xFF00E5FF),
                             modifier = Modifier.size(13.dp),
                         )
+                        val cap = maxOf(vaultSummary!!.totalCapacity, 3000)
                         Text(
-                            text = "${vaultSummary!!.totalOccupied}/${vaultSummary!!.totalCapacity}",
+                            text = "${vaultSummary!!.totalOccupied}/$cap",
                             color = VantafynColors.Ink,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
