@@ -255,7 +255,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         VantafynHomeUiState(
             experienceMode = ExperiencePreferences.getExperienceMode(application),
             musicBackendType = ExperiencePreferences.getMusicBackendType(application),
-            mobileDestination = if (ExperiencePreferences.getExperienceMode(application) == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+            mobileDestination = ExperiencePreferences.getExperienceMode(application).defaultDestination(),
             autoplayCountdownSeconds = appPreferences.getInt(KEY_AUTOPLAY_COUNTDOWN_SECONDS, 10)
                 .takeIf { value -> value in AUTOPLAY_COUNTDOWN_OPTIONS }
                 ?: 10,
@@ -311,8 +311,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         loadDownloads()
         startObservingDownloads()
         refreshDownloadedGameKeys()
-        if (gameStorageManager.listDownloadedGameKeys().isNotEmpty()) {
+        val currentExperience = ExperiencePreferences.getExperienceMode(application)
+        if (gameStorageManager.listDownloadedGameKeys().isNotEmpty() || currentExperience == ExperienceMode.GamesOnly) {
             loadCachedOfflineGames()
+            if (currentExperience == ExperienceMode.GamesOnly) {
+                refreshGameTrackerData()
+            }
         }
         // Watch guide unlocked codes are managed by watchGuideRepository (SQLite database)
         val appLifecycleObserver = LifecycleEventObserver { _, event ->
@@ -410,11 +414,11 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         _state.update {
             it.copy(
                 experienceMode = mode,
-                mobileDestination = if (mode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
-                step = if (mode == ExperienceMode.FullMedia) {
-                    VantafynSetupStep.ConnectServer
-                } else {
+                mobileDestination = mode.defaultDestination(),
+                step = if (mode == ExperienceMode.MusicOnly) {
                     VantafynSetupStep.SelectMusicBackend
+                } else {
+                    VantafynSetupStep.ConnectServer
                 },
                 errorMessage = null,
             )
@@ -487,11 +491,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun switchExperienceModeFromSettings(mode: ExperienceMode) {
         ExperiencePreferences.setExperienceMode(getApplication(), mode)
+        val dest = mode.defaultDestination()
         _state.update {
             it.copy(
                 experienceMode = mode,
-                mobileDestination = if (mode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                mobileDestination = dest,
             )
+        }
+        if (dest == MobileDestination.Games) {
+            refreshGameTrackerData()
+            refreshDownloadedGameKeys()
+            loadGames()
         }
     }
 
@@ -763,7 +773,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             remoteServerUrl = result.value.server.remoteUrl.orEmpty(),
                             step = VantafynSetupStep.Home,
                             experienceMode = currentMode,
-                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                            mobileDestination = currentMode.defaultDestination(),
                             libraries = emptyList(),
                             home = null,
                             homeErrorMessage = null,
@@ -977,7 +987,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 isStartupResolved = true,
                 experienceMode = currentMode,
                 musicBackendType = currentBackend,
-                mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                mobileDestination = currentMode.defaultDestination(),
             )
         }
     }
@@ -1017,7 +1027,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 savedProfiles = profiles,
                 experienceMode = currentMode,
                 musicBackendType = currentBackend,
-                mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                mobileDestination = currentMode.defaultDestination(),
             )
         }
     }
@@ -1051,7 +1061,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             password = "",
                             homeLayout = readHomeLayout(result.value.profileId),
                             experienceMode = currentMode,
-                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                            mobileDestination = currentMode.defaultDestination(),
                             libraries = emptyList(),
                             home = null,
                             homeErrorMessage = null,
@@ -1142,7 +1152,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             password = "",
                             homeLayout = readHomeLayout(session.profileId),
                             experienceMode = currentMode,
-                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                            mobileDestination = currentMode.defaultDestination(),
                             libraries = emptyList(),
                             home = null,
                             homeErrorMessage = null,
@@ -1212,7 +1222,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             restoreFailureMessage = null,
                             failedProfileIds = it.failedProfileIds - profile.id,
                             experienceMode = currentMode,
-                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                            mobileDestination = currentMode.defaultDestination(),
                             isHomeLoading = true,
                             homeLayout = readHomeLayout(result.value.profileId),
                             themeMusicEnabled = readThemeMusicEnabled(result.value.profileId),
@@ -6600,19 +6610,19 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             MobileDestination.Search,
             MobileDestination.Music,
             MobileDestination.Favorites,
-            MobileDestination.Requests -> navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
+            MobileDestination.Requests -> navigateMobile(snapshot.experienceMode.defaultDestination())
             MobileDestination.Games -> {
                 if (snapshot.selectedGameSystem != null) {
                     selectGameSystem(null)
                 } else if (snapshot.activeGamesTab != GamesTab.Home) {
                     setActiveGamesTab(GamesTab.Home)
-                } else {
-                    navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
+                } else if (snapshot.experienceMode != ExperienceMode.GamesOnly) {
+                    navigateMobile(snapshot.experienceMode.defaultDestination())
                 }
             }
             MobileDestination.Admin,
             MobileDestination.Achievements,
-            MobileDestination.Profile -> navigateMobile(if (snapshot.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home)
+            MobileDestination.Profile -> navigateMobile(snapshot.experienceMode.defaultDestination())
             else -> Unit
         }
     }
@@ -10033,7 +10043,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                             autoLoginLastProfile = true,
                             experienceMode = currentMode,
                             musicBackendType = currentBackend,
-                            mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                            mobileDestination = currentMode.defaultDestination(),
                             selectedBackground = readSelectedBackground(null),
                             videoPlayerPreference = readVideoPlayerPreference(null),
                             mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
@@ -10053,7 +10063,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     autoLoginLastProfile = autoLogin,
                     experienceMode = currentMode,
                     musicBackendType = currentBackend,
-                    mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                    mobileDestination = currentMode.defaultDestination(),
                     selectedBackground = readSelectedBackground(null),
                     videoPlayerPreference = readVideoPlayerPreference(null),
                     mediaSegmentBehaviors = readMediaSegmentBehaviors(null),
@@ -10234,7 +10244,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                                     password = "",
                                     step = VantafynSetupStep.Home,
                                     experienceMode = currentMode,
-                                    mobileDestination = if (currentMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home,
+                                    mobileDestination = currentMode.defaultDestination(),
                                     libraries = emptyList(),
                                     home = null,
                                     homeErrorMessage = null,
@@ -11009,8 +11019,14 @@ private fun MobileDestination.isRootDestination(experienceMode: ExperienceMode =
         MobileDestination.TvInput -> false
     }
 
+private fun ExperienceMode.defaultDestination(): MobileDestination = when (this) {
+    ExperienceMode.MusicOnly -> MobileDestination.Music
+    ExperienceMode.GamesOnly -> MobileDestination.Games
+    ExperienceMode.FullMedia -> MobileDestination.Home
+}
+
 private fun MobileDestination.rootDestination(experienceMode: ExperienceMode = ExperienceMode.FullMedia): MobileDestination =
-    if (isRootDestination(experienceMode)) this else if (experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Home
+    if (isRootDestination(experienceMode)) this else experienceMode.defaultDestination()
 
 private data class DownloadScope(
     val serverId: String,

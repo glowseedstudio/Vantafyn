@@ -198,6 +198,7 @@ import androidx.compose.material.icons.rounded.SwitchAccount
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Subtitles
 import androidx.compose.material.icons.rounded.Translate
@@ -3977,6 +3978,8 @@ private fun MobileShellScreen(
                         pokemonRepository = viewModel.pokemonRepository,
                         isPokemonVaultAvailable = state.isPokemonVaultAvailable,
                         vaultHomeTrigger = state.pokemonVaultHomeTrigger,
+                        currentExperienceMode = state.experienceMode,
+                        onSelectExperienceMode = viewModel::switchExperienceModeFromSettings,
                         onRefresh = viewModel::refreshGames,
                         onSelectTab = viewModel::setActiveGamesTab,
                         onSelectSystem = viewModel::selectGameSystem,
@@ -12721,6 +12724,7 @@ private fun ExperienceModeSettingsCard(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             val fullMediaSelected = state.experienceMode == ExperienceMode.FullMedia
+            val gamesOnlySelected = state.experienceMode == ExperienceMode.GamesOnly
             val musicOnlySelected = state.experienceMode == ExperienceMode.MusicOnly
 
             Box(
@@ -12738,7 +12742,26 @@ private fun ExperienceModeSettingsCard(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Rounded.Movie, contentDescription = null, tint = if (fullMediaSelected) Color.White else VantafynColors.Muted)
-                    Text("Full Media", color = if (fullMediaSelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text("Full Media", color = if (fullMediaSelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                }
+            }
+
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (gamesOnlySelected) VantafynColors.Primary.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f))
+                    .border(
+                        BorderStroke(1.dp, if (gamesOnlySelected) VantafynColors.Primary else Color.White.copy(alpha = 0.12f)),
+                        RoundedCornerShape(14.dp),
+                    )
+                    .clickable { onSelectMode(ExperienceMode.GamesOnly) }
+                    .padding(vertical = 12.dp, horizontal = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Rounded.SportsEsports, contentDescription = null, tint = if (gamesOnlySelected) Color.White else VantafynColors.Muted)
+                    Text("Games", color = if (gamesOnlySelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 }
             }
 
@@ -12757,7 +12780,7 @@ private fun ExperienceModeSettingsCard(
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Icon(Icons.Rounded.GraphicEq, contentDescription = null, tint = if (musicOnlySelected) Color.White else VantafynColors.Muted)
-                    Text("Music Only", color = if (musicOnlySelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Text("Music Only", color = if (musicOnlySelected) VantafynColors.Ink else VantafynColors.Muted, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
                 }
             }
         }
@@ -13025,7 +13048,11 @@ private fun SettingsQuickActionsSection(
     val context = androidx.compose.ui.platform.LocalContext.current
     var usageVersion by remember { mutableStateOf(0) }
 
-    val isMusicOnly = state.experienceMode == ExperienceMode.MusicOnly
+    val (modeSubtitle, modeIcon, modeBadge) = when (state.experienceMode) {
+        ExperienceMode.FullMedia -> Triple("Full Media", Icons.Rounded.Movie, "FULL")
+        ExperienceMode.GamesOnly -> Triple("Gaming Mode", Icons.Rounded.SportsEsports, "GAMES")
+        ExperienceMode.MusicOnly -> Triple("Music Only", Icons.Rounded.MusicNote, "MUSIC")
+    }
     val currentThemeLabel = state.selectedTheme.label
 
     val actions = remember(state.experienceMode, currentThemeLabel, state.session?.user?.name, state.hasUnseenWhatsNew, usageVersion) {
@@ -13033,16 +13060,16 @@ private fun SettingsQuickActionsSection(
             SettingsQuickActionItem(
                 id = "experience_mode",
                 title = "Experience",
-                subtitle = if (isMusicOnly) "Music Only" else "Full Media",
-                icon = if (isMusicOnly) Icons.Rounded.MusicNote else Icons.Rounded.Movie,
+                subtitle = modeSubtitle,
+                icon = modeIcon,
                 accentColor = Color(0xFF58D7FF),
                 defaultOrder = 0,
-                activeBadge = if (isMusicOnly) "MUSIC" else "FULL",
+                activeBadge = modeBadge,
                 onClick = {
-                    val next = if (state.experienceMode == ExperienceMode.FullMedia) {
-                        ExperienceMode.MusicOnly
-                    } else {
-                        ExperienceMode.FullMedia
+                    val next = when (state.experienceMode) {
+                        ExperienceMode.FullMedia -> ExperienceMode.GamesOnly
+                        ExperienceMode.GamesOnly -> ExperienceMode.MusicOnly
+                        ExperienceMode.MusicOnly -> ExperienceMode.FullMedia
                     }
                     onSelectExperienceMode(next)
                 },
@@ -22537,7 +22564,12 @@ private fun MobileBottomNav(
 ) {
     var tapTrigger by remember { mutableIntStateOf(0) }
     val mainTabs = remember(isAdmin, experienceMode, isGamesAvailable) {
-        if (experienceMode == ExperienceMode.MusicOnly) {
+        if (experienceMode == ExperienceMode.GamesOnly) {
+            buildList {
+                add(MobileDestination.Games)
+                add(MobileDestination.Profile)
+            }
+        } else if (experienceMode == ExperienceMode.MusicOnly) {
             buildList {
                 add(MobileDestination.Music)
                 add(MobileDestination.Favorites)
@@ -22637,7 +22669,8 @@ private fun MobileBottomNav(
                             mainTabs.indexOfFirst { destination ->
                                 selected == destination ||
                                     (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music) ||
+                                    (experienceMode == ExperienceMode.GamesOnly && selected == MobileDestination.Home && destination == MobileDestination.Games)
                             }.coerceAtLeast(0)
                         }
                         BottomNavKind.Social -> {
@@ -22673,7 +22706,8 @@ private fun MobileBottomNav(
                                     mainTabs.forEach { destination ->
                                         val tabSelected = selected == destination ||
                                             (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                                            (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                                            (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music) ||
+                                            (experienceMode == ExperienceMode.GamesOnly && selected == MobileDestination.Home && destination == MobileDestination.Games)
                                         val interactionSource = remember { MutableInteractionSource() }
                                         Box(
                                             modifier = Modifier
@@ -22811,7 +22845,8 @@ private fun MobileLandscapeSideNavRail(
             mainTabs.indexOfFirst { destination ->
                 selected == destination ||
                     (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                    (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music) ||
+                    (experienceMode == ExperienceMode.GamesOnly && selected == MobileDestination.Home && destination == MobileDestination.Games)
             }.coerceAtLeast(0)
         }
         BottomNavKind.Social -> {
@@ -22872,7 +22907,8 @@ private fun MobileLandscapeSideNavRail(
                                 mainTabs.forEach { destination ->
                                     val tabSelected = selected == destination ||
                                         (selected == MobileDestination.HomeLayout && destination == MobileDestination.Profile) ||
-                                        (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music)
+                                        (experienceMode == ExperienceMode.MusicOnly && selected == MobileDestination.Home && destination == MobileDestination.Music) ||
+                                        (experienceMode == ExperienceMode.GamesOnly && selected == MobileDestination.Home && destination == MobileDestination.Games)
                                     val interactionSource = remember { MutableInteractionSource() }
                                     Box(
                                         modifier = Modifier

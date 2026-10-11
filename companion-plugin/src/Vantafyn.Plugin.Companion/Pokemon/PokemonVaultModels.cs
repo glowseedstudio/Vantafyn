@@ -129,11 +129,11 @@ public sealed class PokemonVaultBox
 
 /// <summary>
 /// Top-level personal Pokémon Vault container for a single Jellyfin user.
-/// Default capacity: 30 boxes x 30 slots = 900 Pokémon.
+/// Default capacity: 100 boxes x 30 slots = 3,000 Pokémon.
 /// </summary>
 public sealed class PokemonVault
 {
-    public const int DefaultBoxCount = 30;
+    public const int DefaultBoxCount = 100;
 
     [JsonPropertyName("userId")]
     public Guid UserId { get; set; }

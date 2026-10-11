@@ -54,8 +54,9 @@ public sealed class FileSaveOperationCoordinator : ISaveOperationCoordinator
     {
         var normalizedId = NormalizeGameId(gameId);
 
-        // 1. Verify save exists on server
-        var saveBytes = await _savesService.GetAsync(userId, normalizedId, "sram", cancellationToken).ConfigureAwait(false);
+        // 1. Verify save exists on server (check both exact gameId and normalizedId)
+        var saveBytes = await _savesService.GetAsync(userId, gameId, "sram", cancellationToken).ConfigureAwait(false)
+            ?? await _savesService.GetAsync(userId, normalizedId, "sram", cancellationToken).ConfigureAwait(false);
         if (saveBytes == null || saveBytes.Length == 0)
         {
             return new SaveOperationStateInfo

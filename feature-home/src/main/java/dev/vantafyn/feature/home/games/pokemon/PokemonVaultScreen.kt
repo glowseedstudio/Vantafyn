@@ -194,8 +194,12 @@ fun PokemonVaultScreen(
     fun loadVaultSummary() {
         if (session == null) return
         coroutineScope.launch(Dispatchers.IO) {
-            pokemonRepository.getVaultSummary(session).onSuccess {
-                vaultSummary = it
+            pokemonRepository.getVaultSummary(session).onSuccess { summary ->
+                vaultSummary = summary
+                if (summary.boxCount > 0) {
+                    upperState = upperState.copy(vaultBoxCount = summary.boxCount)
+                    lowerState = lowerState.copy(vaultBoxCount = summary.boxCount)
+                }
             }
         }
     }
@@ -787,6 +791,7 @@ fun PokemonVaultScreen(
                             detectedSaves = allDetectedSaves,
                             onBack = { subScreen = VaultSubScreen.Home },
                             onRefresh = { loadAll() },
+                            storageManager = storageManager,
                         )
                     }
                     VaultSubScreen.BoxTransfer -> {
@@ -837,7 +842,7 @@ fun PokemonVaultScreen(
                             modifier = Modifier.size(13.dp),
                         )
                         Text(
-                            text = "${vaultSummary!!.totalOccupied}/900",
+                            text = "${vaultSummary!!.totalOccupied}/${vaultSummary!!.totalCapacity}",
                             color = VantafynColors.Ink,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,

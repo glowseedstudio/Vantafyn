@@ -223,7 +223,13 @@ class DefaultJellyfinGamesRepository(
     ): Result<CloudSaveEntry?> =
         withContext(ioDispatcher) {
             runCatching {
-                val conn = session.openAuthenticatedConnection("Vantafyn/Games/Saves/$gameId?kind=${kind.value}")
+                var conn = session.openAuthenticatedConnection("Vantafyn/Games/Saves/$gameId?kind=${kind.value}")
+                if (conn.responseCode == 404 && gameId.lowercase() != gameId) {
+                    val fallbackConn = session.openAuthenticatedConnection("Vantafyn/Games/Saves/${gameId.lowercase()}?kind=${kind.value}")
+                    if (fallbackConn.responseCode in 200..299) {
+                        conn = fallbackConn
+                    }
+                }
                 if (conn.responseCode == 404) {
                     return@runCatching null
                 }
@@ -254,6 +260,19 @@ class DefaultJellyfinGamesRepository(
                 conn.setRequestProperty("Content-Type", "application/octet-stream")
                 conn.outputStream.use { it.write(data) }
                 checkResponseCode(conn)
+
+                if (gameId.lowercase() != gameId) {
+                    runCatching {
+                        val fallbackConn = session.openAuthenticatedConnection(
+                            pathAndQuery = "Vantafyn/Games/Saves/${gameId.lowercase()}?kind=${kind.value}",
+                            method = "PUT",
+                        )
+                        fallbackConn.doOutput = true
+                        fallbackConn.setRequestProperty("Content-Type", "application/octet-stream")
+                        fallbackConn.outputStream.use { it.write(data) }
+                        checkResponseCode(fallbackConn)
+                    }
+                }
             }
         }
 

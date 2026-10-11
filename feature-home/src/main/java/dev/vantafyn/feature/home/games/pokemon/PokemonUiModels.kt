@@ -40,13 +40,14 @@ data class ContainerUiState(
     val lockState: SaveLockStateDto? = null,
     val isLoading: Boolean = false,
     val errorMessage: String? = null,
+    val vaultBoxCount: Int = 100,
 ) {
     val isLocked: Boolean
         get() = lockState?.isLocked == true
 
     val totalBoxes: Int
         get() = when (containerType) {
-            is StorageContainerType.PersonalVault -> 30
+            is StorageContainerType.PersonalVault -> vaultBoxCount
             is StorageContainerType.GameCartridge -> gameSave?.boxes?.size ?: 1
         }
 

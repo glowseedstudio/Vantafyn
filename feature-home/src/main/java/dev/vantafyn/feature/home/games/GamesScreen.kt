@@ -48,6 +48,8 @@ fun GamesScreen(
     pokemonRepository: JellyfinPokemonRepository? = null,
     isPokemonVaultAvailable: Boolean = false,
     vaultHomeTrigger: Long = 0L,
+    currentExperienceMode: dev.vantafyn.core.experience.ExperienceMode = dev.vantafyn.core.experience.ExperienceMode.FullMedia,
+    onSelectExperienceMode: ((dev.vantafyn.core.experience.ExperienceMode) -> Unit)? = null,
     onRefresh: () -> Unit = {},
     onSelectTab: (GamesTab) -> Unit,
     onSelectSystem: (GameSystem?) -> Unit,
@@ -163,6 +165,8 @@ fun GamesScreen(
                         games = games,
                         allGames = allGames,
                         systems = systems,
+                        currentExperienceMode = currentExperienceMode,
+                        onSelectExperienceMode = onSelectExperienceMode,
                         onBack = {
                             onRefresh()
                             onSelectTab(GamesTab.Home)

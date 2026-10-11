@@ -110,6 +110,8 @@ fun GamesSettingsScreen(
     games: List<GameSummary> = emptyList(),
     allGames: List<GameSummary> = games,
     systems: List<GameSystem> = emptyList(),
+    currentExperienceMode: dev.vantafyn.core.experience.ExperienceMode = dev.vantafyn.core.experience.ExperienceMode.FullMedia,
+    onSelectExperienceMode: ((dev.vantafyn.core.experience.ExperienceMode) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -305,6 +307,123 @@ fun GamesSettingsScreen(
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
+            }
+        }
+
+        if (onSelectExperienceMode != null) {
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Text(
+                        text = "EXPERIENCE MODE",
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                            .padding(14.dp),
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(
+                                text = "Switch Launcher Mode",
+                                color = VantafynColors.Ink,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "Choose whether Vantafyn focuses purely on games, full multimedia (movies, TV, music, games), or music only.",
+                                color = VantafynColors.Muted,
+                                fontSize = 12.sp,
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val isFull = currentExperienceMode == dev.vantafyn.core.experience.ExperienceMode.FullMedia
+                                val isGames = currentExperienceMode == dev.vantafyn.core.experience.ExperienceMode.GamesOnly
+                                val isMusic = currentExperienceMode == dev.vantafyn.core.experience.ExperienceMode.MusicOnly
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isGames) Color(0xFF00E5FF).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f))
+                                        .border(
+                                            1.dp,
+                                            if (isGames) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.12f),
+                                            RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { onSelectExperienceMode(dev.vantafyn.core.experience.ExperienceMode.GamesOnly) }
+                                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "Gaming",
+                                        color = if (isGames) Color.White else VantafynColors.Muted,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isFull) Color(0xFF00E5FF).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f))
+                                        .border(
+                                            1.dp,
+                                            if (isFull) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.12f),
+                                            RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { onSelectExperienceMode(dev.vantafyn.core.experience.ExperienceMode.FullMedia) }
+                                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "Full Media",
+                                        color = if (isFull) Color.White else VantafynColors.Muted,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(if (isMusic) Color(0xFF00E5FF).copy(alpha = 0.22f) else Color.White.copy(alpha = 0.05f))
+                                        .border(
+                                            1.dp,
+                                            if (isMusic) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.12f),
+                                            RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { onSelectExperienceMode(dev.vantafyn.core.experience.ExperienceMode.MusicOnly) }
+                                        .padding(vertical = 10.dp, horizontal = 6.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        "Music",
+                                        color = if (isMusic) Color.White else VantafynColors.Muted,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 12.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 

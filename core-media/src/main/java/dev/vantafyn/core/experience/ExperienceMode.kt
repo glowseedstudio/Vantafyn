@@ -16,6 +16,11 @@ enum class ExperienceMode(
         id = "music_only",
         title = "Music Experience",
         description = "Dedicated music streaming powered by OpenSubsonic (Navidrome, Gonic, etc.) or Jellyfin Music.",
+    ),
+    GamesOnly(
+        id = "games_only",
+        title = "Gaming Mode",
+        description = "Dedicated handheld gaming console experience loading directly into Game Hub, Emulators, and Pokémon Vault.",
     );
 
     companion object {

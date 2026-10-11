@@ -44,6 +44,18 @@ public sealed class GameSavesService : IGameSavesService
                 else if (File.Exists(candidateMainExt)) path = candidateMainExt;
                 else if (File.Exists(candidateBin)) path = candidateBin;
                 else if (File.Exists(candidateMain)) path = candidateMain;
+                else
+                {
+                    // Fallback to case-insensitive match in userDir for Linux filesystems where gameId casing may differ
+                    var matched = Directory.EnumerateFiles(userDir)
+                        .FirstOrDefault(f => Path.GetFileNameWithoutExtension(f).Equals(safeGame, StringComparison.OrdinalIgnoreCase)
+                            && (f.EndsWith(".sram", StringComparison.OrdinalIgnoreCase)
+                                || f.EndsWith(".sav", StringComparison.OrdinalIgnoreCase)
+                                || f.EndsWith(".srm", StringComparison.OrdinalIgnoreCase)
+                                || f.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)
+                                || f.EndsWith(".main", StringComparison.OrdinalIgnoreCase)));
+                    if (matched != null) path = matched;
+                }
             }
         }
 

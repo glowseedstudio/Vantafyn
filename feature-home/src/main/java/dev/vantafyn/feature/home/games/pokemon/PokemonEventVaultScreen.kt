@@ -93,7 +93,9 @@ import dev.vantafyn.core.ui.VantafynTextField
 import dev.vantafyn.core.ui.vantafynAnimatedModalBorder
 import dev.vantafyn.feature.home.CompactBackButton
 import dev.vantafyn.core.jellyfin.GameBoxartScraper
+import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.feature.home.games.GameScreenReveal
+import dev.vantafyn.feature.player.games.GameStorageManager
 import kotlinx.coroutines.launch
 
 private data class EventVaultGame(
@@ -111,6 +113,7 @@ fun PokemonEventVaultScreen(
     detectedSaves: List<PokemonGameSaveDto>,
     onBack: () -> Unit,
     onRefresh: () -> Unit,
+    storageManager: GameStorageManager? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -160,6 +163,16 @@ fun PokemonEventVaultScreen(
         val active = session ?: return
         scope.launch {
             isLoading = true
+            if (storageManager != null) {
+                games.forEach { g ->
+                    runCatching {
+                        val localFile = storageManager.findExistingLocalSaveFile(g.save.gameId, GameSaveKind.Sram)
+                        if (localFile.exists() && localFile.length() > 0) {
+                            storageManager.replaceCloudWithLocalSave(active, g.save.gameId, GameSaveKind.Sram)
+                        }
+                    }
+                }
+            }
             val loadedCatalog = pokemonRepository.getEventUnlockCatalog(active)
                 .onFailure { message = it.message ?: "Could not load event unlocks." }
                 .getOrDefault(emptyList())
@@ -249,10 +262,23 @@ fun PokemonEventVaultScreen(
                 val active = session ?: return@RedeemMysteryGiftDialog
                 scope.launch {
                     isLoading = true
+                    if (storageManager != null) {
+                        runCatching {
+                            val localFile = storageManager.findExistingLocalSaveFile(activeGame.save.gameId, GameSaveKind.Sram)
+                            if (localFile.exists() && localFile.length() > 0) {
+                                storageManager.replaceCloudWithLocalSave(active, activeGame.save.gameId, GameSaveKind.Sram)
+                            }
+                        }
+                    }
                     pokemonRepository.redeemMysteryGift(active, activeGame.save.gameId, code).fold(
                         onSuccess = { response ->
                             showRedeemDialog = false
                             celebrationGift = response
+                            if (storageManager != null) {
+                                runCatching {
+                                    storageManager.replaceLocalWithCloudSave(active, activeGame.save.gameId, GameSaveKind.Sram)
+                                }
+                            }
                             loadEvents()
                         },
                         onFailure = { err ->
@@ -336,9 +362,22 @@ fun PokemonEventVaultScreen(
                         pendingUnlock = null
                         scope.launch {
                             isLoading = true
+                            if (storageManager != null) {
+                                runCatching {
+                                    val localFile = storageManager.findExistingLocalSaveFile(game.save.gameId, GameSaveKind.Sram)
+                                    if (localFile.exists() && localFile.length() > 0) {
+                                        storageManager.replaceCloudWithLocalSave(active, game.save.gameId, GameSaveKind.Sram)
+                                    }
+                                }
+                            }
                             pokemonRepository.unlockEvent(active, game.save.gameId, event.id).fold(
                                 onSuccess = { response ->
                                     message = response.message
+                                    if (storageManager != null) {
+                                        runCatching {
+                                            storageManager.replaceLocalWithCloudSave(active, game.save.gameId, GameSaveKind.Sram)
+                                        }
+                                    }
                                     loadEvents()
                                 },
                                 onFailure = { message = it.message ?: "Event unlock failed." },

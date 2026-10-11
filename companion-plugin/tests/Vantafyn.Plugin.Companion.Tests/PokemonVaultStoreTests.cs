@@ -7,7 +7,7 @@ namespace Vantafyn.Plugin.Companion.Tests;
 public sealed class PokemonVaultStoreTests
 {
     [Fact]
-    public async Task GetOrCreateVaultAsync_InitializesDefault30BoxesAndPersists()
+    public async Task GetOrCreateVaultAsync_InitializesDefault100BoxesAndPersists()
     {
         using var temp = new TempPaths();
         var clock = new FixedClock();
@@ -18,9 +18,9 @@ public sealed class PokemonVaultStoreTests
 
         Assert.NotNull(vault);
         Assert.Equal(userId, vault.UserId);
-        Assert.Equal(30, vault.Boxes.Count);
+        Assert.Equal(100, vault.Boxes.Count);
         Assert.Equal("Box 1", vault.Boxes[0].Name);
-        Assert.Equal("Box 30", vault.Boxes[29].Name);
+        Assert.Equal("Box 100", vault.Boxes[99].Name);
         Assert.All(vault.Boxes, b => Assert.Equal(30, b.Capacity));
         Assert.All(vault.Boxes, b => Assert.Empty(b.Entries));
 
@@ -71,8 +71,8 @@ public sealed class PokemonVaultStoreTests
         Assert.Equal(userId, summary.UserId);
         Assert.Equal(2, summary.TotalCount);
         Assert.Equal(1, summary.ShinyCount);
-        Assert.Equal(30, summary.BoxCount);
-        Assert.Equal(900, summary.TotalCapacity);
+        Assert.Equal(100, summary.BoxCount);
+        Assert.Equal(3000, summary.TotalCapacity);
     }
 
     [Fact]
@@ -269,7 +269,7 @@ public sealed class PokemonVaultStoreTests
 
         var boxes = await store.GetBoxesSummaryAsync(userId, CancellationToken.None);
 
-        Assert.Equal(30, boxes.Count);
+        Assert.Equal(100, boxes.Count);
         Assert.Equal(2, boxes[0].Count); // Box 1
         Assert.Equal(0, boxes[1].Count); // Box 2
         Assert.Equal(1, boxes[4].Count); // Box 5
@@ -286,9 +286,9 @@ public sealed class PokemonVaultStoreTests
 
         Assert.Null(await store.GetBoxAsync(userId, 0, CancellationToken.None));
         Assert.Null(await store.GetBoxAsync(userId, -1, CancellationToken.None));
-        Assert.Null(await store.GetBoxAsync(userId, 31, CancellationToken.None));
+        Assert.Null(await store.GetBoxAsync(userId, 101, CancellationToken.None));
         Assert.NotNull(await store.GetBoxAsync(userId, 1, CancellationToken.None));
-        Assert.NotNull(await store.GetBoxAsync(userId, 30, CancellationToken.None));
+        Assert.NotNull(await store.GetBoxAsync(userId, 100, CancellationToken.None));
     }
 
     [Fact]

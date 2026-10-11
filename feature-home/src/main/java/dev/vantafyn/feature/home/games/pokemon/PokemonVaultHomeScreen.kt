@@ -810,7 +810,7 @@ private fun VaultHeroCard(
                 )
 
                 Text(
-                    text = "Store up to 900 Pokémon across 30 boxes.\nConnect your cartridge saves to begin.",
+                    text = "Store thousands of Pokémon across cloud boxes.\nConnect your cartridge saves to begin.",
                     color = VantafynColors.Muted,
                     fontSize = 12.5.sp,
                     textAlign = TextAlign.Center,

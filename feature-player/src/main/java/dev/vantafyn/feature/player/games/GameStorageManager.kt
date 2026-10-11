@@ -246,6 +246,68 @@ class GameStorageManager(
             File(nativeSaveDir, "$altId.dsv"),
         )
 
+        val searchDirs = mutableListOf(
+            savesDir,
+            nativeSaveDir,
+            File("/sdcard/Download/Quick Share"),
+            File("/sdcard/Download"),
+            File("/storage/emulated/0/Download/Quick Share"),
+            File("/storage/emulated/0/Download"),
+            File("/sdcard/RetroArch/saves"),
+            File("/storage/emulated/0/RetroArch/saves"),
+        )
+        try {
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)?.let { dl ->
+                searchDirs.add(File(dl, "Quick Share"))
+                searchDirs.add(dl)
+            }
+        } catch (_: Throwable) {}
+
+        val extensions = listOf(kind.value, "sav", "srm", "dsv", "bin", "main")
+        val idsToTry = listOfNotNull(safeId, altId, gameId, gameId.lowercase()).distinct()
+
+        for (dir in searchDirs.distinct()) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            for (id in idsToTry) {
+                for (ext in extensions) {
+                    val candidate = File(dir, "$id.$ext")
+                    if (candidate.exists() && candidate.length() > 0L) {
+                        if (!standard.exists() || standard.length() <= 0L) {
+                            runCatching {
+                                standard.parentFile?.mkdirs()
+                                candidate.copyTo(standard, overwrite = true)
+                            }
+                        }
+                        return standard.takeIf { it.exists() && it.length() > 0L } ?: candidate
+                    }
+                }
+            }
+        }
+
+        val decodedTitle = runCatching {
+            String(android.util.Base64.decode(gameId, android.util.Base64.DEFAULT))
+                .substringAfterLast('/')
+                .substringBeforeLast('.')
+        }.getOrNull()?.trim()
+
+        if (!decodedTitle.isNullOrBlank()) {
+            for (dir in searchDirs.distinct()) {
+                if (!dir.exists() || !dir.isDirectory) continue
+                for (ext in extensions) {
+                    val candidate = File(dir, "$decodedTitle.$ext")
+                    if (candidate.exists() && candidate.length() > 0L) {
+                        if (!standard.exists() || standard.length() <= 0L) {
+                            runCatching {
+                                standard.parentFile?.mkdirs()
+                                candidate.copyTo(standard, overwrite = true)
+                            }
+                        }
+                        return standard.takeIf { it.exists() && it.length() > 0L } ?: candidate
+                    }
+                }
+            }
+        }
+
         // Only for local 3DS games: check alongside ROM in local 3DS directory using the game's actual ROM base name
         if (safeId.startsWith("local_3ds_")) {
             val local3dsDir = getLocal3dsDirectory()
@@ -858,6 +920,24 @@ class GameStorageManager(
             val localFile = findExistingLocalSaveFile(gameId, kind)
             localFile.parentFile?.mkdirs()
             localFile.writeBytes(data)
+            val standard = getLocalSaveFile(gameId, kind)
+            if (standard.absolutePath != localFile.absolutePath) {
+                runCatching {
+                    standard.parentFile?.mkdirs()
+                    standard.writeBytes(data)
+                }
+            }
+            val externalCandidates = listOf(
+                File("/sdcard/Download/Quick Share", "$gameId.${kind.value}"),
+                File("/sdcard/Download/Quick Share", "${gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")}.${kind.value}"),
+                File("/sdcard/Download", "$gameId.${kind.value}"),
+                File("/sdcard/Download", "${gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")}.${kind.value}"),
+            )
+            for (extFile in externalCandidates) {
+                if (extFile.exists()) {
+                    runCatching { extFile.writeBytes(data) }
+                }
+            }
             val hash = computeHash(data)
             markSynced(gameId, kind, hash, localFile.lastModified())
             Unit

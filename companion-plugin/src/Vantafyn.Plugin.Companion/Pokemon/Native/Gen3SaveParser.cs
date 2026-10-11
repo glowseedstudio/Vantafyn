@@ -399,7 +399,7 @@ public static class Gen3SaveParser
             SpecialDefense = decrypted[eOffset + 5],
         };
 
-        // Misc (IVs, ability, egg)
+        // Misc (IVs, ability, egg, ribbons)
         uint ivData = BitConverter.ToUInt32(decrypted, mOffset + 4);
         var iv = new PokemonStatsDto
         {
@@ -412,6 +412,25 @@ public static class Gen3SaveParser
         };
         bool isEgg = ((ivData >> 30) & 1) == 1;
         int abilityBit = (int)((ivData >> 31) & 1);
+
+        uint ribbonData = BitConverter.ToUInt32(decrypted, mOffset + 8);
+        var explicitRibbons = new Dictionary<string, byte>(StringComparer.OrdinalIgnoreCase);
+        if ((ribbonData & (1 << 15)) != 0) explicitRibbons["champion"] = 1;
+        if ((ribbonData & (1 << 16)) != 0) explicitRibbons["winning"] = 1;
+        if ((ribbonData & (1 << 17)) != 0) explicitRibbons["victory"] = 1;
+        if ((ribbonData & (1 << 18)) != 0) explicitRibbons["artist"] = 1;
+        if ((ribbonData & (1 << 19)) != 0) explicitRibbons["effort"] = 1;
+        if ((ribbonData & (1 << 23)) != 0) explicitRibbons["country"] = 1;
+        if ((ribbonData & (1 << 24)) != 0) explicitRibbons["national"] = 1;
+        if ((ribbonData & (1 << 25)) != 0) explicitRibbons["earth"] = 1;
+        if ((ribbonData & (1 << 26)) != 0) explicitRibbons["world"] = 1;
+        if ((ribbonData & 7) > 0) explicitRibbons["cool"] = 1;
+        if (((ribbonData >> 3) & 7) > 0) explicitRibbons["beauty"] = 1;
+        if (((ribbonData >> 6) & 7) > 0) explicitRibbons["cute"] = 1;
+        if (((ribbonData >> 9) & 7) > 0) explicitRibbons["smart"] = 1;
+        if (((ribbonData >> 12) & 7) > 0) explicitRibbons["tough"] = 1;
+
+        bool hasChampionRibbon = (ribbonData & (1 << 15)) != 0;
 
         string rawNickname = DecodeGen3String(buffer, offset + 8, 10);
         string otName = DecodeGen3String(buffer, offset + 20, 7);
@@ -481,6 +500,15 @@ public static class Gen3SaveParser
             LegalityStatus = "valid",
         };
 
+        var ribbons = PokemonRibbonCatalog.EvaluateRibbons(
+            explicitRibbons,
+            ev,
+            level,
+            friendship,
+            gameTitle,
+            3,
+            isParty);
+
         return new PokemonDetailsDto
         {
             Summary = summary,
@@ -495,6 +523,8 @@ public static class Gen3SaveParser
             Friendship = friendship,
             RawData = rawBase64,
             LegalityStatus = "valid",
+            Ribbons = ribbons,
+            IsHallOfFameMember = hasChampionRibbon,
         };
     }
 
