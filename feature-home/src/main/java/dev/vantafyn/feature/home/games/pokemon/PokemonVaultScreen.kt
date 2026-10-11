@@ -1027,6 +1027,12 @@ fun PokemonVaultScreen(
                         loadContainerData(TransferSide.Source)
                         upperSelectedSlotIndex = null
                     },
+                    onSelectBox = { targetIndex ->
+                        val clamped = targetIndex.coerceIn(1, upperState.totalBoxes)
+                        upperState = upperState.copy(selectedBoxIndex = clamped)
+                        loadContainerData(TransferSide.Source)
+                        upperSelectedSlotIndex = null
+                    },
                     onTogglePartyMode = {
                         upperState = upperState.copy(isPartyMode = !upperState.isPartyMode)
                         upperSelectedSlotIndex = null
@@ -1117,6 +1123,12 @@ fun PokemonVaultScreen(
                     onNextBox = {
                         val next = if (lowerState.selectedBoxIndex < lowerState.totalBoxes) lowerState.selectedBoxIndex + 1 else 1
                         lowerState = lowerState.copy(selectedBoxIndex = next)
+                        loadContainerData(TransferSide.Destination)
+                        lowerSelectedSlotIndex = null
+                    },
+                    onSelectBox = { targetIndex ->
+                        val clamped = targetIndex.coerceIn(1, lowerState.totalBoxes)
+                        lowerState = lowerState.copy(selectedBoxIndex = clamped)
                         loadContainerData(TransferSide.Destination)
                         lowerSelectedSlotIndex = null
                     },

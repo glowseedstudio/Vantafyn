@@ -47,15 +47,15 @@ data class ContainerUiState(
 
     val totalBoxes: Int
         get() = when (containerType) {
-            is StorageContainerType.PersonalVault -> vaultBoxCount
-            is StorageContainerType.GameCartridge -> gameSave?.boxes?.size ?: 1
+            is StorageContainerType.PersonalVault -> maxOf(vaultBoxCount, 100)
+            is StorageContainerType.GameCartridge -> maxOf(gameSave?.boxes?.size ?: 1, 1)
         }
 
     val currentBoxName: String
         get() = if (isPartyMode) {
             "Party (Team)"
         } else when (containerType) {
-            is StorageContainerType.PersonalVault -> vaultBox?.name ?: "Vault Box $selectedBoxIndex"
+            is StorageContainerType.PersonalVault -> vaultBox?.name ?: "Vault Box $selectedBoxIndex of $totalBoxes"
             is StorageContainerType.GameCartridge -> {
                 val box = gameSave?.boxes?.firstOrNull { it.boxIndex == selectedBoxIndex }
                 box?.name?.ifBlank { "Box $selectedBoxIndex" } ?: "Box $selectedBoxIndex"

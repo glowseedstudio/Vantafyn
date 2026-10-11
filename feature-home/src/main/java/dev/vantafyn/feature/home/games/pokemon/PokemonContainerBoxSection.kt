@@ -14,6 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.rounded.Sort
@@ -66,6 +70,7 @@ fun PokemonContainerBoxSection(
     onSelectContainer: (StorageContainerType) -> Unit,
     onPreviousBox: () -> Unit,
     onNextBox: () -> Unit,
+    onSelectBox: ((Int) -> Unit)? = null,
     onTogglePartyMode: () -> Unit,
     onSelectSlot: (Int, PokemonSummaryDto?) -> Unit,
     modifier: Modifier = Modifier,
@@ -74,6 +79,7 @@ fun PokemonContainerBoxSection(
 ) {
     var isDropdownExpanded by remember { mutableStateOf(false) }
     var showSortModal by remember { mutableStateOf(false) }
+    var showBoxJumpModal by remember { mutableStateOf(false) }
 
     PokemonModalContainer(
         modifier = modifier.fillMaxWidth(),
@@ -233,12 +239,27 @@ fun PokemonContainerBoxSection(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
-                    Text(
-                        text = uiState.currentBoxName,
-                        color = VantafynColors.Ink,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showBoxJumpModal = true }
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            text = uiState.currentBoxName,
+                            color = VantafynColors.Ink,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Icon(
+                            imageVector = Icons.Rounded.ExpandMore,
+                            contentDescription = "Jump to Box",
+                            tint = Color(0xFF00E5FF),
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     Text(
                         text = "(${uiState.currentOccupiedCount}/${uiState.currentCapacity})",
                         color = VantafynColors.Muted,
@@ -354,6 +375,153 @@ fun PokemonContainerBoxSection(
                 onSortBox(criterion, ascending)
             },
         )
+    }
+
+    if (showBoxJumpModal) {
+        PokemonBoxJumpDialog(
+            totalBoxes = uiState.totalBoxes,
+            currentBoxIndex = uiState.selectedBoxIndex,
+            isVault = uiState.containerType is StorageContainerType.PersonalVault,
+            gameBoxes = (uiState.containerType as? StorageContainerType.GameCartridge)?.let { uiState.gameSave?.boxes },
+            onDismiss = { showBoxJumpModal = false },
+            onSelectBox = { index ->
+                showBoxJumpModal = false
+                onSelectBox?.invoke(index)
+            },
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PokemonBoxJumpDialog(
+    totalBoxes: Int,
+    currentBoxIndex: Int,
+    isVault: Boolean,
+    gameBoxes: List<dev.vantafyn.core.jellyfin.PokemonBoxDto>? = null,
+    onDismiss: () -> Unit,
+    onSelectBox: (Int) -> Unit,
+) {
+    BasicAlertDialog(
+        onDismissRequest = onDismiss,
+    ) {
+        PokemonModalContainer(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .heightIn(max = 580.dp),
+            shape = RoundedCornerShape(20.dp),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF00E5FF).copy(alpha = 0.15f))
+                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Inventory2,
+                                contentDescription = "Jump to Box",
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Column {
+                            Text(
+                                text = "Select Box (1 – $totalBoxes)",
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                text = if (isVault) "Personal Vault • 100 Boxes Available" else "Cartridge PC Boxes",
+                                color = Color(0xFF00E5FF),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
+                    }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+
+                // Grid of all boxes
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false),
+                ) {
+                    items(totalBoxes) { idx ->
+                        val boxNumber = idx + 1
+                        val isSelected = boxNumber == currentBoxIndex
+                        val gameBox = gameBoxes?.firstOrNull { it.boxIndex == boxNumber }
+                        val occupied = gameBox?.entries?.size
+
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (isSelected) Color(0xFF00E5FF).copy(alpha = 0.25f)
+                                    else Color(0xFF1B1E2B)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) Color(0xFF00E5FF)
+                                    else Color.White.copy(alpha = 0.08f),
+                                    RoundedCornerShape(8.dp)
+                                )
+                                .clickable { onSelectBox(boxNumber) }
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    text = "$boxNumber",
+                                    color = if (isSelected) Color(0xFF00E5FF) else Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                )
+                                if (occupied != null) {
+                                    Text(
+                                        text = "$occupied/30",
+                                        color = if (occupied > 0) Color(0xFF10B981) else VantafynColors.Muted,
+                                        fontSize = 9.sp,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
