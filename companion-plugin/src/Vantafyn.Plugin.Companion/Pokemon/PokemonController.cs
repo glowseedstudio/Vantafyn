@@ -1844,6 +1844,666 @@ public sealed class PokemonController : ControllerBase
     }
 
     /// <summary>
+    /// Bulk deposits an entire box or selected Pokémon from a game save into the user's personal vault.
+    /// Runs atomically inside a single transaction with automatic backup and rollback.
+    /// </summary>
+    [HttpPost("Vault/BulkDeposit")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonBulkOperationResponse>> BulkDeposit(
+        [FromBody] PokemonBulkDepositRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound(new { error = "Pokémon integration is disabled." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.GameId))
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "GameId is required." });
+        }
+
+        if (request.TargetVaultBoxIndex < 1 || request.TargetVaultBoxIndex > PokemonVault.DefaultBoxCount)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"TargetVaultBoxIndex must be between 1 and {PokemonVault.DefaultBoxCount}." });
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var game = FindGame(request.GameId);
+        if (game == null)
+        {
+            return NotFound(new PokemonBulkOperationResponse { Success = false, Message = $"Game '{request.GameId}' not found." });
+        }
+
+        var meta = await _detector.GetMetadataAsync(
+            userId: userId,
+            gameId: game.Id,
+            title: game.Title,
+            fileName: game.FileName,
+            system: game.System,
+            core: game.Core,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (meta == null || !meta.IsPokemonGame)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"Game '{request.GameId}' is not a detected Pokémon game." });
+        }
+
+        var config = Configuration;
+        var provider = _providerFactory.Create(config);
+
+        var currentSaveBytes = await _gameSavesService.GetAsync(userId, request.GameId, "sram", cancellationToken).ConfigureAwait(false);
+        if (currentSaveBytes == null || currentSaveBytes.Length == 0)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "No save data found for game." });
+        }
+
+        var parseResult = await provider.ParseSaveAsync(
+            currentSaveBytes, meta.PokemonGameId, meta.Platform, meta.Generation, cancellationToken).ConfigureAwait(false);
+
+        if (!parseResult.IsSuccess)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"Failed to read game save: {parseResult.ErrorMessage}" });
+        }
+
+        List<PokemonSummaryDto> candidates;
+        if (request.IsParty)
+        {
+            candidates = parseResult.Party.ToList();
+        }
+        else
+        {
+            var sourceBoxIdx = request.SourceBoxIndex ?? 1;
+            var box = parseResult.Boxes.FirstOrDefault(b => b.BoxIndex == sourceBoxIdx);
+            candidates = box?.Entries?.ToList() ?? [];
+        }
+
+        if (request.PokemonIds != null && request.PokemonIds.Count > 0)
+        {
+            var filter = request.PokemonIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            candidates = candidates.Where(p => filter.Contains(p.Id)).ToList();
+        }
+
+        if (candidates.Count == 0)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "No Pokémon found to transfer in selected box." });
+        }
+
+        var errors = new List<string>();
+        int transferredCount = 0;
+        string? backupId = null;
+
+        var txResult = await _transactionManager.ExecuteAsync(
+            userId: userId,
+            operationType: "BulkDeposit",
+            sourceGameId: request.GameId,
+            destinationGameId: null,
+            pokemonId: null,
+            species: null,
+            nickname: null,
+            operation: async context =>
+            {
+                int currentVaultBoxIndex = request.TargetVaultBoxIndex;
+                var currentVaultBox = await _vaultStore.GetBoxAsync(userId, currentVaultBoxIndex, cancellationToken).ConfigureAwait(false);
+                var occupiedSlots = currentVaultBox?.Entries.Select(e => e.SlotIndex).ToHashSet() ?? [];
+
+                foreach (var pkm in candidates)
+                {
+                    int nextSlot = 0;
+                    for (int s = 1; s <= PokemonVaultBox.DefaultCapacity; s++)
+                    {
+                        if (!occupiedSlots.Contains(s))
+                        {
+                            nextSlot = s;
+                            break;
+                        }
+                    }
+
+                    while (nextSlot == 0 && currentVaultBoxIndex < PokemonVault.DefaultBoxCount)
+                    {
+                        currentVaultBoxIndex++;
+                        currentVaultBox = await _vaultStore.GetBoxAsync(userId, currentVaultBoxIndex, cancellationToken).ConfigureAwait(false);
+                        occupiedSlots = currentVaultBox?.Entries.Select(e => e.SlotIndex).ToHashSet() ?? [];
+                        for (int s = 1; s <= PokemonVaultBox.DefaultCapacity; s++)
+                        {
+                            if (!occupiedSlots.Contains(s))
+                            {
+                                nextSlot = s;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (nextSlot == 0)
+                    {
+                        errors.Add($"Personal Vault is full. Could not deposit {pkm.Species}.");
+                        break;
+                    }
+
+                    var extractResult = await provider.ExtractPokemonFromSaveAsync(
+                        context.SourceSaveWorkingCopy,
+                        meta.PokemonGameId,
+                        meta.Platform,
+                        meta.Generation,
+                        pkm.Id,
+                        request.IsParty,
+                        request.IsParty ? null : (request.SourceBoxIndex ?? 1),
+                        pkm.SlotIndex,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!extractResult.IsSuccess || extractResult.UpdatedSaveBytes == null || extractResult.ExtractedPokemon == null)
+                    {
+                        errors.Add($"Failed to extract {pkm.Species} (Slot {pkm.SlotIndex}): {extractResult.ErrorMessage}");
+                        continue;
+                    }
+
+                    context.SourceSaveWorkingCopy = extractResult.UpdatedSaveBytes;
+                    occupiedSlots.Add(nextSlot);
+
+                    var details = extractResult.ExtractedPokemon;
+                    var summary = details.Summary ?? pkm;
+                    var addedEntry = new PokemonVaultEntry
+                    {
+                        Id = string.IsNullOrWhiteSpace(pkm.Id) ? Guid.NewGuid().ToString("N") : pkm.Id,
+                        BoxIndex = currentVaultBoxIndex,
+                        SlotIndex = nextSlot,
+                        Species = summary.Species,
+                        SpeciesId = summary.SpeciesId,
+                        Form = summary.Form,
+                        Nickname = string.IsNullOrWhiteSpace(summary.Nickname) ? summary.Species : summary.Nickname,
+                        Level = summary.Level,
+                        Gender = summary.Gender,
+                        IsShiny = summary.IsShiny,
+                        Generation = meta.Generation,
+                        OriginalTrainer = summary.OriginalTrainer ?? string.Empty,
+                        OriginalTrainerId = summary.OriginalTrainerId,
+                        OriginGame = summary.OriginGame ?? meta.CanonicalTitle,
+                        OriginGameId = meta.PokemonGameId,
+                        CurrentLocation = $"Vault Box {currentVaultBoxIndex}, Slot {nextSlot}",
+                        CreatedAtUtc = DateTimeOffset.UtcNow,
+                        UpdatedAtUtc = DateTimeOffset.UtcNow,
+                        RawData = details.RawData,
+                        Details = details,
+                        LegalityStatus = details.LegalityStatus ?? "valid"
+                    };
+
+                    await _vaultStore.AddOrUpdateEntryAsync(userId, addedEntry, cancellationToken).ConfigureAwait(false);
+
+                    if (_journeyService != null)
+                    {
+                        try
+                        {
+                            await _journeyService.RecordEncounterAsync(userId, summary, meta.CanonicalTitle, isCaught: true, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch { }
+                    }
+
+                    transferredCount++;
+                }
+
+                if (transferredCount == 0)
+                {
+                    throw new InvalidOperationException(errors.Count > 0 ? string.Join("; ", errors) : "No Pokémon could be extracted.");
+                }
+
+                backupId = context.BackupIds.FirstOrDefault();
+                return transferredCount;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (!txResult.Success)
+        {
+            return BadRequest(new PokemonBulkOperationResponse
+            {
+                Success = false,
+                Message = txResult.ErrorMessage ?? "Bulk deposit transaction failed.",
+                Errors = errors
+            });
+        }
+
+        return Ok(new PokemonBulkOperationResponse
+        {
+            Success = true,
+            Message = $"Successfully deposited {txResult.Value} Pokémon into Vault Box {request.TargetVaultBoxIndex}.",
+            TransferredCount = txResult.Value,
+            FailedCount = candidates.Count - txResult.Value,
+            Errors = errors,
+            BackupCreated = true,
+            BackupId = backupId ?? txResult.Record.BackupIds.FirstOrDefault()
+        });
+    }
+
+    /// <summary>
+    /// Bulk withdraws an entire vault box or selected Pokémon into a game save file.
+    /// Runs atomically inside a single transaction with automatic backup and rollback.
+    /// </summary>
+    [HttpPost("Vault/BulkWithdraw")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonBulkOperationResponse>> BulkWithdraw(
+        [FromBody] PokemonBulkWithdrawRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound(new { error = "Pokémon integration is disabled." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.GameId))
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "GameId is required." });
+        }
+
+        if (request.SourceVaultBoxIndex < 1 || request.SourceVaultBoxIndex > PokemonVault.DefaultBoxCount)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"SourceVaultBoxIndex must be between 1 and {PokemonVault.DefaultBoxCount}." });
+        }
+
+        if (request.TargetBoxIndex < 1 || request.TargetBoxIndex > PokemonVault.DefaultBoxCount)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"TargetBoxIndex must be between 1 and {PokemonVault.DefaultBoxCount}." });
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var game = FindGame(request.GameId);
+        if (game == null)
+        {
+            return NotFound(new PokemonBulkOperationResponse { Success = false, Message = $"Game '{request.GameId}' not found." });
+        }
+
+        var meta = await _detector.GetMetadataAsync(
+            userId: userId,
+            gameId: game.Id,
+            title: game.Title,
+            fileName: game.FileName,
+            system: game.System,
+            core: game.Core,
+            cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (meta == null || !meta.IsPokemonGame)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"Game '{request.GameId}' is not a detected Pokémon game." });
+        }
+
+        var sourceVaultBox = await _vaultStore.GetBoxAsync(userId, request.SourceVaultBoxIndex, cancellationToken).ConfigureAwait(false);
+        var candidates = sourceVaultBox?.Entries.OrderBy(e => e.SlotIndex).ToList() ?? [];
+
+        if (request.VaultEntryIds != null && request.VaultEntryIds.Count > 0)
+        {
+            var filter = request.VaultEntryIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            candidates = candidates.Where(e => filter.Contains(e.Id)).ToList();
+        }
+
+        if (candidates.Count == 0)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "No Pokémon found in selected Vault Box to withdraw." });
+        }
+
+        var config = Configuration;
+        var provider = _providerFactory.Create(config);
+
+        var currentSaveBytes = await _gameSavesService.GetAsync(userId, request.GameId, "sram", cancellationToken).ConfigureAwait(false);
+        if (currentSaveBytes == null || currentSaveBytes.Length == 0)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "No save data found for game." });
+        }
+
+        var parseResult = await provider.ParseSaveAsync(
+            currentSaveBytes, meta.PokemonGameId, meta.Platform, meta.Generation, cancellationToken).ConfigureAwait(false);
+
+        if (!parseResult.IsSuccess)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = $"Failed to read game save: {parseResult.ErrorMessage}" });
+        }
+
+        var targetBox = parseResult.Boxes.FirstOrDefault(b => b.BoxIndex == request.TargetBoxIndex);
+        var occupiedSlots = targetBox?.Entries.Select(e => e.SlotIndex).ToHashSet() ?? [];
+
+        var errors = new List<string>();
+        int transferredCount = 0;
+        string? backupId = null;
+
+        var txResult = await _transactionManager.ExecuteAsync(
+            userId: userId,
+            operationType: "BulkWithdraw",
+            sourceGameId: request.GameId,
+            destinationGameId: null,
+            pokemonId: null,
+            species: null,
+            nickname: null,
+            operation: async context =>
+            {
+                int currentTargetBoxIndex = request.TargetBoxIndex;
+
+                foreach (var entry in candidates)
+                {
+                    int nextSlot = 0;
+                    for (int s = 1; s <= PokemonVaultBox.DefaultCapacity; s++)
+                    {
+                        if (!occupiedSlots.Contains(s))
+                        {
+                            nextSlot = s;
+                            break;
+                        }
+                    }
+
+                    while (nextSlot == 0 && currentTargetBoxIndex < parseResult.Boxes.Count)
+                    {
+                        currentTargetBoxIndex++;
+                        var nextBox = parseResult.Boxes.FirstOrDefault(b => b.BoxIndex == currentTargetBoxIndex);
+                        occupiedSlots = nextBox?.Entries.Select(e => e.SlotIndex).ToHashSet() ?? [];
+                        for (int s = 1; s <= PokemonVaultBox.DefaultCapacity; s++)
+                        {
+                            if (!occupiedSlots.Contains(s))
+                            {
+                                nextSlot = s;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (nextSlot == 0)
+                    {
+                        errors.Add($"Destination game boxes are full. Could not withdraw {entry.Species}.");
+                        break;
+                    }
+
+                    var injectResult = await provider.InjectPokemonIntoSaveAsync(
+                        context.SourceSaveWorkingCopy,
+                        meta.PokemonGameId,
+                        meta.Platform,
+                        meta.Generation,
+                        entry,
+                        currentTargetBoxIndex,
+                        nextSlot,
+                        false,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!injectResult.IsSuccess || injectResult.UpdatedSaveBytes == null)
+                    {
+                        errors.Add($"Failed to inject {entry.Species} (Slot {nextSlot}): {injectResult.ErrorMessage}");
+                        continue;
+                    }
+
+                    context.SourceSaveWorkingCopy = injectResult.UpdatedSaveBytes;
+                    occupiedSlots.Add(nextSlot);
+
+                    await _vaultStore.RemoveEntryAsync(userId, entry.Id, cancellationToken).ConfigureAwait(false);
+                    transferredCount++;
+                }
+
+                if (transferredCount == 0)
+                {
+                    throw new InvalidOperationException(errors.Count > 0 ? string.Join("; ", errors) : "No Pokémon could be injected.");
+                }
+
+                backupId = context.BackupIds.FirstOrDefault();
+                return transferredCount;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (!txResult.Success)
+        {
+            return BadRequest(new PokemonBulkOperationResponse
+            {
+                Success = false,
+                Message = txResult.ErrorMessage ?? "Bulk withdraw transaction failed.",
+                Errors = errors
+            });
+        }
+
+        return Ok(new PokemonBulkOperationResponse
+        {
+            Success = true,
+            Message = $"Successfully withdrew {txResult.Value} Pokémon into Game Box {request.TargetBoxIndex}.",
+            TransferredCount = txResult.Value,
+            FailedCount = candidates.Count - txResult.Value,
+            Errors = errors,
+            BackupCreated = true,
+            BackupId = backupId ?? txResult.Record.BackupIds.FirstOrDefault()
+        });
+    }
+
+    /// <summary>
+    /// Bulk transfers an entire box or selected Pokémon directly between two game saves.
+    /// Runs atomically inside a single multi-save transaction with automatic backup and rollback.
+    /// </summary>
+    [HttpPost("DirectTransfer/Bulk")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonBulkOperationResponse>> BulkDirectTransfer(
+        [FromBody] PokemonBulkDirectTransferRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound(new { error = "Pokémon integration is disabled." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SourceGameId) || string.IsNullOrWhiteSpace(request.DestinationGameId))
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "SourceGameId and DestinationGameId are required." });
+        }
+
+        if (string.Equals(request.SourceGameId, request.DestinationGameId, StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "Source and destination games must be different." });
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var sourceGame = FindGame(request.SourceGameId);
+        var destGame = FindGame(request.DestinationGameId);
+        if (sourceGame == null || destGame == null)
+        {
+            return NotFound(new PokemonBulkOperationResponse { Success = false, Message = "Source or destination game not found." });
+        }
+
+        var sourceMeta = await _detector.GetMetadataAsync(userId, gameId: sourceGame.Id, title: sourceGame.Title, fileName: sourceGame.FileName, system: sourceGame.System, core: sourceGame.Core, cancellationToken: cancellationToken).ConfigureAwait(false);
+        var destMeta = await _detector.GetMetadataAsync(userId, gameId: destGame.Id, title: destGame.Title, fileName: destGame.FileName, system: destGame.System, core: destGame.Core, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        if (sourceMeta == null || !sourceMeta.IsPokemonGame || destMeta == null || !destMeta.IsPokemonGame)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "Both source and destination must be detected Pokémon games." });
+        }
+
+        var config = Configuration;
+        var provider = _providerFactory.Create(config);
+
+        var srcBytes = await _gameSavesService.GetAsync(userId, request.SourceGameId, "sram", cancellationToken).ConfigureAwait(false);
+        var dstBytes = await _gameSavesService.GetAsync(userId, request.DestinationGameId, "sram", cancellationToken).ConfigureAwait(false);
+
+        if (srcBytes == null || dstBytes == null)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "Save bytes missing for source or destination." });
+        }
+
+        var srcParsed = await provider.ParseSaveAsync(srcBytes, sourceMeta.PokemonGameId, sourceMeta.Platform, sourceMeta.Generation, cancellationToken).ConfigureAwait(false);
+        var dstParsed = await provider.ParseSaveAsync(dstBytes, destMeta.PokemonGameId, destMeta.Platform, destMeta.Generation, cancellationToken).ConfigureAwait(false);
+
+        if (!srcParsed.IsSuccess || !dstParsed.IsSuccess)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "Failed to parse source or destination save." });
+        }
+
+        List<PokemonSummaryDto> candidates;
+        if (request.SourceParty)
+        {
+            candidates = srcParsed.Party.ToList();
+        }
+        else
+        {
+            var box = srcParsed.Boxes.FirstOrDefault(b => b.BoxIndex == (request.SourceBoxIndex ?? 1));
+            candidates = box?.Entries.ToList() ?? [];
+        }
+
+        if (request.PokemonIds != null && request.PokemonIds.Count > 0)
+        {
+            var filter = request.PokemonIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            candidates = candidates.Where(p => filter.Contains(p.Id)).ToList();
+        }
+
+        if (candidates.Count == 0)
+        {
+            return BadRequest(new PokemonBulkOperationResponse { Success = false, Message = "No Pokémon found in selected box to transfer." });
+        }
+
+        var targetBox = dstParsed.Boxes.FirstOrDefault(b => b.BoxIndex == request.TargetBoxIndex);
+        var occupiedSlots = targetBox?.Entries.Select(e => e.SlotIndex).ToHashSet() ?? [];
+
+        var errors = new List<string>();
+        int transferredCount = 0;
+        string? backupId = null;
+
+        var txResult = await _transactionManager.ExecuteAsync(
+            userId: userId,
+            operationType: "BulkDirectTransfer",
+            sourceGameId: request.SourceGameId,
+            destinationGameId: request.DestinationGameId,
+            pokemonId: null,
+            species: null,
+            nickname: null,
+            operation: async context =>
+            {
+                int currentTargetBoxIndex = request.TargetBoxIndex;
+
+                foreach (var pkm in candidates)
+                {
+                    int nextSlot = 0;
+                    for (int s = 1; s <= PokemonVaultBox.DefaultCapacity; s++)
+                    {
+                        if (!occupiedSlots.Contains(s))
+                        {
+                            nextSlot = s;
+                            break;
+                        }
+                    }
+
+                    while (nextSlot == 0 && currentTargetBoxIndex < dstParsed.Boxes.Count)
+                    {
+                        currentTargetBoxIndex++;
+                        var nextBox = dstParsed.Boxes.FirstOrDefault(b => b.BoxIndex == currentTargetBoxIndex);
+                        occupiedSlots = nextBox?.Entries.Select(e => e.SlotIndex).ToHashSet() ?? [];
+                        for (int s = 1; s <= PokemonVaultBox.DefaultCapacity; s++)
+                        {
+                            if (!occupiedSlots.Contains(s))
+                            {
+                                nextSlot = s;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (nextSlot == 0)
+                    {
+                        errors.Add($"Destination game boxes are full. Could not transfer {pkm.Species}.");
+                        break;
+                    }
+
+                    var extractResult = await provider.ExtractPokemonFromSaveAsync(
+                        context.SourceSaveWorkingCopy,
+                        sourceMeta.PokemonGameId,
+                        sourceMeta.Platform,
+                        sourceMeta.Generation,
+                        pkm.Id,
+                        request.SourceParty,
+                        request.SourceParty ? null : (request.SourceBoxIndex ?? 1),
+                        pkm.SlotIndex,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!extractResult.IsSuccess || extractResult.UpdatedSaveBytes == null || extractResult.ExtractedPokemon == null)
+                    {
+                        errors.Add($"Failed to extract {pkm.Species}: {extractResult.ErrorMessage}");
+                        continue;
+                    }
+
+                    context.SourceSaveWorkingCopy = extractResult.UpdatedSaveBytes;
+
+                    var details = extractResult.ExtractedPokemon;
+                    var summary = details.Summary ?? pkm;
+                    var intermediateEntry = new PokemonVaultEntry
+                    {
+                        Id = pkm.Id,
+                        BoxIndex = currentTargetBoxIndex,
+                        SlotIndex = nextSlot,
+                        Species = summary.Species,
+                        SpeciesId = summary.SpeciesId,
+                        Form = summary.Form,
+                        Nickname = summary.Nickname,
+                        Level = summary.Level,
+                        Gender = summary.Gender,
+                        IsShiny = summary.IsShiny,
+                        Generation = sourceMeta.Generation,
+                        OriginalTrainer = summary.OriginalTrainer ?? string.Empty,
+                        OriginalTrainerId = summary.OriginalTrainerId,
+                        OriginGame = summary.OriginGame ?? sourceMeta.CanonicalTitle,
+                        OriginGameId = sourceMeta.PokemonGameId,
+                        RawData = details.RawData,
+                        Details = details,
+                        LegalityStatus = details.LegalityStatus ?? "valid"
+                    };
+
+                    var injectResult = await provider.InjectPokemonIntoSaveAsync(
+                        context.DestinationSaveWorkingCopy!,
+                        destMeta.PokemonGameId,
+                        destMeta.Platform,
+                        destMeta.Generation,
+                        intermediateEntry,
+                        currentTargetBoxIndex,
+                        nextSlot,
+                        false,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (!injectResult.IsSuccess || injectResult.UpdatedSaveBytes == null)
+                    {
+                        errors.Add($"Failed to inject {pkm.Species} into {destMeta.CanonicalTitle}: {injectResult.ErrorMessage}");
+                        continue;
+                    }
+
+                    context.DestinationSaveWorkingCopy = injectResult.UpdatedSaveBytes;
+                    occupiedSlots.Add(nextSlot);
+                    transferredCount++;
+                }
+
+                if (transferredCount == 0)
+                {
+                    throw new InvalidOperationException(errors.Count > 0 ? string.Join("; ", errors) : "No Pokémon could be transferred.");
+                }
+
+                backupId = context.BackupIds.FirstOrDefault();
+                return transferredCount;
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        if (!txResult.Success)
+        {
+            return BadRequest(new PokemonBulkOperationResponse
+            {
+                Success = false,
+                Message = txResult.ErrorMessage ?? "Bulk direct transfer transaction failed.",
+                Errors = errors
+            });
+        }
+
+        return Ok(new PokemonBulkOperationResponse
+        {
+            Success = true,
+            Message = $"Successfully transferred {txResult.Value} Pokémon from {sourceMeta.CanonicalTitle} to {destMeta.CanonicalTitle} (Box {request.TargetBoxIndex}).",
+            TransferredCount = txResult.Value,
+            FailedCount = candidates.Count - txResult.Value,
+            Errors = errors,
+            BackupCreated = true,
+            BackupId = backupId ?? txResult.Record.BackupIds.FirstOrDefault()
+        });
+    }
+
+    /// <summary>
     /// Retrieves the current user's Pokémon profile and preferences.
     /// </summary>
     [HttpGet("Profile")]

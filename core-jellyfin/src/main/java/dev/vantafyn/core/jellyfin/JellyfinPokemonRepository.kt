@@ -22,11 +22,14 @@ interface JellyfinPokemonRepository {
     suspend fun getGameSave(session: JellyfinSession, libraryId: String, gameId: String): Result<PokemonGameSaveDto>
     suspend fun getGameLockState(session: JellyfinSession, libraryId: String, gameId: String): Result<SaveLockStateDto>
     suspend fun depositPokemon(session: JellyfinSession, request: PokemonDepositRequest): Result<PokemonOperationResponse>
+    suspend fun bulkDepositPokemon(session: JellyfinSession, request: PokemonBulkDepositRequest): Result<PokemonBulkOperationResponse>
     suspend fun importExternalSave(session: JellyfinSession, contentResolver: ContentResolver, uri: Uri): Result<PokemonExternalSaveImportResponse>
     suspend fun previewExternalSave(session: JellyfinSession, contentResolver: ContentResolver, uri: Uri): Result<PokemonExternalSavePreview>
     suspend fun commitExternalSavePreview(session: JellyfinSession, previewId: String, pokemonIds: Set<String>): Result<PokemonExternalSaveImportResponse>
     suspend fun withdrawPokemon(session: JellyfinSession, request: PokemonWithdrawRequest): Result<PokemonOperationResponse>
+    suspend fun bulkWithdrawPokemon(session: JellyfinSession, request: PokemonBulkWithdrawRequest): Result<PokemonBulkOperationResponse>
     suspend fun directTransferPokemon(session: JellyfinSession, request: PokemonDirectTransferRequest): Result<PokemonOperationResponse>
+    suspend fun bulkDirectTransferPokemon(session: JellyfinSession, request: PokemonBulkDirectTransferRequest): Result<PokemonBulkOperationResponse>
     suspend fun validateTransfer(session: JellyfinSession, request: PokemonTransferValidateRequest): Result<PokemonTransferCompatibilityResult>
     suspend fun createTrade(session: JellyfinSession, request: CreateTradeRequest): Result<PokemonTradeOperationResponse>
     suspend fun joinLinkTrade(session: JellyfinSession, request: JoinLinkTradeRequest): Result<PokemonTradeOperationResponse>
@@ -360,6 +363,34 @@ class DefaultJellyfinPokemonRepository(
             }
         }
 
+    override suspend fun bulkDepositPokemon(
+        session: JellyfinSession,
+        request: PokemonBulkDepositRequest,
+    ): Result<PokemonBulkOperationResponse> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection(
+                    pathAndQuery = "Vantafyn/Pokemon/Vault/BulkDeposit",
+                    method = "POST",
+                )
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val payload = JSONObject().apply {
+                    put("gameId", request.gameId)
+                    if (request.sourceBoxIndex != null) put("sourceBoxIndex", request.sourceBoxIndex)
+                    put("isParty", request.isParty)
+                    put("targetVaultBoxIndex", request.targetVaultBoxIndex)
+                    if (request.pokemonIds != null) {
+                        put("pokemonIds", JSONArray(request.pokemonIds))
+                    }
+                }
+                conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseBulkOperationResponse(JSONObject(body))
+            }
+        }
+
     override suspend fun importExternalSave(
         session: JellyfinSession,
         contentResolver: ContentResolver,
@@ -450,6 +481,33 @@ class DefaultJellyfinPokemonRepository(
             }
         }
 
+    override suspend fun bulkWithdrawPokemon(
+        session: JellyfinSession,
+        request: PokemonBulkWithdrawRequest,
+    ): Result<PokemonBulkOperationResponse> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection(
+                    pathAndQuery = "Vantafyn/Pokemon/Vault/BulkWithdraw",
+                    method = "POST",
+                )
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val payload = JSONObject().apply {
+                    put("gameId", request.gameId)
+                    put("sourceVaultBoxIndex", request.sourceVaultBoxIndex)
+                    put("targetBoxIndex", request.targetBoxIndex)
+                    if (request.vaultEntryIds != null) {
+                        put("vaultEntryIds", JSONArray(request.vaultEntryIds))
+                    }
+                }
+                conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseBulkOperationResponse(JSONObject(body))
+            }
+        }
+
     override suspend fun directTransferPokemon(
         session: JellyfinSession,
         request: PokemonDirectTransferRequest,
@@ -477,6 +535,35 @@ class DefaultJellyfinPokemonRepository(
                 checkResponseCode(conn)
                 val body = conn.inputStream.bufferedReader().use { it.readText() }
                 parseOperationResponse(JSONObject(body))
+            }
+        }
+
+    override suspend fun bulkDirectTransferPokemon(
+        session: JellyfinSession,
+        request: PokemonBulkDirectTransferRequest,
+    ): Result<PokemonBulkOperationResponse> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection(
+                    pathAndQuery = "Vantafyn/Pokemon/DirectTransfer/Bulk",
+                    method = "POST",
+                )
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val payload = JSONObject().apply {
+                    put("sourceGameId", request.sourceGameId)
+                    put("destinationGameId", request.destinationGameId)
+                    if (request.sourceBoxIndex != null) put("sourceBoxIndex", request.sourceBoxIndex)
+                    put("sourceParty", request.sourceParty)
+                    put("targetBoxIndex", request.targetBoxIndex)
+                    if (request.pokemonIds != null) {
+                        put("pokemonIds", JSONArray(request.pokemonIds))
+                    }
+                }
+                conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseBulkOperationResponse(JSONObject(body))
             }
         }
 
@@ -850,6 +937,22 @@ class DefaultJellyfinPokemonRepository(
             backupId = json.optString("backupId", "").ifEmpty { null },
             auditId = json.optString("auditId", "").ifEmpty { null },
             warnings = warnings,
+        )
+    }
+
+    private fun parseBulkOperationResponse(json: JSONObject): PokemonBulkOperationResponse {
+        val errors = json.optJSONArray("errors")?.let { arr ->
+            (0 until arr.length()).map { arr.getString(it) }
+        } ?: emptyList()
+
+        return PokemonBulkOperationResponse(
+            success = json.optBoolean("success", false),
+            message = json.optString("message", ""),
+            transferredCount = json.optInt("transferredCount", 0),
+            failedCount = json.optInt("failedCount", 0),
+            errors = errors,
+            backupCreated = json.optBoolean("backupCreated", false),
+            backupId = json.optString("backupId", "").ifEmpty { null },
         )
     }
 

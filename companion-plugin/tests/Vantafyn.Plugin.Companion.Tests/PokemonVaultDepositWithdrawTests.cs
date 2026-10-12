@@ -325,6 +325,91 @@ public sealed class PokemonVaultDepositWithdrawTests
         Assert.Equal(new byte[] { 0x01 }, extractResult.UpdatedSaveBytes);
     }
 
+    [Fact]
+    public async Task BulkDeposit_DepositsEntireBoxSuccessfully()
+    {
+        using var harness = new TestHarness(_userId);
+        harness.Provider.BoxesToReturn =
+        [
+            new PokemonBoxDto
+            {
+                BoxIndex = 1,
+                Name = "BOX 1",
+                Entries =
+                [
+                    new PokemonSummaryDto { Id = "p1", Species = "Bulbasaur", SpeciesId = 1, Level = 5, SlotIndex = 1 },
+                    new PokemonSummaryDto { Id = "p2", Species = "Charmander", SpeciesId = 4, Level = 5, SlotIndex = 2 },
+                    new PokemonSummaryDto { Id = "p3", Species = "Squirtle", SpeciesId = 7, Level = 5, SlotIndex = 3 }
+                ]
+            }
+        ];
+
+        var request = new PokemonBulkDepositRequest
+        {
+            GameId = "emerald",
+            SourceBoxIndex = 1,
+            TargetVaultBoxIndex = 1
+        };
+
+        var actionResult = await harness.Controller.BulkDeposit(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonBulkOperationResponse>(okResult.Value);
+
+        Assert.True(response.Success);
+        Assert.Equal(3, response.TransferredCount);
+
+        var vaultBox = await harness.VaultStore.GetBoxAsync(_userId, 1, CancellationToken.None);
+        Assert.NotNull(vaultBox);
+        Assert.Equal(3, vaultBox.Entries.Count);
+    }
+
+    [Fact]
+    public async Task BulkWithdraw_WithdrawsEntireBoxSuccessfully()
+    {
+        using var harness = new TestHarness(_userId);
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, new PokemonVaultEntry
+        {
+            Id = "v1",
+            Species = "Pikachu",
+            BoxIndex = 2,
+            SlotIndex = 1,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, new PokemonVaultEntry
+        {
+            Id = "v2",
+            Species = "Raichu",
+            BoxIndex = 2,
+            SlotIndex = 2,
+            CreatedAtUtc = DateTimeOffset.UtcNow,
+            UpdatedAtUtc = DateTimeOffset.UtcNow
+        }, CancellationToken.None);
+
+        harness.Provider.BoxesToReturn =
+        [
+            new PokemonBoxDto { BoxIndex = 1, Entries = [] }
+        ];
+
+        var request = new PokemonBulkWithdrawRequest
+        {
+            GameId = "emerald",
+            SourceVaultBoxIndex = 2,
+            TargetBoxIndex = 1
+        };
+
+        var actionResult = await harness.Controller.BulkWithdraw(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonBulkOperationResponse>(okResult.Value);
+
+        Assert.True(response.Success);
+        Assert.Equal(2, response.TransferredCount);
+
+        var vaultBox = await harness.VaultStore.GetBoxAsync(_userId, 2, CancellationToken.None);
+        Assert.NotNull(vaultBox);
+        Assert.Empty(vaultBox.Entries);
+    }
+
     private sealed class TestHarness : IDisposable
     {
         private readonly TempPaths _tempPaths = new();
@@ -338,6 +423,7 @@ public sealed class PokemonVaultDepositWithdrawTests
         public PokemonTransactionManager TransactionManager { get; }
         public FilePokemonVaultStore VaultStore { get; }
         public PokemonController Controller { get; }
+        public TestPokemonProvider Provider { get; }
 
         public TestHarness(Guid userId, bool simulateExtractionFailure = false, bool simulateInjectionFailure = false)
         {
@@ -363,8 +449,8 @@ public sealed class PokemonVaultDepositWithdrawTests
 
             var gamesService = new TestGamesService(game);
             var detector = new PokemonGameDetector(_tempPaths);
-            var provider = new TestPokemonProvider(MutatedSaveBytes, simulateExtractionFailure, simulateInjectionFailure);
-            var providerFactory = new TestPokemonProviderFactory(provider);
+            Provider = new TestPokemonProvider(MutatedSaveBytes, simulateExtractionFailure, simulateInjectionFailure);
+            var providerFactory = new TestPokemonProviderFactory(Provider);
 
             var authContext = new TestAuthorizationContext(userId);
             var config = new PokemonConfiguration
@@ -402,6 +488,7 @@ public sealed class PokemonVaultDepositWithdrawTests
         bool failInject) : IPokemonProvider
     {
         public string ProviderName => "mock";
+        public List<PokemonBoxDto>? BoxesToReturn { get; set; }
 
         public Task<PokemonConnectionTestResult> TestConnectionAsync(CancellationToken cancellationToken) =>
             Task.FromResult(new PokemonConnectionTestResult { IsSuccess = true });
@@ -410,7 +497,7 @@ public sealed class PokemonVaultDepositWithdrawTests
             Task.FromResult(new PokemonProviderCapabilities());
 
         public Task<PokemonSaveParseResult> ParseSaveAsync(byte[] saveBytes, string pokemonGameId, string platform, int generation, CancellationToken cancellationToken) =>
-            Task.FromResult(new PokemonSaveParseResult { IsSuccess = true });
+            Task.FromResult(new PokemonSaveParseResult { IsSuccess = true, Boxes = BoxesToReturn ?? [] });
 
         public Task<PokemonExtractResult> ExtractPokemonFromSaveAsync(
             byte[] saveBytes, string pokemonGameId, string platform, int generation,

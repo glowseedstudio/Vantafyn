@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronLeft
 import androidx.compose.material.icons.rounded.ChevronRight
 import androidx.compose.material.icons.rounded.Close
@@ -76,6 +77,11 @@ fun PokemonContainerBoxSection(
     modifier: Modifier = Modifier,
     onOpenDetails: ((PokemonSummaryDto) -> Unit)? = null,
     onSortBox: ((criterion: String, ascending: Boolean) -> Unit)? = null,
+    isMultiSelectMode: Boolean = false,
+    selectedMultiSlots: Set<Int> = emptySet(),
+    onToggleMultiSelectMode: (() -> Unit)? = null,
+    onToggleMultiSelectSlot: ((Int, PokemonSummaryDto) -> Unit)? = null,
+    onSelectAllInBox: (() -> Unit)? = null,
 ) {
     var isDropdownExpanded by remember { mutableStateOf(false) }
     var showSortModal by remember { mutableStateOf(false) }
@@ -291,6 +297,77 @@ fun PokemonContainerBoxSection(
                             )
                         }
                     }
+
+                    if (onToggleMultiSelectMode != null) {
+                        if (isMultiSelectMode) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF7C4DFF).copy(alpha = 0.35f))
+                                    .border(1.dp, Color(0xFF7C4DFF), RoundedCornerShape(8.dp))
+                                    .clickable { onToggleMultiSelectMode() }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Selecting",
+                                    tint = Color(0xFF7C4DFF),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                Text(
+                                    text = "${selectedMultiSlots.size} SEL",
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+
+                            if (onSelectAllInBox != null) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF202334))
+                                        .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                                        .clickable { onSelectAllInBox() }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "ALL",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                }
+                            }
+                        } else if (uiState.currentOccupiedCount > 0) {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF202334))
+                                    .border(1.dp, Color(0xFFA855F7).copy(alpha = 0.45f), RoundedCornerShape(8.dp))
+                                    .clickable { onToggleMultiSelectMode() }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Select",
+                                    tint = Color(0xFFA855F7),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                                Text(
+                                    text = "SELECT",
+                                    color = Color(0xFFA855F7),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
                 }
 
                 IconButton(
@@ -360,6 +437,9 @@ fun PokemonContainerBoxSection(
                 isParty = uiState.isPartyMode,
                 isLocked = uiState.isLocked,
                 onOpenDetails = onOpenDetails,
+                isMultiSelectMode = isMultiSelectMode,
+                selectedSlotIndices = selectedMultiSlots,
+                onToggleMultiSelectSlot = onToggleMultiSelectSlot,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

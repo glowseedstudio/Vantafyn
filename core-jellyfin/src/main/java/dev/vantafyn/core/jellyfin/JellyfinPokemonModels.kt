@@ -171,6 +171,40 @@ data class PokemonTransferValidateRequest(
     val slotIndex: Int = 1,
 ) : Serializable
 
+data class PokemonBulkDepositRequest(
+    val gameId: String,
+    val sourceBoxIndex: Int? = null,
+    val isParty: Boolean = false,
+    val targetVaultBoxIndex: Int = 1,
+    val pokemonIds: List<String>? = null,
+) : Serializable
+
+data class PokemonBulkWithdrawRequest(
+    val gameId: String,
+    val sourceVaultBoxIndex: Int = 1,
+    val targetBoxIndex: Int = 1,
+    val vaultEntryIds: List<String>? = null,
+) : Serializable
+
+data class PokemonBulkDirectTransferRequest(
+    val sourceGameId: String,
+    val destinationGameId: String,
+    val sourceBoxIndex: Int? = null,
+    val sourceParty: Boolean = false,
+    val targetBoxIndex: Int = 1,
+    val pokemonIds: List<String>? = null,
+) : Serializable
+
+data class PokemonBulkOperationResponse(
+    val success: Boolean = false,
+    val message: String = "",
+    val transferredCount: Int = 0,
+    val failedCount: Int = 0,
+    val errors: List<String> = emptyList(),
+    val backupCreated: Boolean = false,
+    val backupId: String? = null,
+) : Serializable
+
 enum class PokemonTradeStatus {
     Pending,
     Accepted,

@@ -1,12 +1,14 @@
 package dev.vantafyn.feature.home.games.pokemon
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,6 +25,7 @@ import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.Pets
 import androidx.compose.material.icons.rounded.SyncAlt
 import androidx.compose.material.icons.rounded.Warning
@@ -57,6 +60,17 @@ fun PokemonActionBridge(
     onExecuteTransfer: () -> Unit,
     onInspectDetails: () -> Unit,
     modifier: Modifier = Modifier,
+    multiSelectedCount: Int = 0,
+    multiSelectedSide: TransferSide? = null,
+    onExecuteMultiTransfer: (() -> Unit)? = null,
+    onClearMultiSelection: (() -> Unit)? = null,
+    upperBoxOccupiedCount: Int = 0,
+    lowerBoxOccupiedCount: Int = 0,
+    upperBoxName: String = "Upper Box",
+    lowerBoxName: String = "Lower Box",
+    upperIsLocked: Boolean = false,
+    lowerIsLocked: Boolean = false,
+    onTransferEntireBox: ((direction: TransferSide) -> Unit)? = null,
 ) {
     Box(
         modifier = modifier
@@ -260,28 +274,214 @@ fun PokemonActionBridge(
                     }
                 }
             }
-        } else {
-            // Idle State: Prompt user to tap a Pokémon
+        } else if (multiSelectedCount > 0 && multiSelectedSide != null) {
+            // Multi-selection transfer state
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.SyncAlt,
-                    contentDescription = null,
-                    tint = Color(0xFF00E5FF).copy(alpha = 0.7f),
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Select a Pokémon from Upper or Lower box to inspect or transfer",
-                    color = VantafynColors.Muted,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF7C4DFF).copy(alpha = 0.25f))
+                            .border(1.dp, Color(0xFF7C4DFF).copy(alpha = 0.6f), RoundedCornerShape(8.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Inventory2,
+                            contentDescription = null,
+                            tint = Color(0xFF7C4DFF),
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+
+                    Column {
+                        Text(
+                            text = "$multiSelectedCount Pokémon Selected",
+                            color = VantafynColors.Ink,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        val fromLabel = if (multiSelectedSide == TransferSide.Source) upperBoxName else lowerBoxName
+                        val toLabel = if (multiSelectedSide == TransferSide.Source) lowerBoxName else upperBoxName
+                        Text(
+                            text = "From $fromLabel → $toLabel",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                        )
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (onClearMultiSelection != null) {
+                        OutlinedButton(
+                            onClick = onClearMultiSelection,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp),
+                        ) {
+                            Text(
+                                text = "Clear",
+                                color = VantafynColors.Muted,
+                                fontSize = 11.sp,
+                            )
+                        }
+                    }
+
+                    val isSource = multiSelectedSide == TransferSide.Source
+                    val actionLabel = if (isSource) "Transfer $multiSelectedCount ↓" else "Transfer $multiSelectedCount ↑"
+                    val actionIcon = if (isSource) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward
+
+                    Button(
+                        onClick = { onExecuteMultiTransfer?.invoke() },
+                        enabled = !isExecutingTransfer,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color.Transparent,
+                            disabledContainerColor = Color.White.copy(alpha = 0.08f),
+                        ),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .height(34.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(VantafynGradients.accentHorizontal()),
+                    ) {
+                        if (isExecutingTransfer) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                modifier = Modifier.size(14.dp),
+                                strokeWidth = 2.dp,
+                            )
+                        } else {
+                            Icon(
+                                imageVector = actionIcon,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp),
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = actionLabel,
+                                color = Color.White,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
+                }
+            }
+        } else {
+            // Idle State: Offer 1-tap entire box transfer or prompt to select
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Transfer Upper Box Downward Button
+                    Button(
+                        onClick = { onTransferEntireBox?.invoke(TransferSide.Source) },
+                        enabled = !isExecutingTransfer && upperBoxOccupiedCount > 0 && !upperIsLocked,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1F2333),
+                            disabledContainerColor = Color.White.copy(alpha = 0.04f),
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (upperBoxOccupiedCount > 0 && !upperIsLocked) Color(0xFF00E5FF).copy(alpha = 0.4f)
+                            else Color.White.copy(alpha = 0.08f)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ArrowDownward,
+                            contentDescription = null,
+                            tint = if (upperBoxOccupiedCount > 0 && !upperIsLocked) Color(0xFF00E5FF) else VantafynColors.Muted,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Transfer Box ↓ ($upperBoxOccupiedCount)",
+                            color = if (upperBoxOccupiedCount > 0 && !upperIsLocked) Color.White else VantafynColors.Muted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+
+                    // Transfer Lower Box Upward Button
+                    Button(
+                        onClick = { onTransferEntireBox?.invoke(TransferSide.Destination) },
+                        enabled = !isExecutingTransfer && lowerBoxOccupiedCount > 0 && !lowerIsLocked,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFF1F2333),
+                            disabledContainerColor = Color.White.copy(alpha = 0.04f),
+                        ),
+                        border = BorderStroke(
+                            1.dp,
+                            if (lowerBoxOccupiedCount > 0 && !lowerIsLocked) Color(0xFF7C4DFF).copy(alpha = 0.45f)
+                            else Color.White.copy(alpha = 0.08f)
+                        ),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(34.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.ArrowUpward,
+                            contentDescription = null,
+                            tint = if (lowerBoxOccupiedCount > 0 && !lowerIsLocked) Color(0xFF7C4DFF) else VantafynColors.Muted,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Transfer Box ↑ ($lowerBoxOccupiedCount)",
+                            color = if (lowerBoxOccupiedCount > 0 && !lowerIsLocked) Color.White else VantafynColors.Muted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SyncAlt,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF).copy(alpha = 0.7f),
+                        modifier = Modifier.size(13.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Move entire box above, or select Pokémon to move individually / batch",
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
             }
         }
     }

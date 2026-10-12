@@ -69,6 +69,9 @@ import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDepositRequest
+import dev.vantafyn.core.jellyfin.PokemonBulkDepositRequest
+import dev.vantafyn.core.jellyfin.PokemonBulkWithdrawRequest
+import dev.vantafyn.core.jellyfin.PokemonBulkDirectTransferRequest
 import dev.vantafyn.core.jellyfin.PokemonExternalSavePreview
 import dev.vantafyn.core.jellyfin.PokemonDetailsDto
 import dev.vantafyn.core.jellyfin.PokemonDirectTransferRequest
@@ -104,6 +107,14 @@ enum class VaultSubScreen {
     DiplomaCase,
     EventVault,
 }
+
+data class BulkTransferConfirmation(
+    val direction: TransferSide,
+    val count: Int,
+    val fromName: String,
+    val toName: String,
+    val selectedIds: List<String>? = null,
+)
 
 @Composable
 fun PokemonVaultScreen(
@@ -143,6 +154,8 @@ fun PokemonVaultScreen(
         )
     }
     var upperSelectedSlotIndex by remember { mutableStateOf<Int?>(null) }
+    var isUpperMultiSelectMode by remember { mutableStateOf(false) }
+    var upperMultiSelectedSlots by remember { mutableStateOf(emptySet<Int>()) }
 
     // Lower (Destination) State
     var lowerState by remember {
@@ -155,6 +168,10 @@ fun PokemonVaultScreen(
         )
     }
     var lowerSelectedSlotIndex by remember { mutableStateOf<Int?>(null) }
+    var isLowerMultiSelectMode by remember { mutableStateOf(false) }
+    var lowerMultiSelectedSlots by remember { mutableStateOf(emptySet<Int>()) }
+
+    var bulkTransferConfirmation by remember { mutableStateOf<BulkTransferConfirmation?>(null) }
 
     // Active Selection & Inspection
     var selectedPokemonItem by remember { mutableStateOf<SelectedPokemonItem?>(null) }
@@ -512,6 +529,93 @@ fun PokemonVaultScreen(
                     },
                     onFailure = { err ->
                         operationResultMessage = "Operation failed: ${err.message}"
+                    }
+                )
+            }
+        }
+    }
+
+    fun executeBulkTransfer(direction: TransferSide, selectedIds: List<String>? = null) {
+        if (session == null) return
+
+        isExecutingTransfer = true
+        coroutineScope.launch(Dispatchers.IO) {
+            val isSource = direction == TransferSide.Source
+            val srcContainer = if (isSource) upperState.containerType else lowerState.containerType
+            val dstContainer = if (isSource) lowerState.containerType else upperState.containerType
+
+            val srcBox = if (isSource) upperState.selectedBoxIndex else lowerState.selectedBoxIndex
+            val srcParty = if (isSource) upperState.isPartyMode else lowerState.isPartyMode
+            val dstBox = if (isSource) lowerState.selectedBoxIndex else upperState.selectedBoxIndex
+
+            val result = when {
+                // Game -> Personal Vault (Bulk Deposit)
+                srcContainer is StorageContainerType.GameCartridge && dstContainer is StorageContainerType.PersonalVault -> {
+                    pokemonRepository.bulkDepositPokemon(
+                        session,
+                        PokemonBulkDepositRequest(
+                            gameId = srcContainer.game.id,
+                            sourceBoxIndex = if (srcParty) null else srcBox,
+                            isParty = srcParty,
+                            targetVaultBoxIndex = dstBox,
+                            pokemonIds = selectedIds,
+                        )
+                    )
+                }
+
+                // Personal Vault -> Game (Bulk Withdraw)
+                srcContainer is StorageContainerType.PersonalVault && dstContainer is StorageContainerType.GameCartridge -> {
+                    pokemonRepository.bulkWithdrawPokemon(
+                        session,
+                        PokemonBulkWithdrawRequest(
+                            gameId = dstContainer.game.id,
+                            sourceVaultBoxIndex = srcBox,
+                            targetBoxIndex = dstBox,
+                            vaultEntryIds = selectedIds,
+                        )
+                    )
+                }
+
+                // Game -> Game (Bulk Direct Transfer)
+                srcContainer is StorageContainerType.GameCartridge && dstContainer is StorageContainerType.GameCartridge -> {
+                    pokemonRepository.bulkDirectTransferPokemon(
+                        session,
+                        PokemonBulkDirectTransferRequest(
+                            sourceGameId = srcContainer.game.id,
+                            destinationGameId = dstContainer.game.id,
+                            sourceBoxIndex = if (srcParty) null else srcBox,
+                            sourceParty = srcParty,
+                            targetBoxIndex = dstBox,
+                            pokemonIds = selectedIds,
+                        )
+                    )
+                }
+
+                else -> {
+                    Result.failure(Exception("Bulk move between identical containers is not supported."))
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                isExecutingTransfer = false
+                result.fold(
+                    onSuccess = { op ->
+                        val backupNote = if (op.backupCreated) "\nBackup created: ${op.backupId}" else ""
+                        val errNote = if (op.failedCount > 0) "\nFailed: ${op.failedCount} (${op.errors.firstOrNull() ?: ""})" else ""
+                        operationResultMessage = "Success! ${op.message} (${op.transferredCount} moved)$backupNote$errNote"
+                        selectedPokemonItem = null
+                        upperSelectedSlotIndex = null
+                        lowerSelectedSlotIndex = null
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
+                        loadVaultSummary()
+                        loadContainerData(TransferSide.Source)
+                        loadContainerData(TransferSide.Destination)
+                    },
+                    onFailure = { err ->
+                        operationResultMessage = "Bulk transfer failed: ${err.message}"
                     }
                 )
             }
@@ -1014,31 +1118,45 @@ fun PokemonVaultScreen(
                         )
                         loadContainerData(TransferSide.Source)
                         upperSelectedSlotIndex = null
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
                     },
                     onPreviousBox = {
                         val prev = if (upperState.selectedBoxIndex > 1) upperState.selectedBoxIndex - 1 else upperState.totalBoxes
                         upperState = upperState.copy(selectedBoxIndex = prev)
                         loadContainerData(TransferSide.Source)
                         upperSelectedSlotIndex = null
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
                     },
                     onNextBox = {
                         val next = if (upperState.selectedBoxIndex < upperState.totalBoxes) upperState.selectedBoxIndex + 1 else 1
                         upperState = upperState.copy(selectedBoxIndex = next)
                         loadContainerData(TransferSide.Source)
                         upperSelectedSlotIndex = null
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
                     },
                     onSelectBox = { targetIndex ->
                         val clamped = targetIndex.coerceIn(1, upperState.totalBoxes)
                         upperState = upperState.copy(selectedBoxIndex = clamped)
                         loadContainerData(TransferSide.Source)
                         upperSelectedSlotIndex = null
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
                     },
                     onTogglePartyMode = {
                         upperState = upperState.copy(isPartyMode = !upperState.isPartyMode)
                         upperSelectedSlotIndex = null
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
                     },
                     onSelectSlot = { slot, pokemon ->
                         upperSelectedSlotIndex = slot
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                         if (pokemon != null) {
                             val isVault = upperState.containerType is StorageContainerType.PersonalVault
                             val gameId = (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
@@ -1077,7 +1195,80 @@ fun PokemonVaultScreen(
                     onSortBox = { criterion, ascending ->
                         handleSortBox(TransferSide.Source, criterion, ascending)
                     },
+                    isMultiSelectMode = isUpperMultiSelectMode,
+                    selectedMultiSlots = upperMultiSelectedSlots,
+                    onToggleMultiSelectMode = {
+                        isUpperMultiSelectMode = !isUpperMultiSelectMode
+                        upperMultiSelectedSlots = emptySet()
+                        if (isUpperMultiSelectMode) {
+                            selectedPokemonItem = null
+                            upperSelectedSlotIndex = null
+                            isLowerMultiSelectMode = false
+                            lowerMultiSelectedSlots = emptySet()
+                            lowerSelectedSlotIndex = null
+                        }
+                    },
+                    onToggleMultiSelectSlot = { slot, _ ->
+                        upperMultiSelectedSlots = if (upperMultiSelectedSlots.contains(slot)) {
+                            upperMultiSelectedSlots - slot
+                        } else {
+                            upperMultiSelectedSlots + slot
+                        }
+                        selectedPokemonItem = null
+                        upperSelectedSlotIndex = null
+                    },
+                    onSelectAllInBox = {
+                        val allEntries: List<PokemonSummaryDto> = if (upperState.isPartyMode) {
+                            upperState.gameSave?.party ?: emptyList()
+                        } else if (upperState.containerType is StorageContainerType.PersonalVault) {
+                            upperState.vaultBox?.entries?.map { it.toSummaryDto() } ?: emptyList()
+                        } else {
+                            upperState.gameSave?.boxes?.firstOrNull { it.boxIndex == upperState.selectedBoxIndex }?.entries ?: emptyList()
+                        }
+                        upperMultiSelectedSlots = allEntries.map { it.slotIndex }.toSet()
+                        selectedPokemonItem = null
+                        upperSelectedSlotIndex = null
+                    },
                 )
+
+                val upperSelectedPokemonList = remember(upperMultiSelectedSlots, upperState) {
+                    if (upperMultiSelectedSlots.isEmpty()) emptyList()
+                    else {
+                        val allEntries: List<PokemonSummaryDto> = if (upperState.isPartyMode) {
+                            upperState.gameSave?.party ?: emptyList()
+                        } else if (upperState.containerType is StorageContainerType.PersonalVault) {
+                            upperState.vaultBox?.entries?.map { it.toSummaryDto() } ?: emptyList()
+                        } else {
+                            upperState.gameSave?.boxes?.firstOrNull { it.boxIndex == upperState.selectedBoxIndex }?.entries ?: emptyList()
+                        }
+                        allEntries.filter { upperMultiSelectedSlots.contains(it.slotIndex) }
+                    }
+                }
+
+                val lowerSelectedPokemonList = remember(lowerMultiSelectedSlots, lowerState) {
+                    if (lowerMultiSelectedSlots.isEmpty()) emptyList()
+                    else {
+                        val allEntries: List<PokemonSummaryDto> = if (lowerState.isPartyMode) {
+                            lowerState.gameSave?.party ?: emptyList()
+                        } else if (lowerState.containerType is StorageContainerType.PersonalVault) {
+                            lowerState.vaultBox?.entries?.map { it.toSummaryDto() } ?: emptyList()
+                        } else {
+                            lowerState.gameSave?.boxes?.firstOrNull { it.boxIndex == lowerState.selectedBoxIndex }?.entries ?: emptyList()
+                        }
+                        allEntries.filter { lowerMultiSelectedSlots.contains(it.slotIndex) }
+                    }
+                }
+
+                val activeMultiSide = when {
+                    upperMultiSelectedSlots.isNotEmpty() -> TransferSide.Source
+                    lowerMultiSelectedSlots.isNotEmpty() -> TransferSide.Destination
+                    else -> null
+                }
+                val activeMultiCount = when (activeMultiSide) {
+                    TransferSide.Source -> upperMultiSelectedSlots.size
+                    TransferSide.Destination -> lowerMultiSelectedSlots.size
+                    null -> 0
+                }
 
                 // ACTION TRANSFER BRIDGE
                 PokemonActionBridge(
@@ -1094,6 +1285,60 @@ fun PokemonVaultScreen(
                             inspectedPokemonIsVault = selectedPokemonItem?.isVault
                             inspectedPokemonNavigationList = listOf(pkm)
                             inspectedPokemonIndex = 0
+                        }
+                    },
+                    multiSelectedCount = activeMultiCount,
+                    multiSelectedSide = activeMultiSide,
+                    onExecuteMultiTransfer = {
+                        if (activeMultiSide == TransferSide.Source) {
+                            val ids = upperSelectedPokemonList.map { it.id }
+                            bulkTransferConfirmation = BulkTransferConfirmation(
+                                direction = TransferSide.Source,
+                                count = ids.size,
+                                fromName = upperState.currentBoxName,
+                                toName = lowerState.currentBoxName,
+                                selectedIds = ids,
+                            )
+                        } else if (activeMultiSide == TransferSide.Destination) {
+                            val ids = lowerSelectedPokemonList.map { it.id }
+                            bulkTransferConfirmation = BulkTransferConfirmation(
+                                direction = TransferSide.Destination,
+                                count = ids.size,
+                                fromName = lowerState.currentBoxName,
+                                toName = upperState.currentBoxName,
+                                selectedIds = ids,
+                            )
+                        }
+                    },
+                    onClearMultiSelection = {
+                        upperMultiSelectedSlots = emptySet()
+                        isUpperMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
+                        isLowerMultiSelectMode = false
+                    },
+                    upperBoxOccupiedCount = upperState.currentOccupiedCount,
+                    lowerBoxOccupiedCount = lowerState.currentOccupiedCount,
+                    upperBoxName = upperState.currentBoxName,
+                    lowerBoxName = lowerState.currentBoxName,
+                    upperIsLocked = upperState.isLocked,
+                    lowerIsLocked = lowerState.isLocked,
+                    onTransferEntireBox = { direction ->
+                        if (direction == TransferSide.Source) {
+                            bulkTransferConfirmation = BulkTransferConfirmation(
+                                direction = TransferSide.Source,
+                                count = upperState.currentOccupiedCount,
+                                fromName = upperState.currentBoxName,
+                                toName = lowerState.currentBoxName,
+                                selectedIds = null,
+                            )
+                        } else {
+                            bulkTransferConfirmation = BulkTransferConfirmation(
+                                direction = TransferSide.Destination,
+                                count = lowerState.currentOccupiedCount,
+                                fromName = lowerState.currentBoxName,
+                                toName = upperState.currentBoxName,
+                                selectedIds = null,
+                            )
                         }
                     },
                 )
@@ -1113,31 +1358,45 @@ fun PokemonVaultScreen(
                         )
                         loadContainerData(TransferSide.Destination)
                         lowerSelectedSlotIndex = null
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                     },
                     onPreviousBox = {
                         val prev = if (lowerState.selectedBoxIndex > 1) lowerState.selectedBoxIndex - 1 else lowerState.totalBoxes
                         lowerState = lowerState.copy(selectedBoxIndex = prev)
                         loadContainerData(TransferSide.Destination)
                         lowerSelectedSlotIndex = null
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                     },
                     onNextBox = {
                         val next = if (lowerState.selectedBoxIndex < lowerState.totalBoxes) lowerState.selectedBoxIndex + 1 else 1
                         lowerState = lowerState.copy(selectedBoxIndex = next)
                         loadContainerData(TransferSide.Destination)
                         lowerSelectedSlotIndex = null
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                     },
                     onSelectBox = { targetIndex ->
                         val clamped = targetIndex.coerceIn(1, lowerState.totalBoxes)
                         lowerState = lowerState.copy(selectedBoxIndex = clamped)
                         loadContainerData(TransferSide.Destination)
                         lowerSelectedSlotIndex = null
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                     },
                     onTogglePartyMode = {
                         lowerState = lowerState.copy(isPartyMode = !lowerState.isPartyMode)
                         lowerSelectedSlotIndex = null
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                     },
                     onSelectSlot = { slot, pokemon ->
                         lowerSelectedSlotIndex = slot
+                        isUpperMultiSelectMode = false
+                        upperMultiSelectedSlots = emptySet()
+                        isLowerMultiSelectMode = false
+                        lowerMultiSelectedSlots = emptySet()
                         if (pokemon != null) {
                             val isVault = lowerState.containerType is StorageContainerType.PersonalVault
                             val gameId = (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
@@ -1175,6 +1434,40 @@ fun PokemonVaultScreen(
                     },
                     onSortBox = { criterion, ascending ->
                         handleSortBox(TransferSide.Destination, criterion, ascending)
+                    },
+                    isMultiSelectMode = isLowerMultiSelectMode,
+                    selectedMultiSlots = lowerMultiSelectedSlots,
+                    onToggleMultiSelectMode = {
+                        isLowerMultiSelectMode = !isLowerMultiSelectMode
+                        lowerMultiSelectedSlots = emptySet()
+                        if (isLowerMultiSelectMode) {
+                            selectedPokemonItem = null
+                            lowerSelectedSlotIndex = null
+                            isUpperMultiSelectMode = false
+                            upperMultiSelectedSlots = emptySet()
+                            upperSelectedSlotIndex = null
+                        }
+                    },
+                    onToggleMultiSelectSlot = { slot, _ ->
+                        lowerMultiSelectedSlots = if (lowerMultiSelectedSlots.contains(slot)) {
+                            lowerMultiSelectedSlots - slot
+                        } else {
+                            lowerMultiSelectedSlots + slot
+                        }
+                        selectedPokemonItem = null
+                        lowerSelectedSlotIndex = null
+                    },
+                    onSelectAllInBox = {
+                        val allEntries: List<PokemonSummaryDto> = if (lowerState.isPartyMode) {
+                            lowerState.gameSave?.party ?: emptyList()
+                        } else if (lowerState.containerType is StorageContainerType.PersonalVault) {
+                            lowerState.vaultBox?.entries?.map { it.toSummaryDto() } ?: emptyList()
+                        } else {
+                            lowerState.gameSave?.boxes?.firstOrNull { it.boxIndex == lowerState.selectedBoxIndex }?.entries ?: emptyList()
+                        }
+                        lowerMultiSelectedSlots = allEntries.map { it.slotIndex }.toSet()
+                        selectedPokemonItem = null
+                        lowerSelectedSlotIndex = null
                     },
                 )
 
@@ -1269,6 +1562,49 @@ fun PokemonVaultScreen(
             confirmButton = {
                 TextButton(onClick = { operationResultMessage = null }) {
                     Text("OK", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF1B1E2B),
+        )
+    }
+
+    // Bulk Transfer Confirmation Alert
+    if (bulkTransferConfirmation != null) {
+        val conf = bulkTransferConfirmation!!
+        AlertDialog(
+            onDismissRequest = { bulkTransferConfirmation = null },
+            modifier = Modifier.border(1.5.dp, VantafynGradients.accentHorizontal(), RoundedCornerShape(28.dp)),
+            title = {
+                Text(
+                    text = if (conf.selectedIds == null) "Transfer Entire Box?" else "Transfer ${conf.count} Pokémon?",
+                    color = VantafynColors.Ink,
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Text(
+                    text = if (conf.selectedIds == null)
+                        "Are you sure you want to transfer all ${conf.count} Pokémon from ${conf.fromName} into ${conf.toName}?"
+                    else
+                        "Are you sure you want to transfer ${conf.count} selected Pokémon from ${conf.fromName} into ${conf.toName}?",
+                    color = VantafynColors.Ink,
+                    fontSize = 13.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val target = conf
+                        bulkTransferConfirmation = null
+                        executeBulkTransfer(target.direction, target.selectedIds)
+                    }
+                ) {
+                    Text("Transfer", color = Color(0xFF00E5FF), fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { bulkTransferConfirmation = null }) {
+                    Text("Cancel", color = VantafynColors.Muted)
                 }
             },
             containerColor = Color(0xFF1B1E2B),

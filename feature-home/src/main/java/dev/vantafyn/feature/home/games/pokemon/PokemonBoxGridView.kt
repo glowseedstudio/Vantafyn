@@ -60,6 +60,9 @@ fun PokemonBoxGridView(
     isParty: Boolean = false,
     isLocked: Boolean = false,
     onOpenDetails: ((PokemonSummaryDto) -> Unit)? = null,
+    isMultiSelectMode: Boolean = false,
+    selectedSlotIndices: Set<Int> = emptySet(),
+    onToggleMultiSelectSlot: ((Int, PokemonSummaryDto) -> Unit)? = null,
 ) {
     val totalSlots = if (isParty) 6 else 30
     val columns = if (isParty) 3 else 6
@@ -83,7 +86,11 @@ fun PokemonBoxGridView(
                 for (colIndex in 0 until columns) {
                     val slotIndex = (rowIndex * columns) + colIndex + 1
                     val pokemon = entriesBySlot[slotIndex]
-                    val isSelected = selectedSlotIndex == slotIndex
+                    val isSelected = if (isMultiSelectMode) {
+                        selectedSlotIndices.contains(slotIndex)
+                    } else {
+                        selectedSlotIndex == slotIndex
+                    }
 
                     PokemonSlotCell(
                         slotIndex = slotIndex,
@@ -91,14 +98,21 @@ fun PokemonBoxGridView(
                         isSelected = isSelected,
                         isLocked = isLocked,
                         isParty = isParty,
+                        isMultiSelectMode = isMultiSelectMode,
                         onClick = {
                             if (!isLocked) {
-                                onSelectSlot(slotIndex, pokemon)
+                                if (isMultiSelectMode) {
+                                    if (pokemon != null) {
+                                        onToggleMultiSelectSlot?.invoke(slotIndex, pokemon)
+                                    }
+                                } else {
+                                    onSelectSlot(slotIndex, pokemon)
+                                }
                             }
                         },
                         onOpenDetails = onOpenDetails?.let { cb ->
                             {
-                                if (pokemon != null) {
+                                if (pokemon != null && !isMultiSelectMode) {
                                     cb(pokemon)
                                 }
                             }
@@ -120,6 +134,7 @@ fun PokemonSlotCell(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     isParty: Boolean = false,
+    isMultiSelectMode: Boolean = false,
     onOpenDetails: (() -> Unit)? = null,
 ) {
     var lastTapTime by remember { mutableLongStateOf(0L) }
@@ -198,12 +213,30 @@ fun PokemonSlotCell(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(1.dp),
                     ) {
-                        Text(
-                            text = "#$slotIndex",
-                            color = VantafynColors.Muted.copy(alpha = 0.5f),
-                            fontSize = if (isParty) 9.sp else 7.5.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
+                        if (isMultiSelectMode) {
+                            if (isSelected) {
+                                Icon(
+                                    imageVector = Icons.Rounded.CheckCircle,
+                                    contentDescription = "Selected",
+                                    tint = Color(0xFF00E5FF),
+                                    modifier = Modifier.size(if (isParty) 13.dp else 10.dp),
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(if (isParty) 12.dp else 9.dp)
+                                        .clip(CircleShape)
+                                        .border(1.dp, Color.White.copy(alpha = 0.4f), CircleShape)
+                                )
+                            }
+                        } else {
+                            Text(
+                                text = "#$slotIndex",
+                                color = VantafynColors.Muted.copy(alpha = 0.5f),
+                                fontSize = if (isParty) 9.sp else 7.5.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
                         if (pokemon.legalityStatus.equals("illegal", ignoreCase = true)) {
                             Icon(
                                 imageVector = Icons.Rounded.Warning,

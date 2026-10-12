@@ -11,8 +11,8 @@ android {
         applicationId = "dev.vantafyn.mobile"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 78
-        versionName = "0.9.69"
+        versionCode = 79
+        versionName = "0.9.70"
     }
 
     buildTypes {

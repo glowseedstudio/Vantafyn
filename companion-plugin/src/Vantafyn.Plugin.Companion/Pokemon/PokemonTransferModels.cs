@@ -327,3 +327,93 @@ public sealed class PokemonDiagnosticsDto
     [JsonPropertyName("activeTrades")]
     public int ActiveTrades { get; set; }
 }
+
+/// <summary>
+/// Request to bulk deposit Pokémon or an entire box into the personal vault.
+/// </summary>
+public sealed class PokemonBulkDepositRequest
+{
+    [JsonPropertyName("gameId")]
+    public string GameId { get; set; } = string.Empty;
+
+    [JsonPropertyName("sourceBoxIndex")]
+    public int? SourceBoxIndex { get; set; }
+
+    [JsonPropertyName("isParty")]
+    public bool IsParty { get; set; }
+
+    [JsonPropertyName("targetVaultBoxIndex")]
+    public int TargetVaultBoxIndex { get; set; } = 1;
+
+    [JsonPropertyName("pokemonIds")]
+    public List<string>? PokemonIds { get; set; }
+}
+
+/// <summary>
+/// Request to bulk withdraw Pokémon or an entire vault box back into a game save.
+/// </summary>
+public sealed class PokemonBulkWithdrawRequest
+{
+    [JsonPropertyName("gameId")]
+    public string GameId { get; set; } = string.Empty;
+
+    [JsonPropertyName("sourceVaultBoxIndex")]
+    public int SourceVaultBoxIndex { get; set; } = 1;
+
+    [JsonPropertyName("targetBoxIndex")]
+    public int TargetBoxIndex { get; set; } = 1;
+
+    [JsonPropertyName("vaultEntryIds")]
+    public List<string>? VaultEntryIds { get; set; }
+}
+
+/// <summary>
+/// Request to bulk transfer Pokémon or an entire box directly between two game saves.
+/// </summary>
+public sealed class PokemonBulkDirectTransferRequest
+{
+    [JsonPropertyName("sourceGameId")]
+    public string SourceGameId { get; set; } = string.Empty;
+
+    [JsonPropertyName("destinationGameId")]
+    public string DestinationGameId { get; set; } = string.Empty;
+
+    [JsonPropertyName("sourceBoxIndex")]
+    public int? SourceBoxIndex { get; set; }
+
+    [JsonPropertyName("sourceParty")]
+    public bool SourceParty { get; set; }
+
+    [JsonPropertyName("targetBoxIndex")]
+    public int TargetBoxIndex { get; set; } = 1;
+
+    [JsonPropertyName("pokemonIds")]
+    public List<string>? PokemonIds { get; set; }
+}
+
+/// <summary>
+/// Result of a bulk storage operation (deposit, withdraw, or direct transfer).
+/// </summary>
+public sealed class PokemonBulkOperationResponse
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("transferredCount")]
+    public int TransferredCount { get; set; }
+
+    [JsonPropertyName("failedCount")]
+    public int FailedCount { get; set; }
+
+    [JsonPropertyName("errors")]
+    public List<string> Errors { get; set; } = [];
+
+    [JsonPropertyName("backupCreated")]
+    public bool BackupCreated { get; set; }
+
+    [JsonPropertyName("backupId")]
+    public string? BackupId { get; set; }
+}

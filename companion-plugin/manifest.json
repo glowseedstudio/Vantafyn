@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.34.0",
+        "version": "0.2.35.0",
         "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.69/Vantafyn.Plugin.Companion_0.2.34_net9.zip",
-        "checksum": "40d9b030a1e5bdbe5883b8017c0fe085",
-        "timestamp": "2026-10-12T11:20:04Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.70/Vantafyn.Plugin.Companion_0.2.35_net9.zip",
+        "checksum": "06a55f396b740b056ab9f492ce32cd5b",
+        "timestamp": "2026-10-12T12:00:13Z"
       },
       {
-        "version": "0.2.34.1",
+        "version": "0.2.35.1",
         "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.69/Vantafyn.Plugin.Companion_0.2.34_net10.zip",
-        "checksum": "65293d264c2986f3aef9843b04c98173",
-        "timestamp": "2026-10-12T11:20:04Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.70/Vantafyn.Plugin.Companion_0.2.35_net10.zip",
+        "checksum": "d9875704b174946d0fa7a44ddbb24ea9",
+        "timestamp": "2026-10-12T12:00:13Z"
       },
       {
         "version": "0.2.31.0",
