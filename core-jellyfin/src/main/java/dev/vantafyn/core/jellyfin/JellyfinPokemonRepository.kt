@@ -1500,8 +1500,8 @@ class DefaultJellyfinPokemonRepository(
                 output.toByteArray()
             } ?: error("Unable to open the selected diploma screenshot.")
             val boundary = "VantafynDiploma${System.currentTimeMillis()}"
-            val safeGameId = java.net.URLEncoder.encode(gameId, "UTF-8")
-            val safeCertificateId = java.net.URLEncoder.encode(certificateId, "UTF-8")
+            val safeGameId = java.net.URLEncoder.encode(safeDiplomaGameId(gameId), "UTF-8")
+            val safeCertificateId = java.net.URLEncoder.encode(safeDiplomaCertificateId(certificateId), "UTF-8")
             val conn = session.openAuthenticatedConnection(
                 "Vantafyn/Pokemon/Diplomas/Proofs/$safeGameId/$safeCertificateId",
                 "POST",
@@ -1803,4 +1803,22 @@ class DefaultJellyfinPokemonRepository(
             for (i in 0 until length()) add(optInt(i))
         }
     }
+}
+
+fun safeDiplomaGameId(gameId: String): String {
+    val clean = gameId.filter { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }
+    if (clean.length in 1..64 && clean == gameId) return clean
+    val md = java.security.MessageDigest.getInstance("MD5")
+    val hash = md.digest(gameId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    val prefix = clean.take(24).trimEnd('.', '-', '_').ifBlank { "game" }
+    return "${prefix}_$hash".take(64)
+}
+
+fun safeDiplomaCertificateId(certificateId: String): String {
+    val clean = certificateId.filter { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }
+    if (clean.length in 1..64 && clean == certificateId) return clean
+    val md = java.security.MessageDigest.getInstance("MD5")
+    val hash = md.digest(certificateId.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    val prefix = clean.take(24).trimEnd('.', '-', '_').ifBlank { "diploma" }
+    return "${prefix}_$hash".take(64)
 }

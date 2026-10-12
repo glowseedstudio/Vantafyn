@@ -23,7 +23,8 @@ public sealed class PokemonProviderFactory(
         if (!string.IsNullOrWhiteSpace(config.PkVaultBaseUrl) &&
             config.ProviderType.Equals("pkvault", StringComparison.OrdinalIgnoreCase))
         {
-            return new PkVaultPokemonProvider(httpClientFactory, config, pkVaultLogger);
+            var pkVault = new PkVaultPokemonProvider(httpClientFactory, config, pkVaultLogger);
+            return new ResilientPokemonProvider(pkVault, _nativeProvider, pkVaultLogger);
         }
 
         return _nativeProvider;

@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.32.0",
-        "changelog": "Adds full Pokémon Ribbon/Trophy Cabinet extraction in Native Gen 3 Save Parser, support for all 58 TMs and HMs, and comprehensive Event Vault support across Generations 2 through 7.",
+        "version": "0.2.34.0",
+        "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.68/Vantafyn.Plugin.Companion_0.2.32_net9.zip",
-        "checksum": "c7fea715f5ff7485c71f2e0c6a7cf3b6",
-        "timestamp": "2026-10-11T09:01:35Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.69/Vantafyn.Plugin.Companion_0.2.34_net9.zip",
+        "checksum": "40d9b030a1e5bdbe5883b8017c0fe085",
+        "timestamp": "2026-10-12T11:20:04Z"
       },
       {
-        "version": "0.2.32.1",
-        "changelog": "Adds full Pokémon Ribbon/Trophy Cabinet extraction in Native Gen 3 Save Parser, support for all 58 TMs and HMs, and comprehensive Event Vault support across Generations 2 through 7.",
+        "version": "0.2.34.1",
+        "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.68/Vantafyn.Plugin.Companion_0.2.32_net10.zip",
-        "checksum": "70c611a2d12ed2766b685cf4f028eb0a",
-        "timestamp": "2026-10-11T09:01:35Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.69/Vantafyn.Plugin.Companion_0.2.34_net10.zip",
+        "checksum": "65293d264c2986f3aef9843b04c98173",
+        "timestamp": "2026-10-12T11:20:04Z"
       },
       {
         "version": "0.2.31.0",

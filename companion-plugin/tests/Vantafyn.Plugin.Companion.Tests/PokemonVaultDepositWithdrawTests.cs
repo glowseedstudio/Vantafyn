@@ -291,6 +291,40 @@ public sealed class PokemonVaultDepositWithdrawTests
         Assert.Equal(harness.OriginalSaveBytes, currentSaveBytes);
     }
 
+    [Fact]
+    public async Task ResilientPokemonProvider_FallsBackToNative_WhenPrimaryFails()
+    {
+        var primaryMock = new TestPokemonProvider([0x01], failExtract: true, failInject: true);
+        var fallbackMock = new TestPokemonProvider([0x02], failExtract: false, failInject: false);
+        var resilient = new ResilientPokemonProvider(primaryMock, fallbackMock, NullLogger<ResilientPokemonProvider>.Instance);
+
+        var extractResult = await resilient.ExtractPokemonFromSaveAsync(
+            [0x00], "emerald", "gba", 3, "p1", false, 1, 1, CancellationToken.None);
+
+        Assert.True(extractResult.IsSuccess);
+        Assert.Equal(new byte[] { 0x02 }, extractResult.UpdatedSaveBytes);
+
+        var injectResult = await resilient.InjectPokemonIntoSaveAsync(
+            [0x00], "emerald", "gba", 3, new PokemonVaultEntry { Id = "p1" }, 1, 1, false, CancellationToken.None);
+
+        Assert.True(injectResult.IsSuccess);
+        Assert.Equal(new byte[] { 0x02 }, injectResult.UpdatedSaveBytes);
+    }
+
+    [Fact]
+    public async Task ResilientPokemonProvider_UsesPrimary_WhenPrimarySucceeds()
+    {
+        var primaryMock = new TestPokemonProvider([0x01], failExtract: false, failInject: false);
+        var fallbackMock = new TestPokemonProvider([0x02], failExtract: false, failInject: false);
+        var resilient = new ResilientPokemonProvider(primaryMock, fallbackMock, NullLogger<ResilientPokemonProvider>.Instance);
+
+        var extractResult = await resilient.ExtractPokemonFromSaveAsync(
+            [0x00], "emerald", "gba", 3, "p1", false, 1, 1, CancellationToken.None);
+
+        Assert.True(extractResult.IsSuccess);
+        Assert.Equal(new byte[] { 0x01 }, extractResult.UpdatedSaveBytes);
+    }
+
     private sealed class TestHarness : IDisposable
     {
         private readonly TempPaths _tempPaths = new();

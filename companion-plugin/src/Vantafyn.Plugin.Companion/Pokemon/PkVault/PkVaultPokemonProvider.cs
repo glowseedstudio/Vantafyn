@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -11,6 +12,13 @@ namespace Vantafyn.Plugin.Companion.Pokemon.PkVault;
 /// </summary>
 public sealed class PkVaultPokemonProvider : IPokemonProvider
 {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString | JsonNumberHandling.AllowNamedFloatingPointLiterals,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly PokemonConfiguration _config;
     private readonly ILogger<PkVaultPokemonProvider> _logger;
@@ -260,7 +268,7 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         try
         {
             // 1. Upload ephemeral save via POST /api/save-infos?saveFilesNames={name}&overwrite=true
-            var ephemeralFileName = $"vantafyn_{Guid.NewGuid():N}_{pokemonGameId}.sav";
+            var ephemeralFileName = $"vantafyn_{Guid.NewGuid():N}.sav";
             using var formData = new MultipartFormDataContent();
             var fileContent = new ByteArrayContent(saveBytes);
             fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -279,9 +287,8 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var dataDto = await uploadResponse.Content.ReadFromJsonAsync<PkVaultDataDto>(cancellationToken: cts.Token).ConfigureAwait(false);
-            var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
-            if (saveInfo == null)
+            var resolvedInfo = await ResolveSaveInfoAsync(client, uploadResponse, ephemeralFileName, cts.Token).ConfigureAwait(false);
+            if (resolvedInfo == null)
             {
                 return new PokemonSaveParseResult
                 {
@@ -290,15 +297,15 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var saveId = saveInfo.Id;
-            stagedPath = saveInfo.Path;
+            var (saveId, stagedPathVal, saveInfo, dataDto) = resolvedInfo.Value;
+            stagedPath = stagedPathVal;
 
             // 2. Fetch PC box layouts via GET /api/storage/box?saveId={saveId}
             var boxResponse = await client.GetAsync($"/api/storage/box?saveId={saveId}", cts.Token).ConfigureAwait(false);
             List<PkVaultBoxItemDto>? boxesList = null;
             if (boxResponse.IsSuccessStatusCode)
             {
-                boxesList = await boxResponse.Content.ReadFromJsonAsync<List<PkVaultBoxItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false);
+                boxesList = await boxResponse.Content.ReadFromJsonAsync<List<PkVaultBoxItemDto>>(JsonOptions, cts.Token).ConfigureAwait(false);
             }
 
             var pcBoxes = boxesList?.Where(b => b.Type == 0).OrderBy(b => b.Order).ToList();
@@ -358,11 +365,11 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
             var result = new PokemonSaveParseResult
             {
                 IsSuccess = true,
-                DetectedGeneration = saveInfo.Generation,
-                TrainerName = saveInfo.TrainerName,
-                TrainerId = saveInfo.Tid > 0 ? saveInfo.Tid.ToString() : null,
-                PokedexSeen = saveInfo.DexSeenCount,
-                PokedexCaught = saveInfo.DexCaughtCount
+                DetectedGeneration = saveInfo?.Generation > 0 ? saveInfo.Generation : (generation > 0 ? generation : 3),
+                TrainerName = saveInfo?.TrainerName ?? "Trainer",
+                TrainerId = (saveInfo != null && saveInfo.Tid > 0) ? saveInfo.Tid.ToString() : null,
+                PokedexSeen = saveInfo?.DexSeenCount ?? 0,
+                PokedexCaught = saveInfo?.DexCaughtCount ?? 0
             };
 
             // 4. Map Party Pokémon (Party >= 0)
@@ -712,7 +719,7 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         try
         {
             // 1. Upload temporary save via POST /api/save-infos?saveFilesNames={name}&overwrite=true
-            var ephemeralFileName = $"extract_{Guid.NewGuid():N}_{pokemonGameId}.sav";
+            var ephemeralFileName = $"extract_{Guid.NewGuid():N}.sav";
             using var formData = new MultipartFormDataContent();
             var fileContent = new ByteArrayContent(saveBytes);
             fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -731,9 +738,8 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var dataDto = await uploadResponse.Content.ReadFromJsonAsync<PkVaultDataDto>(cancellationToken: cts.Token).ConfigureAwait(false);
-            var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
-            if (saveInfo == null)
+            var resolvedInfo = await ResolveSaveInfoAsync(client, uploadResponse, ephemeralFileName, cts.Token).ConfigureAwait(false);
+            if (resolvedInfo == null)
             {
                 return new PokemonExtractResult
                 {
@@ -742,8 +748,8 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var saveId = saveInfo.Id;
-            stagedPath = saveInfo.Path;
+            var (saveId, stagedPathVal, _, _) = resolvedInfo.Value;
+            stagedPath = stagedPathVal;
 
             // 2. Locate the Pokémon to extract via GET /api/storage/save/{saveId}/pkm
             var pkmResponse = await client.GetAsync($"/api/storage/save/{saveId}/pkm", cts.Token).ConfigureAwait(false);
@@ -756,7 +762,7 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var pkmList = await pkmResponse.Content.ReadFromJsonAsync<List<PkVaultPkmSaveItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false) ?? [];
+            var pkmList = await pkmResponse.Content.ReadFromJsonAsync<List<PkVaultPkmSaveItemDto>>(JsonOptions, cts.Token).ConfigureAwait(false) ?? [];
 
             // Match Pokémon by ID, party slot, or box slot
             PkVaultPkmSaveItemDto? targetPkm = null;
@@ -903,7 +909,7 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         try
         {
             // 1. Upload temporary save via POST /api/save-infos?saveFilesNames={name}&overwrite=true
-            var ephemeralFileName = $"inject_{Guid.NewGuid():N}_{pokemonGameId}.sav";
+            var ephemeralFileName = $"inject_{Guid.NewGuid():N}.sav";
             using var formData = new MultipartFormDataContent();
             var fileContent = new ByteArrayContent(saveBytes);
             fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
@@ -922,9 +928,8 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var dataDto = await uploadResponse.Content.ReadFromJsonAsync<PkVaultDataDto>(cancellationToken: cts.Token).ConfigureAwait(false);
-            var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
-            if (saveInfo == null)
+            var resolvedInfo = await ResolveSaveInfoAsync(client, uploadResponse, ephemeralFileName, cts.Token).ConfigureAwait(false);
+            if (resolvedInfo == null)
             {
                 return new PokemonInjectResult
                 {
@@ -933,15 +938,15 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
                 };
             }
 
-            var saveId = saveInfo.Id;
-            stagedPath = saveInfo.Path;
+            var (saveId, stagedPathVal, _, _) = resolvedInfo.Value;
+            stagedPath = stagedPathVal;
 
             // 2. Find target box via GET /api/storage/box?saveId={saveId}
             var boxResponse = await client.GetAsync($"/api/storage/box?saveId={saveId}", cts.Token).ConfigureAwait(false);
             List<PkVaultBoxItemDto>? boxesList = null;
             if (boxResponse.IsSuccessStatusCode)
             {
-                boxesList = await boxResponse.Content.ReadFromJsonAsync<List<PkVaultBoxItemDto>>(cancellationToken: cts.Token).ConfigureAwait(false);
+                boxesList = await boxResponse.Content.ReadFromJsonAsync<List<PkVaultBoxItemDto>>(JsonOptions, cts.Token).ConfigureAwait(false);
             }
 
             PkVaultBoxItemDto? targetBox = null;
@@ -1039,6 +1044,191 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         }
     }
 
+    private async Task<(int saveId, string stagedPath, PkVaultSaveInfoDto? saveInfo, PkVaultDataDto? dataDto)?> ResolveSaveInfoAsync(
+        HttpClient client,
+        HttpResponseMessage uploadResponse,
+        string ephemeralFileName,
+        CancellationToken cancellationToken)
+    {
+        string? contentString = null;
+        try
+        {
+            contentString = await uploadResponse.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed reading response content from PKVault save-infos upload");
+        }
+
+        if (!string.IsNullOrWhiteSpace(contentString))
+        {
+            // 1. Try deserializing as PkVaultDataDto
+            try
+            {
+                var dataDto = JsonSerializer.Deserialize<PkVaultDataDto>(contentString, JsonOptions);
+                var saveInfo = dataDto?.SaveInfos?.Values.FirstOrDefault();
+                if (saveInfo != null && saveInfo.Id > 0)
+                {
+                    return (saveInfo.Id, saveInfo.Path ?? string.Empty, saveInfo, dataDto);
+                }
+
+                // Check saves list if saveInfos dictionary is empty or keyed differently
+                var dataSave = dataDto?.Saves?.FirstOrDefault();
+                if (dataSave != null && dataSave.SaveId > 0)
+                {
+                    var matchedInfo = dataDto?.SaveInfos?.Values.FirstOrDefault(s => s.Id == dataSave.SaveId);
+                    var path = matchedInfo?.Path ?? string.Empty;
+                    return (dataSave.SaveId, path, matchedInfo, dataDto);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed standard PkVaultDataDto deserialization, attempting JsonDocument inspection");
+            }
+
+            // 2. Try inspecting JSON via JsonDocument
+            try
+            {
+                using var doc = JsonDocument.Parse(contentString);
+                var root = doc.RootElement;
+
+                // Check "saveInfos" object/dictionary
+                if (root.TryGetProperty("saveInfos", out var saveInfosEl) ||
+                    root.TryGetProperty("SaveInfos", out saveInfosEl) ||
+                    root.TryGetProperty("save_infos", out saveInfosEl))
+                {
+                    if (saveInfosEl.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var prop in saveInfosEl.EnumerateObject())
+                        {
+                            if (prop.Value.ValueKind == JsonValueKind.Object)
+                            {
+                                int id = 0;
+                                string path = string.Empty;
+                                if (prop.Value.TryGetProperty("id", out var idProp) || prop.Value.TryGetProperty("Id", out idProp))
+                                {
+                                    if (idProp.ValueKind == JsonValueKind.Number && idProp.TryGetInt32(out var parsedId)) id = parsedId;
+                                    else if (idProp.ValueKind == JsonValueKind.String && int.TryParse(idProp.GetString(), out var sId)) id = sId;
+                                }
+                                if (prop.Value.TryGetProperty("path", out var pathProp) || prop.Value.TryGetProperty("Path", out pathProp))
+                                {
+                                    path = pathProp.GetString() ?? string.Empty;
+                                }
+
+                                if (id > 0)
+                                {
+                                    return (id, path, null, null);
+                                }
+                            }
+                        }
+                    }
+                    else if (saveInfosEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in saveInfosEl.EnumerateArray())
+                        {
+                            int id = 0;
+                            string path = string.Empty;
+                            if (item.TryGetProperty("id", out var idProp) || item.TryGetProperty("Id", out idProp))
+                            {
+                                if (idProp.ValueKind == JsonValueKind.Number && idProp.TryGetInt32(out var parsedId)) id = parsedId;
+                                else if (idProp.ValueKind == JsonValueKind.String && int.TryParse(idProp.GetString(), out var sId)) id = sId;
+                            }
+                            if (item.TryGetProperty("path", out var pathProp) || item.TryGetProperty("Path", out pathProp))
+                            {
+                                path = pathProp.GetString() ?? string.Empty;
+                            }
+
+                            if (id > 0)
+                            {
+                                return (id, path, null, null);
+                            }
+                        }
+                    }
+                }
+
+                // Check "saves" array
+                if (root.TryGetProperty("saves", out var savesEl) || root.TryGetProperty("Saves", out savesEl))
+                {
+                    if (savesEl.ValueKind == JsonValueKind.Array)
+                    {
+                        foreach (var item in savesEl.EnumerateArray())
+                        {
+                            if ((item.TryGetProperty("saveId", out var sidProp) || item.TryGetProperty("SaveId", out sidProp) ||
+                                 item.TryGetProperty("id", out sidProp) || item.TryGetProperty("Id", out sidProp)) &&
+                                (sidProp.ValueKind == JsonValueKind.Number && sidProp.TryGetInt32(out var sId) ||
+                                 sidProp.ValueKind == JsonValueKind.String && int.TryParse(sidProp.GetString(), out sId)))
+                            {
+                                if (sId > 0)
+                                {
+                                    return (sId, string.Empty, null, null);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed JsonDocument fallback inspection of PKVault upload response");
+            }
+        }
+
+        // 3. Fallback: query GET /api/save-infos to discover newly registered or active save
+        try
+        {
+            var listResp = await client.GetAsync("/api/save-infos", cancellationToken).ConfigureAwait(false);
+            if (listResp.IsSuccessStatusCode)
+            {
+                var listJson = await listResp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                using var doc = JsonDocument.Parse(listJson);
+                if (doc.RootElement.ValueKind == JsonValueKind.Object)
+                {
+                    int bestId = 0;
+                    string bestPath = string.Empty;
+                    foreach (var prop in doc.RootElement.EnumerateObject())
+                    {
+                        if (prop.Value.ValueKind == JsonValueKind.Object)
+                        {
+                            int id = 0;
+                            string path = string.Empty;
+                            if (prop.Value.TryGetProperty("id", out var idProp) || prop.Value.TryGetProperty("Id", out idProp))
+                            {
+                                if (idProp.ValueKind == JsonValueKind.Number && idProp.TryGetInt32(out var parsedId)) id = parsedId;
+                                else if (idProp.ValueKind == JsonValueKind.String && int.TryParse(idProp.GetString(), out var sId)) id = sId;
+                            }
+                            if (prop.Value.TryGetProperty("path", out var pathProp) || prop.Value.TryGetProperty("Path", out pathProp))
+                            {
+                                path = pathProp.GetString() ?? string.Empty;
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(ephemeralFileName) && path.Contains(ephemeralFileName, StringComparison.OrdinalIgnoreCase))
+                            {
+                                return (id, path, null, null);
+                            }
+
+                            if (id > bestId)
+                            {
+                                bestId = id;
+                                bestPath = path;
+                            }
+                        }
+                    }
+
+                    if (bestId > 0)
+                    {
+                        return (bestId, bestPath, null, null);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed querying GET /api/save-infos as fallback");
+        }
+
+        return null;
+    }
+
     private sealed class PkVaultSettingsResponse
     {
         [JsonPropertyName("version")]
@@ -1123,7 +1313,7 @@ public sealed class PkVaultPokemonProvider : IPokemonProvider
         public uint Tid { get; set; }
 
         [JsonPropertyName("sid")]
-        public uint Sid { get; set; }
+        public uint? Sid { get; set; }
 
         [JsonPropertyName("generation")]
         public int Generation { get; set; }

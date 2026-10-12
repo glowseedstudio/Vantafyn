@@ -67,6 +67,8 @@ import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDiplomaProofDto
 import dev.vantafyn.core.jellyfin.PokemonGameSaveDto
 import dev.vantafyn.core.jellyfin.cleanGameTitle
+import dev.vantafyn.core.jellyfin.safeDiplomaCertificateId
+import dev.vantafyn.core.jellyfin.safeDiplomaGameId
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.feature.home.CompactBackButton
 import dev.vantafyn.feature.home.games.GameScreenReveal
@@ -194,7 +196,12 @@ fun PokemonDiplomaCaseScreen(
                     transitionSpec = { fadeIn() togetherWith fadeOut() },
                     label = "DiplomaCaseSelected",
                 ) { item ->
-                    val proof = proofs.firstOrNull { it.gameId == item.save.gameId && it.certificateId == item.certificateId }
+                    val safeGameId = safeDiplomaGameId(item.save.gameId)
+                    val safeCertId = safeDiplomaCertificateId(item.certificateId)
+                    val proof = proofs.firstOrNull {
+                        (it.gameId == item.save.gameId || it.gameId == safeGameId) &&
+                        (it.certificateId == item.certificateId || it.certificateId == safeCertId)
+                    }
                     DiplomaStage(
                         item = item,
                         proof = proof,

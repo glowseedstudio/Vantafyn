@@ -3397,7 +3397,7 @@ public sealed class PokemonController : ControllerBase
 
     private static bool IsSafeDiplomaSlug(string value) =>
         !string.IsNullOrWhiteSpace(value) &&
-        value.Length <= 96 &&
+        value.Length <= 512 &&
         value.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.');
 
     private static string? NormalizeDiplomaImageContentType(string? contentType, string fileName)

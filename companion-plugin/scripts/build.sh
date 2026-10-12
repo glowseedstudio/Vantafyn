@@ -8,7 +8,7 @@ ARTIFACTS="$ROOT/artifacts"
 VERSION="${1:-0.2.32}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
 TAG="${2:-v0.9.68}"
-CHANGELOG="Adds full Pokémon Ribbon/Trophy Cabinet extraction in Native Gen 3 Save Parser, support for all 58 TMs and HMs, and comprehensive Event Vault support across Generations 2 through 7."
+CHANGELOG="Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
