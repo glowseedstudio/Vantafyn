@@ -57,6 +57,24 @@ object Gen3NativeSaveParser {
         "Calm", "Gentle", "Sassy", "Careful", "Quirky",
     )
 
+    fun gen3InternalIdToNationalDex(internalId: Int): Int {
+        if (internalId <= 0) return 0
+        if (internalId <= 251) return internalId
+        if (internalId <= 276) return 0
+        if (internalId <= 382) return internalId - 25 // 277..382 -> 252..357 (Treecko to Tropius)
+        if (internalId <= 410) return internalId - 24 // 383..410 -> 359..386 (Absol to Deoxys)
+        if (internalId == 411) return 358 // Chimecho
+        return 0
+    }
+
+    fun nationalDexToGen3InternalId(nationalDexId: Int): Int {
+        if (nationalDexId <= 0 || nationalDexId > 386) return 0
+        if (nationalDexId <= 251) return nationalDexId
+        if (nationalDexId == 358) return 411
+        if (nationalDexId <= 357) return nationalDexId + 25
+        return nationalDexId + 24
+    }
+
     fun resolveSpeciesName(id: Int): String {
         return PokemonSpeciesCatalog.resolveSpeciesName(id)
     }
@@ -597,8 +615,9 @@ object Gen3NativeSaveParser {
             }
         }
 
-        val speciesId = (decrypted[gOffset].toInt() and 0xFF) or ((decrypted[gOffset + 1].toInt() and 0xFF) shl 8)
-        if (speciesId <= 0 || speciesId > 412) return null
+        val rawSpeciesId = (decrypted[gOffset].toInt() and 0xFF) or ((decrypted[gOffset + 1].toInt() and 0xFF) shl 8)
+        if (rawSpeciesId <= 0 || rawSpeciesId > 412) return null
+        val speciesId = gen3InternalIdToNationalDex(rawSpeciesId).let { if (it > 0) it else if (rawSpeciesId <= 386) rawSpeciesId else return null }
 
         // Substructure Growth
         val heldItemId = (decrypted[gOffset + 2].toInt() and 0xFF) or ((decrypted[gOffset + 3].toInt() and 0xFF) shl 8)

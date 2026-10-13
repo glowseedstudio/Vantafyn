@@ -221,14 +221,6 @@ object PokemonRibbonCatalog {
             KNOWN_RIBBONS["footprint"]?.let { result["footprint"] = it }
         }
 
-        // 4. Deterministic: Champion Ribbon for high-level adventure companions (Level 55+ from campaign games)
-        if (level >= 55) {
-            val champKey = resolveChampionRibbonKey(originGame, generation)
-            if (champKey.isNotBlank() && !result.containsKey(champKey)) {
-                KNOWN_RIBBONS[champKey]?.let { result[it.key] = it }
-            }
-        }
-
         return result.values.sortedWith(
             compareBy<PokemonRibbonDto> { getCategoryOrder(it.category) }.thenBy { it.name }
         )

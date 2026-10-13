@@ -96,12 +96,15 @@ public sealed class PkVaultStaticCatalog
         _abilityNames[69] = "Rock Head";
         _abilityNames[71] = "Arena Trap";
         _abilityNames[72] = "Vital Spirit";
-        _abilityNames[75] = "Shell Armor";
         _itemNames[236] = "Light Ball";
-        _moveNames[85] = "Thunderbolt";
-        _moveNames[98] = "Quick Attack";
-        _moveNames[231] = "Iron Tail";
-        _moveNames[344] = "Volt Tackle";
+        for (var i = 1; i <= 559; i++)
+        {
+            var moveName = PokemonMoveCatalog.ResolveMoveName(i);
+            if (!string.IsNullOrEmpty(moveName) && moveName != "———")
+            {
+                _moveNames[i] = moveName;
+            }
+        }
     }
 
     public string ResolveSpeciesName(int speciesId, string? nickname, bool isNicknamed)
@@ -171,7 +174,12 @@ public sealed class PkVaultStaticCatalog
         {
             return name;
         }
-        return moveId.ToString();
+        var catalogName = PokemonMoveCatalog.ResolveMoveName(moveId);
+        if (!string.IsNullOrEmpty(catalogName) && catalogName != "———")
+        {
+            return catalogName;
+        }
+        return moveId > 0 ? $"Move #{moveId}" : "—";
     }
 
     public void PopulateFromStaticData(PkVaultStaticDataDto staticData)

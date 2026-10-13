@@ -76,6 +76,26 @@ public static class Gen3SaveParser
         [3, 2, 1, 0], // 23: MEAG
     ];
 
+    public static int Gen3InternalIdToNationalDex(int internalId)
+    {
+        if (internalId <= 0) return 0;
+        if (internalId <= 251) return internalId; // Gen 1 & Gen 2 (1..251)
+        if (internalId <= 276) return 0; // Unown placeholders / empty
+        if (internalId <= 382) return internalId - 25; // 277..382 -> 252..357 (Treecko to Tropius)
+        if (internalId <= 410) return internalId - 24; // 383..410 -> 359..386 (Absol to Deoxys)
+        if (internalId == 411) return 358; // Chimecho
+        return 0; // 412 is Egg
+    }
+
+    public static int NationalDexToGen3InternalId(int nationalDexId)
+    {
+        if (nationalDexId <= 0 || nationalDexId > 386) return 0;
+        if (nationalDexId <= 251) return nationalDexId; // Gen 1 & Gen 2
+        if (nationalDexId == 358) return 411; // Chimecho
+        if (nationalDexId <= 357) return nationalDexId + 25; // 252..357 -> 277..382 (Treecko to Tropius)
+        return nationalDexId + 24; // 359..386 -> 383..410 (Absol to Deoxys)
+    }
+
     public static bool IsGen3Save(byte[] saveBytes)
     {
         if (saveBytes == null || saveBytes.Length < SectionSize)
@@ -368,10 +388,21 @@ public static class Gen3SaveParser
         int eOffset = Array.IndexOf(order, 2) * 12;
         int mOffset = Array.IndexOf(order, 3) * 12;
 
-        ushort speciesId = BitConverter.ToUInt16(decrypted, gOffset + 0);
-        if (speciesId == 0 || speciesId > 412)
+        ushort rawSpeciesId = BitConverter.ToUInt16(decrypted, gOffset + 0);
+        if (rawSpeciesId == 0 || rawSpeciesId > 412)
         {
             return null; // Empty slot
+        }
+
+        int speciesId = Gen3InternalIdToNationalDex(rawSpeciesId);
+        if (speciesId <= 0)
+        {
+            // If already within National Dex range as fallback, keep it
+            speciesId = rawSpeciesId <= 386 ? rawSpeciesId : 0;
+        }
+        if (speciesId <= 0)
+        {
+            return null;
         }
 
         ushort heldItemId = BitConverter.ToUInt16(decrypted, gOffset + 2);
@@ -930,8 +961,12 @@ public static class Gen3SaveParser
 
         // Substructures
         var decrypted = new byte[48];
-        ushort specId = (ushort)Math.Clamp(entry.SpeciesId, 1, 386);
-        Array.Copy(BitConverter.GetBytes(specId), 0, decrypted, 0, 2); // Species in Growth block
+        ushort internalSpecId = (ushort)NationalDexToGen3InternalId(entry.SpeciesId);
+        if (internalSpecId == 0)
+        {
+            internalSpecId = (ushort)Math.Clamp(entry.SpeciesId, 1, 386);
+        }
+        Array.Copy(BitConverter.GetBytes(internalSpecId), 0, decrypted, 0, 2); // Species in Growth block
 
         // Encrypt with PID ^ OTID
         uint key = pid ^ otid;

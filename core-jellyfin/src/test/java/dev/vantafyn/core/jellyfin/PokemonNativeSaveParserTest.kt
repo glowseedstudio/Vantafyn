@@ -32,6 +32,33 @@ class PokemonNativeSaveParserTest {
     }
 
     @Test
+    fun gen3SpeciesIdMappingTranslatesDeoxysAndHoennPokemonCorrectly() {
+        // Deoxys: internal 410 -> National Dex 386 (Deoxys), not 410 (Shieldon)
+        assertEquals(386, Gen3NativeSaveParser.gen3InternalIdToNationalDex(410))
+        assertEquals(410, Gen3NativeSaveParser.nationalDexToGen3InternalId(386))
+
+        // Chimecho: internal 411 -> National Dex 358
+        assertEquals(358, Gen3NativeSaveParser.gen3InternalIdToNationalDex(411))
+        assertEquals(411, Gen3NativeSaveParser.nationalDexToGen3InternalId(358))
+
+        // Treecko: internal 277 -> National Dex 252
+        assertEquals(252, Gen3NativeSaveParser.gen3InternalIdToNationalDex(277))
+        assertEquals(277, Gen3NativeSaveParser.nationalDexToGen3InternalId(252))
+
+        // Tropius: internal 382 -> National Dex 357
+        assertEquals(357, Gen3NativeSaveParser.gen3InternalIdToNationalDex(382))
+        assertEquals(382, Gen3NativeSaveParser.nationalDexToGen3InternalId(357))
+
+        // Absol: internal 383 -> National Dex 359
+        assertEquals(359, Gen3NativeSaveParser.gen3InternalIdToNationalDex(383))
+        assertEquals(383, Gen3NativeSaveParser.nationalDexToGen3InternalId(359))
+
+        // Bulbasaur: internal 1 -> National Dex 1
+        assertEquals(1, Gen3NativeSaveParser.gen3InternalIdToNationalDex(1))
+        assertEquals(1, Gen3NativeSaveParser.nationalDexToGen3InternalId(1))
+    }
+
+    @Test
     fun heartGoldMetadataRejectsGen3ShapedSave() {
         val save = syntheticGen3Save()
 

@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.32}"
+VERSION="${1:-0.2.36}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.68}"
-CHANGELOG="Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization."
+TAG="${2:-v0.9.71}"
+CHANGELOG="Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.35.0",
+        "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.70/Vantafyn.Plugin.Companion_0.2.35_net9.zip",
+        "checksum": "06a55f396b740b056ab9f492ce32cd5b",
+        "timestamp": "2026-10-12T12:00:13Z"
+      },
+      {
+        "version": "0.2.35.1",
+        "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.70/Vantafyn.Plugin.Companion_0.2.35_net10.zip",
+        "checksum": "d9875704b174946d0fa7a44ddbb24ea9",
+        "timestamp": "2026-10-12T12:00:13Z"
       },
       {
         "version": "0.2.31.0",

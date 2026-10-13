@@ -273,16 +273,6 @@ public static class PokemonRibbonCatalog
             result["footprint"] = KnownRibbons["footprint"];
         }
 
-        // 4. Deterministic: Champion Ribbon for high-level adventure companions (Level 55+ from campaign games)
-        if (level >= 55)
-        {
-            var champKey = ResolveChampionRibbonKey(originGame, generation);
-            if (!string.IsNullOrEmpty(champKey) && KnownRibbons.TryGetValue(champKey, out var champRibbon))
-            {
-                result[champRibbon.Key] = champRibbon;
-            }
-        }
-
         return result.Values.OrderBy(r => GetCategoryOrder(r.Category)).ThenBy(r => r.Name).ToList();
     }
 

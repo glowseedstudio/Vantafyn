@@ -778,6 +778,26 @@ public sealed class PokemonController : ControllerBase
     }
 
     /// <summary>
+    /// Retrieves all non-empty vault boxes with their Pokémon entries for the current user.
+    /// </summary>
+    [HttpGet("Vault/AllBoxes")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<PokemonVaultBox>>> GetAllBoxes(CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound();
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var vault = await _vaultStore.GetOrCreateVaultAsync(userId, cancellationToken).ConfigureAwait(false);
+        var occupiedBoxes = vault.Boxes.Where(b => b.Entries.Count > 0).ToList();
+        return Ok(occupiedBoxes);
+    }
+
+    /// <summary>
     /// Retrieves the Pokémon entries inside a specific vault box (1-indexed) for the current user.
     /// </summary>
     [HttpGet("Vault/Boxes/{boxIndex:int}")]

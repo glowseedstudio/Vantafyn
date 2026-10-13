@@ -78,6 +78,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import dev.vantafyn.core.jellyfin.JellyfinPokemonRepository
+import dev.vantafyn.core.jellyfin.PokemonMoveCatalog
 import dev.vantafyn.core.jellyfin.JellyfinSession
 import dev.vantafyn.core.jellyfin.PokemonDetailsDto
 import dev.vantafyn.core.jellyfin.PokemonJourneyDto
@@ -116,6 +117,18 @@ fun PokemonDetailModal(
     onNavigateToIndex: ((Int) -> Unit)? = null,
     onDismiss: () -> Unit,
 ) {
+    val pokemon = remember(pokemon) {
+        val rawId = pokemon.speciesId
+        val origin = pokemon.originGame ?: ""
+        if (rawId == 410 && (pokemon.nickname.equals("DEOXYS", ignoreCase = true) || pokemon.species.equals("DEOXYS", ignoreCase = true) || pokemon.species.equals("Shieldon", ignoreCase = true))) {
+            pokemon.copy(speciesId = 386, species = "Deoxys")
+        } else if (rawId in 277..411 && (origin.contains("fire", ignoreCase = true) || origin.contains("leaf", ignoreCase = true) || origin.contains("ruby", ignoreCase = true) || origin.contains("sapph", ignoreCase = true) || origin.contains("emer", ignoreCase = true))) {
+            val nat = dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.gen3InternalIdToNationalDex(rawId)
+            if (nat > 0) pokemon.copy(speciesId = nat, species = PokemonSpeciesCatalog.resolveSpeciesName(nat)) else pokemon
+        } else {
+            pokemon
+        }
+    }
     var journey by remember { mutableStateOf<PokemonJourneyDto?>(null) }
     val canonicalFallback = remember(pokemon.id, pokemon.speciesId, pokemon.level) {
         PokemonSpeciesCatalog.generateCanonicalDetails(pokemon)
@@ -1772,6 +1785,10 @@ private fun MoveChip(
     modifier: Modifier = Modifier,
     isLegal: Boolean? = null,
 ) {
+    val displayName = moveName.toIntOrNull()?.let { id ->
+        PokemonMoveCatalog.resolveMoveName(id)
+    } ?: moveName
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(8.dp))
@@ -1790,15 +1807,15 @@ private fun MoveChip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = moveName,
-                color = if (moveName != "—") Color.White else VantafynColors.Muted,
+                text = displayName,
+                color = if (displayName != "—") Color.White else VantafynColors.Muted,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false),
             )
-            if (moveName != "—" && isLegal != null) {
+            if (displayName != "—" && isLegal != null) {
                 Icon(
                     imageVector = if (isLegal) Icons.Rounded.CheckCircle else Icons.Rounded.Cancel,
                     contentDescription = if (isLegal) "Legal Move" else "Illegal Move",
@@ -2093,8 +2110,9 @@ private fun PokemonLegalityReportDialog(
                     )
                     moves.forEachIndexed { idx, moveName ->
                         val moveLegal = details?.movesLegality?.getOrNull(idx) ?: true
+                        val resolvedMoveName = moveName.toIntOrNull()?.let { PokemonMoveCatalog.resolveMoveName(it) } ?: moveName
                         LegalityCheckRow(
-                            label = "Move ${idx + 1}: $moveName",
+                            label = "Move ${idx + 1}: $resolvedMoveName",
                             value = if (moveLegal) "Learnset Valid" else "Illegal Move",
                             isPass = moveLegal,
                         )

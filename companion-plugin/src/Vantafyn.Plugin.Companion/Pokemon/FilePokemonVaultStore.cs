@@ -460,6 +460,35 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
             }
         }
 
+        foreach (var b in vault.Boxes)
+        {
+            foreach (var entry in b.Entries)
+            {
+                if (entry.SpeciesId == 410 && (string.Equals(entry.Nickname, "DEOXYS", StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(entry.Species, "DEOXYS", StringComparison.OrdinalIgnoreCase) ||
+                                               string.Equals(entry.Species, "Shieldon", StringComparison.OrdinalIgnoreCase)))
+                {
+                    entry.SpeciesId = 386;
+                    entry.Species = "Deoxys";
+                }
+                else if (entry.SpeciesId is >= 277 and <= 411 &&
+                         (entry.Generation == 3 ||
+                          entry.OriginGame.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
+                          entry.OriginGame.Contains("leaf", StringComparison.OrdinalIgnoreCase) ||
+                          entry.OriginGame.Contains("ruby", StringComparison.OrdinalIgnoreCase) ||
+                          entry.OriginGame.Contains("sapph", StringComparison.OrdinalIgnoreCase) ||
+                          entry.OriginGame.Contains("emer", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var corrected = Native.Gen3SaveParser.Gen3InternalIdToNationalDex(entry.SpeciesId);
+                    if (corrected > 0)
+                    {
+                        entry.SpeciesId = corrected;
+                        entry.Species = PkVault.PokemonSpeciesCatalog.ResolveSpeciesName(corrected);
+                    }
+                }
+            }
+        }
+
         vault.Boxes.Sort((a, b) => a.BoxIndex.CompareTo(b.BoxIndex));
     }
 

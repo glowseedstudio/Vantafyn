@@ -16,6 +16,7 @@ interface JellyfinPokemonRepository {
     suspend fun getPokemonGames(session: JellyfinSession): Result<List<GameSummary>>
     suspend fun getVaultSummary(session: JellyfinSession): Result<PokemonVaultSummary>
     suspend fun getVaultBoxes(session: JellyfinSession): Result<List<PokemonVaultBoxSummary>>
+    suspend fun getAllVaultBoxes(session: JellyfinSession): Result<List<PokemonVaultBox>>
     suspend fun getVaultBox(session: JellyfinSession, boxIndex: Int): Result<PokemonVaultBox>
     suspend fun sortVaultBox(session: JellyfinSession, boxIndex: Int, criterion: String = "dex", ascending: Boolean = true): Result<PokemonVaultBox>
     suspend fun getVaultEntry(session: JellyfinSession, entryId: String): Result<PokemonVaultEntry?>
@@ -195,7 +196,7 @@ class DefaultJellyfinPokemonRepository(
                 val rawBoxes = json.optInt("boxCount", 100)
                 PokemonVaultSummary(
                     totalCapacity = if (rawCap < 3000) 3000 else rawCap,
-                    totalOccupied = json.optInt("totalOccupied", 0),
+                    totalOccupied = json.optInt("totalOccupied", json.optInt("totalCount", 0)),
                     boxCount = if (rawBoxes < 100) 100 else rawBoxes,
                     shinyCount = json.optInt("shinyCount", 0),
                     speciesCount = json.optInt("speciesCount", 0),
@@ -218,8 +219,35 @@ class DefaultJellyfinPokemonRepository(
                             boxIndex = obj.optInt("boxIndex", i + 1),
                             name = obj.optString("name", "Box ${i + 1}"),
                             capacity = obj.optInt("capacity", 30),
-                            occupiedCount = obj.optInt("occupiedCount", 0),
+                            occupiedCount = obj.optInt("occupiedCount", obj.optInt("count", 0)),
                             shinyCount = obj.optInt("shinyCount", 0),
+                        )
+                    )
+                }
+                list
+            }
+        }
+
+    override suspend fun getAllVaultBoxes(session: JellyfinSession): Result<List<PokemonVaultBox>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Pokemon/Vault/AllBoxes")
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                val list = mutableListOf<PokemonVaultBox>()
+                for (i in 0 until array.length()) {
+                    val json = array.getJSONObject(i)
+                    val entriesArray = json.optJSONArray("entries") ?: JSONArray()
+                    val entriesList = mutableListOf<PokemonVaultEntry>()
+                    for (j in 0 until entriesArray.length()) {
+                        entriesList.add(parseVaultEntry(entriesArray.getJSONObject(j)))
+                    }
+                    list.add(
+                        PokemonVaultBox(
+                            boxIndex = json.optInt("boxIndex", i + 1),
+                            name = json.optString("name", "Box ${i + 1}"),
+                            entries = entriesList,
                         )
                     )
                 }

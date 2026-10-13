@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.36.0",
+        "changelog": "Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.71/Vantafyn.Plugin.Companion_0.2.36_net9.zip",
+        "checksum": "f830dd8b9e4cfee5b14bfaaece5c9d25",
+        "timestamp": "2026-10-13T06:50:13Z"
+      },
+      {
+        "version": "0.2.36.1",
+        "changelog": "Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.71/Vantafyn.Plugin.Companion_0.2.36_net10.zip",
+        "checksum": "1f5c5b95e731f20a467663cafc7957af",
+        "timestamp": "2026-10-13T06:50:13Z"
+      },
+      {
         "version": "0.2.35.0",
         "changelog": "Adds Resilient Pokémon Provider with automatic PKVault-to-Native fallback, fixes diploma identifier formatting, and enhances save info deserialization.",
         "targetAbi": "10.11.0.0",

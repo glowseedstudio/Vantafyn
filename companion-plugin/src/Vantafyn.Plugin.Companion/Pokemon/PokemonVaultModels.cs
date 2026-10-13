@@ -187,6 +187,9 @@ public sealed class PokemonVaultSummaryDto
     [JsonPropertyName("totalCount")]
     public int TotalCount { get; set; }
 
+    [JsonPropertyName("totalOccupied")]
+    public int TotalOccupied => TotalCount;
+
     [JsonPropertyName("boxCount")]
     public int BoxCount { get; set; }
 
@@ -219,6 +222,9 @@ public sealed class PokemonVaultBoxSummaryDto
 
     [JsonPropertyName("count")]
     public int Count { get; set; }
+
+    [JsonPropertyName("occupiedCount")]
+    public int OccupiedCount => Count;
 
     [JsonPropertyName("capacity")]
     public int Capacity { get; set; } = PokemonVaultBox.DefaultCapacity;

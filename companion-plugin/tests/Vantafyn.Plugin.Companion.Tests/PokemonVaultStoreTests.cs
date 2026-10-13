@@ -1,5 +1,6 @@
 using Vantafyn.Plugin.Companion.Core;
 using Vantafyn.Plugin.Companion.Pokemon;
+using Vantafyn.Plugin.Companion.Pokemon.Native;
 using Xunit;
 
 namespace Vantafyn.Plugin.Companion.Tests;
@@ -419,11 +420,11 @@ public sealed class PokemonVaultStoreTests
     }
 
     [Fact]
-    public void PokemonRibbonCatalog_EvaluatesEffortAndChampionRibbons()
+    public void PokemonRibbonCatalog_EvaluatesEffortAndExplicitChampionRibbons()
     {
         var evs = new PokemonStatsDto { Hp = 252, Attack = 252, Speed = 4 };
         var ribbons = PokemonRibbonCatalog.EvaluateRibbons(
-            explicitRibbons: null,
+            explicitRibbons: new Dictionary<string, byte> { ["champion"] = 1 },
             evs: evs,
             level: 60,
             friendship: 200,
@@ -434,6 +435,46 @@ public sealed class PokemonVaultStoreTests
         Assert.NotEmpty(ribbons);
         Assert.Contains(ribbons, r => r.Key == "effort" && r.Category == "Effort");
         Assert.Contains(ribbons, r => r.Key == "champion" && r.Category == "Champion");
+
+        // Verify that newly caught mons WITHOUT explicit champion ribbon do NOT receive champion ribbon
+        var noChampRibbons = PokemonRibbonCatalog.EvaluateRibbons(
+            explicitRibbons: null,
+            evs: null,
+            level: 70, // High level wild catch (e.g. Mewtwo, Ditto, Deoxys)
+            friendship: 70,
+            originGame: "Pokemon FireRed",
+            generation: 3,
+            isInParty: false);
+
+        Assert.DoesNotContain(noChampRibbons, r => r.Key == "champion");
+    }
+
+    [Fact]
+    public void Gen3SaveParser_CorrectlyMapsDeoxysAndGen3InternalIdsToNationalDex()
+    {
+        // Deoxys internal index 410 -> NatDex 386
+        Assert.Equal(386, Gen3SaveParser.Gen3InternalIdToNationalDex(410));
+        Assert.Equal(410, Gen3SaveParser.NationalDexToGen3InternalId(386));
+
+        // Chimecho internal index 411 -> NatDex 358
+        Assert.Equal(358, Gen3SaveParser.Gen3InternalIdToNationalDex(411));
+        Assert.Equal(411, Gen3SaveParser.NationalDexToGen3InternalId(358));
+
+        // Treecko internal index 277 -> NatDex 252
+        Assert.Equal(252, Gen3SaveParser.Gen3InternalIdToNationalDex(277));
+        Assert.Equal(277, Gen3SaveParser.NationalDexToGen3InternalId(252));
+
+        // Tropius internal index 382 -> NatDex 357
+        Assert.Equal(357, Gen3SaveParser.Gen3InternalIdToNationalDex(382));
+        Assert.Equal(382, Gen3SaveParser.NationalDexToGen3InternalId(357));
+
+        // Absol internal index 383 -> NatDex 359
+        Assert.Equal(359, Gen3SaveParser.Gen3InternalIdToNationalDex(383));
+        Assert.Equal(383, Gen3SaveParser.NationalDexToGen3InternalId(359));
+
+        // Bulbasaur internal index 1 -> NatDex 1
+        Assert.Equal(1, Gen3SaveParser.Gen3InternalIdToNationalDex(1));
+        Assert.Equal(1, Gen3SaveParser.NationalDexToGen3InternalId(1));
     }
 
     [Fact]

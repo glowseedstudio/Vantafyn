@@ -191,6 +191,7 @@ fun PokemonVaultScreen(
     var isBackupRestoreModalOpen by remember { mutableStateOf(false) }
     var isPokedexModalOpen by remember { mutableStateOf(false) }
     var isAchievementsModalOpen by remember { mutableStateOf(false) }
+    var remoteVaultBoxes by remember { mutableStateOf<List<dev.vantafyn.core.jellyfin.PokemonVaultBox>>(emptyList()) }
 
     LaunchedEffect(vaultHomeTrigger) {
         if (vaultHomeTrigger > 0L) {
@@ -219,6 +220,9 @@ fun PokemonVaultScreen(
                 )
                 upperState = upperState.copy(vaultBoxCount = effectiveCount)
                 lowerState = lowerState.copy(vaultBoxCount = effectiveCount)
+            }
+            pokemonRepository.getAllVaultBoxes(session).onSuccess { boxes ->
+                remoteVaultBoxes = boxes
             }
         }
     }
@@ -702,16 +706,17 @@ fun PokemonVaultScreen(
         }
     }
 
-    val allVaultBoxes = remember(upperState.vaultBox, lowerState.vaultBox) {
-        listOfNotNull(upperState.vaultBox, lowerState.vaultBox)
-            .distinctBy { it.boxIndex }
-            .map { box ->
-                dev.vantafyn.core.jellyfin.PokemonBoxDto(
-                    boxIndex = box.boxIndex,
-                    name = box.name,
-                    entries = box.entries.map { it.toSummaryDto() },
-                )
-            }
+    val allVaultBoxes = remember(remoteVaultBoxes, upperState.vaultBox, lowerState.vaultBox) {
+        val map = remoteVaultBoxes.associateBy { it.boxIndex }.toMutableMap()
+        upperState.vaultBox?.let { map[it.boxIndex] = it }
+        lowerState.vaultBox?.let { map[it.boxIndex] = it }
+        map.values.sortedBy { it.boxIndex }.map { box ->
+            dev.vantafyn.core.jellyfin.PokemonBoxDto(
+                boxIndex = box.boxIndex,
+                name = box.name,
+                entries = box.entries.map { it.toSummaryDto() },
+            )
+        }
     }
 
     val allDetectedSaves = remember(upperState.gameSave, lowerState.gameSave, availableGames) {
