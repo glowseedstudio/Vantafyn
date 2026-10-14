@@ -276,8 +276,9 @@ class PokemonNativeSaveParserTest {
         gen7Save[0x01201] = 0xD4.toByte()
         val otSun = "Sun".toByteArray(Charsets.UTF_16LE)
         System.arraycopy(otSun, 0, gen7Save, 0x01238, otSun.size)
-        // Misc at 0x04000: rawStamps at 0x04008 = (0x07 << 4) = 0x70
-        gen7Save[0x04008] = 0x70.toByte()
+        // Misc at 0x04000: rawStamps at 0x04008 = (0x0F << 4) = 0xF0
+        // (Bit 0: Official Pokémon Trainer, Bit 1: Melemele, Bit 2: Akala, Bit 3: Ula'ula)
+        gen7Save[0x04008] = 0xF0.toByte()
         // Z-Crystals at 0x00D68: Slot 0 = 1831 (0x0727 -> Normalium Z)
         gen7Save[0x00D68] = 0x27.toByte()
         gen7Save[0x00D69] = 0x07.toByte()
@@ -303,6 +304,22 @@ class PokemonNativeSaveParserTest {
         assertEquals("zcrystals", parsed7.gymBadges[1].region)
         assertEquals(29, parsed7.gymBadges[1].badges.size)
         assertTrue(parsed7.gymBadges[1].badges.single { it.id == "normalium-z" }.isEarned)
+
+        // Fresh Gen 7 save test: only Official Pokémon Trainer stamp (bit 0 = (1 << 4) = 0x10)
+        // Must NOT award the Melemele trial stamp!
+        val freshGen7Save = gen7Save.copyOf()
+        freshGen7Save[0x04008] = 0x10.toByte() // Only passport stamp
+        val parsedFresh = PokemonNativeSaveParser.parse(
+            saveBytes = freshGen7Save,
+            gameTitle = "Pokemon Sun",
+            gameId = "pokemonsun",
+            expectedGeneration = 7,
+            expectedPlatform = "3ds",
+        )
+        assertNotNull(parsedFresh)
+        val freshAlola = parsedFresh!!.gymBadges.single { it.region == "alola" }
+        assertFalse("Melemele stamp should not be earned on fresh save with only passport", freshAlola.badges[0].isEarned)
+        assertTrue("No trial stamps should be earned on fresh save", freshAlola.badges.none { it.isEarned })
         assertFalse(parsed7.gymBadges[1].badges.single { it.id == "firium-z" }.isEarned)
     }
 }

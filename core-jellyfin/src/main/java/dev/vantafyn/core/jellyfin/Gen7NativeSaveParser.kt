@@ -352,7 +352,7 @@ object Gen7NativeSaveParser {
 
         val gymBadges = PokemonGymBadgeCatalog.forGen7(
             gameKey = pokemonGameKey(gameId, gameTitle),
-            stampFlags = stampFlags,
+            stampFlags = stampFlags ushr 1,
             unlockedZCrystals = unlockedZCrystals,
             isUsum = isUsum,
         )

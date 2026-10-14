@@ -253,7 +253,10 @@ fun GamePlayerScreen(
     var nativeEngine by remember { mutableStateOf<NativeEmulatorEngine?>(null) }
     var nativeCoreLoaded by remember { mutableStateOf(false) }
     var coreGeometry by remember { mutableStateOf<Triple<Int, Int, Double>?>(null) }
-    var citraResolutionFactor by remember { mutableStateOf(prefs.getString("citra_resolution_factor", "1x (400x240)") ?: "1x (400x240)") }
+    var citraResolutionFactor by remember {
+        val stored = prefs.getString("citra_resolution_factor", "4x (1600x960)") ?: "4x (1600x960)"
+        mutableStateOf(stored)
+    }
 
     val hasSecondaryDisplay = rememberNdsDualDisplayManager(
         engine = nativeEngine,
@@ -288,6 +291,12 @@ fun GamePlayerScreen(
                         val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                         GameStorageManager.saveScope.launch {
                             nativeEngine?.saveSram(sramFile)
+                            if (is3dsSystem) {
+                                storageManager.sync3dsSaveFromSdmc(game.id, game.title)
+                            }
+                            if (sramFile.exists() && sramFile.length() > 0) {
+                                storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = false, gameTitle = game.title)
+                            }
                         }
                     } else {
                         webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves();", null)
@@ -407,6 +416,9 @@ fun GamePlayerScreen(
             if (isNativeMode) {
                 val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                 nativeEngine?.saveSram(sramFile)
+                if (is3dsSystem) {
+                    storageManager.sync3dsSaveFromSdmc(game.id, game.title)
+                }
                 nativeEngine?.pause()
             } else {
                 webViewInstance?.evaluateJavascript("window.VantafynEmulator?.flushAllSaves(); window.VantafynEmulator?.pause();", null)
@@ -459,7 +471,7 @@ fun GamePlayerScreen(
 
             // Check save synchronization between cloud and local
             statusMessage = "Checking saved game..."
-            val syncInfo = storageManager.checkSaveSync(session, game.id, GameSaveKind.Sram)
+            val syncInfo = storageManager.checkSaveSync(session, game.id, GameSaveKind.Sram, game.title)
             if (syncInfo.status == SaveSyncStatus.CLOUD_NEWER || syncInfo.status == SaveSyncStatus.CONFLICT) {
                 pendingDownloadedRom = file
                 pendingConflict = syncInfo
@@ -468,14 +480,14 @@ fun GamePlayerScreen(
             } else {
                 if (syncInfo.status == SaveSyncStatus.LOCAL_NEWER && session != null) {
                     android.util.Log.i("GamePlayerScreen", "Syncing newer offline SRAM save to cloud for ${game.id}")
-                    storageManager.replaceCloudWithLocalSave(session, game.id, GameSaveKind.Sram)
+                    storageManager.replaceCloudWithLocalSave(session, game.id, GameSaveKind.Sram, game.title)
                 } else if (syncInfo.status == SaveSyncStatus.CLOUD_ONLY && session != null) {
                     android.util.Log.i("GamePlayerScreen", "Downloading cloud SRAM save for ${game.id}")
-                    storageManager.replaceLocalWithCloudSave(session, game.id, GameSaveKind.Sram, syncInfo.cachedCloudData)
+                    storageManager.replaceLocalWithCloudSave(session, game.id, GameSaveKind.Sram, syncInfo.cachedCloudData, game.title)
                 }
 
                 // Pre-load existing in-game battery save (SRAM) from storage or cloud
-                val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
+                val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram, gameTitle = game.title)
                 if (sramBytes != null && sramBytes.isNotEmpty()) {
                     initialSramBase64 = Base64.encodeToString(sramBytes, Base64.NO_WRAP)
                     android.util.Log.i("GamePlayerScreen", "Found existing in-game SRAM save (${sramBytes.size} bytes) for ${game.id}")
@@ -535,13 +547,13 @@ fun GamePlayerScreen(
                         engine.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
                     } else if (is3dsSystem) {
                         val (citraLayout, citraScreenLayout, citraSwap) = if (hasSecondaryDisplay) {
-                            Triple("Side by Side", "left_right", "Top")
+                            Triple("side_by_side", "left_right", "Top")
                         } else {
                             when (ndsScreenLayout) {
-                                NdsScreenLayout.TopBottom -> Triple("Default Top-Bottom Screen", "top_bottom", "Top")
-                                NdsScreenLayout.LeftRight -> Triple("Side by Side", "left_right", "Top")
-                                NdsScreenLayout.TopOnly -> Triple("Single Screen Only", "top_only", "Top")
-                                NdsScreenLayout.BottomOnly -> Triple("Single Screen Only", "bottom_only", "Bottom")
+                                NdsScreenLayout.TopBottom -> Triple("default", "top_bottom", "Top")
+                                NdsScreenLayout.LeftRight -> Triple("side_by_side", "left_right", "Top")
+                                NdsScreenLayout.TopOnly -> Triple("single_screen", "top_only", "Top")
+                                NdsScreenLayout.BottomOnly -> Triple("single_screen", "bottom_only", "Bottom")
                             }
                         }
                         engine.setOption("citra_layout_option", citraLayout)
@@ -568,12 +580,43 @@ fun GamePlayerScreen(
                         engine.setOption("azahar_use_shader_jit", "enabled")
                         engine.setOption("citra_use_hw_shader_cache", "enabled")
                         engine.setOption("azahar_use_hw_shader_cache", "enabled")
-                        engine.setOption("citra_is_new_3ds", "disabled")
-                        engine.setOption("azahar_is_new_3ds", "disabled")
+                        engine.setOption("citra_use_disk_shader_cache", "enabled")
+                        engine.setOption("azahar_use_disk_shader_cache", "enabled")
+                        engine.setOption("citra_is_new_3ds", "New 3DS")
+                        engine.setOption("azahar_is_new_3ds", "New 3DS")
+                        engine.setOption("citra_cpu_clock_percentage", "100")
+                        engine.setOption("azahar_cpu_clock_percentage", "100")
+                        engine.setOption("citra_audio_emulation", "hle")
+                        engine.setOption("azahar_audio_emulation", "hle")
                         engine.setOption("citra_use_acc_geo_shaders", "disabled")
                         engine.setOption("azahar_use_acc_geo_shaders", "disabled")
                         engine.setOption("citra_use_acc_mul", "disabled")
                         engine.setOption("azahar_use_acc_mul", "disabled")
+                        engine.setOption("citra_shaders_accurate_mul", "disabled")
+                        engine.setOption("azahar_shaders_accurate_mul", "disabled")
+
+                        // Prepare and sanitize Azahar shader cache directories to ensure write access and prevent recompile freezes
+                        try {
+                            val azaharDir = File(storageManager.nativeCoreManager.getSaveDirectory(), "Azahar")
+                            val shadersDir = File(azaharDir, "shaders")
+                            shadersDir.mkdirs()
+                            val transferableDir = File(shadersDir, "opengl/transferable").apply { mkdirs() }
+                            val precompiledDir = File(shadersDir, "opengl/precompiled/conventional").apply { mkdirs() }
+                            transferableDir.setReadable(true, false)
+                            transferableDir.setWritable(true, false)
+                            transferableDir.setExecutable(true, false)
+                            precompiledDir.setReadable(true, false)
+                            precompiledDir.setWritable(true, false)
+                            precompiledDir.setExecutable(true, false)
+                            // Remove any empty/corrupted 0-byte cache lock files that block cache appending
+                            shadersDir.walkTopDown().forEach { f ->
+                                if (f.isFile && f.length() == 0L) {
+                                    f.delete()
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.w("GamePlayerScreen", "Error preparing Azahar shader directory: ${e.message}")
+                        }
                     }
                     engine.setColorCorrection(gbaColorCorrection)
                     engine.setAudioFiltering(gbaAudioFiltering)
@@ -595,6 +638,9 @@ fun GamePlayerScreen(
 
                     statusMessage = "Booting game..."
                     val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
+                    if (is3dsSystem && sramFile.exists() && sramFile.length() > 0) {
+                        storageManager.sync3dsSaveToSdmc(game.id, sramFile.readBytes(), game.title)
+                    }
                     val av = withContext(Dispatchers.IO) {
                         engine.loadGame(
                             corePath = coreFile,
@@ -687,6 +733,9 @@ fun GamePlayerScreen(
                 if (isNativeMode) {
                     val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                     nativeEngine?.saveSram(sramFile)
+                    if (is3dsSystem) {
+                        storageManager.sync3dsSaveFromSdmc(game.id, game.title)
+                    }
                     nativeEngine?.pause()
                 } else {
                     webViewInstance?.evaluateJavascript("window.VantafynEmulator?.pause();", null)
@@ -1250,10 +1299,10 @@ fun GamePlayerScreen(
                 if (isNativeMode) {
                     nativeEngine?.setOption("melonds_screen_layout", ndsScreenLayout.coreValue)
                     val (citraLayout, citraScreenLayout, citraSwap) = when (ndsScreenLayout) {
-                        NdsScreenLayout.TopBottom -> Triple("Default Top-Bottom Screen", "top_bottom", "Top")
-                        NdsScreenLayout.LeftRight -> Triple("Side by Side", "left_right", "Top")
-                        NdsScreenLayout.TopOnly -> Triple("Single Screen Only", "top_only", "Top")
-                        NdsScreenLayout.BottomOnly -> Triple("Single Screen Only", "bottom_only", "Bottom")
+                        NdsScreenLayout.TopBottom -> Triple("default", "top_bottom", "Top")
+                        NdsScreenLayout.LeftRight -> Triple("side_by_side", "left_right", "Top")
+                        NdsScreenLayout.TopOnly -> Triple("single_screen", "top_only", "Top")
+                        NdsScreenLayout.BottomOnly -> Triple("single_screen", "bottom_only", "Bottom")
                     }
                     nativeEngine?.setOption("citra_layout_option", citraLayout)
                     nativeEngine?.setOption("azahar_layout_option", citraLayout)
@@ -1293,8 +1342,11 @@ fun GamePlayerScreen(
                     scope.launch {
                         val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                         nativeEngine?.saveSram(sramFile)
+                        if (is3dsSystem) {
+                            storageManager.sync3dsSaveFromSdmc(game.id, game.title)
+                        }
                         if (sramFile.exists() && sramFile.length() > 0 && session != null) {
-                            storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true)
+                            storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true, gameTitle = game.title)
                         }
                         delay(300)
                         isSyncingSave = false
@@ -1381,9 +1433,12 @@ fun GamePlayerScreen(
                 if (isNativeMode) {
                     val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                     nativeEngine?.saveSram(sramFile)
+                    if (is3dsSystem) {
+                        storageManager.sync3dsSaveFromSdmc(game.id, game.title)
+                    }
                     if (sramFile.exists() && sramFile.length() > 0) {
                         GameStorageManager.saveScope.launch {
-                            storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true)
+                            storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true, gameTitle = game.title)
                         }
                     }
                     nativeEngine?.destroy()
@@ -1408,9 +1463,9 @@ fun GamePlayerScreen(
                 val rom = pendingDownloadedRom
                 scope.launch(Dispatchers.IO) {
                     if (session != null && conflict != null) {
-                        storageManager.replaceLocalWithCloudSave(session, game.id, GameSaveKind.Sram, conflict.cachedCloudData)
+                        storageManager.replaceLocalWithCloudSave(session, game.id, GameSaveKind.Sram, conflict.cachedCloudData, gameTitle = game.title)
                     }
-                    val sramBytes = conflict?.cachedCloudData ?: storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
+                    val sramBytes = conflict?.cachedCloudData ?: storageManager.loadSaveState(session, game.id, GameSaveKind.Sram, gameTitle = game.title)
                     val base64 = sramBytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
                     withContext(Dispatchers.Main) {
                         initialSramBase64 = base64
@@ -1425,9 +1480,9 @@ fun GamePlayerScreen(
                 val rom = pendingDownloadedRom
                 scope.launch(Dispatchers.IO) {
                     if (session != null) {
-                        storageManager.replaceCloudWithLocalSave(session, game.id, GameSaveKind.Sram)
+                        storageManager.replaceCloudWithLocalSave(session, game.id, GameSaveKind.Sram, gameTitle = game.title)
                     }
-                    val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram)
+                    val sramBytes = storageManager.loadSaveState(session, game.id, GameSaveKind.Sram, gameTitle = game.title)
                     val base64 = sramBytes?.let { Base64.encodeToString(it, Base64.NO_WRAP) }
                     withContext(Dispatchers.Main) {
                         initialSramBase64 = base64
@@ -1471,9 +1526,12 @@ fun GamePlayerScreen(
             if (isNativeMode) {
                 val sramFile = storageManager.getLocalSaveFile(game.id, GameSaveKind.Sram)
                 nativeEngine?.saveSram(sramFile)
+                if (is3dsSystem) {
+                    storageManager.sync3dsSaveFromSdmc(game.id, game.title)
+                }
                 if (sramFile.exists() && sramFile.length() > 0) {
                     GameStorageManager.saveScope.launch {
-                        storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true)
+                        storageManager.saveState(session, game.id, sramFile.readBytes(), GameSaveKind.Sram, forceUpload = true, gameTitle = game.title)
                     }
                 }
                 nativeEngine?.destroy()

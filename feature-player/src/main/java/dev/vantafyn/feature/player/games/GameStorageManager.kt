@@ -222,12 +222,144 @@ class GameStorageManager(
         return File(savesDir, "$safeId.${kind.value}")
     }
 
-    fun findExistingLocalSaveFile(gameId: String, kind: GameSaveKind): File {
-        val standard = getLocalSaveFile(gameId, kind)
-        if (standard.exists() && standard.length() > 0) return standard
+    fun getCitraRoots(): List<File> {
+        val nativeSaveDir = nativeCoreManager.getSaveDirectory()
+        return listOf(
+            File(nativeSaveDir, "Azahar/sdmc/Nintendo 3DS"),
+            File(nativeSaveDir, "azahar/sdmc/Nintendo 3DS"),
+            File(savesDir, "Azahar/sdmc/Nintendo 3DS"),
+            File(savesDir, "azahar/sdmc/Nintendo 3DS"),
+            File(nativeSaveDir, "Citra/sdmc/Nintendo 3DS"),
+            File(nativeSaveDir, "citra/sdmc/Nintendo 3DS"),
+            File(savesDir, "Citra/sdmc/Nintendo 3DS"),
+            File(savesDir, "citra/sdmc/Nintendo 3DS"),
+        )
+    }
 
+    fun get3dsTitleIds(identifier: String): Set<String> {
+        val lower = identifier.lowercase()
+        return when {
+            lower.contains("ultra") && (lower.contains("sun") || lower.contains("us")) -> setOf("001b5000")
+            lower.contains("ultra") && (lower.contains("moon") || lower.contains("um")) -> setOf("001b5100")
+            lower.contains("sun") -> setOf("00164800")
+            lower.contains("moon") -> setOf("00175e00")
+            lower.contains("omega") || lower.contains("ruby") -> setOf("0011c400")
+            lower.contains("alpha") || lower.contains("sapphire") -> setOf("0011c500")
+            lower.contains("pokemon x") || lower.contains("pokemon_x") || lower.endsWith("_x") || lower == "x" -> setOf("00055d00")
+            lower.contains("pokemon y") || lower.contains("pokemon_y") || lower.endsWith("_y") || lower == "y" -> setOf("00055e00")
+            else -> emptySet()
+        }
+    }
+
+    fun find3dsSdmcSaveFile(identifiers: List<String>): File? {
+        val titleIds = identifiers.flatMap { get3dsTitleIds(it) }.toSet()
+        if (titleIds.isEmpty()) return null
+        for (root in getCitraRoots()) {
+            if (root.exists() && root.isDirectory) {
+                for (tid in titleIds) {
+                    val candidate = root.walkTopDown()
+                        .maxDepth(6)
+                        .filter { it.isDirectory && it.name.equals(tid, ignoreCase = true) }
+                        .flatMap { it.walkTopDown().maxDepth(4).filter { f -> f.isFile && f.name.equals("main", ignoreCase = true) } }
+                        .firstOrNull { it.length() > 0 }
+                    if (candidate != null) return candidate
+                }
+            }
+        }
+        return null
+    }
+
+    fun get3dsSdmcSaveDestination(titleId: String): File {
+        val nativeSaveDir = nativeCoreManager.getSaveDirectory()
+        for (root in getCitraRoots()) {
+            if (root.exists() && root.isDirectory) {
+                val tidDir = root.walkTopDown()
+                    .maxDepth(6)
+                    .firstOrNull { it.isDirectory && it.name.equals(titleId, ignoreCase = true) }
+                if (tidDir != null) {
+                    val dataDir = File(tidDir, "data/00000001")
+                    dataDir.mkdirs()
+                    return File(dataDir, "main")
+                }
+            }
+        }
+        val defaultDir = File(
+            nativeSaveDir,
+            "Azahar/sdmc/Nintendo 3DS/00000000000000000000000000000000/00000000000000000000000000000000/title/00040000/$titleId/data/00000001"
+        )
+        defaultDir.mkdirs()
+        return File(defaultDir, "main")
+    }
+
+    fun sync3dsSaveFromSdmc(gameId: String, gameTitle: String? = null): File? {
         val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
         val altId = if (safeId.startsWith("local_3ds_")) safeId.removePrefix("local_3ds_") else safeId
+        val decodedTitle = runCatching {
+            String(android.util.Base64.decode(gameId, android.util.Base64.DEFAULT))
+                .substringAfterLast('/')
+                .substringBeforeLast('.')
+        }.getOrNull()?.trim()
+        val idsToTry = listOfNotNull(gameTitle, decodedTitle, safeId, altId, gameId).distinct()
+        val sdmcFile = find3dsSdmcSaveFile(idsToTry) ?: return null
+        if (!sdmcFile.exists() || sdmcFile.length() <= 0) return null
+        val standard = getLocalSaveFile(gameId, GameSaveKind.Sram)
+        runCatching {
+            standard.parentFile?.mkdirs()
+            sdmcFile.copyTo(standard, overwrite = true)
+        }
+        return standard
+    }
+
+    fun sync3dsSaveToSdmc(gameId: String, data: ByteArray, gameTitle: String? = null) {
+        val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val altId = if (safeId.startsWith("local_3ds_")) safeId.removePrefix("local_3ds_") else safeId
+        val decodedTitle = runCatching {
+            String(android.util.Base64.decode(gameId, android.util.Base64.DEFAULT))
+                .substringAfterLast('/')
+                .substringBeforeLast('.')
+        }.getOrNull()?.trim()
+        val idsToTry = listOfNotNull(gameTitle, decodedTitle, safeId, altId, gameId).distinct()
+        val titleIds = idsToTry.flatMap { get3dsTitleIds(it) }.toSet()
+        if (titleIds.isEmpty()) return
+        for (tid in titleIds) {
+            runCatching {
+                val dest = get3dsSdmcSaveDestination(tid)
+                dest.parentFile?.mkdirs()
+                dest.writeBytes(data)
+                android.util.Log.i("GameStorageManager", "Synced 3DS save (${data.size} bytes) to SDMC destination: ${dest.absolutePath}")
+            }
+        }
+    }
+
+    fun findExistingLocalSaveFile(gameId: String, kind: GameSaveKind, gameTitle: String? = null): File {
+        val standard = getLocalSaveFile(gameId, kind)
+        val safeId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+        val altId = if (safeId.startsWith("local_3ds_")) safeId.removePrefix("local_3ds_") else safeId
+        val decodedTitle = runCatching {
+            String(android.util.Base64.decode(gameId, android.util.Base64.DEFAULT))
+                .substringAfterLast('/')
+                .substringBeforeLast('.')
+        }.getOrNull()?.trim()
+
+        val idsToTry = listOfNotNull(gameTitle, decodedTitle, safeId, altId, gameId, gameId.lowercase()).distinct()
+
+        // 1. For battery SRAM, check if an emulated 3DS SDMC save file exists
+        if (kind == GameSaveKind.Sram) {
+            val sdmcFile = find3dsSdmcSaveFile(idsToTry)
+            if (sdmcFile != null && sdmcFile.exists() && sdmcFile.length() > 0) {
+                // If SDMC main is newer than standard SRAM or standard does not exist, sync SDMC -> standard
+                if (!standard.exists() || sdmcFile.lastModified() > standard.lastModified()) {
+                    runCatching {
+                        standard.parentFile?.mkdirs()
+                        sdmcFile.copyTo(standard, overwrite = true)
+                    }
+                }
+                return standard.takeIf { it.exists() && it.length() > 0 } ?: sdmcFile
+            }
+        }
+
+        if (standard.exists() && standard.length() > 0) return standard
+
         val nativeSaveDir = nativeCoreManager.getSaveDirectory()
 
         val altCandidates = mutableListOf(
@@ -264,7 +396,6 @@ class GameStorageManager(
         } catch (_: Throwable) {}
 
         val extensions = listOf(kind.value, "sav", "srm", "dsv", "bin", "main")
-        val idsToTry = listOfNotNull(safeId, altId, gameId, gameId.lowercase()).distinct()
 
         for (dir in searchDirs.distinct()) {
             if (!dir.exists() || !dir.isDirectory) continue
@@ -284,12 +415,6 @@ class GameStorageManager(
             }
         }
 
-        val decodedTitle = runCatching {
-            String(android.util.Base64.decode(gameId, android.util.Base64.DEFAULT))
-                .substringAfterLast('/')
-                .substringBeforeLast('.')
-        }.getOrNull()?.trim()
-
         if (!decodedTitle.isNullOrBlank()) {
             for (dir in searchDirs.distinct()) {
                 if (!dir.exists() || !dir.isDirectory) continue
@@ -308,37 +433,12 @@ class GameStorageManager(
             }
         }
 
-        // Only for local 3DS games: check alongside ROM in local 3DS directory using the game's actual ROM base name
-        if (safeId.startsWith("local_3ds_")) {
-            val local3dsDir = getLocal3dsDirectory()
-            if (local3dsDir.exists() && local3dsDir.isDirectory) {
-                altCandidates.add(File(local3dsDir, "$altId.sav"))
-                altCandidates.add(File(local3dsDir, "$altId.srm"))
-                altCandidates.add(File(local3dsDir, "$altId.main"))
-            }
-
-            // Citra SDMC save directory: must strictly match THIS 3DS game's title ID
-            val titleIds = get3dsTitleIds(altId)
-            if (titleIds.isNotEmpty()) {
-                val citraRoots = listOf(
-                    File(nativeSaveDir, "Citra/sdmc/Nintendo 3DS"),
-                    File(nativeSaveDir, "citra/sdmc/Nintendo 3DS"),
-                    File(savesDir, "Citra/sdmc/Nintendo 3DS"),
-                    File(savesDir, "citra/sdmc/Nintendo 3DS"),
-                )
-                for (root in citraRoots) {
-                    if (root.exists() && root.isDirectory) {
-                        for (tid in titleIds) {
-                            val candidate = root.walkTopDown()
-                                .maxDepth(6)
-                                .filter { it.isDirectory && it.name.equals(tid, ignoreCase = true) }
-                                .flatMap { it.walkTopDown().maxDepth(4).filter { f -> f.isFile && f.name.equals("main", ignoreCase = true) } }
-                                .firstOrNull { it.length() > 0 }
-                            if (candidate != null) return candidate
-                        }
-                    }
-                }
-            }
+        // Check alongside ROM in local 3DS directory using the game's actual ROM base name
+        val local3dsDir = getLocal3dsDirectory()
+        if (local3dsDir.exists() && local3dsDir.isDirectory) {
+            altCandidates.add(File(local3dsDir, "$altId.sav"))
+            altCandidates.add(File(local3dsDir, "$altId.srm"))
+            altCandidates.add(File(local3dsDir, "$altId.main"))
         }
 
         for (alt in altCandidates) {
@@ -346,21 +446,6 @@ class GameStorageManager(
         }
 
         return standard
-    }
-
-    private fun get3dsTitleIds(altId: String): Set<String> {
-        val lower = altId.lowercase()
-        return when {
-            lower.contains("ultra") && lower.contains("sun") -> setOf("001b5000", "001b5100", "001b4f00")
-            lower.contains("ultra") && lower.contains("moon") -> setOf("001b5100", "001b5200", "001b5000")
-            lower.contains("sun") -> setOf("00164800", "00164900", "00175e00")
-            lower.contains("moon") -> setOf("00175d00", "00175e00", "00175f00")
-            lower.contains("omega") || lower.contains("ruby") -> setOf("0011c300", "0011c400", "0011c500")
-            lower.contains("alpha") || lower.contains("sapphire") -> setOf("0011c500", "0011c600", "0011c700")
-            lower.contains("pokemon x") || lower.contains("pokemon_x") || lower.endsWith("_x") -> setOf("00055c00", "00055d00", "00055e00")
-            lower.contains("pokemon y") || lower.contains("pokemon_y") || lower.endsWith("_y") -> setOf("00055e00", "00055f00", "00056000")
-            else -> emptySet()
-        }
     }
 
     suspend fun downloadRomIfNeeded(
@@ -750,6 +835,8 @@ class GameStorageManager(
                 throw IllegalStateException("Could not finalize the imported battery save.")
             }
 
+            sync3dsSaveToSdmc(gameId, data)
+
             val cloudSynced = session?.let {
                 gamesRepository.uploadCloudSave(it, gameId, GameSaveKind.Sram, data).isSuccess
             } ?: false
@@ -802,8 +889,9 @@ class GameStorageManager(
         session: JellyfinSession?,
         gameId: String,
         kind: GameSaveKind,
+        gameTitle: String? = null,
     ): SaveSyncInfo = withContext(Dispatchers.IO) {
-        val localFile = findExistingLocalSaveFile(gameId, kind)
+        val localFile = findExistingLocalSaveFile(gameId, kind, gameTitle)
         val localExists = localFile.exists() && localFile.length() > 0
         val localBytes = if (localExists) runCatching { localFile.readBytes() }.getOrNull() else null
         val localModified = if (localExists) localFile.lastModified() else 0L
@@ -893,9 +981,10 @@ class GameStorageManager(
         session: JellyfinSession,
         gameId: String,
         kind: GameSaveKind,
+        gameTitle: String? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
-            val localFile = findExistingLocalSaveFile(gameId, kind)
+            val localFile = findExistingLocalSaveFile(gameId, kind, gameTitle)
             if (!localFile.exists() || localFile.length() <= 0) {
                 throw IllegalStateException("Local save file does not exist.")
             }
@@ -912,12 +1001,13 @@ class GameStorageManager(
         gameId: String,
         kind: GameSaveKind,
         cloudData: ByteArray? = null,
+        gameTitle: String? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             backupSave(gameId, kind)
             val data = cloudData ?: gamesRepository.getCloudSave(session, gameId, kind).getOrThrow()
                 ?: throw IllegalStateException("Cloud save not found on server.")
-            val localFile = findExistingLocalSaveFile(gameId, kind)
+            val localFile = findExistingLocalSaveFile(gameId, kind, gameTitle)
             localFile.parentFile?.mkdirs()
             localFile.writeBytes(data)
             val standard = getLocalSaveFile(gameId, kind)
@@ -926,6 +1016,9 @@ class GameStorageManager(
                     standard.parentFile?.mkdirs()
                     standard.writeBytes(data)
                 }
+            }
+            if (kind == GameSaveKind.Sram) {
+                sync3dsSaveToSdmc(gameId, data, gameTitle)
             }
             val externalCandidates = listOf(
                 File("/sdcard/Download/Quick Share", "$gameId.${kind.value}"),
@@ -949,8 +1042,9 @@ class GameStorageManager(
         gameId: String,
         kind: GameSaveKind = GameSaveKind.Sram,
         forceCloud: Boolean = false,
+        gameTitle: String? = null,
     ): ByteArray? = withContext(Dispatchers.IO) {
-        val localFile = findExistingLocalSaveFile(gameId, kind)
+        val localFile = findExistingLocalSaveFile(gameId, kind, gameTitle)
 
         if (forceCloud && session != null) {
             val cloudEntry = gamesRepository.getCloudSaveWithMetadata(session, gameId, kind).getOrNull()
@@ -958,6 +1052,9 @@ class GameStorageManager(
                 backupSave(gameId, kind)
                 localFile.parentFile?.mkdirs()
                 localFile.writeBytes(cloudEntry.data)
+                if (kind == GameSaveKind.Sram) {
+                    sync3dsSaveToSdmc(gameId, cloudEntry.data, gameTitle)
+                }
                 markSynced(gameId, kind, computeHash(cloudEntry.data), localFile.lastModified())
                 return@withContext cloudEntry.data
             }
@@ -973,6 +1070,9 @@ class GameStorageManager(
                 val targetFile = getLocalSaveFile(gameId, kind)
                 targetFile.parentFile?.mkdirs()
                 targetFile.writeBytes(cloudEntry.data)
+                if (kind == GameSaveKind.Sram) {
+                    sync3dsSaveToSdmc(gameId, cloudEntry.data, gameTitle)
+                }
                 markSynced(gameId, kind, computeHash(cloudEntry.data), targetFile.lastModified())
                 return@withContext cloudEntry.data
             }
@@ -987,11 +1087,15 @@ class GameStorageManager(
         data: ByteArray,
         kind: GameSaveKind = GameSaveKind.Sram,
         forceUpload: Boolean = false,
+        gameTitle: String? = null,
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val localFile = getLocalSaveFile(gameId, kind)
             localFile.parentFile?.mkdirs()
             localFile.writeBytes(data)
+            if (kind == GameSaveKind.Sram) {
+                sync3dsSaveToSdmc(gameId, data, gameTitle)
+            }
             val hash = computeHash(data)
             if (session != null) {
                 val key = "${gameId}_${kind.value}"

@@ -946,6 +946,8 @@ public sealed class PokemonController : ControllerBase
 
     private GameDetail? FindGame(string gameId)
     {
+        if (string.IsNullOrWhiteSpace(gameId)) return null;
+
         var libraries = _gamesService.GetGameLibraries();
         if (libraries.Count == 0)
         {
@@ -974,6 +976,62 @@ public sealed class PokemonController : ControllerBase
                 };
             }
         }
+
+        // Check if gameId matches a game title or filename in libraries
+        foreach (var library in libraries)
+        {
+            var summary = _gamesService.GetGames(library.Id).FirstOrDefault(g =>
+                string.Equals(g.Title, gameId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(g.FileName, gameId, StringComparison.OrdinalIgnoreCase));
+            if (summary != null)
+            {
+                return new GameDetail
+                {
+                    Id = gameId,
+                    Title = summary.Title,
+                    FileName = summary.FileName,
+                    System = summary.System,
+                    Core = summary.Core
+                };
+            }
+        }
+
+        // Support synthetic GameDetail for local games (e.g. local_3ds_...) or direct game IDs/keys
+        var clean = gameId;
+        if (clean.StartsWith("local_3ds_", StringComparison.OrdinalIgnoreCase))
+        {
+            clean = clean["local_3ds_".Length..];
+        }
+        else if (clean.StartsWith("local_", StringComparison.OrdinalIgnoreCase))
+        {
+            clean = clean["local_".Length..];
+        }
+        clean = clean.Replace("_", " ").Trim();
+
+        var is3ds = gameId.Contains("3ds", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("ultra", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("sun", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("moon", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("x", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("y", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("omega", StringComparison.OrdinalIgnoreCase) ||
+                    clean.Contains("alpha", StringComparison.OrdinalIgnoreCase);
+
+        var system = is3ds ? "3ds" : string.Empty;
+        var detectedTitle = clean.Contains("pokemon", StringComparison.OrdinalIgnoreCase) ? clean : $"Pokemon {clean}";
+        var detected = _detector.Detect(detectedTitle, detectedTitle + (is3ds ? ".3ds" : ".rom"), system);
+        if (detected != null)
+        {
+            return new GameDetail
+            {
+                Id = gameId,
+                Title = detected.CanonicalTitle ?? clean,
+                FileName = clean + (is3ds ? ".3ds" : ".rom"),
+                System = detected.Platform ?? (is3ds ? "3ds" : string.Empty),
+                Core = is3ds ? "azahar" : string.Empty
+            };
+        }
+
         return null;
     }
 
@@ -3920,7 +3978,7 @@ public sealed class PokemonController : ControllerBase
         }
 
         var saveBytes = await _gameSavesService.GetAsync(userId, game.Id, "sram", cancellationToken).ConfigureAwait(false);
-        if (saveBytes == null || saveBytes.Length == 0)
+        if ((saveBytes == null || saveBytes.Length == 0) && !string.IsNullOrWhiteSpace(gift.EventId))
         {
             return BadRequest(new { error = "No battery save found for this game. Start the game and save once first." });
         }
@@ -3942,6 +4000,32 @@ public sealed class PokemonController : ControllerBase
                 BackupIds = []
             });
         }
+
+        if (string.IsNullOrWhiteSpace(gift.EventId) && (saveBytes == null || saveBytes.Length == 0))
+        {
+            if (gift.RewardType is "Pokemon" or "Egg")
+            {
+                var vaultEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(gift, meta.CanonicalTitle, meta.Generation);
+                await _vaultStore.AddOrUpdateEntryAsync(userId, vaultEntry, cancellationToken).ConfigureAwait(false);
+            }
+            MarkMysteryGiftCodeRedeemed(userId, game.Id, gift.Code);
+
+            return Ok(new PokemonMysteryGiftRedeemResponse
+            {
+                Success = true,
+                Code = gift.Code,
+                Title = gift.Title,
+                Subtitle = gift.Subtitle,
+                RewardType = gift.RewardType,
+                TargetSpeciesId = gift.TargetSpeciesId,
+                TargetSpeciesName = gift.TargetSpeciesName,
+                Accent = gift.Accent,
+                InGameInstructions = gift.InGameInstructions,
+                Message = $"{gift.Title} redeemed successfully! {gift.InGameInstructions}",
+                BackupIds = []
+            });
+        }
+
 
         var result = await _transactionManager.ExecuteAsync(
             userId,

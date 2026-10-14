@@ -8,6 +8,22 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
+        "version": "0.2.37.0",
+        "changelog": "Adds full support for Nintendo 3DS save detection and cloud sync, fixes Alola trial stamp parsing for fresh saves, resolves 3DS game IDs for Mystery Gifts and event unlocks, and renders Mystery Gift cards with 1-tap vault redemption.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.72/Vantafyn.Plugin.Companion_0.2.37_net9.zip",
+        "checksum": "12f8756f7392023295e5c248d53f5bd2",
+        "timestamp": "2026-10-14T06:51:21Z"
+      },
+      {
+        "version": "0.2.37.1",
+        "changelog": "Adds full support for Nintendo 3DS save detection and cloud sync, fixes Alola trial stamp parsing for fresh saves, resolves 3DS game IDs for Mystery Gifts and event unlocks, and renders Mystery Gift cards with 1-tap vault redemption.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.72/Vantafyn.Plugin.Companion_0.2.37_net10.zip",
+        "checksum": "a5461b421c201ba36197cc91045b5b9b",
+        "timestamp": "2026-10-14T06:51:21Z"
+      },
+      {
         "version": "0.2.36.0",
         "changelog": "Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint.",
         "targetAbi": "10.11.0.0",

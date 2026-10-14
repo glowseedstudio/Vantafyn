@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.36}"
+VERSION="${1:-0.2.37}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.71}"
-CHANGELOG="Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint."
+TAG="${2:-v0.9.72}"
+CHANGELOG="Adds full support for Nintendo 3DS save detection and cloud sync, fixes Alola trial stamp parsing for fresh saves, resolves 3DS game IDs for Mystery Gifts and event unlocks, and renders Mystery Gift cards with 1-tap vault redemption."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.36.0",
+        "changelog": "Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.71/Vantafyn.Plugin.Companion_0.2.36_net9.zip",
+        "checksum": "f830dd8b9e4cfee5b14bfaaece5c9d25",
+        "timestamp": "2026-10-13T06:50:13Z"
+      },
+      {
+        "version": "0.2.36.1",
+        "changelog": "Fixes Gen 3 Deoxys species ID mapping, resolves numeric move strings to real move names, removes erroneous Champion ribbon heuristic, fixes PKVault box occupancy counts, and adds AllBoxes bulk endpoint.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.71/Vantafyn.Plugin.Companion_0.2.36_net10.zip",
+        "checksum": "1f5c5b95e731f20a467663cafc7957af",
+        "timestamp": "2026-10-13T06:50:13Z"
       },
       {
         "version": "0.2.35.0",

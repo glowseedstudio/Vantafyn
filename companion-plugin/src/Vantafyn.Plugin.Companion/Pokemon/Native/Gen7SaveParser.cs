@@ -349,7 +349,7 @@ public static class Gen7SaveParser
         result.SeenSpeciesIds = [.. seenIds];
         result.PokedexCaught = caughtIds.Count;
         result.PokedexSeen = seenIds.Count;
-        result.GymBadges = PokemonGymBadgeCatalog.ForGen7(gameId, stampFlags, unlockedZCrystals, isUsum);
+        result.GymBadges = PokemonGymBadgeCatalog.ForGen7(gameId, (ushort)(stampFlags >> 1), unlockedZCrystals, isUsum);
 
         bool isUninitialized = partyCount == 0 &&
                                result.Boxes.TrueForAll(b => b.OccupiedCount == 0) &&

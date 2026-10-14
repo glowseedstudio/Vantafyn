@@ -263,7 +263,7 @@ fun PokemonVaultScreen(
                     val safeGameId = gameId.replace(Regex("[^a-zA-Z0-9_-]"), "_")
 
                     // 1. Locate local save file (.sram, .sav, .srm, .main, etc.)
-                    val localSaveFile = storageManager.findExistingLocalSaveFile(gameId, GameSaveKind.Sram)
+                    val localSaveFile = storageManager.findExistingLocalSaveFile(gameId, GameSaveKind.Sram, target.game.title)
 
                     // 2. Query companion plugin for game save and lock state
                     var saveDto: dev.vantafyn.core.jellyfin.PokemonGameSaveDto? = null
@@ -740,7 +740,7 @@ fun PokemonVaultScreen(
         lowerState.gameSave?.takeIf { isValidSave(it, lowerGame) }?.let { map[it.gameId] = it }
         for (game in availableGames) {
             if (!map.containsKey(game.id)) {
-                val localSaveFile = storageManager.findExistingLocalSaveFile(game.id, GameSaveKind.Sram)
+                val localSaveFile = storageManager.findExistingLocalSaveFile(game.id, GameSaveKind.Sram, game.title)
                 if (localSaveFile.exists() && localSaveFile.length() > 0L) {
                     val bytes = runCatching { localSaveFile.readBytes() }.getOrNull()
                     if (bytes != null && bytes.isNotEmpty()) {

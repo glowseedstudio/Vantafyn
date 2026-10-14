@@ -12,6 +12,8 @@
 
 #include <android/log.h>
 #include <android/native_window.h>
+#include <dirent.h>
+#include <errno.h>
 #include <dlfcn.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -386,6 +388,251 @@ static bool vf_egl_init(vf_session_t *s, struct retro_hw_render_callback *cb) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Libretro Virtual File System (VFS) Implementation
+// ---------------------------------------------------------------------------
+
+struct retro_vfs_file_handle {
+    FILE *fp;
+    char path[PATH_MAX];
+};
+
+struct retro_vfs_dir_handle {
+    DIR *dir;
+    struct dirent *entry;
+    char path[PATH_MAX];
+    bool include_hidden;
+};
+
+static const char *vf_vfs_get_path(struct retro_vfs_file_handle *stream) {
+    if (!stream) return NULL;
+    return stream->path;
+}
+
+static struct retro_vfs_file_handle *vf_vfs_open(const char *path, unsigned mode, unsigned hints) {
+    (void)hints;
+    if (!path || !path[0]) return NULL;
+
+    const char *mode_str = "rb";
+    if ((mode & RETRO_VFS_FILE_ACCESS_READ_WRITE) == RETRO_VFS_FILE_ACCESS_READ_WRITE) {
+        if (mode & RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING) {
+            mode_str = "r+b";
+        } else {
+            mode_str = "w+b";
+        }
+    } else if (mode & RETRO_VFS_FILE_ACCESS_WRITE) {
+        if (mode & RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING) {
+            mode_str = "r+b";
+        } else {
+            mode_str = "wb";
+        }
+    } else {
+        mode_str = "rb";
+    }
+
+    FILE *fp = fopen(path, mode_str);
+    if (!fp && (mode & RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING)) {
+        // If updating an existing file that didn't exist yet, open with write/create
+        fp = fopen(path, (mode & RETRO_VFS_FILE_ACCESS_READ) ? "w+b" : "wb");
+    }
+
+    if (!fp) {
+        LOGE("vf_vfs_open failed for path '%s' (mode=0x%x, mode_str='%s'): %s", path, mode, mode_str, strerror(errno));
+        return NULL;
+    }
+
+    struct retro_vfs_file_handle *handle = (struct retro_vfs_file_handle *)calloc(1, sizeof(struct retro_vfs_file_handle));
+    if (!handle) {
+        fclose(fp);
+        return NULL;
+    }
+
+    handle->fp = fp;
+    strncpy(handle->path, path, sizeof(handle->path) - 1);
+    LOGI("vf_vfs_open succeeded for path '%s' (mode_str='%s')", path, mode_str);
+    return handle;
+}
+
+static int vf_vfs_close(struct retro_vfs_file_handle *stream) {
+    if (!stream) return -1;
+    int ret = 0;
+    if (stream->fp) {
+        ret = fclose(stream->fp);
+    }
+    free(stream);
+    return ret;
+}
+
+static int64_t vf_vfs_size(struct retro_vfs_file_handle *stream) {
+    if (!stream || !stream->fp) return -1;
+    long curr = ftell(stream->fp);
+    if (curr < 0) return -1;
+    if (fseek(stream->fp, 0, SEEK_END) != 0) return -1;
+    long size = ftell(stream->fp);
+    fseek(stream->fp, curr, SEEK_SET);
+    return (int64_t)size;
+}
+
+static int64_t vf_vfs_truncate(struct retro_vfs_file_handle *stream, int64_t length) {
+    if (!stream || !stream->fp) return -1;
+    int fd = fileno(stream->fp);
+    if (fd < 0) return -1;
+    return (ftruncate(fd, (off_t)length) == 0) ? 0 : -1;
+}
+
+static int64_t vf_vfs_tell(struct retro_vfs_file_handle *stream) {
+    if (!stream || !stream->fp) return -1;
+    return (int64_t)ftell(stream->fp);
+}
+
+static int64_t vf_vfs_seek(struct retro_vfs_file_handle *stream, int64_t offset, int seek_position) {
+    if (!stream || !stream->fp) return -1;
+    int whence = SEEK_SET;
+    switch (seek_position) {
+        case RETRO_VFS_SEEK_POSITION_START:   whence = SEEK_SET; break;
+        case RETRO_VFS_SEEK_POSITION_CURRENT: whence = SEEK_CUR; break;
+        case RETRO_VFS_SEEK_POSITION_END:     whence = SEEK_END; break;
+        default: return -1;
+    }
+    return (fseek(stream->fp, (long)offset, whence) == 0) ? 0 : -1;
+}
+
+static int64_t vf_vfs_read(struct retro_vfs_file_handle *stream, void *s, uint64_t len) {
+    if (!stream || !stream->fp || !s) return -1;
+    size_t read_bytes = fread(s, 1, (size_t)len, stream->fp);
+    if (read_bytes == 0 && ferror(stream->fp)) return -1;
+    return (int64_t)read_bytes;
+}
+
+static int64_t vf_vfs_write(struct retro_vfs_file_handle *stream, const void *s, uint64_t len) {
+    if (!stream || !stream->fp || !s) return -1;
+    size_t written_bytes = fwrite(s, 1, (size_t)len, stream->fp);
+    if (written_bytes == 0 && len > 0 && ferror(stream->fp)) return -1;
+    return (int64_t)written_bytes;
+}
+
+static int vf_vfs_flush(struct retro_vfs_file_handle *stream) {
+    if (!stream || !stream->fp) return -1;
+    return fflush(stream->fp);
+}
+
+static int vf_vfs_remove(const char *path) {
+    if (!path) return -1;
+    return remove(path);
+}
+
+static int vf_vfs_rename(const char *old_path, const char *new_path) {
+    if (!old_path || !new_path) return -1;
+    return rename(old_path, new_path);
+}
+
+static int vf_vfs_stat(const char *path, int32_t *size) {
+    if (!path) return 0;
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+
+    int flags = RETRO_VFS_STAT_IS_VALID;
+    if (S_ISDIR(st.st_mode)) {
+        flags |= RETRO_VFS_STAT_IS_DIRECTORY;
+    }
+    if (S_ISCHR(st.st_mode)) {
+        flags |= RETRO_VFS_STAT_IS_CHARACTER_SPECIAL;
+    }
+    if (size) {
+        *size = (int32_t)st.st_size;
+    }
+    return flags;
+}
+
+static int vf_vfs_stat_64(const char *path, int64_t *size) {
+    if (!path) return 0;
+    struct stat st;
+    if (stat(path, &st) != 0) return 0;
+
+    int flags = RETRO_VFS_STAT_IS_VALID;
+    if (S_ISDIR(st.st_mode)) {
+        flags |= RETRO_VFS_STAT_IS_DIRECTORY;
+    }
+    if (S_ISCHR(st.st_mode)) {
+        flags |= RETRO_VFS_STAT_IS_CHARACTER_SPECIAL;
+    }
+    if (size) {
+        *size = (int64_t)st.st_size;
+    }
+    return flags;
+}
+
+static int vf_vfs_mkdir(const char *dir) {
+    if (!dir) return -1;
+    struct stat st;
+    if (stat(dir, &st) == 0) {
+        return S_ISDIR(st.st_mode) ? -2 : -1;
+    }
+    if (mkdir(dir, 0755) == 0) return 0;
+    if (errno == EEXIST) return -2;
+    return -1;
+}
+
+static struct retro_vfs_dir_handle *vf_vfs_opendir(const char *dir, bool include_hidden) {
+    if (!dir) return NULL;
+    DIR *d = opendir(dir);
+    if (!d) return NULL;
+
+    struct retro_vfs_dir_handle *handle = (struct retro_vfs_dir_handle *)calloc(1, sizeof(struct retro_vfs_dir_handle));
+    if (!handle) {
+        closedir(d);
+        return NULL;
+    }
+    handle->dir = d;
+    handle->include_hidden = include_hidden;
+    strncpy(handle->path, dir, sizeof(handle->path) - 1);
+    return handle;
+}
+
+static bool vf_vfs_readdir(struct retro_vfs_dir_handle *dirstream) {
+    if (!dirstream || !dirstream->dir) return false;
+    struct dirent *ent = NULL;
+    while ((ent = readdir(dirstream->dir)) != NULL) {
+        if (!dirstream->include_hidden && ent->d_name[0] == '.') {
+            continue;
+        }
+        dirstream->entry = ent;
+        return true;
+    }
+    dirstream->entry = NULL;
+    return false;
+}
+
+static const char *vf_vfs_dirent_get_name(struct retro_vfs_dir_handle *dirstream) {
+    if (!dirstream || !dirstream->entry) return NULL;
+    return dirstream->entry->d_name;
+}
+
+static bool vf_vfs_dirent_is_dir(struct retro_vfs_dir_handle *dirstream) {
+    if (!dirstream || !dirstream->entry) return false;
+#if defined(DT_DIR)
+    if (dirstream->entry->d_type == DT_DIR) return true;
+    if (dirstream->entry->d_type != DT_UNKNOWN) return false;
+#endif
+    char full[PATH_MAX];
+    snprintf(full, sizeof(full), "%s/%s", dirstream->path, dirstream->entry->d_name);
+    struct stat st;
+    if (stat(full, &st) == 0) {
+        return S_ISDIR(st.st_mode);
+    }
+    return false;
+}
+
+static int vf_vfs_closedir(struct retro_vfs_dir_handle *dirstream) {
+    if (!dirstream) return -1;
+    int ret = 0;
+    if (dirstream->dir) {
+        ret = closedir(dirstream->dir);
+    }
+    free(dirstream);
+    return ret;
+}
+
 static bool core_environment(unsigned cmd, void *data) {
     vf_session_t *s = s_current_session;
     if (!s) return false;
@@ -493,16 +740,30 @@ static bool core_environment(unsigned cmd, void *data) {
             }
             // Essential defaults for Citra / Azahar 3DS core
             if (strcmp(var->key, "citra_layout_option") == 0 || strcmp(var->key, "azahar_layout_option") == 0) {
-                var->value = "Default Top-Bottom Screen";
+                for (int i = 0; i < s->option_count; i++) {
+                    if (strcmp(s->options[i].key, "citra_layout_option") == 0 || strcmp(s->options[i].key, "azahar_layout_option") == 0) {
+                        if (strstr(s->options[i].value, "side") != NULL || strstr(s->options[i].value, "Side") != NULL) {
+                            var->value = "side_by_side";
+                            return true;
+                        } else if (strstr(s->options[i].value, "single") != NULL || strstr(s->options[i].value, "Single") != NULL) {
+                            var->value = "single_screen";
+                            return true;
+                        } else if (strstr(s->options[i].value, "large") != NULL || strstr(s->options[i].value, "Large") != NULL) {
+                            var->value = "large_screen";
+                            return true;
+                        }
+                    }
+                }
+                var->value = "default";
                 return true;
             }
             if (strcmp(var->key, "citra_screen_layout") == 0 || strcmp(var->key, "azahar_screen_layout") == 0) {
                 for (int i = 0; i < s->option_count; i++) {
                     if (strcmp(s->options[i].key, "citra_layout_option") == 0 || strcmp(s->options[i].key, "azahar_layout_option") == 0) {
-                        if (strcmp(s->options[i].value, "Side by Side") == 0) {
+                        if (strstr(s->options[i].value, "side") != NULL || strstr(s->options[i].value, "Side") != NULL) {
                             var->value = "left_right";
                             return true;
-                        } else if (strcmp(s->options[i].value, "Single Screen Only") == 0) {
+                        } else if (strstr(s->options[i].value, "single") != NULL || strstr(s->options[i].value, "Single") != NULL) {
                             var->value = "top_only";
                             return true;
                         }
@@ -520,11 +781,36 @@ static bool core_environment(unsigned cmd, void *data) {
                 return true;
             }
             if (strcmp(var->key, "citra_is_new_3ds") == 0 || strcmp(var->key, "azahar_is_new_3ds") == 0) {
-                var->value = "disabled";
+                var->value = "New 3DS";
+                return true;
+            }
+            if (strcmp(var->key, "citra_cpu_clock_percentage") == 0 || strcmp(var->key, "azahar_cpu_clock_percentage") == 0) {
+                var->value = "100";
+                return true;
+            }
+            if (strcmp(var->key, "citra_audio_emulation") == 0 || strcmp(var->key, "azahar_audio_emulation") == 0) {
+                var->value = "hle";
                 return true;
             }
             if (strcmp(var->key, "citra_resolution_factor") == 0 || strcmp(var->key, "azahar_resolution_factor") == 0) {
-                var->value = "1x (400x240)";
+                for (int i = 0; i < s->option_count; i++) {
+                    if (strcmp(s->options[i].key, "citra_resolution_factor") == 0 || strcmp(s->options[i].key, "azahar_resolution_factor") == 0) {
+                        if (strstr(s->options[i].value, "2") != NULL) {
+                            var->value = "2";
+                            return true;
+                        } else if (strstr(s->options[i].value, "3") != NULL) {
+                            var->value = "3";
+                            return true;
+                        } else if (strstr(s->options[i].value, "4") != NULL) {
+                            var->value = "4";
+                            return true;
+                        } else {
+                            var->value = "1";
+                            return true;
+                        }
+                    }
+                }
+                var->value = "1";
                 return true;
             }
             if (strcmp(var->key, "citra_graphics_api") == 0 || strcmp(var->key, "azahar_graphics_api") == 0) {
@@ -548,7 +834,8 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "enabled";
                 return true;
             }
-            if (strcmp(var->key, "citra_use_hw_shader_cache") == 0 || strcmp(var->key, "azahar_use_hw_shader_cache") == 0) {
+            if (strcmp(var->key, "citra_use_hw_shader_cache") == 0 || strcmp(var->key, "azahar_use_hw_shader_cache") == 0 ||
+                strcmp(var->key, "citra_use_disk_shader_cache") == 0 || strcmp(var->key, "azahar_use_disk_shader_cache") == 0) {
                 var->value = "enabled";
                 return true;
             }
@@ -556,7 +843,8 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "disabled";
                 return true;
             }
-            if (strcmp(var->key, "citra_use_acc_mul") == 0 || strcmp(var->key, "azahar_use_acc_mul") == 0) {
+            if (strcmp(var->key, "citra_use_acc_mul") == 0 || strcmp(var->key, "azahar_use_acc_mul") == 0 ||
+                strcmp(var->key, "citra_shaders_accurate_mul") == 0 || strcmp(var->key, "azahar_shaders_accurate_mul") == 0) {
                 var->value = "disabled";
                 return true;
             }
@@ -594,6 +882,39 @@ static bool core_environment(unsigned cmd, void *data) {
                 return true;
             }
             return false;
+        }
+        case RETRO_ENVIRONMENT_GET_VFS_INTERFACE: {
+            struct retro_vfs_interface_info *info = (struct retro_vfs_interface_info *)data;
+            if (!info) return false;
+            static struct retro_vfs_interface s_vfs_interface = {
+                .get_path = vf_vfs_get_path,
+                .open = vf_vfs_open,
+                .close = vf_vfs_close,
+                .size = vf_vfs_size,
+                .tell = vf_vfs_tell,
+                .seek = vf_vfs_seek,
+                .read = vf_vfs_read,
+                .write = vf_vfs_write,
+                .flush = vf_vfs_flush,
+                .remove = vf_vfs_remove,
+                .rename = vf_vfs_rename,
+                .truncate = vf_vfs_truncate,
+                .stat = vf_vfs_stat,
+                .mkdir = vf_vfs_mkdir,
+                .opendir = vf_vfs_opendir,
+                .readdir = vf_vfs_readdir,
+                .dirent_get_name = vf_vfs_dirent_get_name,
+                .dirent_is_dir = vf_vfs_dirent_is_dir,
+                .closedir = vf_vfs_closedir,
+                .stat_64 = vf_vfs_stat_64
+            };
+            info->iface = &s_vfs_interface;
+            // The libretro spec requires the frontend to set required_interface_version to its actual API version.
+            // libretro-common's filestream_vfs_init requires required_interface_version >= 2 to register callbacks.
+            LOGI("Core requested RETRO_ENVIRONMENT_GET_VFS_INTERFACE (requested_version=%u) -> providing VFS interface version 3",
+                 info->required_interface_version);
+            info->required_interface_version = 3;
+            return true;
         }
         case RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE: {
             LOGI("Core requested RETRO_ENVIRONMENT_GET_HW_RENDER_INTERFACE (unsupported)");

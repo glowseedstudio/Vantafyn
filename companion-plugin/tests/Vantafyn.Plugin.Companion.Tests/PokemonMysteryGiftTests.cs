@@ -79,7 +79,11 @@ public sealed class PokemonMysteryGiftTests
 
         var rockruff = PokemonMysteryGiftCatalog.Find("DUSK-ROCKRUFF")!;
         Assert.True(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "ultrasun"));
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "local_3ds_Pokemon_Ultra_Sun__USA____3ds"));
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "Pokemon Ultra Sun"));
+        Assert.True(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "local_3ds_Pokemon_Ultra_Moon_3ds"));
         Assert.False(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "pokemon_sun"));
+        Assert.False(PokemonMysteryGiftCatalog.SupportsGame(rockruff, "local_3ds_Pokemon_Moon_3ds"));
     }
 
     [Fact]

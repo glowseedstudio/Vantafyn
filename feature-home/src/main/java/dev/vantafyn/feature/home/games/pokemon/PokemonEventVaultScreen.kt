@@ -166,9 +166,9 @@ fun PokemonEventVaultScreen(
             if (storageManager != null) {
                 games.forEach { g ->
                     runCatching {
-                        val localFile = storageManager.findExistingLocalSaveFile(g.save.gameId, GameSaveKind.Sram)
+                        val localFile = storageManager.findExistingLocalSaveFile(g.save.gameId, GameSaveKind.Sram, g.save.title)
                         if (localFile.exists() && localFile.length() > 0) {
-                            storageManager.replaceCloudWithLocalSave(active, g.save.gameId, GameSaveKind.Sram)
+                            storageManager.replaceCloudWithLocalSave(active, g.save.gameId, GameSaveKind.Sram, g.save.title)
                         }
                     }
                 }
@@ -234,6 +234,35 @@ fun PokemonEventVaultScreen(
                         isBusy = isLoading,
                         onUnlock = { event -> pendingUnlock = game to event },
                         onOpenMysteryGift = { showRedeemDialog = true },
+                        onRedeemGift = { gift ->
+                            val active = session ?: return@EventVaultStage
+                            scope.launch {
+                                isLoading = true
+                                if (storageManager != null) {
+                                    runCatching {
+                                        val localFile = storageManager.findExistingLocalSaveFile(game.save.gameId, GameSaveKind.Sram, game.save.title)
+                                        if (localFile.exists() && localFile.length() > 0) {
+                                            storageManager.replaceCloudWithLocalSave(active, game.save.gameId, GameSaveKind.Sram, game.save.title)
+                                        }
+                                    }
+                                }
+                                pokemonRepository.redeemMysteryGift(active, game.save.gameId, gift.code).fold(
+                                    onSuccess = { response ->
+                                        celebrationGift = response
+                                        if (storageManager != null) {
+                                            runCatching {
+                                                storageManager.replaceLocalWithCloudSave(active, game.save.gameId, GameSaveKind.Sram)
+                                            }
+                                        }
+                                        loadEvents()
+                                    },
+                                    onFailure = { err ->
+                                        message = err.message ?: "Failed to redeem code."
+                                    },
+                                )
+                                isLoading = false
+                            }
+                        },
                     )
                 }
             }
@@ -264,9 +293,9 @@ fun PokemonEventVaultScreen(
                     isLoading = true
                     if (storageManager != null) {
                         runCatching {
-                            val localFile = storageManager.findExistingLocalSaveFile(activeGame.save.gameId, GameSaveKind.Sram)
+                            val localFile = storageManager.findExistingLocalSaveFile(activeGame.save.gameId, GameSaveKind.Sram, activeGame.save.title)
                             if (localFile.exists() && localFile.length() > 0) {
-                                storageManager.replaceCloudWithLocalSave(active, activeGame.save.gameId, GameSaveKind.Sram)
+                                storageManager.replaceCloudWithLocalSave(active, activeGame.save.gameId, GameSaveKind.Sram, activeGame.save.title)
                             }
                         }
                     }
@@ -364,9 +393,9 @@ fun PokemonEventVaultScreen(
                             isLoading = true
                             if (storageManager != null) {
                                 runCatching {
-                                    val localFile = storageManager.findExistingLocalSaveFile(game.save.gameId, GameSaveKind.Sram)
+                                    val localFile = storageManager.findExistingLocalSaveFile(game.save.gameId, GameSaveKind.Sram, game.save.title)
                                     if (localFile.exists() && localFile.length() > 0) {
-                                        storageManager.replaceCloudWithLocalSave(active, game.save.gameId, GameSaveKind.Sram)
+                                        storageManager.replaceCloudWithLocalSave(active, game.save.gameId, GameSaveKind.Sram, game.save.title)
                                     }
                                 }
                             }
@@ -539,6 +568,7 @@ private fun EventVaultStage(
     isBusy: Boolean,
     onUnlock: (PokemonEventUnlockDto) -> Unit,
     onOpenMysteryGift: () -> Unit,
+    onRedeemGift: (PokemonMysteryGiftDto) -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Box(
@@ -612,17 +642,47 @@ private fun EventVaultStage(
             onClick = onOpenMysteryGift,
         )
 
-        if (events.isEmpty()) {
-            EventVaultEmpty("No curated event unlocks are ready for this save yet.")
+        if (events.isEmpty() && mysteryGifts.isEmpty()) {
+            EventVaultEmpty("No curated event unlocks or mystery gifts are ready for this save yet.")
         } else {
-            events.forEach { event ->
-                val status = statuses[event.id]
-                EventUnlockCard(
-                    event = event,
-                    status = status,
-                    isBusy = isBusy,
-                    onUnlock = { onUnlock(event) },
+            if (events.isNotEmpty()) {
+                if (mysteryGifts.isNotEmpty()) {
+                    Text(
+                        "IN-GAME EVENT UNLOCKS",
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(start = 4.dp, top = 2.dp),
+                    )
+                }
+                events.forEach { event ->
+                    val status = statuses[event.id]
+                    EventUnlockCard(
+                        event = event,
+                        status = status,
+                        isBusy = isBusy,
+                        onUnlock = { onUnlock(event) },
+                    )
+                }
+            }
+
+            if (mysteryGifts.isNotEmpty()) {
+                Text(
+                    "PROMOTIONAL MYSTERY GIFTS",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(start = 4.dp, top = 4.dp),
                 )
+                mysteryGifts.forEach { gift ->
+                    MysteryGiftCard(
+                        gift = gift,
+                        isBusy = isBusy,
+                        onRedeem = { onRedeemGift(gift) },
+                    )
+                }
             }
         }
     }
@@ -1019,6 +1079,328 @@ private fun EventUnlockCard(
                                 Icons.Rounded.ChevronRight,
                                 contentDescription = null,
                                 tint = if (available) Color(0xFF0F172A) else VantafynColors.Muted,
+                                modifier = Modifier.size(13.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MysteryGiftCard(
+    gift: PokemonMysteryGiftDto,
+    isBusy: Boolean,
+    onRedeem: () -> Unit,
+) {
+    val accent = parseHexColor(gift.accent)
+    val redeemed = gift.isRedeemed
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        accent.copy(alpha = if (redeemed) 0.16f else 0.12f),
+                        Color(0xFF0F172A).copy(alpha = 0.95f),
+                        Color(0xFF090D16),
+                    )
+                )
+            )
+            .border(
+                1.dp,
+                Brush.linearGradient(
+                    listOf(
+                        accent.copy(alpha = if (redeemed) 0.65f else 0.40f),
+                        Color.White.copy(alpha = 0.08f),
+                        accent.copy(alpha = if (redeemed) 0.35f else 0.20f),
+                    )
+                ),
+                RoundedCornerShape(22.dp),
+            )
+            .padding(16.dp),
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // Top Badge Row: Mystery Gift Tag + Gen/Region Chip
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(accent.copy(alpha = 0.16f))
+                        .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Icon(
+                        Icons.Rounded.CardGiftcard,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(12.dp),
+                    )
+                    Text(
+                        "MYSTERY GIFT ARCHIVE",
+                        color = accent,
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Color.White.copy(alpha = 0.06f))
+                        .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        "GEN ${gift.generation} • ${gift.region.uppercase()}",
+                        color = Color.White.copy(alpha = 0.75f),
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp,
+                    )
+                }
+            }
+
+            // Middle Section: Left Info & Right 3D Pokémon Render
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text(
+                        gift.title,
+                        color = VantafynColors.Ink,
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        gift.subtitle,
+                        color = accent,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        gift.description,
+                        color = VantafynColors.Muted,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        // Code badge
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color.Black.copy(alpha = 0.45f))
+                                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(6.dp))
+                                .padding(horizontal = 7.dp, vertical = 3.dp),
+                        ) {
+                            Text(
+                                "Code: ${gift.code}",
+                                color = Color(0xFFE2E8F0),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        val ot = gift.originalTrainer
+                        if (!ot.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black.copy(alpha = 0.35f))
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    "OT: $ot",
+                                    color = Color.White.copy(alpha = 0.85f),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                        val ribbon = gift.ribbonName
+                        if (!ribbon.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color.Black.copy(alpha = 0.35f))
+                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    ribbon,
+                                    color = accent.copy(alpha = 0.9f),
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // 3D Pokémon Render
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(
+                            Brush.radialGradient(
+                                listOf(
+                                    accent.copy(alpha = 0.28f),
+                                    Color.Transparent,
+                                )
+                            )
+                        )
+                        .border(1.dp, accent.copy(alpha = 0.22f), RoundedCornerShape(18.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (gift.targetSpeciesId > 0) {
+                        val spriteUrl = if (gift.isShiny) {
+                            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/shiny/${gift.targetSpeciesId}.png"
+                        } else {
+                            "https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/home/${gift.targetSpeciesId}.png"
+                        }
+                        AsyncImage(
+                            model = spriteUrl,
+                            contentDescription = gift.targetSpeciesName,
+                            modifier = Modifier.size(76.dp),
+                            contentScale = ContentScale.Fit,
+                        )
+                        if (gift.isShiny) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color(0xFFFBBF24))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                            ) {
+                                Text(
+                                    "★",
+                                    color = Color(0xFF0F172A),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
+                        }
+                    } else {
+                        Icon(
+                            Icons.Rounded.CardGiftcard,
+                            contentDescription = null,
+                            tint = accent,
+                            modifier = Modifier.size(36.dp),
+                        )
+                    }
+                }
+            }
+
+            // Bottom Action Row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                if (redeemed) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.Verified,
+                            contentDescription = null,
+                            tint = Color(0xFF10B981),
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Text(
+                            "Delivered to Personal Vault",
+                            color = Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF10B981).copy(alpha = 0.14f))
+                            .border(1.dp, Color(0xFF10B981).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                    ) {
+                        Text(
+                            "✓ Claimed",
+                            color = Color(0xFF10B981),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    }
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Icon(
+                            Icons.Rounded.CardGiftcard,
+                            contentDescription = null,
+                            tint = VantafynColors.Muted,
+                            modifier = Modifier.size(14.dp),
+                        )
+                        Text(
+                            "Reward: ${gift.rewardType} • Ready to claim",
+                            color = VantafynColors.Muted,
+                            fontSize = 11.sp,
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (!isBusy) {
+                                    Brush.horizontalGradient(listOf(accent, accent.copy(alpha = 0.82f)))
+                                } else {
+                                    Brush.horizontalGradient(listOf(Color(0xFF1E293B), Color(0xFF1E293B)))
+                                }
+                            )
+                            .clickable(enabled = !redeemed && !isBusy) { onRedeem() }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = "Claim Gift",
+                                color = Color(0xFF0F172A),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                            )
+                            Icon(
+                                Icons.Rounded.ChevronRight,
+                                contentDescription = null,
+                                tint = Color(0xFF0F172A),
                                 modifier = Modifier.size(13.dp),
                             )
                         }

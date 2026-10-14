@@ -868,8 +868,8 @@ public sealed class PokemonSaveReaderTests
         BitConverter.GetBytes((ushort)54321).CopyTo(saveBytes, 0x01200);
         // OT name at 0x01238: "Sun" in UTF-16LE
         System.Text.Encoding.Unicode.GetBytes("Sun").CopyTo(saveBytes, 0x01238);
-        // Misc at 0x04000: rawStamps at 0x04008 = (0x07 << 4) = 0x70
-        BitConverter.GetBytes((ushort)0x70).CopyTo(saveBytes, 0x04008);
+        // Misc at 0x04000: rawStamps at 0x04008 = (0x0E << 4) = 0xE0 (trial stamps 1, 2, 3 for Melemele, Akala, Ulaula)
+        BitConverter.GetBytes((ushort)0xE0).CopyTo(saveBytes, 0x04008);
         // Z-Crystals at 0x00D68: Slot 0 = 1831 (Normalium Z)
         BitConverter.GetBytes((ushort)1831).CopyTo(saveBytes, 0x00D68);
 
