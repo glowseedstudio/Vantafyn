@@ -265,15 +265,31 @@ public static class GameSystemCoreResolver
 
     public static string? ResolveSystemLogoUrl(string systemName)
     {
-        var core = ResolveCore(systemName);
-        if (string.Equals(core, "citra", StringComparison.OrdinalIgnoreCase))
+        var lower = systemName.ToLowerInvariant();
+        if (lower.Contains("3ds") || lower.Contains("citra") || lower.Contains("azahar"))
         {
             return "https://raw.githubusercontent.com/batocera-linux/batocera-themes/master/themes/batocera/3ds/_data/svg/logo.svg";
         }
 
+        if (lower.Contains("gba") || lower.Contains("advance"))
+        {
+            return "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gba/art/system.svg";
+        }
+
+        var normalized = lower.Replace("_", "").Replace("-", "").Replace(" ", "");
+        if (normalized == "gbc" || normalized.Contains("gameboycolor") || normalized.Contains("gameboycolour") ||
+            normalized.Contains("gbcolor") || normalized.Contains("gbcolour") ||
+            ((normalized.Contains("gameboy") || normalized.Contains("gb")) && (normalized.Contains("color") || normalized.Contains("colour"))))
+        {
+            return "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg";
+        }
+
+        var core = ResolveCore(systemName);
+
         var themeFolder = core switch
         {
             "gba" => "gba",
+            "gbc" => "gbc",
             "snes" => "snes",
             "nes" => "nes",
             "n64" => "n64",

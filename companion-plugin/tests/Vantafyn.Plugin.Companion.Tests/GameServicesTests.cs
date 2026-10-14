@@ -164,6 +164,22 @@ public sealed class GameServicesTests
         }
     }
 
+    [Theory]
+    [InlineData("gbc", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg")]
+    [InlineData("Game Boy Color", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg")]
+    [InlineData("gameboycolor", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg")]
+    [InlineData("gameboycolour", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg")]
+    [InlineData("gb", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gb/art/system.svg")]
+    [InlineData("Game Boy", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gb/art/system.svg")]
+    [InlineData("gba", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gba/art/system.svg")]
+    [InlineData("Game Boy Advance", "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gba/art/system.svg")]
+    [InlineData("Nintendo 3DS", "https://raw.githubusercontent.com/batocera-linux/batocera-themes/master/themes/batocera/3ds/_data/svg/logo.svg")]
+    public void SystemCoreResolver_ResolvesCorrectSystemLogoUrl(string systemName, string expectedUrl)
+    {
+        var url = GameSystemCoreResolver.ResolveSystemLogoUrl(systemName);
+        Assert.Equal(expectedUrl, url);
+    }
+
     [Fact]
     public void SystemCoreResolver_GeneratesLibretroBoxartUrl()
     {

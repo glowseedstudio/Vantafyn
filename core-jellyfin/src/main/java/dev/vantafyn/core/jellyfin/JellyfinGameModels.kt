@@ -38,18 +38,37 @@ data class GameSystem(
         get() = resolveSystemDisplayName(id, name)
 
     val officialLogoUrl: String
-        get() = logoUrl?.takeIf { it.isNotBlank() } ?: resolveSystemLogoUrl(id, core)
+        get() {
+            if (isGameBoyColor(id, name)) {
+                return "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg"
+            }
+            return logoUrl?.takeIf { it.isNotBlank() } ?: resolveSystemLogoUrl(id, core)
+        }
+}
+
+fun isGameBoyColor(id: String, name: String = ""): Boolean {
+    val check = { str: String ->
+        val k = str.lowercase().replace("_", "").replace("-", "").replace(" ", "").trim()
+        k == "gbc" ||
+            k.contains("gameboycolor") ||
+            k.contains("gameboycolour") ||
+            k.contains("gbcolor") ||
+            k.contains("gbcolour") ||
+            ((k.contains("gameboy") || k.contains("gb")) && (k.contains("color") || k.contains("colour")))
+    }
+    return check(id) || check(name)
 }
 
 fun resolveSystemDisplayName(id: String, rawName: String): String {
     val key = id.lowercase().trim()
+    val rawKey = rawName.lowercase().trim()
     return when {
-        key == "gba" || key == "gameboyadvance" -> "Game Boy Advance"
+        key == "gba" || key == "gameboyadvance" || key.contains("advance") || rawKey.contains("advance") -> "Game Boy Advance"
+        isGameBoyColor(id, rawName) -> "Game Boy Color"
+        key == "gb" || key == "gameboy" || rawKey == "game boy" || rawKey == "gameboy" -> "Game Boy"
         key == "snes" || key == "sfc" || key == "supernintendo" -> "Super Nintendo"
         key == "nes" || key == "famicom" -> "Nintendo Entertainment System"
         key == "n64" || key == "nintendo64" -> "Nintendo 64"
-        key == "gb" || key == "gameboy" -> "Game Boy"
-        key == "gbc" || key == "gameboycolor" -> "Game Boy Color"
         key == "nds" || key == "ds" || key == "nintendods" -> "Nintendo DS"
         key == "3ds" || key == "n3ds" || key == "nintendo3ds" -> "Nintendo 3DS"
         key == "psx" || key == "ps1" || key == "playstation" -> "Sony PlayStation"
@@ -76,11 +95,11 @@ fun resolveSystemLogoUrl(id: String, core: String): String {
     }
     val themeFolder = when {
         key.contains("gba") || key.contains("advance") -> "gba"
+        isGameBoyColor(key) -> "gbc"
+        key == "gb" || key.contains("gameboy") -> "gb"
         key.contains("snes") || key.contains("sfc") -> "snes"
         key.contains("nes") || key.contains("famicom") -> "nes"
         key.contains("n64") -> "n64"
-        key.contains("gbc") -> "gbc"
-        key == "gb" || key.contains("gameboy") -> "gb"
         key.contains("nds") || key == "ds" -> "nds"
         key.contains("psx") || key.contains("ps1") || key.contains("playstation") -> "psx"
         key.contains("psp") -> "psp"

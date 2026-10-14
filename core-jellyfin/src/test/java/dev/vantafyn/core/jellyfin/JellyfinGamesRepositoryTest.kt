@@ -64,4 +64,33 @@ class JellyfinGamesRepositoryTest {
         assertEquals("Super Metroid", summary.cleanTitle)
         assertEquals("USA", summary.region)
     }
+
+    @Test
+    fun gameSystem_resolvesGameBoyColorLogoAndDisplayName() {
+        val gbcSystem = GameSystem(
+            id = "gbc",
+            name = "Game Boy Color",
+            core = "gambatte",
+            logoUrl = "https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gb/art/system.svg", // Server previously provided gb
+        )
+        assertEquals("Game Boy Color", gbcSystem.displayName)
+        // Must override server's gb logo to gbc logo
+        assertEquals("https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gbc/art/system.svg", gbcSystem.officialLogoUrl)
+
+        val gbSystem = GameSystem(
+            id = "gb",
+            name = "Game Boy",
+            core = "gambatte",
+        )
+        assertEquals("Game Boy", gbSystem.displayName)
+        assertEquals("https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gb/art/system.svg", gbSystem.officialLogoUrl)
+
+        val gbaSystem = GameSystem(
+            id = "gba",
+            name = "Game Boy Advance",
+            core = "mgba",
+        )
+        assertEquals("Game Boy Advance", gbaSystem.displayName)
+        assertEquals("https://raw.githubusercontent.com/RetroPie/es-theme-carbon/master/gba/art/system.svg", gbaSystem.officialLogoUrl)
+    }
 }
