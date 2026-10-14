@@ -431,6 +431,28 @@ static struct retro_vfs_file_handle *vf_vfs_open(const char *path, unsigned mode
     }
 
     FILE *fp = fopen(path, mode_str);
+    if (!fp && (mode & (RETRO_VFS_FILE_ACCESS_WRITE | RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING))) {
+        char parent[PATH_MAX];
+        strncpy(parent, path, sizeof(parent) - 1);
+        parent[sizeof(parent) - 1] = '\0';
+        char *slash = strrchr(parent, '/');
+        if (slash) {
+            *slash = '\0';
+            // Recursively create parent directories
+            for (char *p = parent + 1; *p; p++) {
+                if (*p == '/') {
+                    *p = '\0';
+                    struct stat st;
+                    if (stat(parent, &st) != 0) {
+                        mkdir(parent, 0755);
+                    }
+                    *p = '/';
+                }
+            }
+            mkdir(parent, 0755);
+            fp = fopen(path, mode_str);
+        }
+    }
     if (!fp && (mode & RETRO_VFS_FILE_ACCESS_UPDATE_EXISTING)) {
         // If updating an existing file that didn't exist yet, open with write/create
         fp = fopen(path, (mode & RETRO_VFS_FILE_ACCESS_READ) ? "w+b" : "wb");
@@ -563,12 +585,28 @@ static int vf_vfs_stat_64(const char *path, int64_t *size) {
 }
 
 static int vf_vfs_mkdir(const char *dir) {
-    if (!dir) return -1;
+    if (!dir || !*dir) return -1;
+    char tmp[PATH_MAX];
+    strncpy(tmp, dir, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    size_t len = strlen(tmp);
+    if (len > 0 && tmp[len - 1] == '/') tmp[len - 1] = '\0';
+
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p == '/') {
+            *p = '\0';
+            struct stat st;
+            if (stat(tmp, &st) != 0) {
+                mkdir(tmp, 0755);
+            }
+            *p = '/';
+        }
+    }
     struct stat st;
-    if (stat(dir, &st) == 0) {
+    if (stat(tmp, &st) == 0) {
         return S_ISDIR(st.st_mode) ? -2 : -1;
     }
-    if (mkdir(dir, 0755) == 0) return 0;
+    if (mkdir(tmp, 0755) == 0) return 0;
     if (errno == EEXIST) return -2;
     return -1;
 }
@@ -834,9 +872,27 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "enabled";
                 return true;
             }
+            if (strcmp(var->key, "citra_use_libretro_save_path") == 0 || strcmp(var->key, "azahar_use_libretro_save_path") == 0) {
+                var->value = "LibRetro Default";
+                return true;
+            }
             if (strcmp(var->key, "citra_use_hw_shader_cache") == 0 || strcmp(var->key, "azahar_use_hw_shader_cache") == 0 ||
                 strcmp(var->key, "citra_use_disk_shader_cache") == 0 || strcmp(var->key, "azahar_use_disk_shader_cache") == 0) {
                 var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_async_shader_compilation") == 0 || strcmp(var->key, "azahar_async_shader_compilation") == 0 ||
+                strcmp(var->key, "citra_async_shaders") == 0 || strcmp(var->key, "azahar_async_shaders") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_separable_shaders") == 0 || strcmp(var->key, "azahar_use_separable_shaders") == 0 ||
+                strcmp(var->key, "citra_separable_shaders") == 0 || strcmp(var->key, "azahar_separable_shaders") == 0) {
+                var->value = "enabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_use_custom_textures") == 0 || strcmp(var->key, "azahar_use_custom_textures") == 0) {
+                var->value = "disabled";
                 return true;
             }
             if (strcmp(var->key, "citra_use_acc_geo_shaders") == 0 || strcmp(var->key, "azahar_use_acc_geo_shaders") == 0) {

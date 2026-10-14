@@ -582,6 +582,16 @@ fun GamePlayerScreen(
                         engine.setOption("azahar_use_hw_shader_cache", "enabled")
                         engine.setOption("citra_use_disk_shader_cache", "enabled")
                         engine.setOption("azahar_use_disk_shader_cache", "enabled")
+                        engine.setOption("citra_async_shader_compilation", "enabled")
+                        engine.setOption("azahar_async_shader_compilation", "enabled")
+                        engine.setOption("citra_async_shaders", "enabled")
+                        engine.setOption("azahar_async_shaders", "enabled")
+                        engine.setOption("citra_use_separable_shaders", "enabled")
+                        engine.setOption("azahar_use_separable_shaders", "enabled")
+                        engine.setOption("citra_use_libretro_save_path", "LibRetro Default")
+                        engine.setOption("azahar_use_libretro_save_path", "LibRetro Default")
+                        engine.setOption("citra_use_custom_textures", "disabled")
+                        engine.setOption("azahar_use_custom_textures", "disabled")
                         engine.setOption("citra_is_new_3ds", "New 3DS")
                         engine.setOption("azahar_is_new_3ds", "New 3DS")
                         engine.setOption("citra_cpu_clock_percentage", "100")
@@ -595,23 +605,27 @@ fun GamePlayerScreen(
                         engine.setOption("citra_shaders_accurate_mul", "disabled")
                         engine.setOption("azahar_shaders_accurate_mul", "disabled")
 
-                        // Prepare and sanitize Azahar shader cache directories to ensure write access and prevent recompile freezes
+                        // Prepare permanent Azahar / Citra shader cache directories to ensure write access across sessions
                         try {
-                            val azaharDir = File(storageManager.nativeCoreManager.getSaveDirectory(), "Azahar")
-                            val shadersDir = File(azaharDir, "shaders")
-                            shadersDir.mkdirs()
-                            val transferableDir = File(shadersDir, "opengl/transferable").apply { mkdirs() }
-                            val precompiledDir = File(shadersDir, "opengl/precompiled/conventional").apply { mkdirs() }
-                            transferableDir.setReadable(true, false)
-                            transferableDir.setWritable(true, false)
-                            transferableDir.setExecutable(true, false)
-                            precompiledDir.setReadable(true, false)
-                            precompiledDir.setWritable(true, false)
-                            precompiledDir.setExecutable(true, false)
-                            // Remove any empty/corrupted 0-byte cache lock files that block cache appending
-                            shadersDir.walkTopDown().forEach { f ->
-                                if (f.isFile && f.length() == 0L) {
-                                    f.delete()
+                            val baseDirs = listOfNotNull(
+                                storageManager.nativeCoreManager.getSaveDirectory(),
+                                storageManager.nativeCoreManager.getSystemDirectory()
+                            )
+                            for (base in baseDirs) {
+                                for (coreName in listOf("Azahar", "Citra")) {
+                                    val coreDir = File(base, coreName)
+                                    val subDirs = listOf(
+                                        File(coreDir, "shaders/opengl/transferable"),
+                                        File(coreDir, "shaders/opengl/precompiled/conventional"),
+                                        File(coreDir, "sdmc"),
+                                        File(coreDir, "sysdata")
+                                    )
+                                    for (d in subDirs) {
+                                        d.mkdirs()
+                                        d.setReadable(true, false)
+                                        d.setWritable(true, false)
+                                        d.setExecutable(true, false)
+                                    }
                                 }
                             }
                         } catch (e: Exception) {
