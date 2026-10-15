@@ -30,6 +30,21 @@ public sealed class GameSavesController : ControllerBase
     private static bool GamesEnabled() =>
         Plugin.Instance?.Configuration?.GamesEnabled != false;
 
+    [HttpGet]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IEnumerable<CloudSaveSummaryDto>>> ListSaves(CancellationToken cancellationToken)
+    {
+        if (!GamesEnabled())
+        {
+            return Ok(Array.Empty<CloudSaveSummaryDto>());
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var saves = await _savesService.ListAsync(userId, cancellationToken).ConfigureAwait(false);
+        return Ok(saves);
+    }
+
     [HttpGet("{gameId}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

@@ -16,15 +16,57 @@ interface JellyfinGamesRepository {
     suspend fun getGames(session: JellyfinSession, libraryId: String, systemId: String): Result<List<GameSummary>>
     suspend fun getGameDetail(session: JellyfinSession, libraryId: String, gameId: String): Result<GameDetail>
     fun getRomDownloadUrl(session: JellyfinSession, libraryId: String, token: String): String
+    suspend fun getCloudSaves(session: JellyfinSession): Result<List<CloudSaveSummary>>
     suspend fun getCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram): Result<ByteArray?>
     suspend fun getCloudSaveWithMetadata(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram): Result<CloudSaveEntry?>
     suspend fun uploadCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram, data: ByteArray): Result<Unit>
     suspend fun deleteCloudSave(session: JellyfinSession, gameId: String, kind: GameSaveKind = GameSaveKind.Sram): Result<Unit>
 }
 
+data class CloudSaveSummary(
+    val gameId: String,
+    val kind: GameSaveKind = GameSaveKind.Sram,
+    val lastModifiedMs: Long,
+    val sizeBytes: Long,
+    val titleId: String? = null,
+    val gameTitle: String? = null,
+)
+
 class DefaultJellyfinGamesRepository(
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : JellyfinGamesRepository {
+
+    override suspend fun getCloudSaves(session: JellyfinSession): Result<List<CloudSaveSummary>> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection("Vantafyn/Games/Saves")
+                if (conn.responseCode == 404) return@runCatching emptyList()
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                val array = JSONArray(body)
+                val list = mutableListOf<CloudSaveSummary>()
+                for (i in 0 until array.length()) {
+                    val obj = array.getJSONObject(i)
+                    val kindStr = obj.optString("kind", "sram")
+                    val kind = when (kindStr.lowercase()) {
+                        "settings" -> GameSaveKind.Settings
+                        "state" -> GameSaveKind.State
+                        else -> GameSaveKind.Sram
+                    }
+                    list.add(
+                        CloudSaveSummary(
+                            gameId = obj.getString("gameId"),
+                            kind = kind,
+                            lastModifiedMs = obj.optLong("lastModifiedMs", 0L),
+                            sizeBytes = obj.optLong("sizeBytes", 0L),
+                            titleId = obj.optString("titleId", "").ifEmpty { null },
+                            gameTitle = obj.optString("gameTitle", "").ifEmpty { null },
+                        )
+                    )
+                }
+                list
+            }
+        }
 
     override suspend fun isGamesAvailable(session: JellyfinSession): Result<Boolean> =
         withContext(ioDispatcher) {
@@ -231,6 +273,41 @@ class DefaultJellyfinGamesRepository(
                     }
                 }
                 if (conn.responseCode == 404) {
+                    val candidateIds = mutableListOf<String>()
+                    val lower = gameId.lowercase()
+                    if (lower.contains("001b5000") || (lower.contains("ultra") && (lower.contains("sun") || lower.contains("us")))) {
+                        candidateIds.add("3ds_001b5000")
+                        candidateIds.add("pokemon_ultrasun")
+                        candidateIds.add("001b5000")
+                    } else if (lower.contains("001b5100") || (lower.contains("ultra") && (lower.contains("moon") || lower.contains("um")))) {
+                        candidateIds.add("3ds_001b5100")
+                        candidateIds.add("pokemon_ultramoon")
+                        candidateIds.add("001b5100")
+                    } else if (lower.contains("00164800") || (lower.contains("pokemon") && lower.contains("sun"))) {
+                        candidateIds.add("3ds_00164800")
+                        candidateIds.add("pokemon_sun")
+                    } else if (lower.contains("00175e00") || (lower.contains("pokemon") && lower.contains("moon"))) {
+                        candidateIds.add("3ds_00175e00")
+                        candidateIds.add("pokemon_moon")
+                    } else if (lower.contains("0011c400") || lower.contains("omega") || lower.contains("ruby")) {
+                        candidateIds.add("3ds_0011c400")
+                        candidateIds.add("pokemon_omegaruby")
+                    } else if (lower.contains("0011c500") || lower.contains("alpha") || lower.contains("sapphire")) {
+                        candidateIds.add("3ds_0011c500")
+                        candidateIds.add("pokemon_alphasapphire")
+                    }
+                    if (lower.startsWith("local_3ds_")) {
+                        candidateIds.add(gameId.removePrefix("local_3ds_"))
+                    }
+                    for (cand in candidateIds.distinct()) {
+                        val candConn = session.openAuthenticatedConnection("Vantafyn/Games/Saves/$cand?kind=${kind.value}")
+                        if (candConn.responseCode in 200..299) {
+                            conn = candConn
+                            break
+                        }
+                    }
+                }
+                if (conn.responseCode == 404) {
                     return@runCatching null
                 }
                 checkResponseCode(conn)
@@ -271,6 +348,30 @@ class DefaultJellyfinGamesRepository(
                         fallbackConn.setRequestProperty("Content-Type", "application/octet-stream")
                         fallbackConn.outputStream.use { it.write(data) }
                         checkResponseCode(fallbackConn)
+                    }
+                }
+
+                // Also mirror to 3DS canonical alias if this is a 3DS game save
+                val lower = gameId.lowercase()
+                val alias = when {
+                    lower.contains("001b5000") || (lower.contains("ultra") && (lower.contains("sun") || lower.contains("us"))) || data.size == 445440 -> "3ds_001b5000"
+                    lower.contains("001b5100") || (lower.contains("ultra") && (lower.contains("moon") || lower.contains("um"))) -> "3ds_001b5100"
+                    lower.contains("00164800") || (lower.contains("pokemon") && lower.contains("sun")) -> "3ds_00164800"
+                    lower.contains("00175e00") || (lower.contains("pokemon") && lower.contains("moon")) -> "3ds_00175e00"
+                    lower.contains("0011c400") || lower.contains("omega") || lower.contains("ruby") -> "3ds_0011c400"
+                    lower.contains("0011c500") || lower.contains("alpha") || lower.contains("sapphire") -> "3ds_0011c500"
+                    else -> null
+                }
+                if (alias != null && !alias.equals(gameId, ignoreCase = true)) {
+                    runCatching {
+                        val aliasConn = session.openAuthenticatedConnection(
+                            pathAndQuery = "Vantafyn/Games/Saves/$alias?kind=${kind.value}",
+                            method = "PUT",
+                        )
+                        aliasConn.doOutput = true
+                        aliasConn.setRequestProperty("Content-Type", "application/octet-stream")
+                        aliasConn.outputStream.use { it.write(data) }
+                        checkResponseCode(aliasConn)
                     }
                 }
             }

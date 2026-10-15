@@ -896,12 +896,12 @@ static bool core_environment(unsigned cmd, void *data) {
                 return true;
             }
             if (strcmp(var->key, "citra_use_acc_geo_shaders") == 0 || strcmp(var->key, "azahar_use_acc_geo_shaders") == 0) {
-                var->value = "disabled";
+                var->value = "enabled";
                 return true;
             }
             if (strcmp(var->key, "citra_use_acc_mul") == 0 || strcmp(var->key, "azahar_use_acc_mul") == 0 ||
                 strcmp(var->key, "citra_shaders_accurate_mul") == 0 || strcmp(var->key, "azahar_shaders_accurate_mul") == 0) {
-                var->value = "disabled";
+                var->value = "enabled";
                 return true;
             }
             if (strcmp(var->key, "citra_limit_framerate") == 0 || strcmp(var->key, "azahar_limit_framerate") == 0) {

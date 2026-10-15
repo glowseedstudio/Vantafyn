@@ -217,6 +217,46 @@ public sealed class GameServicesTests
         }
     }
 
+    [Fact]
+    public async Task GameSavesService_Resolves3dsUltraSunSavesAndLists()
+    {
+        using var paths = new TempGamePaths();
+        var service = new GameSavesService(paths);
+        var userId = Guid.NewGuid();
+        var dummySave = new byte[445440]; // Ultra Sun size
+        dummySave[0] = 0xAA;
+
+        // Save from Retroid under local game ID
+        var localGameId = "local_3ds_Pokemon___Ultra_Sun__USA__3ds";
+        await service.SaveAsync(userId, localGameId, "sram", dummySave, CancellationToken.None);
+
+        // 1. Phone queries under Jellyfin GUID
+        var jellyfinGuid = "c9603517567a0bf99c1d1959828eeb11";
+        // Directly without hint won't match GUID unless titleId or alias is queried:
+        var byTitleId = await service.GetAsync(userId, "3ds_001b5000", "sram", CancellationToken.None);
+        Assert.NotNull(byTitleId);
+        Assert.Equal(445440, byTitleId.Length);
+        Assert.Equal(0xAA, byTitleId[0]);
+
+        // 2. Query under canonical pokemon_ultrasun
+        var byUs = await service.GetAsync(userId, "pokemon_ultrasun", "sram", CancellationToken.None);
+        Assert.NotNull(byUs);
+        Assert.Equal(445440, byUs.Length);
+
+        // 3. Query under title "Pokemon Ultra Sun"
+        var byTitle = await service.GetAsync(userId, "Pokemon - Ultra Sun (USA)", "sram", CancellationToken.None);
+        Assert.NotNull(byTitle);
+        Assert.Equal(445440, byTitle.Length);
+
+        // 4. ListAsync returns deduplicated save with title
+        var list = await service.ListAsync(userId, CancellationToken.None);
+        Assert.NotEmpty(list);
+        var usItem = list.FirstOrDefault(x => x.TitleId == "001b5000");
+        Assert.NotNull(usItem);
+        Assert.Equal("Pokémon Ultra Sun", usItem.GameTitle);
+        Assert.Equal(445440, usItem.SizeBytes);
+    }
+
     private sealed class TempGamePaths : ICompanionPaths, IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "vantafyn-games-tests", Guid.NewGuid().ToString("N"));

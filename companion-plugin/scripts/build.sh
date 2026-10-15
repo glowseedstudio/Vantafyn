@@ -5,10 +5,10 @@ export PATH="$HOME/.dotnet:$PATH"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PROJECT="$ROOT/src/Vantafyn.Plugin.Companion/Vantafyn.Plugin.Companion.csproj"
 ARTIFACTS="$ROOT/artifacts"
-VERSION="${1:-0.2.39}"
+VERSION="${1:-0.2.40}"
 REPO_URL="https://github.com/glowseedstudio/Vantafyn"
-TAG="${2:-v0.9.75}"
-CHANGELOG="Fixes FireRed Deoxys sprite and mapping in details modal, corrects 3DS Gen 6 and 7 IV offset parsing so IV radars and stats display accurately, and expands move catalog for Gen 6 and 7 moves."
+TAG="${2:-v0.9.76}"
+CHANGELOG="Enables accurate multiplication and accurate geometry shaders for 3DS emulation to eliminate white screens in Pokémon Ultra Sun / Moon, enhances 3DS cloud save synchronization and listing across devices."
 
 rm -rf "$ARTIFACTS"
 mkdir -p "$ARTIFACTS"
@@ -105,6 +105,22 @@ cat > "$ROOT/manifest.json" <<JSON
         "sourceUrl": "${REPO_URL}/releases/download/${TAG}/Vantafyn.Plugin.Companion_${VERSION}_net10.zip",
         "checksum": "${MD5_NET10}",
         "timestamp": "${TIMESTAMP}"
+      },
+      {
+        "version": "0.2.39.0",
+        "changelog": "Fixes 3DS cloud saves resolution, normalization and multi-device listing.",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.75/Vantafyn.Plugin.Companion_0.2.39_net9.zip",
+        "checksum": "99c0729a7b8ae0d60ce861b5d746d5d0",
+        "timestamp": "2026-10-15T07:21:14Z"
+      },
+      {
+        "version": "0.2.39.1",
+        "changelog": "Fixes 3DS cloud saves resolution, normalization and multi-device listing.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "${REPO_URL}/releases/download/v0.9.75/Vantafyn.Plugin.Companion_0.2.39_net10.zip",
+        "checksum": "141e45f338075e8a75d59469f1098fd7",
+        "timestamp": "2026-10-15T07:21:14Z"
       },
       {
         "version": "0.2.36.0",

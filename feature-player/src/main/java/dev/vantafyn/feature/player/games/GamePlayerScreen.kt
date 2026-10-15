@@ -598,12 +598,12 @@ fun GamePlayerScreen(
                         engine.setOption("azahar_cpu_clock_percentage", "100")
                         engine.setOption("citra_audio_emulation", "hle")
                         engine.setOption("azahar_audio_emulation", "hle")
-                        engine.setOption("citra_use_acc_geo_shaders", "disabled")
-                        engine.setOption("azahar_use_acc_geo_shaders", "disabled")
-                        engine.setOption("citra_use_acc_mul", "disabled")
-                        engine.setOption("azahar_use_acc_mul", "disabled")
-                        engine.setOption("citra_shaders_accurate_mul", "disabled")
-                        engine.setOption("azahar_shaders_accurate_mul", "disabled")
+                        engine.setOption("citra_use_acc_geo_shaders", "enabled")
+                        engine.setOption("azahar_use_acc_geo_shaders", "enabled")
+                        engine.setOption("citra_use_acc_mul", "enabled")
+                        engine.setOption("azahar_use_acc_mul", "enabled")
+                        engine.setOption("citra_shaders_accurate_mul", "enabled")
+                        engine.setOption("azahar_shaders_accurate_mul", "enabled")
 
                         // Prepare permanent Azahar / Citra shader cache directories to ensure write access across sessions
                         try {

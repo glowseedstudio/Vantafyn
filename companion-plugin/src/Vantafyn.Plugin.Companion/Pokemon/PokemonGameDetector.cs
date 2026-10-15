@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Vantafyn.Plugin.Companion.Core;
+using Vantafyn.Plugin.Companion.Games;
 
 namespace Vantafyn.Plugin.Companion.Pokemon;
+
 
 public interface IPokemonGameDetector
 {
@@ -221,12 +223,41 @@ public sealed class PokemonGameDetector : IPokemonGameDetector
             var userDir = Path.Combine(_paths.GameSavesRoot, userId.ToString("N"));
             if (!Directory.Exists(userDir)) return false;
 
-            return File.Exists(Path.Combine(userDir, $"{safeGame}.sram")) ||
-                   File.Exists(Path.Combine(userDir, $"{safeGame}.sav")) ||
-                   File.Exists(Path.Combine(userDir, $"{safeGame}.srm")) ||
-                   File.Exists(Path.Combine(userDir, $"{safeGame}.main")) ||
-                   File.Exists(Path.Combine(userDir, $"{safeGame}.bin")) ||
-                   File.Exists(Path.Combine(userDir, "main"));
+            if (File.Exists(Path.Combine(userDir, $"{safeGame}.sram")) ||
+                File.Exists(Path.Combine(userDir, $"{safeGame}.sav")) ||
+                File.Exists(Path.Combine(userDir, $"{safeGame}.srm")) ||
+                File.Exists(Path.Combine(userDir, $"{safeGame}.main")) ||
+                File.Exists(Path.Combine(userDir, $"{safeGame}.bin")) ||
+                File.Exists(Path.Combine(userDir, "main")))
+            {
+                return true;
+            }
+
+            var titleId = GameSavesService.Deduce3dsTitleId(gameId);
+            if (!string.IsNullOrEmpty(titleId))
+            {
+                if (Directory.EnumerateFiles(userDir).Any(f =>
+                    (Path.GetFileName(f).Contains(titleId, StringComparison.OrdinalIgnoreCase) ||
+                     (titleId == "001b5000" && Path.GetFileName(f).Contains("ultrasun", StringComparison.OrdinalIgnoreCase))) &&
+                    (f.EndsWith(".sram", StringComparison.OrdinalIgnoreCase) ||
+                     f.EndsWith(".sav", StringComparison.OrdinalIgnoreCase) ||
+                     f.EndsWith(".main", StringComparison.OrdinalIgnoreCase) ||
+                     f.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))))
+                {
+                    return true;
+                }
+            }
+
+            if (safeGame.StartsWith("local_3ds_", StringComparison.OrdinalIgnoreCase))
+            {
+                var stripped = safeGame[10..];
+                if (Directory.EnumerateFiles(userDir).Any(f => Path.GetFileName(f).Contains(stripped, StringComparison.OrdinalIgnoreCase)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
         catch
         {

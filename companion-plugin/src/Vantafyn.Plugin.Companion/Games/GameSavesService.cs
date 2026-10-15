@@ -20,6 +20,32 @@ public sealed class GameSavesService : IGameSavesService
         _savesPath = companionPaths.GameSavesRoot;
     }
 
+    public static readonly Dictionary<string, string> Known3dsTitleIds = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["001b5000"] = "Pokémon Ultra Sun",
+        ["001b5100"] = "Pokémon Ultra Moon",
+        ["00164800"] = "Pokémon Sun",
+        ["00175e00"] = "Pokémon Moon",
+        ["0011c400"] = "Pokémon Omega Ruby",
+        ["0011c500"] = "Pokémon Alpha Sapphire",
+        ["00055d00"] = "Pokémon X",
+        ["00055e00"] = "Pokémon Y",
+    };
+
+    public static string? Deduce3dsTitleId(string identifier)
+    {
+        var lower = identifier.ToLowerInvariant();
+        if (lower.Contains("001b5000") || (lower.Contains("ultra") && (lower.Contains("sun") || lower.Contains("us")))) return "001b5000";
+        if (lower.Contains("001b5100") || (lower.Contains("ultra") && (lower.Contains("moon") || lower.Contains("um")))) return "001b5100";
+        if (lower.Contains("00164800") || lower.Contains("sun")) return "00164800";
+        if (lower.Contains("00175e00") || lower.Contains("moon")) return "00175e00";
+        if (lower.Contains("0011c400") || lower.Contains("omega") || lower.Contains("ruby")) return "0011c400";
+        if (lower.Contains("0011c500") || lower.Contains("alpha") || lower.Contains("sapphire")) return "0011c500";
+        if (lower.Contains("00055d00") || lower.Contains("pokemon x") || lower.Contains("pokemon_x") || lower.EndsWith("_x") || lower == "x") return "00055d00";
+        if (lower.Contains("00055e00") || lower.Contains("pokemon y") || lower.Contains("pokemon_y") || lower.EndsWith("_y") || lower == "y") return "00055e00";
+        return null;
+    }
+
     public async Task<byte[]?> GetAsync(Guid userId, string gameId, string kind, CancellationToken cancellationToken)
     {
         var path = ResolvePath(userId, gameId, kind);
@@ -54,7 +80,35 @@ public sealed class GameSavesService : IGameSavesService
                                 || f.EndsWith(".srm", StringComparison.OrdinalIgnoreCase)
                                 || f.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)
                                 || f.EndsWith(".main", StringComparison.OrdinalIgnoreCase)));
-                    if (matched != null) path = matched;
+                    if (matched != null)
+                    {
+                        path = matched;
+                    }
+                    else
+                    {
+                        // 3DS Title ID and alternate game title resolution
+                        var titleId = Deduce3dsTitleId(gameId);
+                        if (!string.IsNullOrEmpty(titleId))
+                        {
+                            var titleMatch = Directory.EnumerateFiles(userDir)
+                                .FirstOrDefault(f => (Path.GetFileName(f).Contains(titleId, StringComparison.OrdinalIgnoreCase)
+                                    || (titleId == "001b5000" && Path.GetFileName(f).Contains("ultrasun", StringComparison.OrdinalIgnoreCase)))
+                                    && (f.EndsWith(".sram", StringComparison.OrdinalIgnoreCase)
+                                        || f.EndsWith(".sav", StringComparison.OrdinalIgnoreCase)
+                                        || f.EndsWith(".main", StringComparison.OrdinalIgnoreCase)
+                                        || f.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)));
+                            if (titleMatch != null) path = titleMatch;
+                        }
+
+                        // Local 3DS game prefix fallback
+                        if (!File.Exists(path) && safeGame.StartsWith("local_3ds_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var stripped = safeGame[10..];
+                            var strippedMatch = Directory.EnumerateFiles(userDir)
+                                .FirstOrDefault(f => Path.GetFileName(f).Contains(stripped, StringComparison.OrdinalIgnoreCase));
+                            if (strippedMatch != null) path = strippedMatch;
+                        }
+                    }
                 }
             }
         }
@@ -90,6 +144,34 @@ public sealed class GameSavesService : IGameSavesService
         try
         {
             await File.WriteAllBytesAsync(path, data, cancellationToken).ConfigureAwait(false);
+
+            // For 3DS SRAM saves (Gen 6/7), also mirror to canonical title ID and name aliases
+            if (string.Equals(kind, "sram", StringComparison.OrdinalIgnoreCase) && data.Length > 0)
+            {
+                var titleId = Deduce3dsTitleId(gameId);
+                if (titleId == null && data.Length == 445440)
+                {
+                    // 445,440 bytes is the authentic Gen 7 (Sun/Moon/US/UM) main save size
+                    titleId = gameId.Contains("moon", StringComparison.OrdinalIgnoreCase) ? "001b5100" : "001b5000";
+                }
+
+                if (!string.IsNullOrEmpty(titleId))
+                {
+                    var aliasPath = Path.Combine(dir, $"3ds_{titleId}.sram");
+                    if (!string.Equals(aliasPath, path, StringComparison.OrdinalIgnoreCase))
+                    {
+                        await File.WriteAllBytesAsync(aliasPath, data, cancellationToken).ConfigureAwait(false);
+                    }
+                    if (titleId == "001b5000")
+                    {
+                        var usPath = Path.Combine(dir, "pokemon_ultrasun.sram");
+                        if (!string.Equals(usPath, path, StringComparison.OrdinalIgnoreCase))
+                        {
+                            await File.WriteAllBytesAsync(usPath, data, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
+                }
+            }
         }
         finally
         {
@@ -139,6 +221,55 @@ public sealed class GameSavesService : IGameSavesService
         {
             _lock.Release();
         }
+    }
+
+    public async Task<IReadOnlyList<CloudSaveSummaryDto>> ListAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var userDir = Path.Combine(_savesPath, userId.ToString("N"));
+        if (!Directory.Exists(userDir))
+        {
+            return Array.Empty<CloudSaveSummaryDto>();
+        }
+
+        var results = new List<CloudSaveSummaryDto>();
+        var seenGameKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        var validExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".sram", ".sav", ".srm", ".state", ".main"
+        };
+
+        foreach (var file in Directory.EnumerateFiles(userDir))
+        {
+            var ext = Path.GetExtension(file);
+            if (!validExtensions.Contains(ext)) continue;
+
+            var rawName = Path.GetFileNameWithoutExtension(file);
+            var kind = ext.TrimStart('.').ToLowerInvariant();
+            if (kind is "sav" or "srm" or "main") kind = "sram";
+
+            var titleId = Deduce3dsTitleId(rawName);
+            var gameTitle = titleId != null && Known3dsTitleIds.TryGetValue(titleId, out var kt)
+                ? kt
+                : rawName.Replace('_', ' ').Trim();
+
+            // De-duplicate aliases (e.g. 3ds_001b5000 vs local_3ds_... vs pokemon_ultrasun)
+            var dedupeKey = titleId ?? rawName;
+            if (!seenGameKeys.Add(dedupeKey)) continue;
+
+            var fi = new FileInfo(file);
+            results.Add(new CloudSaveSummaryDto
+            {
+                GameId = rawName,
+                Kind = kind,
+                LastModifiedMs = new DateTimeOffset(fi.LastWriteTimeUtc).ToUnixTimeMilliseconds(),
+                SizeBytes = fi.Length,
+                TitleId = titleId,
+                GameTitle = gameTitle,
+            });
+        }
+
+        return results;
     }
 
     private string? ResolvePath(Guid userId, string gameId, string kind)
