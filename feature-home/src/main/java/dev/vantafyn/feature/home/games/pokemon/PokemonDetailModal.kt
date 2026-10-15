@@ -120,11 +120,37 @@ fun PokemonDetailModal(
     val pokemon = remember(pokemon) {
         val rawId = pokemon.speciesId
         val origin = pokemon.originGame ?: ""
-        if (rawId == 410 && (pokemon.nickname.equals("DEOXYS", ignoreCase = true) || pokemon.species.equals("DEOXYS", ignoreCase = true) || pokemon.species.equals("Shieldon", ignoreCase = true))) {
+        val current = pokemon.currentGame ?: ""
+        val game = gameId ?: ""
+        val isGen3 = origin.contains("fire", ignoreCase = true) ||
+            origin.contains("leaf", ignoreCase = true) ||
+            origin.contains("ruby", ignoreCase = true) ||
+            origin.contains("sapph", ignoreCase = true) ||
+            origin.contains("emer", ignoreCase = true) ||
+            current.contains("fire", ignoreCase = true) ||
+            current.contains("leaf", ignoreCase = true) ||
+            current.contains("ruby", ignoreCase = true) ||
+            current.contains("sapph", ignoreCase = true) ||
+            current.contains("emer", ignoreCase = true) ||
+            game.contains("fire", ignoreCase = true) ||
+            game.contains("leaf", ignoreCase = true) ||
+            game.contains("ruby", ignoreCase = true) ||
+            game.contains("sapph", ignoreCase = true) ||
+            game.contains("emer", ignoreCase = true) ||
+            game.contains("gba", ignoreCase = true)
+
+        if ((rawId == 410 || rawId == 362 || rawId == 386) && (pokemon.nickname.equals("DEOXYS", ignoreCase = true) || pokemon.species.equals("DEOXYS", ignoreCase = true))) {
             pokemon.copy(speciesId = 386, species = "Deoxys")
-        } else if (rawId in 277..411 && (origin.contains("fire", ignoreCase = true) || origin.contains("leaf", ignoreCase = true) || origin.contains("ruby", ignoreCase = true) || origin.contains("sapph", ignoreCase = true) || origin.contains("emer", ignoreCase = true))) {
-            val nat = dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.gen3InternalIdToNationalDex(rawId)
-            if (nat > 0) pokemon.copy(speciesId = nat, species = PokemonSpeciesCatalog.resolveSpeciesName(nat)) else pokemon
+        } else if (rawId == 410 && isGen3) {
+            pokemon.copy(speciesId = 386, species = "Deoxys")
+        } else if (isGen3 && rawId in 277..411) {
+            val catalogName = PokemonSpeciesCatalog.resolveSpeciesName(rawId)
+            if (catalogName.isNotBlank() && !catalogName.startsWith("#") && (catalogName.equals(pokemon.species, ignoreCase = true) || (rawId <= 386 && pokemon.species.isNotBlank() && !pokemon.species.startsWith("#")))) {
+                pokemon
+            } else {
+                val nat = dev.vantafyn.core.jellyfin.Gen3NativeSaveParser.gen3InternalIdToNationalDex(rawId)
+                if (nat > 0) pokemon.copy(speciesId = nat, species = PokemonSpeciesCatalog.resolveSpeciesName(nat)) else pokemon
+            }
         } else {
             pokemon
         }
@@ -655,7 +681,9 @@ fun PokemonDetailModal(
             }
 
             // Stat & Judge Appraisal System
-            val effectiveIvs = details?.iv ?: canonicalFallback.iv
+            val rawIvs = details?.iv
+            val hasNonZeroIvs = rawIvs != null && (rawIvs.hp > 0 || rawIvs.attack > 0 || rawIvs.defense > 0 || rawIvs.speed > 0 || rawIvs.specialAttack > 0 || rawIvs.specialDefense > 0)
+            val effectiveIvs = if (hasNonZeroIvs) rawIvs else canonicalFallback.iv
             val effectiveEvs = details?.ev ?: canonicalFallback.ev
             val effectiveNature = details?.nature?.ifBlank { canonicalFallback.nature } ?: canonicalFallback.nature
             val natureMods = remember(effectiveNature) { getNatureModifiers(effectiveNature) }

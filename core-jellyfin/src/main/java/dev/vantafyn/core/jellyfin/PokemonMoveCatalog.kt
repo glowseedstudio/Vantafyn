@@ -562,6 +562,189 @@ object PokemonMoveCatalog {
         "V-create", // 557
         "Fusion Flare", // 558
         "Fusion Bolt", // 559
+        "Flying Press", // 560
+        "Mat Block", // 561
+        "Belch", // 562
+        "Rototiller", // 563
+        "Sticky Web", // 564
+        "Fell Stinger", // 565
+        "Phantom Force", // 566
+        "Trick-or-Treat", // 567
+        "Noble Roar", // 568
+        "Ion Deluge", // 569
+        "Parabolic Charge", // 570
+        "Forest's Curse", // 571
+        "Petal Blizzard", // 572
+        "Freeze-Dry", // 573
+        "Disarming Voice", // 574
+        "Parting Shot", // 575
+        "Topsy-Turvy", // 576
+        "Draining Kiss", // 577
+        "Crafty Shield", // 578
+        "Flower Shield", // 579
+        "Grassy Terrain", // 580
+        "Misty Terrain", // 581
+        "Electrify", // 582
+        "Play Rough", // 583
+        "Fairy Wind", // 584
+        "Moonblast", // 585
+        "Boomburst", // 586
+        "Fairy Lock", // 587
+        "King's Shield", // 588
+        "Play Nice", // 589
+        "Confide", // 590
+        "Diamond Storm", // 591
+        "Steam Eruption", // 592
+        "Hyperspace Hole", // 593
+        "Water Shuriken", // 594
+        "Mystical Fire", // 595
+        "Spiky Shield", // 596
+        "Aromatic Mist", // 597
+        "Eerie Impulse", // 598
+        "Venom Drench", // 599
+        "Powder", // 600
+        "Geomancy", // 601
+        "Magnetic Flux", // 602
+        "Happy Hour", // 603
+        "Electric Terrain", // 604
+        "Dazzling Gleam", // 605
+        "Celebrate", // 606
+        "Hold Hands", // 607
+        "Baby-Doll Eyes", // 608
+        "Nuzzle", // 609
+        "Hold Back", // 610
+        "Infestation", // 611
+        "Power-Up Punch", // 612
+        "Oblivion Wing", // 613
+        "Thousand Arrows", // 614
+        "Thousand Waves", // 615
+        "Land's Wrath", // 616
+        "Light of Ruin", // 617
+        "Origin Pulse", // 618
+        "Precipice Blades", // 619
+        "Dragon Ascent", // 620
+        "Hyperspace Fury", // 621
+        "Breakneck Blitz", // 622
+        "Breakneck Blitz", // 623
+        "All-Out Pummeling", // 624
+        "All-Out Pummeling", // 625
+        "Supersonic Skystrike", // 626
+        "Supersonic Skystrike", // 627
+        "Acid Downpour", // 628
+        "Acid Downpour", // 629
+        "Tectonic Rage", // 630
+        "Tectonic Rage", // 631
+        "Continental Crush", // 632
+        "Continental Crush", // 633
+        "Savage Spin-Out", // 634
+        "Savage Spin-Out", // 635
+        "Never-Ending Nightmare", // 636
+        "Never-Ending Nightmare", // 637
+        "Corkscrew Crash", // 638
+        "Corkscrew Crash", // 639
+        "Inferno Overdrive", // 640
+        "Inferno Overdrive", // 641
+        "Hydro Vortex", // 642
+        "Hydro Vortex", // 643
+        "Bloom Doom", // 644
+        "Bloom Doom", // 645
+        "Gigavolt Havoc", // 646
+        "Gigavolt Havoc", // 647
+        "Shattered Psyche", // 648
+        "Shattered Psyche", // 649
+        "Subzero Slammer", // 650
+        "Subzero Slammer", // 651
+        "Devastating Drake", // 652
+        "Devastating Drake", // 653
+        "Black Hole Eclipse", // 654
+        "Black Hole Eclipse", // 655
+        "Twinkle Tackle", // 656
+        "Twinkle Tackle", // 657
+        "Catastropika", // 658
+        "Shore Up", // 659
+        "First Impression", // 660
+        "Baneful Bunker", // 661
+        "Spirit Shackle", // 662
+        "Darkest Lariat", // 663
+        "Sparkling Aria", // 664
+        "Ice Hammer", // 665
+        "Floral Healing", // 666
+        "High Horsepower", // 667
+        "Strength Sap", // 668
+        "Solar Blade", // 669
+        "Leafage", // 670
+        "Spotlight", // 671
+        "Toxic Thread", // 672
+        "Laser Focus", // 673
+        "Gear Up", // 674
+        "Throat Chop", // 675
+        "Pollen Puff", // 676
+        "Anchor Shot", // 677
+        "Psychic Terrain", // 678
+        "Lunge", // 679
+        "Fire Lash", // 680
+        "Power Trip", // 681
+        "Burn Up", // 682
+        "Speed Swap", // 683
+        "Smart Strike", // 684
+        "Purify", // 685
+        "Revelation Dance", // 686
+        "Core Enforcer", // 687
+        "Trop Kick", // 688
+        "Instruct", // 689
+        "Beak Blast", // 690
+        "Clanging Scales", // 691
+        "Dragon Hammer", // 692
+        "Brutal Swing", // 693
+        "Aurora Veil", // 694
+        "Sinister Arrow Raid", // 695
+        "Malicious Moonsault", // 696
+        "Oceanic Operetta", // 697
+        "Guardian of Alola", // 698
+        "Soul-Stealing 7-Star Strike", // 699
+        "Stoked Sparksurfer", // 700
+        "Pulverizing Pancake", // 701
+        "Extreme Evoboost", // 702
+        "Genesis Supernova", // 703
+        "Shell Trap", // 704
+        "Fleur Cannon", // 705
+        "Psychic Fangs", // 706
+        "Stomping Tantrum", // 707
+        "Shadow Bone", // 708
+        "Accelerock", // 709
+        "Liquidation", // 710
+        "Prismatic Laser", // 711
+        "Spectral Thief", // 712
+        "Sunsteel Strike", // 713
+        "Moongeist Beam", // 714
+        "Tearful Look", // 715
+        "Zing Zap", // 716
+        "Nature's Madness", // 717
+        "Multi-Attack", // 718
+        "10,000,000 Volt Thunderbolt", // 719
+        "Mind Blown", // 720
+        "Plasma Fists", // 721
+        "Photon Geyser", // 722
+        "Light That Burns the Sky", // 723
+        "Searing Sunraze Smash", // 724
+        "Menacing Moonraze Maelstrom", // 725
+        "Let's Snuggle Forever", // 726
+        "Splintered Stormshards", // 727
+        "Clangorous Soulblaze", // 728
+        "Zippy Zap", // 729
+        "Splishy Splash", // 730
+        "Floaty Fall", // 731
+        "Pika Papow", // 732
+        "Bouncy Bubble", // 733
+        "Buzzy Buzz", // 734
+        "Sizzly Slide", // 735
+        "Glitzy Glow", // 736
+        "Baddy Bad", // 737
+        "Sappy Seed", // 738
+        "Freezy Frost", // 739
+        "Sparkly Swirl", // 740
+        "Veevee Volley", // 741
+        "Double Iron Bash", // 742
     )
 
     fun resolveMoveName(id: Int): String {

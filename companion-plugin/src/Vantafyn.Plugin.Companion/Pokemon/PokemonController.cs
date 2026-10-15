@@ -2764,6 +2764,7 @@ public sealed class PokemonController : ControllerBase
             ProviderAvailable = true,
             Party = parseResult.Party,
             Boxes = parseResult.Boxes,
+            PokemonDetails = parseResult.Details,
             TotalPokemonCount = totalCount,
             ShinyCount = shinyCount
         });
@@ -2861,11 +2862,31 @@ public sealed class PokemonController : ControllerBase
             return Ok(details);
         }
 
+        var matchedDetail = parseResult.Details.FirstOrDefault(kvp => string.Equals(kvp.Key, pokemonId, StringComparison.OrdinalIgnoreCase)).Value;
+        if (matchedDetail != null)
+        {
+            return Ok(matchedDetail);
+        }
+
         var foundSummary = parseResult.Party.FirstOrDefault(p => string.Equals(p.Id, pokemonId, StringComparison.OrdinalIgnoreCase))
             ?? parseResult.Boxes.SelectMany(b => b.Entries).FirstOrDefault(p => string.Equals(p.Id, pokemonId, StringComparison.OrdinalIgnoreCase));
 
         if (foundSummary != null)
         {
+            var detailMatch = parseResult.Details.Values.FirstOrDefault(d =>
+                d.Summary.SpeciesId == foundSummary.SpeciesId &&
+                d.Summary.Level == foundSummary.Level &&
+                d.Summary.BoxIndex == foundSummary.BoxIndex &&
+                d.Summary.SlotIndex == foundSummary.SlotIndex)
+                ?? parseResult.Details.Values.FirstOrDefault(d =>
+                d.Summary.SpeciesId == foundSummary.SpeciesId &&
+                d.Summary.Level == foundSummary.Level);
+
+            if (detailMatch != null)
+            {
+                return Ok(detailMatch);
+            }
+
             return Ok(new PokemonDetailsDto { Summary = foundSummary });
         }
 

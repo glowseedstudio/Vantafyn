@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.38.0",
-        "changelog": "Adds full support for Nintendo 3DS save detection and cloud sync, fixes Alola trial stamp parsing for fresh saves, resolves 3DS game IDs for Mystery Gifts and event unlocks, and renders Mystery Gift cards with 1-tap vault redemption.",
+        "version": "0.2.39.0",
+        "changelog": "Fixes FireRed Deoxys sprite and mapping in details modal, corrects 3DS Gen 6 and 7 IV offset parsing so IV radars and stats display accurately, and expands move catalog for Gen 6 and 7 moves.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.73/Vantafyn.Plugin.Companion_0.2.38_net9.zip",
-        "checksum": "4d43e06003c16228de398b64c36d2cb3",
-        "timestamp": "2026-10-14T07:14:30Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.75/Vantafyn.Plugin.Companion_0.2.39_net9.zip",
+        "checksum": "3746d495fd5a4370af6fd0fbd82ecdd2",
+        "timestamp": "2026-10-15T06:30:14Z"
       },
       {
-        "version": "0.2.38.1",
-        "changelog": "Adds full support for Nintendo 3DS save detection and cloud sync, fixes Alola trial stamp parsing for fresh saves, resolves 3DS game IDs for Mystery Gifts and event unlocks, and renders Mystery Gift cards with 1-tap vault redemption.",
+        "version": "0.2.39.1",
+        "changelog": "Fixes FireRed Deoxys sprite and mapping in details modal, corrects 3DS Gen 6 and 7 IV offset parsing so IV radars and stats display accurately, and expands move catalog for Gen 6 and 7 moves.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.73/Vantafyn.Plugin.Companion_0.2.38_net10.zip",
-        "checksum": "0427860a555a902a8039df9b9fc45f53",
-        "timestamp": "2026-10-14T07:14:30Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.75/Vantafyn.Plugin.Companion_0.2.39_net10.zip",
+        "checksum": "957c540612d32f43d8e3e457201f0c8e",
+        "timestamp": "2026-10-15T06:30:14Z"
       },
       {
         "version": "0.2.36.0",

@@ -488,7 +488,7 @@ public static class Gen7SaveParser
             }
         }
 
-        uint iv32 = ReadUInt32LE(unshuffled, 112);
+        uint iv32 = ReadUInt32LE(unshuffled, 116);
         int hpIv = (int)(iv32 & 0x1F);
         int atkIv = (int)((iv32 >> 5) & 0x1F);
         int defIv = (int)((iv32 >> 10) & 0x1F);

@@ -312,6 +312,9 @@ public sealed class PokemonGameSaveDto
     [JsonPropertyName("boxes")]
     public IReadOnlyList<PokemonBoxDto> Boxes { get; set; } = Array.Empty<PokemonBoxDto>();
 
+    [JsonPropertyName("pokemonDetails")]
+    public Dictionary<string, PokemonDetailsDto> PokemonDetails { get; set; } = new();
+
     [JsonPropertyName("totalPokemonCount")]
     public int TotalPokemonCount { get; set; }
 

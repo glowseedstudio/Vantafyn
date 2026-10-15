@@ -464,26 +464,36 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
         {
             foreach (var entry in b.Entries)
             {
-                if (entry.SpeciesId == 410 && (string.Equals(entry.Nickname, "DEOXYS", StringComparison.OrdinalIgnoreCase) ||
-                                               string.Equals(entry.Species, "DEOXYS", StringComparison.OrdinalIgnoreCase) ||
-                                               string.Equals(entry.Species, "Shieldon", StringComparison.OrdinalIgnoreCase)))
+                bool isGen3 = entry.Generation == 3 ||
+                              entry.OriginGame.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
+                              entry.OriginGame.Contains("leaf", StringComparison.OrdinalIgnoreCase) ||
+                              entry.OriginGame.Contains("ruby", StringComparison.OrdinalIgnoreCase) ||
+                              entry.OriginGame.Contains("sapph", StringComparison.OrdinalIgnoreCase) ||
+                              entry.OriginGame.Contains("emer", StringComparison.OrdinalIgnoreCase);
+
+                if ((entry.SpeciesId == 410 || entry.SpeciesId == 362 || entry.SpeciesId == 386) &&
+                    (string.Equals(entry.Nickname, "DEOXYS", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(entry.Species, "DEOXYS", StringComparison.OrdinalIgnoreCase)))
                 {
                     entry.SpeciesId = 386;
                     entry.Species = "Deoxys";
                 }
-                else if (entry.SpeciesId is >= 277 and <= 411 &&
-                         (entry.Generation == 3 ||
-                          entry.OriginGame.Contains("fire", StringComparison.OrdinalIgnoreCase) ||
-                          entry.OriginGame.Contains("leaf", StringComparison.OrdinalIgnoreCase) ||
-                          entry.OriginGame.Contains("ruby", StringComparison.OrdinalIgnoreCase) ||
-                          entry.OriginGame.Contains("sapph", StringComparison.OrdinalIgnoreCase) ||
-                          entry.OriginGame.Contains("emer", StringComparison.OrdinalIgnoreCase)))
+                else if (entry.SpeciesId == 410 && (isGen3 || string.Equals(entry.Species, "Shieldon", StringComparison.OrdinalIgnoreCase)))
                 {
-                    var corrected = Native.Gen3SaveParser.Gen3InternalIdToNationalDex(entry.SpeciesId);
-                    if (corrected > 0)
+                    entry.SpeciesId = 386;
+                    entry.Species = "Deoxys";
+                }
+                else if (entry.SpeciesId is >= 277 and <= 411 && isGen3)
+                {
+                    var currentName = PkVault.PokemonSpeciesCatalog.ResolveSpeciesName(entry.SpeciesId);
+                    if (!string.Equals(entry.Species, currentName, StringComparison.OrdinalIgnoreCase))
                     {
-                        entry.SpeciesId = corrected;
-                        entry.Species = PkVault.PokemonSpeciesCatalog.ResolveSpeciesName(corrected);
+                        var corrected = Native.Gen3SaveParser.Gen3InternalIdToNationalDex(entry.SpeciesId);
+                        if (corrected > 0)
+                        {
+                            entry.SpeciesId = corrected;
+                            entry.Species = PkVault.PokemonSpeciesCatalog.ResolveSpeciesName(corrected);
+                        }
                     }
                 }
             }

@@ -389,8 +389,8 @@ object Gen6NativeSaveParser {
             .filter { it > 0 }
             .map { PokemonMoveCatalog.resolveMoveName(it) }
 
-        // IVs in Block B (offset 112)
-        val iv32 = readUInt32LE(unshuffled, 112)
+        // IVs in Block B (offset 116)
+        val iv32 = readUInt32LE(unshuffled, 116)
         val hpIv = (iv32 and 0x1FL).toInt()
         val atkIv = ((iv32 ushr 5) and 0x1FL).toInt()
         val defIv = ((iv32 ushr 10) and 0x1FL).toInt()
