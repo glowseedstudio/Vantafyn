@@ -23,7 +23,12 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
                 var existing = await JsonFile.ReadAsync<PokemonVault>(path, cancellationToken).ConfigureAwait(false);
                 if (existing != null)
                 {
-                    EnsureBoxes(existing);
+                    var modified = EnsureBoxes(existing);
+                    if (modified)
+                    {
+                        Directory.CreateDirectory(UserVaultDirectory(userId));
+                        await JsonFile.WriteAtomicAsync(path, existing, cancellationToken).ConfigureAwait(false);
+                    }
                     return existing;
                 }
             }
@@ -129,8 +134,31 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
             }
 
             var targetBox = vault.Boxes.FirstOrDefault(b => b.BoxIndex == entry.BoxIndex) ?? vault.Boxes[0];
-            entry.BoxIndex = targetBox.BoxIndex;
-            if (string.IsNullOrWhiteSpace(entry.CurrentLocation))
+
+            // If the specified slot is invalid (<= 0 or > Capacity) or already occupied by another entry in the target box,
+            // find the next available slot starting from the target box.
+            if (entry.SlotIndex <= 0 ||
+                entry.SlotIndex > targetBox.Capacity ||
+                targetBox.Entries.Any(e => e.SlotIndex == entry.SlotIndex))
+            {
+                var (nextBoxIdx, nextSlotIdx) = FindNextSlotInternal(vault, targetBox.BoxIndex);
+                if (nextBoxIdx > 0 && nextSlotIdx > 0)
+                {
+                    targetBox = vault.Boxes.FirstOrDefault(b => b.BoxIndex == nextBoxIdx) ?? targetBox;
+                    entry.BoxIndex = targetBox.BoxIndex;
+                    entry.SlotIndex = nextSlotIdx;
+                }
+                else
+                {
+                    entry.BoxIndex = targetBox.BoxIndex;
+                }
+            }
+            else
+            {
+                entry.BoxIndex = targetBox.BoxIndex;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.CurrentLocation) || entry.CurrentLocation.StartsWith("Box ") || entry.CurrentLocation.StartsWith("Vault Box "))
             {
                 entry.CurrentLocation = $"{targetBox.Name}, Slot {entry.SlotIndex}";
             }
@@ -152,6 +180,89 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
         {
             lockObj.Release();
         }
+    }
+
+    public async Task<(int BoxIndex, int SlotIndex)> FindNextAvailableSlotAsync(Guid userId, int preferredBoxIndex = 1, CancellationToken cancellationToken = default)
+    {
+        var lockObj = LockFor(userId);
+        await lockObj.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var path = VaultFilePath(userId);
+            PokemonVault vault;
+            if (File.Exists(path))
+            {
+                vault = (await JsonFile.ReadAsync<PokemonVault>(path, cancellationToken).ConfigureAwait(false))
+                        ?? PokemonVault.CreateDefault(userId, clock.UtcNow);
+            }
+            else
+            {
+                vault = PokemonVault.CreateDefault(userId, clock.UtcNow);
+            }
+
+            var modified = EnsureBoxes(vault);
+            if (modified)
+            {
+                Directory.CreateDirectory(UserVaultDirectory(userId));
+                await JsonFile.WriteAtomicAsync(path, vault, cancellationToken).ConfigureAwait(false);
+            }
+
+            return FindNextSlotInternal(vault, preferredBoxIndex);
+        }
+        finally
+        {
+            lockObj.Release();
+        }
+    }
+
+    public static (int BoxIndex, int SlotIndex) FindNextSlotInternal(PokemonVault vault, int preferredBoxIndex = 1)
+    {
+        if (vault.Boxes == null || vault.Boxes.Count == 0)
+        {
+            return (0, 0);
+        }
+
+        var startBox = Math.Clamp(preferredBoxIndex, 1, vault.Boxes.Count);
+
+        // Check from preferredBoxIndex to end of boxes
+        for (var bIdx = startBox; bIdx <= vault.Boxes.Count; bIdx++)
+        {
+            var box = vault.Boxes.FirstOrDefault(b => b.BoxIndex == bIdx);
+            if (box == null)
+            {
+                continue;
+            }
+
+            var occupied = new HashSet<int>(box.Entries.Select(e => e.SlotIndex));
+            for (var slot = 1; slot <= box.Capacity; slot++)
+            {
+                if (!occupied.Contains(slot))
+                {
+                    return (box.BoxIndex, slot);
+                }
+            }
+        }
+
+        // Wrap around from Box 1 up to startBox - 1
+        for (var bIdx = 1; bIdx < startBox; bIdx++)
+        {
+            var box = vault.Boxes.FirstOrDefault(b => b.BoxIndex == bIdx);
+            if (box == null)
+            {
+                continue;
+            }
+
+            var occupied = new HashSet<int>(box.Entries.Select(e => e.SlotIndex));
+            for (var slot = 1; slot <= box.Capacity; slot++)
+            {
+                if (!occupied.Contains(slot))
+                {
+                    return (box.BoxIndex, slot);
+                }
+            }
+        }
+
+        return (0, 0);
     }
 
     public async Task<bool> RemoveEntryAsync(Guid userId, string entryId, CancellationToken cancellationToken)
@@ -188,6 +299,155 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
             }
 
             return removed;
+        }
+        finally
+        {
+            lockObj.Release();
+        }
+    }
+
+    public async Task<PokemonVaultMoveResult> MoveEntryAsync(Guid userId, string entryId, int targetBoxIndex, int? targetSlotIndex, CancellationToken cancellationToken)
+    {
+        var lockObj = LockFor(userId);
+        await lockObj.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var path = VaultFilePath(userId);
+            if (!File.Exists(path))
+            {
+                return new PokemonVaultMoveResult { Success = false, Message = "Personal Vault not found." };
+            }
+
+            var vault = await JsonFile.ReadAsync<PokemonVault>(path, cancellationToken).ConfigureAwait(false);
+            if (vault == null)
+            {
+                return new PokemonVaultMoveResult { Success = false, Message = "Personal Vault could not be loaded." };
+            }
+
+            EnsureBoxes(vault);
+
+            PokemonVaultBox? sourceBox = null;
+            PokemonVaultEntry? sourceEntry = null;
+            foreach (var b in vault.Boxes)
+            {
+                sourceEntry = b.Entries.FirstOrDefault(e => string.Equals(e.Id, entryId, StringComparison.OrdinalIgnoreCase));
+                if (sourceEntry != null)
+                {
+                    sourceBox = b;
+                    break;
+                }
+            }
+
+            if (sourceEntry == null || sourceBox == null)
+            {
+                return new PokemonVaultMoveResult { Success = false, Message = $"Pokémon entry '{entryId}' not found in Personal Vault." };
+            }
+
+            var clampedBox = Math.Clamp(targetBoxIndex, 1, vault.Boxes.Count);
+            var targetBox = vault.Boxes.FirstOrDefault(b => b.BoxIndex == clampedBox) ?? vault.Boxes[0];
+
+            int resolvedSlot;
+            if (!targetSlotIndex.HasValue || targetSlotIndex.Value < 1 || targetSlotIndex.Value > targetBox.Capacity)
+            {
+                var occupied = new HashSet<int>(targetBox.Entries.Where(e => !string.Equals(e.Id, sourceEntry.Id, StringComparison.OrdinalIgnoreCase)).Select(e => e.SlotIndex));
+                int freeSlot = 0;
+                for (int s = 1; s <= targetBox.Capacity; s++)
+                {
+                    if (!occupied.Contains(s))
+                    {
+                        freeSlot = s;
+                        break;
+                    }
+                }
+
+                if (freeSlot == 0)
+                {
+                    return new PokemonVaultMoveResult { Success = false, Message = $"{targetBox.Name} is completely full." };
+                }
+                resolvedSlot = freeSlot;
+            }
+            else
+            {
+                resolvedSlot = targetSlotIndex.Value;
+            }
+
+            // If same box and same slot, no-op
+            if (sourceBox.BoxIndex == targetBox.BoxIndex && sourceEntry.SlotIndex == resolvedSlot)
+            {
+                return new PokemonVaultMoveResult
+                {
+                    Success = true,
+                    Message = $"{sourceEntry.Species} is already in {targetBox.Name}, Slot {resolvedSlot}.",
+                    MovedEntry = sourceEntry,
+                    WasSwapped = false
+                };
+            }
+
+            var now = clock.UtcNow;
+            var occupant = targetBox.Entries.FirstOrDefault(e => e.SlotIndex == resolvedSlot && !string.Equals(e.Id, sourceEntry.Id, StringComparison.OrdinalIgnoreCase));
+
+            if (occupant != null)
+            {
+                // SWAP
+                occupant.BoxIndex = sourceBox.BoxIndex;
+                occupant.SlotIndex = sourceEntry.SlotIndex;
+                occupant.CurrentLocation = $"{sourceBox.Name}, Slot {occupant.SlotIndex}";
+                occupant.UpdatedAtUtc = now;
+
+                if (sourceBox.BoxIndex != targetBox.BoxIndex)
+                {
+                    targetBox.Entries.Remove(occupant);
+                    sourceBox.Entries.Add(occupant);
+                }
+
+                sourceEntry.BoxIndex = targetBox.BoxIndex;
+                sourceEntry.SlotIndex = resolvedSlot;
+                sourceEntry.CurrentLocation = $"{targetBox.Name}, Slot {sourceEntry.SlotIndex}";
+                sourceEntry.UpdatedAtUtc = now;
+
+                if (sourceBox.BoxIndex != targetBox.BoxIndex)
+                {
+                    sourceBox.Entries.Remove(sourceEntry);
+                    targetBox.Entries.Add(sourceEntry);
+                }
+
+                vault.UpdatedAtUtc = now;
+                await JsonFile.WriteAtomicAsync(path, vault, cancellationToken).ConfigureAwait(false);
+
+                return new PokemonVaultMoveResult
+                {
+                    Success = true,
+                    Message = $"Swapped {sourceEntry.Species} with {occupant.Species}.",
+                    MovedEntry = sourceEntry,
+                    DisplacedEntry = occupant,
+                    WasSwapped = true
+                };
+            }
+            else
+            {
+                // MOVE to empty slot
+                sourceEntry.BoxIndex = targetBox.BoxIndex;
+                sourceEntry.SlotIndex = resolvedSlot;
+                sourceEntry.CurrentLocation = $"{targetBox.Name}, Slot {sourceEntry.SlotIndex}";
+                sourceEntry.UpdatedAtUtc = now;
+
+                if (sourceBox.BoxIndex != targetBox.BoxIndex)
+                {
+                    sourceBox.Entries.Remove(sourceEntry);
+                    targetBox.Entries.Add(sourceEntry);
+                }
+
+                vault.UpdatedAtUtc = now;
+                await JsonFile.WriteAtomicAsync(path, vault, cancellationToken).ConfigureAwait(false);
+
+                return new PokemonVaultMoveResult
+                {
+                    Success = true,
+                    Message = $"Moved {sourceEntry.Species} to {targetBox.Name}, Slot {sourceEntry.SlotIndex}.",
+                    MovedEntry = sourceEntry,
+                    WasSwapped = false
+                };
+            }
         }
         finally
         {
@@ -436,9 +696,14 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
         return iv.Hp + iv.Attack + iv.Defense + iv.Speed + iv.SpecialAttack + iv.SpecialDefense;
     }
 
-    private static void EnsureBoxes(PokemonVault vault)
+    private static bool EnsureBoxes(PokemonVault vault)
     {
-        vault.Boxes ??= [];
+        var modified = false;
+        if (vault.Boxes == null)
+        {
+            vault.Boxes = [];
+            modified = true;
+        }
 
         for (var i = 1; i <= PokemonVault.DefaultBoxCount; i++)
         {
@@ -453,12 +718,16 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
                     Entries = []
                 };
                 vault.Boxes.Add(box);
+                modified = true;
             }
-            else
+            else if (box.Entries == null)
             {
-                box.Entries ??= [];
+                box.Entries = [];
+                modified = true;
             }
         }
+
+        vault.Boxes.Sort((a, b) => a.BoxIndex.CompareTo(b.BoxIndex));
 
         foreach (var b in vault.Boxes)
         {
@@ -475,13 +744,21 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
                     (string.Equals(entry.Nickname, "DEOXYS", StringComparison.OrdinalIgnoreCase) ||
                      string.Equals(entry.Species, "DEOXYS", StringComparison.OrdinalIgnoreCase)))
                 {
-                    entry.SpeciesId = 386;
-                    entry.Species = "Deoxys";
+                    if (entry.SpeciesId != 386 || entry.Species != "Deoxys")
+                    {
+                        entry.SpeciesId = 386;
+                        entry.Species = "Deoxys";
+                        modified = true;
+                    }
                 }
                 else if (entry.SpeciesId == 410 && (isGen3 || string.Equals(entry.Species, "Shieldon", StringComparison.OrdinalIgnoreCase)))
                 {
-                    entry.SpeciesId = 386;
-                    entry.Species = "Deoxys";
+                    if (entry.SpeciesId != 386 || entry.Species != "Deoxys")
+                    {
+                        entry.SpeciesId = 386;
+                        entry.Species = "Deoxys";
+                        modified = true;
+                    }
                 }
                 else if (entry.SpeciesId is >= 277 and <= 411 && isGen3)
                 {
@@ -493,13 +770,56 @@ public sealed class FilePokemonVaultStore(ICompanionPaths paths, IClock clock) :
                         {
                             entry.SpeciesId = corrected;
                             entry.Species = PkVault.PokemonSpeciesCatalog.ResolveSpeciesName(corrected);
+                            modified = true;
                         }
                     }
                 }
             }
         }
 
-        vault.Boxes.Sort((a, b) => a.BoxIndex.CompareTo(b.BoxIndex));
+        // Heal duplicate or invalid slot collisions across all boxes
+        foreach (var box in vault.Boxes)
+        {
+            var occupiedSlots = new HashSet<int>();
+            var duplicates = new List<PokemonVaultEntry>();
+
+            foreach (var entry in box.Entries)
+            {
+                entry.BoxIndex = box.BoxIndex;
+                if (entry.SlotIndex >= 1 && entry.SlotIndex <= box.Capacity && occupiedSlots.Add(entry.SlotIndex))
+                {
+                    continue;
+                }
+
+                duplicates.Add(entry);
+            }
+
+            foreach (var dup in duplicates)
+            {
+                var (nextBoxIdx, nextSlotIdx) = FindNextSlotInternal(vault, box.BoxIndex);
+                if (nextBoxIdx > 0 && nextSlotIdx > 0)
+                {
+                    var destBox = vault.Boxes.FirstOrDefault(b => b.BoxIndex == nextBoxIdx);
+                    if (destBox != null)
+                    {
+                        if (destBox != box)
+                        {
+                            box.Entries.Remove(dup);
+                            destBox.Entries.Add(dup);
+                        }
+                        dup.BoxIndex = destBox.BoxIndex;
+                        dup.SlotIndex = nextSlotIdx;
+                        if (string.IsNullOrWhiteSpace(dup.CurrentLocation) || dup.CurrentLocation.StartsWith("Box ") || dup.CurrentLocation.StartsWith("Vault Box "))
+                        {
+                            dup.CurrentLocation = $"{destBox.Name}, Slot {dup.SlotIndex}";
+                        }
+                        modified = true;
+                    }
+                }
+            }
+        }
+
+        return modified;
     }
 
     private string UserVaultDirectory(Guid userId) => Path.Combine(paths.PokemonRoot, "vaults", userId.ToString("N"));

@@ -70,6 +70,7 @@ fun PokemonActionBridge(
     lowerBoxName: String = "Lower Box",
     upperIsLocked: Boolean = false,
     lowerIsLocked: Boolean = false,
+    isSameContainerOrGame: Boolean = false,
     onTransferEntireBox: ((direction: TransferSide) -> Unit)? = null,
 ) {
     Box(
@@ -230,7 +231,11 @@ fun PokemonActionBridge(
 
                     // Main Transfer Action Button
                     val isSource = selectedPokemon.side == TransferSide.Source
-                    val actionLabel = if (isSource) "Transfer Down ↓" else "Transfer Up ↑"
+                    val actionLabel = if (isSameContainerOrGame) {
+                        if (isSource) "Move Down ↓" else "Move Up ↑"
+                    } else {
+                        if (isSource) "Transfer Down ↓" else "Transfer Up ↑"
+                    }
                     val actionIcon = if (isSource) Icons.Rounded.ArrowDownward else Icons.Rounded.ArrowUpward
 
                     Button(

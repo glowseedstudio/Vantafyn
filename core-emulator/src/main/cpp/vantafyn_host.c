@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -39,7 +40,7 @@ typedef struct {
     atomic_size_t write_idx;
 } audio_ring_t;
 
-#define VF_MAX_OPTIONS 32
+#define VF_MAX_OPTIONS 128
 
 typedef struct {
     char key[64];
@@ -252,6 +253,9 @@ static size_t ring_read_samples(audio_ring_t *ring, int16_t *out, size_t max_fra
 // ---------------------------------------------------------------------------
 
 static void core_log_printf(enum retro_log_level level, const char *fmt, ...) {
+    if (level == RETRO_LOG_DEBUG) {
+        return; // Suppress extreme debug noise (e.g. Citra camera/audio Y2R service spam)
+    }
     va_list va;
     va_start(va, fmt);
     android_LogPriority prio = ANDROID_LOG_INFO;
@@ -262,8 +266,338 @@ static void core_log_printf(enum retro_log_level level, const char *fmt, ...) {
         case RETRO_LOG_ERROR: prio = ANDROID_LOG_ERROR; break;
         default: prio = ANDROID_LOG_INFO; break;
     }
-    __android_log_vprint(prio, "MelonDSCore", fmt, va);
+    __android_log_vprint(prio, "VantafynCore", fmt, va);
     va_end(va);
+}
+
+// ---------------------------------------------------------------------------
+// Persistent OpenGL ES Program Binary Disk Cache & Deferred Shader Compiler
+// ---------------------------------------------------------------------------
+
+#define VF_GL_HASH_BUCKETS 4096
+
+typedef struct vf_shader_node {
+    GLuint shader;
+    GLenum type;
+    uint64_t hash_lo;
+    uint64_t hash_hi;
+    bool has_source;
+    bool compile_requested;
+    bool compiled_on_gpu;
+    struct vf_shader_node *next;
+} vf_shader_node_t;
+
+typedef struct vf_program_node {
+    GLuint program;
+    GLuint attached_shaders[8];
+    int attached_count;
+    struct vf_program_node *next;
+} vf_program_node_t;
+
+static vf_shader_node_t *s_shader_buckets[VF_GL_HASH_BUCKETS] = {0};
+static vf_program_node_t *s_program_buckets[VF_GL_HASH_BUCKETS] = {0};
+static pthread_mutex_t s_gl_cache_lock = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t s_gl_driver_hash = 0;
+
+static inline void vf_hash_bytes(const char *data, size_t len, uint64_t *h1, uint64_t *h2) {
+    uint64_t a = *h1;
+    uint64_t b = *h2;
+    for (size_t i = 0; i < len; i++) {
+        uint8_t c = (uint8_t)data[i];
+        a ^= c;
+        a *= 0x100000001b3ULL;
+        b = ((b << 5) + b) + c;
+    }
+    *h1 = a;
+    *h2 = b;
+}
+
+static void GL_APIENTRY vf_glShaderSource(GLuint shader, GLsizei count, const GLchar *const*string, const GLint *length) {
+    glShaderSource(shader, count, string, length);
+    if (!string || count <= 0) return;
+
+    uint64_t h1 = 0xcbf29ce484222325ULL;
+    uint64_t h2 = 5381ULL;
+    for (GLsizei i = 0; i < count; i++) {
+        if (!string[i]) continue;
+        size_t len = (length && length[i] >= 0) ? (size_t)length[i] : strlen(string[i]);
+        vf_hash_bytes(string[i], len, &h1, &h2);
+    }
+
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(shader % VF_GL_HASH_BUCKETS);
+    vf_shader_node_t *n = s_shader_buckets[b];
+    while (n && n->shader != shader) n = n->next;
+    if (!n) {
+        n = (vf_shader_node_t *)calloc(1, sizeof(vf_shader_node_t));
+        n->shader = shader;
+        n->next = s_shader_buckets[b];
+        s_shader_buckets[b] = n;
+    }
+    n->hash_lo = h1;
+    n->hash_hi = h2;
+    n->has_source = true;
+    n->compile_requested = false;
+    n->compiled_on_gpu = false;
+    pthread_mutex_unlock(&s_gl_cache_lock);
+}
+
+static void GL_APIENTRY vf_glCompileShader(GLuint shader) {
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(shader % VF_GL_HASH_BUCKETS);
+    vf_shader_node_t *n = s_shader_buckets[b];
+    while (n && n->shader != shader) n = n->next;
+    if (n && n->has_source) {
+        n->compile_requested = true;
+        pthread_mutex_unlock(&s_gl_cache_lock);
+        return; // Deferred until link time or program cache lookup!
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+    glCompileShader(shader);
+}
+
+static void GL_APIENTRY vf_glGetShaderiv(GLuint shader, GLenum pname, GLint *params) {
+    if (!params) return;
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(shader % VF_GL_HASH_BUCKETS);
+    vf_shader_node_t *n = s_shader_buckets[b];
+    while (n && n->shader != shader) n = n->next;
+    if (n && n->compile_requested && !n->compiled_on_gpu) {
+        if (pname == GL_COMPILE_STATUS) {
+            *params = GL_TRUE;
+            pthread_mutex_unlock(&s_gl_cache_lock);
+            return;
+        }
+        if (pname == GL_INFO_LOG_LENGTH) {
+            *params = 0;
+            pthread_mutex_unlock(&s_gl_cache_lock);
+            return;
+        }
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+    glGetShaderiv(shader, pname, params);
+}
+
+static void GL_APIENTRY vf_glGetShaderInfoLog(GLuint shader, GLsizei bufSize, GLsizei *length, GLchar *infoLog) {
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(shader % VF_GL_HASH_BUCKETS);
+    vf_shader_node_t *n = s_shader_buckets[b];
+    while (n && n->shader != shader) n = n->next;
+    if (n && n->compile_requested && !n->compiled_on_gpu) {
+        if (length) *length = 0;
+        if (infoLog && bufSize > 0) infoLog[0] = '\0';
+        pthread_mutex_unlock(&s_gl_cache_lock);
+        return;
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+    glGetShaderInfoLog(shader, bufSize, length, infoLog);
+}
+
+static void GL_APIENTRY vf_glDeleteShader(GLuint shader) {
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(shader % VF_GL_HASH_BUCKETS);
+    vf_shader_node_t **curr = &s_shader_buckets[b];
+    while (*curr) {
+        if ((*curr)->shader == shader) {
+            vf_shader_node_t *to_free = *curr;
+            *curr = to_free->next;
+            free(to_free);
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+    glDeleteShader(shader);
+}
+
+static void GL_APIENTRY vf_glAttachShader(GLuint program, GLuint shader) {
+    glAttachShader(program, shader);
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(program % VF_GL_HASH_BUCKETS);
+    vf_program_node_t *p = s_program_buckets[b];
+    while (p && p->program != program) p = p->next;
+    if (!p) {
+        p = (vf_program_node_t *)calloc(1, sizeof(vf_program_node_t));
+        p->program = program;
+        p->next = s_program_buckets[b];
+        s_program_buckets[b] = p;
+    }
+    if (p->attached_count < 8) {
+        p->attached_shaders[p->attached_count++] = shader;
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+}
+
+static void GL_APIENTRY vf_glDetachShader(GLuint program, GLuint shader) {
+    glDetachShader(program, shader);
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(program % VF_GL_HASH_BUCKETS);
+    vf_program_node_t *p = s_program_buckets[b];
+    while (p && p->program != program) p = p->next;
+    if (p) {
+        for (int i = 0; i < p->attached_count; i++) {
+            if (p->attached_shaders[i] == shader) {
+                p->attached_shaders[i] = p->attached_shaders[p->attached_count - 1];
+                p->attached_count--;
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+}
+
+static void GL_APIENTRY vf_glDeleteProgram(GLuint program) {
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(program % VF_GL_HASH_BUCKETS);
+    vf_program_node_t **curr = &s_program_buckets[b];
+    while (*curr) {
+        if ((*curr)->program == program) {
+            vf_program_node_t *to_free = *curr;
+            *curr = to_free->next;
+            free(to_free);
+            break;
+        }
+        curr = &(*curr)->next;
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+    glDeleteProgram(program);
+}
+
+static void GL_APIENTRY vf_glLinkProgram(GLuint program) {
+    pthread_mutex_lock(&s_gl_cache_lock);
+    unsigned int b = (unsigned int)(program % VF_GL_HASH_BUCKETS);
+    vf_program_node_t *p = s_program_buckets[b];
+    while (p && p->program != program) p = p->next;
+
+    bool can_cache = false;
+    uint64_t prog_key_lo = 0xcbf29ce484222325ULL;
+    uint64_t prog_key_hi = 5381ULL ^ s_gl_driver_hash;
+    char cache_path[PATH_MAX] = {0};
+
+    vf_session_t *s = s_current_session;
+
+    if (p && p->attached_count > 0 && s && s->save_directory[0]) {
+        can_cache = true;
+        for (int i = 0; i < p->attached_count; i++) {
+            GLuint sh = p->attached_shaders[i];
+            unsigned int sb = (unsigned int)(sh % VF_GL_HASH_BUCKETS);
+            vf_shader_node_t *sn = s_shader_buckets[sb];
+            while (sn && sn->shader != sh) sn = sn->next;
+            if (!sn || !sn->has_source) {
+                can_cache = false;
+                break;
+            }
+            prog_key_lo ^= sn->hash_lo;
+            prog_key_lo *= 0x100000001b3ULL;
+            prog_key_hi ^= sn->hash_hi;
+            prog_key_hi = ((prog_key_hi << 5) + prog_key_hi) + (uint64_t)sn->type;
+        }
+    }
+
+    if (can_cache) {
+        snprintf(cache_path, sizeof(cache_path) - 1, "%s/Azahar/shaders/vf_bin_cache/%016llx_%016llx.bin",
+                 s->save_directory, (unsigned long long)prog_key_hi, (unsigned long long)prog_key_lo);
+
+        FILE *f = fopen(cache_path, "rb");
+        if (f) {
+            uint32_t magic = 0, ver = 0, bin_format = 0, bin_size = 0;
+            if (fread(&magic, 4, 1, f) == 1 && magic == 0x56465042 && // 'VFPB'
+                fread(&ver, 4, 1, f) == 1 && ver == 1 &&
+                fread(&bin_format, 4, 1, f) == 1 &&
+                fread(&bin_size, 4, 1, f) == 1 && bin_size > 0 && bin_size < 16777216) {
+                void *buf = malloc(bin_size);
+                if (buf && fread(buf, 1, bin_size, f) == bin_size) {
+                    glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
+                    glProgramBinary(program, (GLenum)bin_format, buf, (GLsizei)bin_size);
+                    GLint link_ok = GL_FALSE;
+                    glGetProgramiv(program, GL_LINK_STATUS, &link_ok);
+                    if (link_ok == GL_TRUE) {
+                        free(buf);
+                        fclose(f);
+                        pthread_mutex_unlock(&s_gl_cache_lock);
+                        return; // Program binary loaded in <0.1ms without driver compile or link!
+                    }
+                }
+                free(buf);
+            }
+            fclose(f);
+            unlink(cache_path); // Rejected by GPU driver; will recompile
+        }
+    }
+
+    // Cache miss: compile any deferred attached shaders on the GPU driver now
+    if (p) {
+        for (int i = 0; i < p->attached_count; i++) {
+            GLuint sh = p->attached_shaders[i];
+            unsigned int sb = (unsigned int)(sh % VF_GL_HASH_BUCKETS);
+            vf_shader_node_t *sn = s_shader_buckets[sb];
+            while (sn && sn->shader != sh) sn = sn->next;
+            if (sn && !sn->compiled_on_gpu) {
+                glCompileShader(sh);
+                sn->compiled_on_gpu = true;
+            }
+        }
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
+
+    glProgramParameteri(program, GL_PROGRAM_BINARY_RETRIEVABLE_HINT, GL_TRUE);
+    glLinkProgram(program);
+
+    GLint link_ok = GL_FALSE;
+    glGetProgramiv(program, GL_LINK_STATUS, &link_ok);
+    if (link_ok == GL_TRUE && can_cache && cache_path[0]) {
+        GLint bin_len = 0;
+        glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &bin_len);
+        if (bin_len > 0 && bin_len < 16777216) {
+            void *buf = malloc(bin_len);
+            GLsizei actual_len = 0;
+            GLenum bin_format = 0;
+            if (buf) {
+                glGetProgramBinary(program, bin_len, &actual_len, &bin_format, buf);
+                if (actual_len > 0) {
+                    char tmp_path[PATH_MAX];
+                    snprintf(tmp_path, sizeof(tmp_path) - 1, "%s.tmp", cache_path);
+                    FILE *wf = fopen(tmp_path, "wb");
+                    if (wf) {
+                        uint32_t magic = 0x56465042;
+                        uint32_t ver = 1;
+                        uint32_t u_fmt = (uint32_t)bin_format;
+                        uint32_t u_len = (uint32_t)actual_len;
+                        fwrite(&magic, 4, 1, wf);
+                        fwrite(&ver, 4, 1, wf);
+                        fwrite(&u_fmt, 4, 1, wf);
+                        fwrite(&u_len, 4, 1, wf);
+                        fwrite(buf, 1, actual_len, wf);
+                        fclose(wf);
+                        rename(tmp_path, cache_path);
+                    }
+                }
+                free(buf);
+            }
+        }
+    }
+}
+
+static void vf_gl_cache_cleanup(void) {
+    pthread_mutex_lock(&s_gl_cache_lock);
+    for (int i = 0; i < VF_GL_HASH_BUCKETS; i++) {
+        vf_shader_node_t *s = s_shader_buckets[i];
+        while (s) {
+            vf_shader_node_t *next = s->next;
+            free(s);
+            s = next;
+        }
+        s_shader_buckets[i] = NULL;
+
+        vf_program_node_t *p = s_program_buckets[i];
+        while (p) {
+            vf_program_node_t *next = p->next;
+            free(p);
+            p = next;
+        }
+        s_program_buckets[i] = NULL;
+    }
+    pthread_mutex_unlock(&s_gl_cache_lock);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +606,16 @@ static void core_log_printf(enum retro_log_level level, const char *fmt, ...) {
 
 static retro_proc_address_t vf_hw_get_proc_address(const char *sym) {
     if (!sym) return NULL;
+    if (strcmp(sym, "glShaderSource") == 0) return (retro_proc_address_t)vf_glShaderSource;
+    if (strcmp(sym, "glCompileShader") == 0) return (retro_proc_address_t)vf_glCompileShader;
+    if (strcmp(sym, "glGetShaderiv") == 0) return (retro_proc_address_t)vf_glGetShaderiv;
+    if (strcmp(sym, "glGetShaderInfoLog") == 0) return (retro_proc_address_t)vf_glGetShaderInfoLog;
+    if (strcmp(sym, "glDeleteShader") == 0) return (retro_proc_address_t)vf_glDeleteShader;
+    if (strcmp(sym, "glAttachShader") == 0) return (retro_proc_address_t)vf_glAttachShader;
+    if (strcmp(sym, "glDetachShader") == 0) return (retro_proc_address_t)vf_glDetachShader;
+    if (strcmp(sym, "glDeleteProgram") == 0) return (retro_proc_address_t)vf_glDeleteProgram;
+    if (strcmp(sym, "glLinkProgram") == 0) return (retro_proc_address_t)vf_glLinkProgram;
+
     retro_proc_address_t proc = (retro_proc_address_t)eglGetProcAddress(sym);
     if (!proc) {
         proc = (retro_proc_address_t)dlsym(RTLD_DEFAULT, sym);
@@ -355,13 +699,24 @@ static bool vf_egl_init(vf_session_t *s, struct retro_hw_render_callback *cb) {
         return false;
     }
 
-    // Create a 1x1 pbuffer surface as initial surface so the context is valid before SurfaceView arrives
+    // Create an offscreen pbuffer surface sized for emulation framebuffer so context/viewport doesn't collapse to 1x1
+    EGLint max_pb_w = 2880, max_pb_h = 1920;
+    eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_MAX_PBUFFER_WIDTH, &max_pb_w);
+    eglGetConfigAttrib(s->egl_display, s->egl_config, EGL_MAX_PBUFFER_HEIGHT, &max_pb_h);
+    int target_pb_w = (max_pb_w > 0 && max_pb_w < 2880) ? max_pb_w : 2880;
+    int target_pb_h = (max_pb_h > 0 && max_pb_h < 1920) ? max_pb_h : 1920;
+
     const EGLint pbuffer_attribs[] = {
-        EGL_WIDTH, 1,
-        EGL_HEIGHT, 1,
+        EGL_WIDTH, target_pb_w,
+        EGL_HEIGHT, target_pb_h,
         EGL_NONE
     };
     s->egl_pbuffer_surface = eglCreatePbufferSurface(s->egl_display, s->egl_config, pbuffer_attribs);
+    if (s->egl_pbuffer_surface == EGL_NO_SURFACE) {
+        LOGW("eglCreatePbufferSurface failed for %dx%d (err=0x%x), falling back to 1x1", target_pb_w, target_pb_h, eglGetError());
+        const EGLint fallback_attribs[] = { EGL_WIDTH, 1, EGL_HEIGHT, 1, EGL_NONE };
+        s->egl_pbuffer_surface = eglCreatePbufferSurface(s->egl_display, s->egl_config, fallback_attribs);
+    }
     if (s->egl_pbuffer_surface == EGL_NO_SURFACE) {
         LOGE("eglCreatePbufferSurface failed: 0x%x", eglGetError());
         return false;
@@ -383,8 +738,37 @@ static bool vf_egl_init(vf_session_t *s, struct retro_hw_render_callback *cb) {
         return false;
     }
 
-    LOGI("EGL HW render context initialized successfully on loader thread (GLES %s, Vendor: %s)",
-         (const char *)glGetString(GL_VERSION), (const char *)glGetString(GL_VENDOR));
+    const char *v = (const char *)glGetString(GL_VERSION);
+    const char *r = (const char *)glGetString(GL_RENDERER);
+    uint64_t dh = 5381ULL;
+    if (v) vf_hash_bytes(v, strlen(v), &dh, &dh);
+    if (r) vf_hash_bytes(r, strlen(r), &dh, &dh);
+    s_gl_driver_hash = dh;
+
+    // Pre-create initial hw_fbo so get_current_framebuffer() always returns a valid FBO from frame 0
+    glGenTextures(1, &s->hw_texture);
+    glBindTexture(GL_TEXTURE_2D, s->hw_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 400, 480, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    glGenRenderbuffers(1, &s->hw_depth_rb);
+    glBindRenderbuffer(GL_RENDERBUFFER, s->hw_depth_rb);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 400, 480);
+
+    glGenFramebuffers(1, &s->hw_fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, s->hw_fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s->hw_texture, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s->hw_depth_rb);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    s->hw_fbo_w = 400;
+    s->hw_fbo_h = 480;
+
+    LOGI("EGL HW render context initialized successfully on loader thread (GLES %s, Vendor: %s, driver_hash=%llx, fbo=%u)",
+         v ? v : "unknown", (const char *)glGetString(GL_VENDOR), (unsigned long long)s_gl_driver_hash, s->hw_fbo);
     return true;
 }
 
@@ -395,6 +779,9 @@ static bool vf_egl_init(vf_session_t *s, struct retro_hw_render_callback *cb) {
 struct retro_vfs_file_handle {
     FILE *fp;
     char path[PATH_MAX];
+    unsigned mode;
+    bool is_shader_cache;
+    bool has_read;
 };
 
 struct retro_vfs_dir_handle {
@@ -471,7 +858,11 @@ static struct retro_vfs_file_handle *vf_vfs_open(const char *path, unsigned mode
 
     handle->fp = fp;
     strncpy(handle->path, path, sizeof(handle->path) - 1);
-    LOGI("vf_vfs_open succeeded for path '%s' (mode_str='%s')", path, mode_str);
+    handle->mode = mode;
+    handle->is_shader_cache = (strstr(path, "/shaders/") != NULL);
+    handle->has_read = false;
+    LOGI("vf_vfs_open succeeded for path '%s' (mode=0x%x, mode_str='%s', is_shader_cache=%d)",
+         path, mode, mode_str, handle->is_shader_cache);
     return handle;
 }
 
@@ -521,6 +912,13 @@ static int64_t vf_vfs_seek(struct retro_vfs_file_handle *stream, int64_t offset,
 
 static int64_t vf_vfs_read(struct retro_vfs_file_handle *stream, void *s, uint64_t len) {
     if (!stream || !stream->fp || !s) return -1;
+    if (stream->is_shader_cache && !stream->has_read) {
+        // Azahar opens transferable and precompiled shader cache files once with "ab+",
+        // writes the initial header if needed, and then reads from the same handle expecting
+        // standard C fopen("ab+") initial read position 0.
+        fseek(stream->fp, 0, SEEK_SET);
+        stream->has_read = true;
+    }
     size_t read_bytes = fread(s, 1, (size_t)len, stream->fp);
     if (read_bytes == 0 && ferror(stream->fp)) return -1;
     return (int64_t)read_bytes;
@@ -528,7 +926,18 @@ static int64_t vf_vfs_read(struct retro_vfs_file_handle *stream, void *s, uint64
 
 static int64_t vf_vfs_write(struct retro_vfs_file_handle *stream, const void *s, uint64_t len) {
     if (!stream || !stream->fp || !s) return -1;
+    if (stream->is_shader_cache) {
+        // Enforce standard C fopen("ab+") append-at-EOF semantics on all writes.
+        fseek(stream->fp, 0, SEEK_END);
+    }
     size_t written_bytes = fwrite(s, 1, (size_t)len, stream->fp);
+    if (stream->is_shader_cache) {
+        fflush(stream->fp);
+        if (written_bytes != (size_t)len) {
+            LOGE("vf_vfs_write shader cache FAILED for '%s': len=%llu, written=%zu, err=%s",
+                 stream->path, (unsigned long long)len, written_bytes, strerror(errno));
+        }
+    }
     if (written_bytes == 0 && len > 0 && ferror(stream->fp)) return -1;
     return (int64_t)written_bytes;
 }
@@ -901,7 +1310,7 @@ static bool core_environment(unsigned cmd, void *data) {
             }
             if (strcmp(var->key, "citra_use_acc_mul") == 0 || strcmp(var->key, "azahar_use_acc_mul") == 0 ||
                 strcmp(var->key, "citra_shaders_accurate_mul") == 0 || strcmp(var->key, "azahar_shaders_accurate_mul") == 0) {
-                var->value = "enabled";
+                var->value = "disabled";
                 return true;
             }
             if (strcmp(var->key, "citra_limit_framerate") == 0 || strcmp(var->key, "azahar_limit_framerate") == 0) {
@@ -1125,6 +1534,9 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 LOGI("EGL HW render updated secondary window geometry to %dx%d", target_sec_w, target_sec_h);
             }
 
+            // Ensure EGL context is current on worker thread before any GL operations
+            eglMakeCurrent(s->egl_display, s->egl_pbuffer_surface, s->egl_pbuffer_surface, s->egl_context);
+
             if (s->hw_fbo == 0 || s->hw_fbo_w != (int)width || s->hw_fbo_h != (int)height) {
                 if (s->hw_fbo) {
                     glDeleteFramebuffers(1, &s->hw_fbo);
@@ -1150,14 +1562,36 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
                 glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, s->hw_depth_rb);
                 s->hw_fbo_w = (int)width;
                 s->hw_fbo_h = (int)height;
+                glDisable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
                 LOGI("Created EGL HW dual-display FBO %u (%dx%d)", s->hw_fbo, width, height);
             }
 
             EGLSurface surf_top = (win_top == s->window) ? s->egl_window_surface : s->egl_surface_secondary;
             EGLSurface surf_bottom = (win_bottom == s->window) ? s->egl_window_surface : s->egl_surface_secondary;
 
+            // Diagnostic pixel sampling from s->hw_fbo every 60 frames to verify Citra framebuffer content
+            static int s_frame_diag_cnt = 0;
+            if (++s_frame_diag_cnt % 60 == 0) {
+                uint32_t top_pixel = 0, bot_pixel = 0;
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, s->hw_fbo);
+                glReadPixels(top_src_x0 + (top_src_x1 - top_src_x0) / 2,
+                             top_src_y0 + (top_src_y1 - top_src_y0) / 2,
+                             1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &top_pixel);
+                glReadPixels(bot_src_x0 + (bot_src_x1 - bot_src_x0) / 2,
+                             bot_src_y0 + (bot_src_y1 - bot_src_y0) / 2,
+                             1, 1, GL_RGBA, GL_UNSIGNED_BYTE, &bot_pixel);
+                GLenum err = glGetError();
+                LOGI("HW Frame diag #%d (%dx%d): top_px=0x%08X, bot_px=0x%08X, glErr=0x%x, surf_top=%p, surf_bot=%p",
+                     s_frame_diag_cnt, width, height, top_pixel, bot_pixel, err, surf_top, surf_bottom);
+            }
+
             if (surf_top != EGL_NO_SURFACE) {
                 eglMakeCurrent(s->egl_display, surf_top, surf_top, s->egl_context);
+                glDisable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, s->hw_fbo);
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
                 glBlitFramebuffer(top_src_x0, top_src_y0, top_src_x1, top_src_y1,
@@ -1168,6 +1602,8 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
 
             if (surf_bottom != EGL_NO_SURFACE) {
                 eglMakeCurrent(s->egl_display, surf_bottom, surf_bottom, s->egl_context);
+                glDisable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
                 glBindFramebuffer(GL_READ_FRAMEBUFFER, s->hw_fbo);
                 glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
                 glBlitFramebuffer(bot_src_x0, bot_src_y0, bot_src_x1, bot_src_y1,
@@ -1179,6 +1615,9 @@ static void core_video_refresh(const void *data, unsigned width, unsigned height
             // Restore context to pbuffer surface and bind hw_fbo ready for next frame
             eglMakeCurrent(s->egl_display, s->egl_pbuffer_surface, s->egl_pbuffer_surface, s->egl_context);
             glBindFramebuffer(GL_FRAMEBUFFER, s->hw_fbo);
+            glViewport(0, 0, s->hw_fbo_w, s->hw_fbo_h);
+            glDisable(GL_SCISSOR_TEST);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         } else {
             // Single display mode: render full composite directly to s->window
             if (s->window && width > 0 && height > 0) {
@@ -1788,16 +2227,23 @@ static void* run_loop_thread(void *arg) {
             continue;
         }
 
-        // For hardware-rendered cores (OpenGL ES), clear entire buffer to solid black before rendering.
-        // This ensures unrendered margins (such as the 40px left/right borders of the
-        // 3DS bottom screen in 400x480 top-bottom layout) never contain uninitialized
-        // GPU VRAM (which causes TV static noise and violent flashing on buffer swap).
-        if (s->is_hw_render && s->egl_display && s->egl_surface != EGL_NO_SURFACE && s->egl_surface != s->egl_pbuffer_surface) {
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-            glDisable(GL_SCISSOR_TEST);
-            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
+        // For hardware-rendered cores (OpenGL ES), ensure proper framebuffer and surface binding.
+        // On physical dual displays, the core renders into s->hw_fbo with the pbuffer surface active.
+        // On single displays, the core renders into the main window surface (FBO 0).
+        if (s->is_hw_render && s->egl_display) {
+            if (s->window_secondary && s->hw_fbo) {
+                eglMakeCurrent(s->egl_display, s->egl_pbuffer_surface, s->egl_pbuffer_surface, s->egl_context);
+                glBindFramebuffer(GL_FRAMEBUFFER, s->hw_fbo);
+                glViewport(0, 0, s->hw_fbo_w, s->hw_fbo_h);
+                glDisable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+            } else if (s->egl_surface != EGL_NO_SURFACE && s->egl_surface != s->egl_pbuffer_surface) {
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glDisable(GL_SCISSOR_TEST);
+                glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+                glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+                glClear(GL_COLOR_BUFFER_BIT);
+            }
         }
 
         // Run emulation frame
@@ -1946,6 +2392,110 @@ static void vf_close_core_handle(void *handle) {
 #endif
 }
 
+static void vf_patch_azahar_core_file(const char *core_path) {
+#if defined(__aarch64__)
+    if (!core_path) return;
+    if (!strstr(core_path, "azahar") && !strstr(core_path, "citra")) return;
+
+    chmod(core_path, 0755);
+    FILE *fp = fopen(core_path, "r+b");
+    if (!fp) {
+        LOGW("vf_patch_azahar_core_file: could not open '%s' for r+b: %s", core_path, strerror(errno));
+        return;
+    }
+
+    // In Azahar 2126.1.2 (arm64-v8a), FileUtil::IOFile::WriteImpl has an upstream bug under
+    // HAVE_LIBRETRO_VFS:
+    //   written = rfwrite(data, elem_size, length, m_file) / elem_size;
+    // Because rfwrite() in libretro-common ALREADY divides the byte count by elem_size,
+    // dividing a second time by elem_size (udiv x21, x0, x21 = 0x9ad50815) causes every write
+    // with elem_size > 1 (such as WriteObject<u32>(NativeVersion) or WriteObject<u64>(id))
+    // to return 0 and delete the entire 3DS shader disk cache!
+    // Replacing 'udiv x21, x0, x21' (0x9ad50815) with 'mov x21, x0' (0xaa0003f5) fixes it.
+    const long known_offset = 0x01afe080L;
+    uint32_t pair[2] = {0, 0};
+    if (fseek(fp, known_offset, SEEK_SET) == 0 && fread(pair, sizeof(uint32_t), 2, fp) == 2) {
+        if (pair[0] == 0x9ad50815U && pair[1] == 0xeb1302bfU) {
+            uint32_t patched = 0xaa0003f5U; // mov x21, x0
+            if (fseek(fp, known_offset, SEEK_SET) == 0 && fwrite(&patched, sizeof(uint32_t), 1, fp) == 1) {
+                fflush(fp);
+                fsync(fileno(fp));
+                LOGI("Patched Azahar IOFile::WriteImpl double-division bug on disk at 0x%lx", known_offset);
+                fclose(fp);
+                return;
+            }
+        } else if (pair[0] == 0xaa0003f5U && pair[1] == 0xeb1302bfU) {
+            LOGI("Azahar IOFile::WriteImpl double-division bug already patched on disk at 0x%lx", known_offset);
+            fclose(fp);
+            return;
+        }
+    }
+
+    // Fallback scan across the binary for the unique 8-byte sequence {udiv x21, x0, x21; cmp x21, x19}
+    if (fseek(fp, 0, SEEK_END) == 0) {
+        long file_size = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        const size_t chunk_words = 16384;
+        uint32_t *buf = (uint32_t *)malloc(chunk_words * sizeof(uint32_t));
+        if (buf) {
+            long offset = 0;
+            while (offset < file_size) {
+                if (fseek(fp, offset, SEEK_SET) != 0) break;
+                size_t n = fread(buf, sizeof(uint32_t), chunk_words, fp);
+                if (n < 2) break;
+                for (size_t i = 0; i + 1 < n; i++) {
+                    if (buf[i] == 0x9ad50815U && buf[i + 1] == 0xeb1302bfU) {
+                        long patch_pos = offset + (long)(i * sizeof(uint32_t));
+                        uint32_t patched = 0xaa0003f5U;
+                        if (fseek(fp, patch_pos, SEEK_SET) == 0 && fwrite(&patched, sizeof(uint32_t), 1, fp) == 1) {
+                            fflush(fp);
+                            fsync(fileno(fp));
+                            LOGI("Patched Azahar IOFile::WriteImpl double-division bug via scan at 0x%lx", patch_pos);
+                        }
+                        free(buf);
+                        fclose(fp);
+                        return;
+                    }
+                }
+                offset += (long)((n - 1) * sizeof(uint32_t));
+            }
+            free(buf);
+        }
+    }
+
+    fclose(fp);
+#else
+    (void)core_path;
+#endif
+}
+
+static void vf_patch_azahar_core_memory(void *core_handle) {
+#if defined(__aarch64__)
+    if (!core_handle) return;
+    void *sym = dlsym(core_handle, "_ZN8FileUtil6IOFile9WriteImplEPKvmm");
+    if (!sym) return;
+
+    uint32_t *ins = (uint32_t *)((uintptr_t)sym + 0x48);
+    LOGI("Azahar IOFile::WriteImpl in memory at %p (+0x48 = 0x%08x, +0x4c = 0x%08x)",
+         sym, ins[0], ins[1]);
+    if (ins[0] == 0x9ad50815U && ins[1] == 0xeb1302bfU) {
+        long page_size = sysconf(_SC_PAGESIZE);
+        if (page_size <= 0) page_size = 4096;
+        uintptr_t page_start = (uintptr_t)ins & ~((uintptr_t)page_size - 1);
+        if (mprotect((void *)page_start, (size_t)page_size, PROT_READ | PROT_WRITE | PROT_EXEC) == 0) {
+            ins[0] = 0xaa0003f5U; // mov x21, x0
+            __builtin___clear_cache((char *)ins, (char *)(ins + 1));
+            mprotect((void *)page_start, (size_t)page_size, PROT_READ | PROT_EXEC);
+            LOGI("Patched Azahar IOFile::WriteImpl in memory -> 0x%08x", ins[0]);
+        } else {
+            LOGE("mprotect failed on Azahar IOFile::WriteImpl at %p: %s", (void *)page_start, strerror(errno));
+        }
+    }
+#else
+    (void)core_handle;
+#endif
+}
+
 vf_result_t vf_session_load_game(
     vf_session_t *session,
     const char *core_path,
@@ -1960,12 +2510,17 @@ vf_result_t vf_session_load_game(
     strncpy(session->system_directory, system_dir ? system_dir : "", sizeof(session->system_directory) - 1);
     strncpy(session->save_directory, save_dir ? save_dir : "", sizeof(session->save_directory) - 1);
 
+    // Patch Azahar's IOFile::WriteImpl double-division bug on disk before loading the shared library
+    vf_patch_azahar_core_file(core_path);
+
     // Open dynamic core library
     session->core_handle = dlopen(core_path, RTLD_NOW | RTLD_LOCAL);
     if (!session->core_handle) {
         LOGE("dlopen failed on core '%s': %s", core_path, dlerror());
         return VF_ERR_CORE_LOAD;
     }
+
+    vf_patch_azahar_core_memory(session->core_handle);
 
     // Resolve required libretro symbols
     #define RESOLVE(name) \
@@ -2150,15 +2705,7 @@ void vf_session_unload(vf_session_t *session) {
 
     if (session->is_hw_render) {
         if (session->egl_display && session->egl_context) {
-            eglMakeCurrent(session->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-            if (session->egl_window_surface != EGL_NO_SURFACE) {
-                eglDestroySurface(session->egl_display, session->egl_window_surface);
-                session->egl_window_surface = EGL_NO_SURFACE;
-            }
-            if (session->egl_surface_secondary != EGL_NO_SURFACE) {
-                eglDestroySurface(session->egl_display, session->egl_surface_secondary);
-                session->egl_surface_secondary = EGL_NO_SURFACE;
-            }
+            eglMakeCurrent(session->egl_display, session->egl_pbuffer_surface, session->egl_pbuffer_surface, session->egl_context);
             if (session->hw_fbo) {
                 glDeleteFramebuffers(1, &session->hw_fbo);
                 glDeleteTextures(1, &session->hw_texture);
@@ -2168,6 +2715,15 @@ void vf_session_unload(vf_session_t *session) {
                 session->hw_depth_rb = 0;
                 session->hw_fbo_w = 0;
                 session->hw_fbo_h = 0;
+            }
+            eglMakeCurrent(session->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+            if (session->egl_window_surface != EGL_NO_SURFACE) {
+                eglDestroySurface(session->egl_display, session->egl_window_surface);
+                session->egl_window_surface = EGL_NO_SURFACE;
+            }
+            if (session->egl_surface_secondary != EGL_NO_SURFACE) {
+                eglDestroySurface(session->egl_display, session->egl_surface_secondary);
+                session->egl_surface_secondary = EGL_NO_SURFACE;
             }
             if (session->egl_pbuffer_surface != EGL_NO_SURFACE) {
                 eglDestroySurface(session->egl_display, session->egl_pbuffer_surface);
@@ -2182,6 +2738,7 @@ void vf_session_unload(vf_session_t *session) {
         session->active_egl_window = NULL;
         session->active_egl_window_secondary = NULL;
         session->hw_context_reset_done = false;
+        vf_gl_cache_cleanup();
     }
 
     if (session->rom_data) {

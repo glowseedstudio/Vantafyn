@@ -257,6 +257,10 @@ fun GamePlayerScreen(
         val stored = prefs.getString("citra_resolution_factor", "4x (1600x960)") ?: "4x (1600x960)"
         mutableStateOf(stored)
     }
+    var citraAccurateMul by remember {
+        val stored = prefs.getBoolean("citra_accurate_mul", false)
+        mutableStateOf(stored)
+    }
 
     val hasSecondaryDisplay = rememberNdsDualDisplayManager(
         engine = nativeEngine,
@@ -562,8 +566,9 @@ fun GamePlayerScreen(
                         engine.setOption("azahar_screen_layout", citraScreenLayout)
                         engine.setOption("citra_swap_screen", citraSwap)
                         engine.setOption("azahar_swap_screen", citraSwap)
-                        engine.setOption("citra_resolution_factor", citraResolutionFactor)
-                        engine.setOption("azahar_resolution_factor", citraResolutionFactor)
+                        val resolutionDigit = citraResolutionFactor.substringBefore("x").trim()
+                        engine.setOption("citra_resolution_factor", resolutionDigit)
+                        engine.setOption("azahar_resolution_factor", resolutionDigit)
                         engine.setOption("citra_graphics_api", "OpenGL")
                         engine.setOption("azahar_graphics_api", "OpenGL")
                         engine.setOption("citra_use_hw_renderer", "enabled")
@@ -600,10 +605,11 @@ fun GamePlayerScreen(
                         engine.setOption("azahar_audio_emulation", "hle")
                         engine.setOption("citra_use_acc_geo_shaders", "enabled")
                         engine.setOption("azahar_use_acc_geo_shaders", "enabled")
-                        engine.setOption("citra_use_acc_mul", "enabled")
-                        engine.setOption("azahar_use_acc_mul", "enabled")
-                        engine.setOption("citra_shaders_accurate_mul", "enabled")
-                        engine.setOption("azahar_shaders_accurate_mul", "enabled")
+                        val accMulOption = if (citraAccurateMul) "enabled" else "disabled"
+                        engine.setOption("citra_use_acc_mul", accMulOption)
+                        engine.setOption("azahar_use_acc_mul", accMulOption)
+                        engine.setOption("citra_shaders_accurate_mul", accMulOption)
+                        engine.setOption("azahar_shaders_accurate_mul", accMulOption)
 
                         // Prepare permanent Azahar / Citra shader cache directories to ensure write access across sessions
                         try {
@@ -617,6 +623,7 @@ fun GamePlayerScreen(
                                     val subDirs = listOf(
                                         File(coreDir, "shaders/opengl/transferable"),
                                         File(coreDir, "shaders/opengl/precompiled/conventional"),
+                                        File(coreDir, "shaders/vf_bin_cache"),
                                         File(coreDir, "sdmc"),
                                         File(coreDir, "sysdata")
                                     )
@@ -1346,8 +1353,20 @@ fun GamePlayerScreen(
                 }
                 citraResolutionFactor = nextFactor
                 prefs.edit().putString("citra_resolution_factor", nextFactor).apply()
-                nativeEngine?.setOption("citra_resolution_factor", nextFactor)
-                nativeEngine?.setOption("azahar_resolution_factor", nextFactor)
+                val nextDigit = nextFactor.substringBefore("x").trim()
+                nativeEngine?.setOption("citra_resolution_factor", nextDigit)
+                nativeEngine?.setOption("azahar_resolution_factor", nextDigit)
+            },
+            citraAccurateMul = citraAccurateMul,
+            onToggleCitraAccurateMul = {
+                val next = !citraAccurateMul
+                citraAccurateMul = next
+                prefs.edit().putBoolean("citra_accurate_mul", next).apply()
+                val opt = if (next) "enabled" else "disabled"
+                nativeEngine?.setOption("citra_use_acc_mul", opt)
+                nativeEngine?.setOption("azahar_use_acc_mul", opt)
+                nativeEngine?.setOption("citra_shaders_accurate_mul", opt)
+                nativeEngine?.setOption("azahar_shaders_accurate_mul", opt)
             },
             onSyncCloudSave = {
                 if (isNativeMode) {

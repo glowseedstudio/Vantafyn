@@ -944,6 +944,51 @@ public sealed class PokemonController : ControllerBase
         return Ok(updated);
     }
 
+    /// <summary>
+    /// Moves or swaps a Pokémon within the user's personal vault across boxes or slots.
+    /// </summary>
+    [HttpPost("Vault/Move")]
+    [Produces(MediaTypeNames.Application.Json)]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<PokemonOperationResponse>> MoveVaultEntry(
+        [FromBody] PokemonVaultMoveRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!IsPokemonIntegrationEnabled())
+        {
+            return NotFound(new { error = "Pokémon integration is disabled." });
+        }
+
+        if (string.IsNullOrWhiteSpace(request.EntryId))
+        {
+            return BadRequest(new { error = "EntryId is required." });
+        }
+
+        var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
+        var result = await _vaultStore.MoveEntryAsync(userId, request.EntryId, request.TargetBoxIndex, request.TargetSlotIndex, cancellationToken).ConfigureAwait(false);
+
+        if (!result.Success)
+        {
+            return BadRequest(new PokemonOperationResponse
+            {
+                Success = false,
+                Operation = "VaultMove",
+                Message = result.Message
+            });
+        }
+
+        return Ok(new PokemonOperationResponse
+        {
+            Success = true,
+            Operation = "VaultMove",
+            Message = result.Message,
+            VaultEntry = result.MovedEntry,
+            DestinationLocation = result.MovedEntry?.CurrentLocation ?? string.Empty
+        });
+    }
+
     private GameDetail? FindGame(string gameId)
     {
         if (string.IsNullOrWhiteSpace(gameId)) return null;
@@ -1581,17 +1626,38 @@ public sealed class PokemonController : ControllerBase
             return BadRequest(new { error = "SourceGameId and DestinationGameId are required." });
         }
 
-        if (string.Equals(request.SourceGameId, request.DestinationGameId, StringComparison.OrdinalIgnoreCase))
-        {
-            return BadRequest(new { error = "Source and destination games must be different." });
-        }
-
         var userId = await this.CurrentUserIdAsync(_authorizationContext).ConfigureAwait(false);
 
         var sourceGame = FindGame(request.SourceGameId);
         if (sourceGame == null)
         {
             return NotFound(new { error = $"Source game '{request.SourceGameId}' not found." });
+        }
+
+        if (string.Equals(request.SourceGameId, request.DestinationGameId, StringComparison.OrdinalIgnoreCase))
+        {
+            var meta = await _detector.GetMetadataAsync(
+                userId: userId,
+                gameId: sourceGame.Id,
+                title: sourceGame.Title,
+                fileName: sourceGame.FileName,
+                system: sourceGame.System,
+                core: sourceGame.Core,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            if (meta == null || !meta.IsPokemonGame)
+            {
+                return BadRequest(new { error = $"Game '{request.SourceGameId}' is not a detected Pokémon game." });
+            }
+
+            return Ok(new PokemonTransferCompatibilityResult
+            {
+                IsCompatible = true,
+                Reason = "Same-game save rearrangement and box movement is fully compatible.",
+                Direction = "same_generation",
+                SourceGeneration = meta.Generation,
+                DestinationGeneration = meta.Generation
+            });
         }
 
         var destGame = FindGame(request.DestinationGameId);
@@ -1656,9 +1722,16 @@ public sealed class PokemonController : ControllerBase
             return BadRequest(new { error = "SourceGameId, DestinationGameId, and PokemonId are required." });
         }
 
-        if (string.Equals(request.SourceGameId, request.DestinationGameId, StringComparison.OrdinalIgnoreCase))
+        var isSameGame = string.Equals(request.SourceGameId, request.DestinationGameId, StringComparison.OrdinalIgnoreCase);
+
+        if (isSameGame)
         {
-            return BadRequest(new { error = "Source and destination games must be different." });
+            bool sameContainer = (request.SourceIsInParty && request.TargetParty) || (!request.SourceIsInParty && !request.TargetParty && (request.SourceBoxIndex ?? 1) == (request.TargetBoxIndex ?? 1));
+            bool sameSlot = request.TargetSlotIndex.HasValue && request.SourceSlotIndex == request.TargetSlotIndex.Value;
+            if (sameContainer && sameSlot)
+            {
+                return BadRequest(new { error = "Source and target slots are identical." });
+            }
         }
 
         if (request.TargetParty)
@@ -1688,7 +1761,7 @@ public sealed class PokemonController : ControllerBase
             return NotFound(new { error = $"Source game '{request.SourceGameId}' not found." });
         }
 
-        var destGame = FindGame(request.DestinationGameId);
+        var destGame = isSameGame ? sourceGame : FindGame(request.DestinationGameId);
         if (destGame == null)
         {
             return NotFound(new { error = $"Destination game '{request.DestinationGameId}' not found." });
@@ -1703,7 +1776,7 @@ public sealed class PokemonController : ControllerBase
             core: sourceGame.Core,
             cancellationToken: cancellationToken).ConfigureAwait(false);
 
-        var destMeta = await _detector.GetMetadataAsync(
+        var destMeta = isSameGame ? sourceMeta : await _detector.GetMetadataAsync(
             userId: userId,
             gameId: destGame.Id,
             title: destGame.Title,
@@ -1722,7 +1795,9 @@ public sealed class PokemonController : ControllerBase
             return BadRequest(new { error = $"Destination game '{request.DestinationGameId}' is not a detected Pokémon game." });
         }
 
-        var preCompat = PokemonMigrationValidator.ValidateTransfer(sourceMeta, destMeta, Configuration);
+        var preCompat = isSameGame
+            ? new PokemonTransferCompatibilityResult { IsCompatible = true, Reason = "Compatible: Moving within the same game save." }
+            : PokemonMigrationValidator.ValidateTransfer(sourceMeta, destMeta, Configuration);
         if (!preCompat.IsCompatible)
         {
             return BadRequest(new PokemonOperationResponse
@@ -1740,19 +1815,19 @@ public sealed class PokemonController : ControllerBase
         var config = Configuration;
         var provider = _providerFactory.Create(config);
 
-        var opType = preCompat.IsCrossGeneration ? "CrossGenTransfer" : "DirectTransfer";
+        var opType = isSameGame ? "SaveMove" : (preCompat.IsCrossGeneration ? "CrossGenTransfer" : "DirectTransfer");
 
         var txResult = await _transactionManager.ExecuteAsync(
             userId: userId,
             operationType: opType,
             sourceGameId: request.SourceGameId,
-            destinationGameId: request.DestinationGameId,
+            destinationGameId: isSameGame ? null : request.DestinationGameId,
             pokemonId: request.PokemonId,
             species: null,
             nickname: null,
             operation: async context =>
             {
-                if (context.DestinationSaveWorkingCopy == null)
+                if (!isSameGame && context.DestinationSaveWorkingCopy == null)
                 {
                     throw new InvalidOperationException($"Destination save working copy was not loaded for {request.DestinationGameId}.");
                 }
@@ -1774,11 +1849,14 @@ public sealed class PokemonController : ControllerBase
                     throw new InvalidOperationException(extractResult.ErrorMessage ?? "Extraction from source save failed.");
                 }
 
-                // 2. Perform detailed validation with extracted Pokémon metadata
-                var postCompat = PokemonMigrationValidator.ValidateTransfer(sourceMeta, destMeta, config, extractResult.ExtractedPokemon);
-                if (!postCompat.IsCompatible)
+                if (!isSameGame)
                 {
-                    throw new InvalidOperationException(postCompat.Reason);
+                    // 2. Perform detailed validation with extracted Pokémon metadata
+                    var postCompat = PokemonMigrationValidator.ValidateTransfer(sourceMeta, destMeta, config, extractResult.ExtractedPokemon);
+                    if (!postCompat.IsCompatible)
+                    {
+                        throw new InvalidOperationException(postCompat.Reason);
+                    }
                 }
 
                 // Update source save working copy
@@ -1821,8 +1899,9 @@ public sealed class PokemonController : ControllerBase
                 };
 
                 // 4. Inject into destination save working copy
+                var targetSave = isSameGame ? context.SourceSaveWorkingCopy : context.DestinationSaveWorkingCopy!;
                 var injectResult = await provider.InjectPokemonIntoSaveAsync(
-                    context.DestinationSaveWorkingCopy,
+                    targetSave,
                     destMeta.PokemonGameId,
                     destMeta.Platform,
                     destMeta.Generation,
@@ -1838,7 +1917,14 @@ public sealed class PokemonController : ControllerBase
                 }
 
                 // Update destination save working copy
-                context.DestinationSaveWorkingCopy = injectResult.UpdatedSaveBytes;
+                if (isSameGame)
+                {
+                    context.SourceSaveWorkingCopy = injectResult.UpdatedSaveBytes;
+                }
+                else
+                {
+                    context.DestinationSaveWorkingCopy = injectResult.UpdatedSaveBytes;
+                }
 
                 var destLocation = injectResult.AssignedLocation
                     ?? (request.TargetParty
@@ -3807,18 +3893,29 @@ public sealed class PokemonController : ControllerBase
                     if (matchingGift != null)
                     {
                         var vaultEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(matchingGift, meta.CanonicalTitle, meta.Generation);
+                        var (boxIdx, slotIdx) = await _vaultStore.FindNextAvailableSlotAsync(userId, 1, cancellationToken).ConfigureAwait(false);
+                        if (boxIdx > 0 && slotIdx > 0)
+                        {
+                            vaultEntry.BoxIndex = boxIdx;
+                            vaultEntry.SlotIndex = slotIdx;
+                            vaultEntry.CurrentLocation = $"Box {boxIdx}, Slot {slotIdx}";
+                        }
                         await _vaultStore.AddOrUpdateEntryAsync(userId, vaultEntry, cancellationToken).ConfigureAwait(false);
                     }
                 }
 
                 MarkMysteryGiftCodeRedeemed(userId, game.Id, definition.Id);
 
+                var destMessage = (definition.Id is PokemonEventCatalog.Gen7MagearnaDelivery or PokemonEventCatalog.Gen7AshGreninjaDelivery)
+                    ? $"{definition.Title} delivered to your Personal Vault! Open the Cloud Vault screen to withdraw it directly into your game's party or PC box."
+                    : $"{definition.Title} unlocked. Start the game from battery save and continue the event in-game.";
+
                 return new PokemonEventUnlockResponse
                 {
                     Success = true,
                     EventId = definition.Id,
                     GameId = game.Id,
-                    Message = $"{definition.Title} unlocked. Start the game from battery save and continue the event in-game.",
+                    Message = destMessage,
                     BackupIds = context.BackupIds
                 };
             },
@@ -4027,6 +4124,13 @@ public sealed class PokemonController : ControllerBase
             if (gift.RewardType is "Pokemon" or "Egg")
             {
                 var vaultEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(gift, meta.CanonicalTitle, meta.Generation);
+                var (boxIdx, slotIdx) = await _vaultStore.FindNextAvailableSlotAsync(userId, 1, cancellationToken).ConfigureAwait(false);
+                if (boxIdx > 0 && slotIdx > 0)
+                {
+                    vaultEntry.BoxIndex = boxIdx;
+                    vaultEntry.SlotIndex = slotIdx;
+                    vaultEntry.CurrentLocation = $"Box {boxIdx}, Slot {slotIdx}";
+                }
                 await _vaultStore.AddOrUpdateEntryAsync(userId, vaultEntry, cancellationToken).ConfigureAwait(false);
             }
             MarkMysteryGiftCodeRedeemed(userId, game.Id, gift.Code);
@@ -4084,6 +4188,13 @@ public sealed class PokemonController : ControllerBase
                 if (gift.RewardType is "Pokemon" or "Egg")
                 {
                     var vaultEntry = PokemonMysteryGiftCatalog.CreateVaultEntry(gift, meta.CanonicalTitle, meta.Generation);
+                    var (boxIdx, slotIdx) = await _vaultStore.FindNextAvailableSlotAsync(userId, 1, cancellationToken).ConfigureAwait(false);
+                    if (boxIdx > 0 && slotIdx > 0)
+                    {
+                        vaultEntry.BoxIndex = boxIdx;
+                        vaultEntry.SlotIndex = slotIdx;
+                        vaultEntry.CurrentLocation = $"Box {boxIdx}, Slot {slotIdx}";
+                    }
                     await _vaultStore.AddOrUpdateEntryAsync(userId, vaultEntry, cancellationToken).ConfigureAwait(false);
                 }
 

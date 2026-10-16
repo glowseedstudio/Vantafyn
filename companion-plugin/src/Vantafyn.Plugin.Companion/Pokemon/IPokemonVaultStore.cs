@@ -48,9 +48,21 @@ public interface IPokemonVaultStore
     Task<PokemonVaultEntry> AddOrUpdateEntryAsync(Guid userId, PokemonVaultEntry entry, CancellationToken cancellationToken);
 
     /// <summary>
+    /// Finds the next available box and slot (1-indexed) in the user's personal vault.
+    /// Returns (0, 0) if all boxes are full.
+    /// </summary>
+    Task<(int BoxIndex, int SlotIndex)> FindNextAvailableSlotAsync(Guid userId, int preferredBoxIndex = 1, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Removes a Pokémon entry by its ID from the user's vault.
     /// </summary>
     Task<bool> RemoveEntryAsync(Guid userId, string entryId, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Moves or swaps a Pokémon entry to a target box and slot in the user's personal vault.
+    /// If target slot is occupied, performs a swap.
+    /// </summary>
+    Task<PokemonVaultMoveResult> MoveEntryAsync(Guid userId, string entryId, int targetBoxIndex, int? targetSlotIndex, CancellationToken cancellationToken);
 
     /// <summary>
     /// Updates the active moves for a Pokémon entry in the user's vault.

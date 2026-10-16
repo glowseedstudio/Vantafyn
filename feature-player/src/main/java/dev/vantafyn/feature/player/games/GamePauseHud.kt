@@ -130,6 +130,8 @@ fun GamePauseHud(
     onToggleLcdGhosting: () -> Unit = {},
     citraResolution: String = "1x (400x240)",
     onCycleCitraResolution: () -> Unit = {},
+    citraAccurateMul: Boolean = false,
+    onToggleCitraAccurateMul: () -> Unit = {},
     onResume: () -> Unit,
     onToggleSpeed: () -> Unit,
     onCycleAspectRatio: () -> Unit,
@@ -325,7 +327,22 @@ fun GamePauseHud(
                                         onClick = onToggleSwapDualScreens,
                                         modifier = Modifier.weight(1f),
                                     )
+                                } else {
+                                    HudMenuButton(
+                                        label = if (citraAccurateMul) "Accurate Mul: On" else "Accurate Mul: Off",
+                                        icon = Icons.Rounded.Tune,
+                                        onClick = onToggleCitraAccurateMul,
+                                        modifier = Modifier.weight(1f),
+                                    )
                                 }
+                            }
+                            if (!hasSecondaryDisplay) {
+                                HudMenuButton(
+                                    label = if (citraAccurateMul) "Accurate Multiplication: On" else "Accurate Multiplication: Off",
+                                    icon = Icons.Rounded.Tune,
+                                    onClick = onToggleCitraAccurateMul,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
                             }
                         }
 

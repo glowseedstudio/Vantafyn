@@ -150,6 +150,12 @@ data class PokemonWithdrawRequest(
     val targetIsInParty: Boolean = false,
 ) : Serializable
 
+data class PokemonVaultMoveRequest(
+    val entryId: String,
+    val targetBoxIndex: Int = 1,
+    val targetSlotIndex: Int? = null,
+) : Serializable
+
 data class PokemonDirectTransferRequest(
     val sourceGameId: String,
     val destinationGameId: String,

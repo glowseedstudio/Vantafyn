@@ -8,20 +8,20 @@
     "owner": "Glowseed Studio",
     "versions": [
       {
-        "version": "0.2.40.0",
-        "changelog": "Enables accurate multiplication and accurate geometry shaders for 3DS emulation to eliminate white screens in Pokémon Ultra Sun / Moon, enhances 3DS cloud save synchronization and listing across devices.",
+        "version": "0.2.41.0",
+        "changelog": "Supports moving and swapping Pokémon between Personal Vault boxes, same-game save reorganization, and automatic free-slot allocation for event gifts.",
         "targetAbi": "10.11.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.76/Vantafyn.Plugin.Companion_0.2.40_net9.zip",
-        "checksum": "60156985489b72c0ecf87357ee99d5a4",
-        "timestamp": "2026-10-15T07:32:53Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.77/Vantafyn.Plugin.Companion_0.2.41_net9.zip",
+        "checksum": "f1aca6f01cc5f507fb8470cf0d4e3503",
+        "timestamp": "2026-10-16T09:29:09Z"
       },
       {
-        "version": "0.2.40.1",
-        "changelog": "Enables accurate multiplication and accurate geometry shaders for 3DS emulation to eliminate white screens in Pokémon Ultra Sun / Moon, enhances 3DS cloud save synchronization and listing across devices.",
+        "version": "0.2.41.1",
+        "changelog": "Supports moving and swapping Pokémon between Personal Vault boxes, same-game save reorganization, and automatic free-slot allocation for event gifts.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.76/Vantafyn.Plugin.Companion_0.2.40_net10.zip",
-        "checksum": "732842a7ce57d4fa75d8e47b0376b0ce",
-        "timestamp": "2026-10-15T07:32:53Z"
+        "sourceUrl": "https://github.com/glowseedstudio/Vantafyn/releases/download/v0.9.77/Vantafyn.Plugin.Companion_0.2.41_net10.zip",
+        "checksum": "5f6f170cc9ccd94e22904e4903575067",
+        "timestamp": "2026-10-16T09:29:09Z"
       },
       {
         "version": "0.2.39.0",

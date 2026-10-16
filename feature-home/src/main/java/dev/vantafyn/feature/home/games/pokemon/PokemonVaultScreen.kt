@@ -85,6 +85,7 @@ import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.feature.player.games.GameStorageManager
 import dev.vantafyn.feature.player.games.SaveSyncStatus
 import dev.vantafyn.core.jellyfin.PokemonVaultSummary
+import dev.vantafyn.core.jellyfin.PokemonVaultMoveRequest
 import dev.vantafyn.core.jellyfin.PokemonWithdrawRequest
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
@@ -416,29 +417,36 @@ fun PokemonVaultScreen(
         }
 
         if (srcGame != null && dstGame != null) {
-            isValidatingCompatibility = true
-            coroutineScope.launch(Dispatchers.IO) {
-                val req = PokemonTransferValidateRequest(
-                    sourceGameId = srcGame,
-                    destinationGameId = dstGame,
-                    pokemonId = selected.pokemonId,
-                    isInParty = selected.isInParty,
-                    boxIndex = selected.boxIndex,
-                    slotIndex = selected.slotIndex,
+            if (srcGame == dstGame) {
+                compatibilityResult = PokemonTransferCompatibilityResult(
+                    isCompatible = true,
+                    reason = "Compatible: Moving within the same game save.",
                 )
-                pokemonRepository.validateTransfer(session, req).fold(
-                    onSuccess = { res ->
-                        compatibilityResult = res
-                        isValidatingCompatibility = false
-                    },
-                    onFailure = {
-                        compatibilityResult = PokemonTransferCompatibilityResult(
-                            isCompatible = false,
-                            reason = it.message ?: "Validation failed",
-                        )
-                        isValidatingCompatibility = false
-                    }
-                )
+            } else {
+                isValidatingCompatibility = true
+                coroutineScope.launch(Dispatchers.IO) {
+                    val req = PokemonTransferValidateRequest(
+                        sourceGameId = srcGame,
+                        destinationGameId = dstGame,
+                        pokemonId = selected.pokemonId,
+                        isInParty = selected.isInParty,
+                        boxIndex = selected.boxIndex,
+                        slotIndex = selected.slotIndex,
+                    )
+                    pokemonRepository.validateTransfer(session, req).fold(
+                        onSuccess = { res ->
+                            compatibilityResult = res
+                            isValidatingCompatibility = false
+                        },
+                        onFailure = {
+                            compatibilityResult = PokemonTransferCompatibilityResult(
+                                isCompatible = false,
+                                reason = it.message ?: "Validation failed",
+                            )
+                            isValidatingCompatibility = false
+                        }
+                    )
+                }
             }
         } else {
             // Vault deposit or withdraw: Always compatible
@@ -494,7 +502,7 @@ fun PokemonVaultScreen(
                     )
                 }
 
-                // Game -> Game (Direct Transfer)
+                // Game -> Game (Direct Transfer / Same Game Move)
                 srcContainer is StorageContainerType.GameCartridge && dstContainer is StorageContainerType.GameCartridge -> {
                     pokemonRepository.directTransferPokemon(
                         session,
@@ -512,9 +520,20 @@ fun PokemonVaultScreen(
                     )
                 }
 
-                // Vault -> Vault (Move between vault boxes)
+                // Vault -> Vault (Move / Swap between vault boxes / slots)
+                srcContainer is StorageContainerType.PersonalVault && dstContainer is StorageContainerType.PersonalVault -> {
+                    pokemonRepository.moveVaultEntry(
+                        session,
+                        PokemonVaultMoveRequest(
+                            entryId = selected.entryId ?: selected.pokemonId,
+                            targetBoxIndex = targetBox,
+                            targetSlotIndex = targetSlot,
+                        )
+                    )
+                }
+
                 else -> {
-                    Result.failure(Exception("Direct move between two Vault boxes can be done by selecting different target boxes."))
+                    Result.failure(Exception("Unable to determine transfer operation for selected containers."))
                 }
             }
 
@@ -533,6 +552,69 @@ fun PokemonVaultScreen(
                     },
                     onFailure = { err ->
                         operationResultMessage = "Operation failed: ${err.message}"
+                    }
+                )
+            }
+        }
+    }
+
+    fun executeInContainerMove(
+        side: TransferSide,
+        targetBox: Int,
+        targetSlot: Int,
+        targetIsInParty: Boolean,
+    ) {
+        val selected = selectedPokemonItem ?: return
+        if (session == null) return
+        if (selected.side != side) return
+
+        isExecutingTransfer = true
+        coroutineScope.launch(Dispatchers.IO) {
+            val container = if (side == TransferSide.Source) upperState.containerType else lowerState.containerType
+            val result = when (container) {
+                is StorageContainerType.PersonalVault -> {
+                    pokemonRepository.moveVaultEntry(
+                        session,
+                        PokemonVaultMoveRequest(
+                            entryId = selected.entryId ?: selected.pokemonId,
+                            targetBoxIndex = targetBox,
+                            targetSlotIndex = targetSlot,
+                        )
+                    )
+                }
+                is StorageContainerType.GameCartridge -> {
+                    pokemonRepository.directTransferPokemon(
+                        session,
+                        PokemonDirectTransferRequest(
+                            sourceGameId = container.game.id,
+                            destinationGameId = container.game.id,
+                            pokemonId = selected.pokemonId,
+                            isInParty = selected.isInParty,
+                            sourceBoxIndex = selected.boxIndex,
+                            sourceSlotIndex = selected.slotIndex,
+                            targetBoxIndex = targetBox,
+                            targetSlotIndex = targetSlot,
+                            targetIsInParty = targetIsInParty,
+                        )
+                    )
+                }
+            }
+
+            withContext(Dispatchers.Main) {
+                isExecutingTransfer = false
+                result.fold(
+                    onSuccess = { op ->
+                        val backupNote = if (op.backupCreated) "\nBackup created: ${op.backupId}" else ""
+                        operationResultMessage = "Success! ${op.message}$backupNote"
+                        selectedPokemonItem = null
+                        upperSelectedSlotIndex = null
+                        lowerSelectedSlotIndex = null
+                        loadVaultSummary()
+                        loadContainerData(TransferSide.Source)
+                        loadContainerData(TransferSide.Destination)
+                    },
+                    onFailure = { err ->
+                        operationResultMessage = "Move failed: ${err.message}"
                     }
                 )
             }
@@ -1157,30 +1239,65 @@ fun PokemonVaultScreen(
                         upperMultiSelectedSlots = emptySet()
                     },
                     onSelectSlot = { slot, pokemon ->
-                        upperSelectedSlotIndex = slot
+                        val currentSelected = selectedPokemonItem
+                        if (currentSelected != null && currentSelected.side == TransferSide.Source) {
+                            val currentSlot = currentSelected.slotIndex
+                            val isSamePartyMode = currentSelected.isInParty == upperState.isPartyMode
+                            val isSameBox = upperState.isPartyMode || (currentSelected.boxIndex == upperState.selectedBoxIndex)
+
+                            if (isSamePartyMode && isSameBox && currentSlot == slot) {
+                                selectedPokemonItem = null
+                                upperSelectedSlotIndex = null
+                            } else if (pokemon == null) {
+                                val targetBox = if (upperState.isPartyMode) 1 else upperState.selectedBoxIndex
+                                executeInContainerMove(
+                                    side = TransferSide.Source,
+                                    targetBox = targetBox,
+                                    targetSlot = slot,
+                                    targetIsInParty = upperState.isPartyMode
+                                )
+                            } else {
+                                upperSelectedSlotIndex = slot
+                                val isVault = upperState.containerType is StorageContainerType.PersonalVault
+                                val gameId = (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
+                                selectedPokemonItem = SelectedPokemonItem(
+                                    side = TransferSide.Source,
+                                    isVault = isVault,
+                                    gameId = gameId,
+                                    entryId = if (isVault) pokemon.id else null,
+                                    pokemonId = pokemon.id,
+                                    summary = pokemon,
+                                    boxIndex = if (upperState.isPartyMode) null else upperState.selectedBoxIndex,
+                                    slotIndex = slot,
+                                    isInParty = upperState.isPartyMode,
+                                )
+                            }
+                        } else if (currentSelected != null && currentSelected.side == TransferSide.Destination) {
+                            upperSelectedSlotIndex = slot
+                        } else {
+                            upperSelectedSlotIndex = slot
+                            if (pokemon != null) {
+                                val isVault = upperState.containerType is StorageContainerType.PersonalVault
+                                val gameId = (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
+                                selectedPokemonItem = SelectedPokemonItem(
+                                    side = TransferSide.Source,
+                                    isVault = isVault,
+                                    gameId = gameId,
+                                    entryId = if (isVault) pokemon.id else null,
+                                    pokemonId = pokemon.id,
+                                    summary = pokemon,
+                                    boxIndex = if (upperState.isPartyMode) null else upperState.selectedBoxIndex,
+                                    slotIndex = slot,
+                                    isInParty = upperState.isPartyMode,
+                                )
+                            } else {
+                                selectedPokemonItem = null
+                            }
+                        }
                         isUpperMultiSelectMode = false
                         upperMultiSelectedSlots = emptySet()
                         isLowerMultiSelectMode = false
                         lowerMultiSelectedSlots = emptySet()
-                        if (pokemon != null) {
-                            val isVault = upperState.containerType is StorageContainerType.PersonalVault
-                            val gameId = (upperState.containerType as? StorageContainerType.GameCartridge)?.game?.id
-                            selectedPokemonItem = SelectedPokemonItem(
-                                side = TransferSide.Source,
-                                isVault = isVault,
-                                gameId = gameId,
-                                entryId = if (isVault) pokemon.id else null,
-                                pokemonId = pokemon.id,
-                                summary = pokemon,
-                                boxIndex = if (upperState.isPartyMode) null else upperState.selectedBoxIndex,
-                                slotIndex = slot,
-                                isInParty = upperState.isPartyMode,
-                            )
-                        } else {
-                            if (selectedPokemonItem?.side == TransferSide.Source) {
-                                selectedPokemonItem = null
-                            }
-                        }
                     },
                     onOpenDetails = { pokemon ->
                         val boxList: List<PokemonSummaryDto> = (if (upperState.isPartyMode) {
@@ -1327,6 +1444,12 @@ fun PokemonVaultScreen(
                     lowerBoxName = lowerState.currentBoxName,
                     upperIsLocked = upperState.isLocked,
                     lowerIsLocked = lowerState.isLocked,
+                    isSameContainerOrGame = remember(upperState.containerType, lowerState.containerType) {
+                        val upper = upperState.containerType
+                        val lower = lowerState.containerType
+                        (upper is StorageContainerType.PersonalVault && lower is StorageContainerType.PersonalVault) ||
+                        (upper is StorageContainerType.GameCartridge && lower is StorageContainerType.GameCartridge && upper.game.id == lower.game.id)
+                    },
                     onTransferEntireBox = { direction ->
                         if (direction == TransferSide.Source) {
                             bulkTransferConfirmation = BulkTransferConfirmation(
@@ -1397,30 +1520,65 @@ fun PokemonVaultScreen(
                         lowerMultiSelectedSlots = emptySet()
                     },
                     onSelectSlot = { slot, pokemon ->
-                        lowerSelectedSlotIndex = slot
+                        val currentSelected = selectedPokemonItem
+                        if (currentSelected != null && currentSelected.side == TransferSide.Destination) {
+                            val currentSlot = currentSelected.slotIndex
+                            val isSamePartyMode = currentSelected.isInParty == lowerState.isPartyMode
+                            val isSameBox = lowerState.isPartyMode || (currentSelected.boxIndex == lowerState.selectedBoxIndex)
+
+                            if (isSamePartyMode && isSameBox && currentSlot == slot) {
+                                selectedPokemonItem = null
+                                lowerSelectedSlotIndex = null
+                            } else if (pokemon == null) {
+                                val targetBox = if (lowerState.isPartyMode) 1 else lowerState.selectedBoxIndex
+                                executeInContainerMove(
+                                    side = TransferSide.Destination,
+                                    targetBox = targetBox,
+                                    targetSlot = slot,
+                                    targetIsInParty = lowerState.isPartyMode
+                                )
+                            } else {
+                                lowerSelectedSlotIndex = slot
+                                val isVault = lowerState.containerType is StorageContainerType.PersonalVault
+                                val gameId = (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
+                                selectedPokemonItem = SelectedPokemonItem(
+                                    side = TransferSide.Destination,
+                                    isVault = isVault,
+                                    gameId = gameId,
+                                    entryId = if (isVault) pokemon.id else null,
+                                    pokemonId = pokemon.id,
+                                    summary = pokemon,
+                                    boxIndex = if (lowerState.isPartyMode) null else lowerState.selectedBoxIndex,
+                                    slotIndex = slot,
+                                    isInParty = lowerState.isPartyMode,
+                                )
+                            }
+                        } else if (currentSelected != null && currentSelected.side == TransferSide.Source) {
+                            lowerSelectedSlotIndex = slot
+                        } else {
+                            lowerSelectedSlotIndex = slot
+                            if (pokemon != null) {
+                                val isVault = lowerState.containerType is StorageContainerType.PersonalVault
+                                val gameId = (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
+                                selectedPokemonItem = SelectedPokemonItem(
+                                    side = TransferSide.Destination,
+                                    isVault = isVault,
+                                    gameId = gameId,
+                                    entryId = if (isVault) pokemon.id else null,
+                                    pokemonId = pokemon.id,
+                                    summary = pokemon,
+                                    boxIndex = if (lowerState.isPartyMode) null else lowerState.selectedBoxIndex,
+                                    slotIndex = slot,
+                                    isInParty = lowerState.isPartyMode,
+                                )
+                            } else {
+                                selectedPokemonItem = null
+                            }
+                        }
                         isUpperMultiSelectMode = false
                         upperMultiSelectedSlots = emptySet()
                         isLowerMultiSelectMode = false
                         lowerMultiSelectedSlots = emptySet()
-                        if (pokemon != null) {
-                            val isVault = lowerState.containerType is StorageContainerType.PersonalVault
-                            val gameId = (lowerState.containerType as? StorageContainerType.GameCartridge)?.game?.id
-                            selectedPokemonItem = SelectedPokemonItem(
-                                side = TransferSide.Destination,
-                                isVault = isVault,
-                                gameId = gameId,
-                                entryId = if (isVault) pokemon.id else null,
-                                pokemonId = pokemon.id,
-                                summary = pokemon,
-                                boxIndex = if (lowerState.isPartyMode) null else lowerState.selectedBoxIndex,
-                                slotIndex = slot,
-                                isInParty = lowerState.isPartyMode,
-                            )
-                        } else {
-                            if (selectedPokemonItem?.side == TransferSide.Destination) {
-                                selectedPokemonItem = null
-                            }
-                        }
                     },
                     onOpenDetails = { pokemon ->
                         val boxList: List<PokemonSummaryDto> = (if (lowerState.isPartyMode) {

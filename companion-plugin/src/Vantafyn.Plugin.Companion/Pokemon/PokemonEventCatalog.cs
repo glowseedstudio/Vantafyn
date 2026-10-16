@@ -221,14 +221,14 @@ public static class PokemonEventCatalog
         {
             Id = Gen7MagearnaDelivery,
             Title = "Magearna Delivery",
-            Subtitle = "Hau'oli Antiquities Event",
-            Description = "Delivers the Mythical Pokémon Magearna holding a Silver Bottle Cap to the deliveryman waiting at the Antiquities of the Ages store inside Hau'oli City Mall.",
+            Subtitle = "Personal Vault Event Delivery",
+            Description = "Delivered directly to your Personal Vault! From the Cloud Vault screen, you can withdraw the Mythical Pokémon Magearna holding a Silver Bottle Cap straight into your Party or PC Box.",
             Generation = 7,
             Region = "Alola",
             Legendary = "Magearna",
             Accent = "#94A3B8",
             TargetSpeciesId = 801,
-            InGameLocation = "Hau'oli City Mall (Antiquities of the Ages store deliveryman)",
+            InGameLocation = "Personal Vault (Withdraw to Party or PC Box in Vault screen)",
             SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"]
         },
         new()
@@ -236,13 +236,13 @@ public static class PokemonEventCatalog
             Id = Gen7AshGreninjaDelivery,
             Title = "Ash-Greninja",
             Subtitle = "Battle Bond Demo Delivery",
-            Description = "Delivers the Special Demo Battle Bond Greninja with Water Shuriken and Aerial Ace to the deliveryman waiting beside the counter in any Pokémon Center.",
+            Description = "Delivered directly to your Personal Vault! From the Cloud Vault screen, you can withdraw this Special Demo Battle Bond Greninja (with Water Shuriken and Aerial Ace) straight into your Party or PC Box.",
             Generation = 7,
             Region = "Alola",
             Legendary = "Ash-Greninja",
             Accent = "#0284C7",
             TargetSpeciesId = 658,
-            InGameLocation = "Any Pokémon Center (Deliveryman waiting by the counter)",
+            InGameLocation = "Personal Vault (Withdraw to Party or PC Box in Vault screen)",
             SupportedGameIds = ["sun", "moon", "ultrasun", "ultramoon", "usum"]
         }
     ];

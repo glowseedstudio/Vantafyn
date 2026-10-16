@@ -338,6 +338,286 @@ public sealed class PokemonMysteryGiftTests
     }
 
     [Fact]
+    public async Task Controller_RedeemMysteryGift_WhenSlot1Occupied_FindsNextEmptySlotAndDoesNotOverwrite()
+    {
+        using var harness = new TestHarness(_userId);
+
+        // Pre-populate Box 1 Slot 1 with an existing Pokemon
+        var existingStarter = new PokemonVaultEntry
+        {
+            Id = "starter-rowlet-1",
+            Species = "Rowlet",
+            SpeciesId = 722,
+            BoxIndex = 1,
+            SlotIndex = 1,
+            CurrentLocation = "Box 1, Slot 1"
+        };
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, existingStarter, CancellationToken.None);
+
+        // Redeem Magearna wondercard
+        var request = new PokemonMysteryGiftRedeemRequest
+        {
+            GameId = "sun",
+            Code = "MAGEARNA-QR"
+        };
+
+        var actionResult = await harness.Controller.RedeemMysteryGift(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonMysteryGiftRedeemResponse>(okResult.Value);
+        Assert.True(response.Success);
+
+        // Verify Box 1 now has both Rowlet at Slot 1 and Magearna at Slot 2
+        var box1 = await harness.VaultStore.GetBoxAsync(_userId, 1, CancellationToken.None);
+        Assert.NotNull(box1);
+        Assert.Equal(2, box1.Entries.Count);
+
+        var starter = box1.Entries.FirstOrDefault(e => e.Id == "starter-rowlet-1");
+        Assert.NotNull(starter);
+        Assert.Equal(1, starter.SlotIndex);
+        Assert.Equal("Rowlet", starter.Species);
+
+        var magearna = box1.Entries.FirstOrDefault(e => e.Species == "Magearna");
+        Assert.NotNull(magearna);
+        Assert.Equal(1, magearna.BoxIndex);
+        Assert.Equal(2, magearna.SlotIndex);
+        Assert.Equal("Box 1, Slot 2", magearna.CurrentLocation);
+    }
+
+    [Fact]
+    public async Task Controller_RedeemMysteryGift_WhenBox1Full_RollsOverToBox2Slot1()
+    {
+        using var harness = new TestHarness(_userId);
+
+        // Fill all 30 slots of Box 1
+        for (var i = 1; i <= 30; i++)
+        {
+            var filler = new PokemonVaultEntry
+            {
+                Id = $"filler-{i}",
+                Species = "Pidgey",
+                SpeciesId = 16,
+                BoxIndex = 1,
+                SlotIndex = i,
+                CurrentLocation = $"Box 1, Slot {i}"
+            };
+            await harness.VaultStore.AddOrUpdateEntryAsync(_userId, filler, CancellationToken.None);
+        }
+
+        // Redeem Magearna wondercard
+        var request = new PokemonMysteryGiftRedeemRequest
+        {
+            GameId = "sun",
+            Code = "MAGEARNA-QR"
+        };
+
+        var actionResult = await harness.Controller.RedeemMysteryGift(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonMysteryGiftRedeemResponse>(okResult.Value);
+        Assert.True(response.Success);
+
+        // Verify Magearna was placed into Box 2 Slot 1
+        var box1 = await harness.VaultStore.GetBoxAsync(_userId, 1, CancellationToken.None);
+        Assert.NotNull(box1);
+        Assert.Equal(30, box1.Entries.Count);
+
+        var box2 = await harness.VaultStore.GetBoxAsync(_userId, 2, CancellationToken.None);
+        Assert.NotNull(box2);
+        Assert.Single(box2.Entries);
+
+        var magearna = box2.Entries[0];
+        Assert.Equal("Magearna", magearna.Species);
+        Assert.Equal(2, magearna.BoxIndex);
+        Assert.Equal(1, magearna.SlotIndex);
+    }
+
+    [Fact]
+    public async Task VaultStore_EnsureBoxes_AutoHealsCorruptedDuplicateSlots()
+    {
+        using var harness = new TestHarness(_userId);
+
+        // Simulate corrupted vault on disk with multiple entries sharing Slot 1
+        var vault = PokemonVault.CreateDefault(_userId, DateTimeOffset.UtcNow);
+        var box1 = vault.Boxes[0];
+        box1.Entries.Add(new PokemonVaultEntry { Id = "mon-1", Species = "Bulbasaur", SpeciesId = 1, BoxIndex = 1, SlotIndex = 1 });
+        box1.Entries.Add(new PokemonVaultEntry { Id = "mon-2", Species = "Charmander", SpeciesId = 4, BoxIndex = 1, SlotIndex = 1 });
+        box1.Entries.Add(new PokemonVaultEntry { Id = "mon-3", Species = "Squirtle", SpeciesId = 7, BoxIndex = 1, SlotIndex = 1 });
+
+        // Save raw corrupted vault
+        var vaultPath = (string)harness.VaultStore.GetType().GetMethod("VaultFilePath", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+            .Invoke(harness.VaultStore, [_userId])!;
+        Directory.CreateDirectory(Path.GetDirectoryName(vaultPath)!);
+        await JsonFile.WriteAtomicAsync(vaultPath, vault, CancellationToken.None);
+
+        // Load through VaultStore, which triggers EnsureBoxes auto-healing
+        var healedVault = await harness.VaultStore.GetOrCreateVaultAsync(_userId, CancellationToken.None);
+        var healedBox1 = healedVault.Boxes[0];
+        Assert.Equal(3, healedBox1.Entries.Count);
+
+        var m1 = healedBox1.Entries.FirstOrDefault(e => e.Id == "mon-1");
+        var m2 = healedBox1.Entries.FirstOrDefault(e => e.Id == "mon-2");
+        var m3 = healedBox1.Entries.FirstOrDefault(e => e.Id == "mon-3");
+
+        Assert.NotNull(m1);
+        Assert.NotNull(m2);
+        Assert.NotNull(m3);
+
+        Assert.Equal(1, m1.SlotIndex);
+        Assert.Equal(2, m2.SlotIndex);
+        Assert.Equal(3, m3.SlotIndex);
+    }
+
+    [Fact]
+    public async Task Controller_VaultMove_MovesToEmptySlotSuccessfully()
+    {
+        using var harness = new TestHarness(_userId);
+
+        var pkm = new PokemonVaultEntry
+        {
+            Id = "vault-pikachu-1",
+            Species = "Pikachu",
+            SpeciesId = 25,
+            BoxIndex = 1,
+            SlotIndex = 1,
+            CurrentLocation = "Box 1, Slot 1"
+        };
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, pkm, CancellationToken.None);
+
+        var moveRequest = new PokemonVaultMoveRequest
+        {
+            EntryId = "vault-pikachu-1",
+            TargetBoxIndex = 1,
+            TargetSlotIndex = 10
+        };
+
+        var actionResult = await harness.Controller.MoveVaultEntry(moveRequest, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonOperationResponse>(okResult.Value);
+        Assert.True(response.Success);
+        Assert.Equal("Box 1, Slot 10", response.DestinationLocation);
+
+        var box1 = await harness.VaultStore.GetBoxAsync(_userId, 1, CancellationToken.None);
+        Assert.NotNull(box1);
+        var moved = box1.Entries.FirstOrDefault(e => e.Id == "vault-pikachu-1");
+        Assert.NotNull(moved);
+        Assert.Equal(10, moved.SlotIndex);
+    }
+
+    [Fact]
+    public async Task Controller_VaultMove_SwapsOccupiedSlotsSuccessfully()
+    {
+        using var harness = new TestHarness(_userId);
+
+        var pkm1 = new PokemonVaultEntry
+        {
+            Id = "vault-pkm-1",
+            Species = "Bulbasaur",
+            SpeciesId = 1,
+            BoxIndex = 1,
+            SlotIndex = 1,
+            CurrentLocation = "Box 1, Slot 1"
+        };
+        var pkm2 = new PokemonVaultEntry
+        {
+            Id = "vault-pkm-2",
+            Species = "Charmander",
+            SpeciesId = 4,
+            BoxIndex = 1,
+            SlotIndex = 2,
+            CurrentLocation = "Box 1, Slot 2"
+        };
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, pkm1, CancellationToken.None);
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, pkm2, CancellationToken.None);
+
+        // Move Bulbasaur to Slot 2 (occupied by Charmander)
+        var moveRequest = new PokemonVaultMoveRequest
+        {
+            EntryId = "vault-pkm-1",
+            TargetBoxIndex = 1,
+            TargetSlotIndex = 2
+        };
+
+        var actionResult = await harness.Controller.MoveVaultEntry(moveRequest, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonOperationResponse>(okResult.Value);
+        Assert.True(response.Success);
+
+        var box1 = await harness.VaultStore.GetBoxAsync(_userId, 1, CancellationToken.None);
+        Assert.NotNull(box1);
+        var b = box1.Entries.FirstOrDefault(e => e.Id == "vault-pkm-1");
+        var c = box1.Entries.FirstOrDefault(e => e.Id == "vault-pkm-2");
+        Assert.NotNull(b);
+        Assert.NotNull(c);
+        Assert.Equal(2, b.SlotIndex);
+        Assert.Equal(1, c.SlotIndex);
+    }
+
+    [Fact]
+    public async Task Controller_VaultMove_MovesAcrossBoxesSuccessfully()
+    {
+        using var harness = new TestHarness(_userId);
+
+        var pkm = new PokemonVaultEntry
+        {
+            Id = "vault-squirtle",
+            Species = "Squirtle",
+            SpeciesId = 7,
+            BoxIndex = 1,
+            SlotIndex = 5,
+            CurrentLocation = "Box 1, Slot 5"
+        };
+        await harness.VaultStore.AddOrUpdateEntryAsync(_userId, pkm, CancellationToken.None);
+
+        // Move from Box 1 to Box 3 Slot 15
+        var moveRequest = new PokemonVaultMoveRequest
+        {
+            EntryId = "vault-squirtle",
+            TargetBoxIndex = 3,
+            TargetSlotIndex = 15
+        };
+
+        var actionResult = await harness.Controller.MoveVaultEntry(moveRequest, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonOperationResponse>(okResult.Value);
+        Assert.True(response.Success);
+
+        var box1 = await harness.VaultStore.GetBoxAsync(_userId, 1, CancellationToken.None);
+        Assert.NotNull(box1);
+        Assert.DoesNotContain(box1.Entries, e => e.Id == "vault-squirtle");
+
+        var box3 = await harness.VaultStore.GetBoxAsync(_userId, 3, CancellationToken.None);
+        Assert.NotNull(box3);
+        var moved = box3.Entries.FirstOrDefault(e => e.Id == "vault-squirtle");
+        Assert.NotNull(moved);
+        Assert.Equal(3, moved.BoxIndex);
+        Assert.Equal(15, moved.SlotIndex);
+    }
+
+    [Fact]
+    public async Task Controller_DirectTransfer_SameGameMove_Succeeds()
+    {
+        using var harness = new TestHarness(_userId);
+
+        // Move within same game "platinum" from Box 1 Slot 1 to Box 2 Slot 5
+        var request = new PokemonDirectTransferRequest
+        {
+            SourceGameId = "platinum",
+            DestinationGameId = "platinum",
+            PokemonId = "plat-mon-1",
+            SourceIsInParty = false,
+            SourceBoxIndex = 1,
+            SourceSlotIndex = 1,
+            TargetParty = false,
+            TargetBoxIndex = 2,
+            TargetSlotIndex = 5
+        };
+
+        var actionResult = await harness.Controller.DirectTransfer(request, CancellationToken.None);
+        var okResult = Assert.IsType<OkObjectResult>(actionResult.Result);
+        var response = Assert.IsType<PokemonOperationResponse>(okResult.Value);
+        Assert.True(response.Success);
+    }
+
+    [Fact]
     public async Task Controller_UnlockEvent_Gen7MagearnaDelivery_AddsToVaultAndMarksRedeemed()
     {
         using var harness = new TestHarness(_userId);
@@ -577,7 +857,22 @@ public sealed class PokemonMysteryGiftTests
         public Task<PokemonExtractResult> ExtractPokemonFromSaveAsync(
             byte[] saveBytes, string pokemonGameId, string platform, int generation,
             string pokemonId, bool isInParty, int? boxIndex, int slotIndex, CancellationToken cancellationToken) =>
-            Task.FromResult(new PokemonExtractResult { IsSuccess = true });
+            Task.FromResult(new PokemonExtractResult
+            {
+                IsSuccess = true,
+                UpdatedSaveBytes = saveBytes,
+                ExtractedPokemon = new PokemonDetailsDto
+                {
+                    Summary = new PokemonSummaryDto
+                    {
+                        Id = pokemonId,
+                        Species = "Pikachu",
+                        SpeciesId = 25,
+                        Level = 50,
+                        OriginGame = pokemonGameId
+                    }
+                }
+            });
 
         public Task<PokemonInjectResult> InjectPokemonIntoSaveAsync(
             byte[] saveBytes, string pokemonGameId, string platform, int generation,

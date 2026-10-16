@@ -287,3 +287,42 @@ public sealed class PokemonIntegrationStatusDto
     [JsonPropertyName("hasBadgeArt")]
     public bool HasBadgeArt { get; set; }
 }
+
+/// <summary>
+/// Request to move or swap a Pokémon within personal vault boxes and slots.
+/// </summary>
+public sealed class PokemonVaultMoveRequest
+{
+    [JsonPropertyName("entryId")]
+    public string EntryId { get; set; } = string.Empty;
+
+    [JsonPropertyName("targetBoxIndex")]
+    public int TargetBoxIndex { get; set; } = 1;
+
+    [JsonPropertyName("targetSlotIndex")]
+    public int? TargetSlotIndex { get; set; }
+}
+
+/// <summary>
+/// Result of a vault move or swap operation.
+/// </summary>
+public sealed class PokemonVaultMoveResult
+{
+    [JsonPropertyName("success")]
+    public bool Success { get; set; }
+
+    [JsonPropertyName("message")]
+    public string Message { get; set; } = string.Empty;
+
+    [JsonPropertyName("movedEntry")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PokemonVaultEntry? MovedEntry { get; set; }
+
+    [JsonPropertyName("displacedEntry")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public PokemonVaultEntry? DisplacedEntry { get; set; }
+
+    [JsonPropertyName("wasSwapped")]
+    public bool WasSwapped { get; set; }
+}
+

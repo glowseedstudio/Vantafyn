@@ -28,6 +28,7 @@ interface JellyfinPokemonRepository {
     suspend fun previewExternalSave(session: JellyfinSession, contentResolver: ContentResolver, uri: Uri): Result<PokemonExternalSavePreview>
     suspend fun commitExternalSavePreview(session: JellyfinSession, previewId: String, pokemonIds: Set<String>): Result<PokemonExternalSaveImportResponse>
     suspend fun withdrawPokemon(session: JellyfinSession, request: PokemonWithdrawRequest): Result<PokemonOperationResponse>
+    suspend fun moveVaultEntry(session: JellyfinSession, request: PokemonVaultMoveRequest): Result<PokemonOperationResponse>
     suspend fun bulkWithdrawPokemon(session: JellyfinSession, request: PokemonBulkWithdrawRequest): Result<PokemonBulkOperationResponse>
     suspend fun directTransferPokemon(session: JellyfinSession, request: PokemonDirectTransferRequest): Result<PokemonOperationResponse>
     suspend fun bulkDirectTransferPokemon(session: JellyfinSession, request: PokemonBulkDirectTransferRequest): Result<PokemonBulkOperationResponse>
@@ -501,6 +502,30 @@ class DefaultJellyfinPokemonRepository(
                     if (request.targetBoxIndex != null) put("targetBoxIndex", request.targetBoxIndex)
                     if (request.targetSlotIndex != null) put("targetSlotIndex", request.targetSlotIndex)
                     put("targetIsInParty", request.targetIsInParty)
+                }
+                conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
+                checkResponseCode(conn)
+                val body = conn.inputStream.bufferedReader().use { it.readText() }
+                parseOperationResponse(JSONObject(body))
+            }
+        }
+
+    override suspend fun moveVaultEntry(
+        session: JellyfinSession,
+        request: PokemonVaultMoveRequest,
+    ): Result<PokemonOperationResponse> =
+        withContext(ioDispatcher) {
+            runCatching {
+                val conn = session.openAuthenticatedConnection(
+                    pathAndQuery = "Vantafyn/Pokemon/Vault/Move",
+                    method = "POST",
+                )
+                conn.doOutput = true
+                conn.setRequestProperty("Content-Type", "application/json")
+                val payload = JSONObject().apply {
+                    put("entryId", request.entryId)
+                    put("targetBoxIndex", request.targetBoxIndex)
+                    if (request.targetSlotIndex != null) put("targetSlotIndex", request.targetSlotIndex)
                 }
                 conn.outputStream.bufferedWriter().use { it.write(payload.toString()) }
                 checkResponseCode(conn)
