@@ -261,6 +261,15 @@ fun GamePlayerScreen(
         val stored = prefs.getBoolean("citra_accurate_mul", false)
         mutableStateOf(stored)
     }
+    var customTexturesEnabled by remember {
+        val stored = prefs.getBoolean("custom_textures_enabled", true)
+        mutableStateOf(stored)
+    }
+    var mods3dsEnabled by remember {
+        val stored = prefs.getBoolean("mods_3ds_enabled", true)
+        mutableStateOf(stored)
+    }
+    var currentRomFile by remember { mutableStateOf<File?>(null) }
 
     val hasSecondaryDisplay = rememberNdsDualDisplayManager(
         engine = nativeEngine,
@@ -466,6 +475,7 @@ fun GamePlayerScreen(
                     }
                 }
             }
+            currentRomFile = file
 
             if (!isNativeMode) {
                 // Only pre-cache EmulatorJS web core assets if running in WebView mode
@@ -594,9 +604,21 @@ fun GamePlayerScreen(
                         engine.setOption("citra_use_separable_shaders", "enabled")
                         engine.setOption("azahar_use_separable_shaders", "enabled")
                         engine.setOption("citra_use_libretro_save_path", "LibRetro Default")
-                        engine.setOption("azahar_use_libretro_save_path", "LibRetro Default")
-                        engine.setOption("citra_use_custom_textures", "disabled")
-                        engine.setOption("azahar_use_custom_textures", "disabled")
+                        val (hasCustomTextures, hasMods) = storageManager.update3dsAssets(
+                            gameId = game.id,
+                            gameTitle = game.title,
+                            romFile = file,
+                            customTexturesEnabled = customTexturesEnabled,
+                            mods3dsEnabled = mods3dsEnabled,
+                        )
+                        val customTextureOption = if (hasCustomTextures || hasMods) "enabled" else "disabled"
+                        android.util.Log.i("GamePlayerScreen", "3DS custom textures for '${game.title}': $customTextureOption (texturesSetting: $customTexturesEnabled, modsSetting: $mods3dsEnabled, hasTextures: $hasCustomTextures, hasMods: $hasMods)")
+                        engine.setOption("citra_use_custom_textures", customTextureOption)
+                        engine.setOption("azahar_use_custom_textures", customTextureOption)
+                        engine.setOption("citra_custom_textures", customTextureOption)
+                        engine.setOption("azahar_custom_textures", customTextureOption)
+                        engine.setOption("citra_preload_textures", "disabled")
+                        engine.setOption("azahar_preload_textures", "disabled")
                         engine.setOption("citra_is_new_3ds", "New 3DS")
                         engine.setOption("azahar_is_new_3ds", "New 3DS")
                         engine.setOption("citra_cpu_clock_percentage", "100")
@@ -625,7 +647,8 @@ fun GamePlayerScreen(
                                         File(coreDir, "shaders/opengl/precompiled/conventional"),
                                         File(coreDir, "shaders/vf_bin_cache"),
                                         File(coreDir, "sdmc"),
-                                        File(coreDir, "sysdata")
+                                        File(coreDir, "sysdata"),
+                                        File(coreDir, "load/textures")
                                     )
                                     for (d in subDirs) {
                                         d.mkdirs()
@@ -802,19 +825,22 @@ fun GamePlayerScreen(
         val isDualScreenGame = isNdsGame || is3dsGame
         val isGbaGame = game.systemId.lowercase() == "gba" || game.core.contains("gpsp", ignoreCase = true) || game.core.contains("mgba", ignoreCase = true)
         val isGbGame = game.systemId.lowercase() in listOf("gb", "gbc") || game.core.contains("gambatte", ignoreCase = true) || game.core.contains("tgbdual", ignoreCase = true) || game.core.contains("sameboy", ignoreCase = true)
+        val is3dsTopFullscreen = is3dsGame && !hasSecondaryDisplay && ndsScreenLayout == NdsScreenLayout.TopOnly
         val ratioFloat = if (hasSecondaryDisplay && is3dsGame) {
             if (swapDualScreens) 5f / 3f else 4f / 3f // Primary handheld screen: 4:3 bottom (default), 5:3 top (swapped)
         } else if (hasSecondaryDisplay && isNdsGame) {
             4f / 3f // On physical dual displays, the primary screen renders a single 256x192 DS screen (4:3)
-        } else if (coreGeometry != null && (coreGeometry!!.third > 0.1)) {
-            coreGeometry!!.third.toFloat()
+        } else if (is3dsTopFullscreen) {
+            16f / 9f // Fullscreen 16:9 on handheld (fills display without black pillarbox bars)
         } else if (is3dsGame) {
             when (ndsScreenLayout) {
                 NdsScreenLayout.LeftRight -> 720f / 240f // 3:1 widescreen side-by-side (400+320 x 240)
                 NdsScreenLayout.TopBottom -> 400f / 480f // 5:6 vertical stack (400 x 240+240)
-                NdsScreenLayout.TopOnly -> 400f / 240f // 5:3 top screen
+                NdsScreenLayout.TopOnly -> 16f / 9f // Fullscreen 16:9 on handheld
                 NdsScreenLayout.BottomOnly -> 320f / 240f // 4:3 bottom touch screen
             }
+        } else if (coreGeometry != null && (coreGeometry!!.third > 0.1)) {
+            coreGeometry!!.third.toFloat()
         } else if (isNdsGame) {
             when (ndsScreenLayout) {
                 NdsScreenLayout.LeftRight -> 512f / 192f // 8:3 = ~2.67 widescreen side-by-side
@@ -852,7 +878,7 @@ fun GamePlayerScreen(
                     .height(gameHeight)
             } else {
                 val screenAspect = if (totalHeight.value > 0f) (totalWidth.value / totalHeight.value) else 1f
-                if (aspectRatio == GameAspectRatio.Widescreen && !isNativeMode) {
+                if ((aspectRatio == GameAspectRatio.Widescreen && !isNativeMode) || is3dsTopFullscreen) {
                     Modifier
                         .align(Alignment.Center)
                         .fillMaxSize()
@@ -1368,6 +1394,42 @@ fun GamePlayerScreen(
                 nativeEngine?.setOption("citra_shaders_accurate_mul", opt)
                 nativeEngine?.setOption("azahar_shaders_accurate_mul", opt)
             },
+            customTexturesEnabled = customTexturesEnabled,
+            onToggleCustomTextures = {
+                val next = !customTexturesEnabled
+                customTexturesEnabled = next
+                prefs.edit().putBoolean("custom_textures_enabled", next).apply()
+                val (hasTextures, hasMods) = storageManager.update3dsAssets(
+                    gameId = game.id,
+                    gameTitle = game.title,
+                    romFile = currentRomFile,
+                    customTexturesEnabled = next,
+                    mods3dsEnabled = mods3dsEnabled,
+                )
+                val opt = if (hasTextures || hasMods) "enabled" else "disabled"
+                nativeEngine?.setOption("citra_use_custom_textures", opt)
+                nativeEngine?.setOption("azahar_use_custom_textures", opt)
+                nativeEngine?.setOption("citra_custom_textures", opt)
+                nativeEngine?.setOption("azahar_custom_textures", opt)
+            },
+            mods3dsEnabled = mods3dsEnabled,
+            onToggle3dsMods = {
+                val next = !mods3dsEnabled
+                mods3dsEnabled = next
+                prefs.edit().putBoolean("mods_3ds_enabled", next).apply()
+                val (hasTextures, hasMods) = storageManager.update3dsAssets(
+                    gameId = game.id,
+                    gameTitle = game.title,
+                    romFile = currentRomFile,
+                    customTexturesEnabled = customTexturesEnabled,
+                    mods3dsEnabled = next,
+                )
+                val opt = if (hasTextures || hasMods) "enabled" else "disabled"
+                nativeEngine?.setOption("citra_use_custom_textures", opt)
+                nativeEngine?.setOption("azahar_use_custom_textures", opt)
+                nativeEngine?.setOption("citra_custom_textures", opt)
+                nativeEngine?.setOption("azahar_custom_textures", opt)
+            },
             onSyncCloudSave = {
                 if (isNativeMode) {
                     isSyncingSave = true
@@ -1457,8 +1519,9 @@ fun GamePlayerScreen(
             onReset = {
                 if (isNativeMode) {
                     nativeEngine?.reset()
+                    nativeEngine?.resume()
                 } else {
-                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.reset();", null)
+                    webViewInstance?.evaluateJavascript("window.VantafynEmulator?.reset(); window.VantafynEmulator?.resume();", null)
                 }
                 isPaused = false
             },
@@ -2044,6 +2107,9 @@ private fun generateEmulatorHtml(
                             gm.restart();
                         } else if (window.EJS_emulator && window.EJS_emulator.restart) {
                             window.EJS_emulator.restart();
+                        }
+                        if (window.VantafynEmulator && window.VantafynEmulator.resume) {
+                            window.VantafynEmulator.resume();
                         }
                     },
                     setSpeed: function(speed) {

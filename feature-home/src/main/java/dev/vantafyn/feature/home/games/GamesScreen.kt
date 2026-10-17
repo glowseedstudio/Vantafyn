@@ -56,6 +56,7 @@ fun GamesScreen(
     onOpenGame: (GameSummary) -> Unit,
     onRemoveRecentGame: (String) -> Unit = {},
     onBackToMain: () -> Unit,
+    onNavigateToSettings: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -115,7 +116,14 @@ fun GamesScreen(
                             onSelectSystem(sys)
                             onSelectTab(GamesTab.Library)
                         },
+                        onOpenPokemonVault = { onSelectTab(GamesTab.Vault) },
+                        onOpenSaves = { onSelectTab(GamesTab.Saves) },
+                        onNavigateToSettings = onNavigateToSettings,
+                        onSelectLibrary = { onSelectTab(GamesTab.Library) },
+                        onSelectSearch = { onSelectTab(GamesTab.Library) },
                         onNavigateBack = onBackToMain,
+                        isOffline = session == null,
+                        isGamesOnlyMode = currentExperienceMode == dev.vantafyn.core.experience.ExperienceMode.GamesOnly,
                     )
                 }
                 GamesTab.Library -> {
@@ -139,6 +147,7 @@ fun GamesScreen(
                                 onSelectTab(GamesTab.Home)
                             }
                         },
+                        isOffline = session == null,
                     )
                 }
                 GamesTab.Vault -> {

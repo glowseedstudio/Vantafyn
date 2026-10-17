@@ -30,7 +30,7 @@ enum class GameHubTrack(val assetName: String) {
 object GameHubSoundManager {
 
     private const val TAG = "GameHubSoundManager"
-    const val DEFAULT_VOLUME = 0.40f
+    const val DEFAULT_VOLUME = 0.20f
     private const val ASSET_NAME = "gamehub.mp3"
     private const val PREFS_NAME = "vantafyn_retro_settings"
     private const val KEY_BGM_ENABLED = "gamehub_bgm_enabled"
@@ -87,7 +87,7 @@ object GameHubSoundManager {
     fun getTargetVolume(context: Context): Float {
         val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val saved = prefs.getFloat(KEY_BGM_VOLUME, DEFAULT_VOLUME)
-        return if (saved >= 0.64f && saved <= 0.66f) DEFAULT_VOLUME else saved.coerceIn(0.0f, 1.0f)
+        return if (saved >= 0.38f && saved <= 0.66f) DEFAULT_VOLUME else saved.coerceIn(0.0f, 1.0f)
     }
 
     fun setTargetVolume(context: Context, volume: Float) {

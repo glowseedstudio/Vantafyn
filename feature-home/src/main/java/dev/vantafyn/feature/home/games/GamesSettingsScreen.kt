@@ -1,6 +1,10 @@
 package dev.vantafyn.feature.home.games
 
 import android.content.Context
+import dev.vantafyn.feature.home.games.dualscreen.DualScreenTopContent
+import dev.vantafyn.feature.home.games.dualscreen.GameDualScreenTopScreen
+import dev.vantafyn.feature.home.games.grid.GridTileType
+import dev.vantafyn.feature.home.games.screensaver.GameScreensaverResolver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,6 +36,7 @@ import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.CleaningServices
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.ImageSearch
 import androidx.compose.material.icons.rounded.MusicNote
@@ -40,8 +45,12 @@ import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Tv
+import androidx.compose.material.icons.rounded.Slideshow
 import androidx.compose.material.icons.rounded.Cable
 import androidx.compose.material.icons.rounded.CloudQueue
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import dev.vantafyn.feature.home.games.screensaver.GameHubScreensaver
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Sensors
 import androidx.compose.material.icons.rounded.Wifi
@@ -139,11 +148,38 @@ fun GamesSettingsScreen(
     var bgmEnabled by remember {
         mutableStateOf(GameHubSoundManager.isMusicEnabled(context))
     }
+    var customTexturesEnabled by remember {
+        mutableStateOf(prefs.getBoolean("custom_textures_enabled", true))
+    }
+    var mods3dsEnabled by remember {
+        mutableStateOf(prefs.getBoolean("mods_3ds_enabled", true))
+    }
     var selectedAspectRatio by remember {
         mutableStateOf(prefs.getString("default_aspect_ratio", "4:3") ?: "4:3")
     }
     var selectedVideoFilter by remember {
         mutableStateOf(prefs.getString("video_filter", "crisp") ?: "crisp")
+    }
+    var screensaverEnabled by remember {
+        mutableStateOf(prefs.getBoolean("games_screensaver_enabled", true))
+    }
+    var screensaverTimeoutMs by remember {
+        mutableLongStateOf(prefs.getLong("games_screensaver_timeout_ms", 300_000L))
+    }
+    var screensaverSlideMs by remember {
+        mutableLongStateOf(prefs.getLong("games_screensaver_slide_ms", 8_000L))
+    }
+    var screensaverShowClock by remember {
+        mutableStateOf(prefs.getBoolean("games_screensaver_show_clock", true))
+    }
+    var showScreensaverPreview by remember { mutableStateOf(false) }
+    var dualScreenEnabled by remember {
+        mutableStateOf(prefs.getBoolean("games_dual_screen_enabled", true))
+    }
+    var showDualScreenPreview by remember { mutableStateOf(false) }
+    val displayManager = remember { context.getSystemService(Context.DISPLAY_SERVICE) as android.hardware.display.DisplayManager }
+    val isExternalDisplayConnected = remember(displayManager) {
+        displayManager.displays.any { it.displayId != android.view.Display.DEFAULT_DISPLAY }
     }
     var fastForwardSpeed by remember {
         mutableStateOf(prefs.getString("fast_forward_speed", "2x") ?: "2x")
@@ -635,7 +671,13 @@ fun GamesSettingsScreen(
                                                 val matchedFilename = GameBoxartScraper.matchGame(game.cleanTitle, game.filename, catalog)
                                                 if (matchedFilename != null) {
                                                     val cdnUrl = GameBoxartScraper.buildCdnUrl(platform, matchedFilename)
-                                                    prefs.edit().putString("boxart_${game.id}", cdnUrl).apply()
+                                                    val snapUrl = GameBoxartScraper.buildSnapUrl(platform, matchedFilename)
+                                                    val logoUrl = GameBoxartScraper.buildLogoUrl(platform, matchedFilename)
+                                                    prefs.edit()
+                                                        .putString("boxart_${game.id}", cdnUrl)
+                                                        .putString("snap_${game.id}", snapUrl)
+                                                        .putString("logo_${game.id}", logoUrl)
+                                                        .apply()
                                                     withContext(Dispatchers.Main) {
                                                         scrapeMatchedCount++
                                                     }
@@ -823,7 +865,333 @@ fun GamesSettingsScreen(
             }
         }
 
-        // 3. Wireless Communication & Link Play
+        // 3. Ambient Screensaver
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "AMBIENT SCREENSAVER",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    val newVal = !screensaverEnabled
+                                    screensaverEnabled = newVal
+                                    prefs.edit().putBoolean("games_screensaver_enabled", newVal).apply()
+                                },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Slideshow,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(22.dp),
+                            )
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Game Art Screensaver",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Full-screen cinematic gameplay slideshow with Ken Burns motion when idle on the grid",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 12.sp,
+                                )
+                            }
+
+                            VantafynSwitch(
+                                checked = screensaverEnabled,
+                                onCheckedChange = { checked ->
+                                    screensaverEnabled = checked
+                                    prefs.edit().putBoolean("games_screensaver_enabled", checked).apply()
+                                },
+                            )
+                        }
+
+                        if (screensaverEnabled) {
+                            // Inactivity Timeout Selector
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Start Inactivity Timeout",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    listOf(
+                                        120_000L to "2 min",
+                                        300_000L to "5 min",
+                                        600_000L to "10 min",
+                                        900_000L to "15 min",
+                                    ).forEach { (ms, label) ->
+                                        val selected = screensaverTimeoutMs == ms
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(
+                                                    if (selected) VantafynGradients.accentHorizontal()
+                                                    else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                                )
+                                                .clickable {
+                                                    screensaverTimeoutMs = ms
+                                                    prefs.edit().putLong("games_screensaver_timeout_ms", ms).apply()
+                                                }
+                                                .padding(vertical = 10.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (selected) Color.White else VantafynColors.Muted,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Slide Duration Selector
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    text = "Slide Transition Duration",
+                                    color = VantafynColors.Ink,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    listOf(
+                                        7_000L to "7 sec",
+                                        8_000L to "8 sec",
+                                        10_000L to "10 sec",
+                                        15_000L to "15 sec",
+                                    ).forEach { (ms, label) ->
+                                        val selected = screensaverSlideMs == ms
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clip(RoundedCornerShape(10.dp))
+                                                .background(
+                                                    if (selected) VantafynGradients.accentHorizontal()
+                                                    else Brush.linearGradient(listOf(Color.White.copy(alpha = 0.06f), Color.White.copy(alpha = 0.06f))),
+                                                )
+                                                .clickable {
+                                                    screensaverSlideMs = ms
+                                                    prefs.edit().putLong("games_screensaver_slide_ms", ms).apply()
+                                                }
+                                                .padding(vertical = 10.dp),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = label,
+                                                color = if (selected) Color.White else VantafynColors.Muted,
+                                                fontSize = 12.sp,
+                                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Show Clock Toggle
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.02f))
+                                    .clickable {
+                                        val newVal = !screensaverShowClock
+                                        screensaverShowClock = newVal
+                                        prefs.edit().putBoolean("games_screensaver_show_clock", newVal).apply()
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Show Clock in Top-Right",
+                                        color = VantafynColors.Ink,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                    Text(
+                                        text = "Renders current time over top scrim gradient",
+                                        color = VantafynColors.Muted,
+                                        fontSize = 11.sp,
+                                    )
+                                }
+                                VantafynSwitch(
+                                    checked = screensaverShowClock,
+                                    onCheckedChange = { checked ->
+                                        screensaverShowClock = checked
+                                        prefs.edit().putBoolean("games_screensaver_show_clock", checked).apply()
+                                    },
+                                )
+                            }
+
+                            // Preview Button
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                    .clickable { showScreensaverPreview = true }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "Preview Screensaver Now",
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // DUAL SCREEN MODE (3DS STYLE)
+        item {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = "DUAL SCREEN MODE (3DS STYLE)",
+                    color = VantafynColors.Muted,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .padding(14.dp),
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.02f))
+                                .clickable {
+                                    val newVal = !dualScreenEnabled
+                                    dualScreenEnabled = newVal
+                                    prefs.edit().putBoolean("games_dual_screen_enabled", newVal).apply()
+                                }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Enable Dual Screen Experience",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    text = "Projects 3DS-style Top Screen with landscape art and 3D logo to connected external display",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            VantafynSwitch(
+                                checked = dualScreenEnabled,
+                                onCheckedChange = { checked ->
+                                    dualScreenEnabled = checked
+                                    prefs.edit().putBoolean("games_dual_screen_enabled", checked).apply()
+                                },
+                            )
+                        }
+
+                        if (dualScreenEnabled) {
+                            // Display status
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "External Display Status",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = if (isExternalDisplayConnected) "Connected" else "None detected",
+                                    color = if (isExternalDisplayConnected) Color(0xFF00E676) else VantafynColors.Muted,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+
+                            // Preview Top Screen button
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .border(1.dp, Color(0xFF9D00FF).copy(alpha = 0.4f), RoundedCornerShape(10.dp))
+                                    .clickable { showDualScreenPreview = true }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = "Preview 3DS Top Screen",
+                                    color = Color(0xFFD180FF),
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Wireless Communication & Link Play
         item {
             Column(
                 modifier = Modifier
@@ -1326,6 +1694,98 @@ fun GamesSettingsScreen(
                         }
                     }
                 }
+
+                // Custom HD Textures
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val newVal = !customTexturesEnabled
+                            customTexturesEnabled = newVal
+                            prefs.edit().putBoolean("custom_textures_enabled", newVal).apply()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.ImageSearch,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(22.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Custom Texture Packs",
+                            color = VantafynColors.Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Load custom HD replacement textures for 3DS games from Download/texture packs",
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    VantafynSwitch(
+                        checked = customTexturesEnabled,
+                        onCheckedChange = { checked ->
+                            customTexturesEnabled = checked
+                            prefs.edit().putBoolean("custom_textures_enabled", checked).apply()
+                        },
+                    )
+                }
+
+                // 3DS Game Mods
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.04f))
+                        .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+                        .clickable {
+                            val newVal = !mods3dsEnabled
+                            mods3dsEnabled = newVal
+                            prefs.edit().putBoolean("mods_3ds_enabled", newVal).apply()
+                        }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Extension,
+                        contentDescription = null,
+                        tint = Color(0xFF00E5FF),
+                        modifier = Modifier.size(22.dp),
+                    )
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "3DS Game Mods & Patches",
+                            color = VantafynColors.Ink,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = "Load LayeredFS mods, single-screen patches & RomFS overrides from Download/mods",
+                            color = VantafynColors.Muted,
+                            fontSize = 12.sp,
+                        )
+                    }
+
+                    VantafynSwitch(
+                        checked = mods3dsEnabled,
+                        onCheckedChange = { checked ->
+                            mods3dsEnabled = checked
+                            prefs.edit().putBoolean("mods_3ds_enabled", checked).apply()
+                        },
+                    )
+                }
             }
         }
 
@@ -1749,6 +2209,94 @@ fun GamesSettingsScreen(
                             }
                         }
 
+                        // Custom HD Textures for 3DS
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                                .clickable {
+                                    val newVal = !customTexturesEnabled
+                                    customTexturesEnabled = newVal
+                                    prefs.edit().putBoolean("custom_textures_enabled", newVal).apply()
+                                }
+                                .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.ImageSearch,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Custom HD Textures",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Load custom replacement textures from Download/texture packs",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            VantafynSwitch(
+                                checked = customTexturesEnabled,
+                                onCheckedChange = { checked ->
+                                    customTexturesEnabled = checked
+                                    prefs.edit().putBoolean("custom_textures_enabled", checked).apply()
+                                },
+                            )
+                        }
+
+                        // 3DS Game Mods & Patches
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(10.dp))
+                            .clickable {
+                                val newVal = !mods3dsEnabled
+                                mods3dsEnabled = newVal
+                                prefs.edit().putBoolean("mods_3ds_enabled", newVal).apply()
+                            }
+                            .padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Extension,
+                                contentDescription = null,
+                                tint = Color(0xFF00E5FF),
+                                modifier = Modifier.size(20.dp),
+                            )
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "3DS Game Mods & Patches",
+                                    color = Color.White,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                Text(
+                                    text = "Load LayeredFS mods & patches from Download/mods",
+                                    color = VantafynColors.Muted,
+                                    fontSize = 11.sp,
+                                )
+                            }
+                            VantafynSwitch(
+                                checked = mods3dsEnabled,
+                                onCheckedChange = { checked ->
+                                    mods3dsEnabled = checked
+                                    prefs.edit().putBoolean("mods_3ds_enabled", checked).apply()
+                                },
+                            )
+                        }
+
                         if (!hasAllFilesAccess && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                             Box(
                                 modifier = Modifier
@@ -1930,6 +2478,55 @@ fun GamesSettingsScreen(
                 }
             },
         )
+    }
+
+    if (showScreensaverPreview) {
+        Dialog(
+            onDismissRequest = { showScreensaverPreview = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            GameHubScreensaver(
+                games = fullGamesList,
+                systems = systems,
+                slideDurationMs = screensaverSlideMs,
+                showClock = screensaverShowClock,
+                onWake = { showScreensaverPreview = false },
+            )
+        }
+    }
+
+    if (showDualScreenPreview) {
+        Dialog(
+            onDismissRequest = { showDualScreenPreview = false },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false,
+            ),
+        ) {
+            val sampleGame = targetGames.firstOrNull()
+            val sampleArt = sampleGame?.let { GameScreensaverResolver.resolveLandscapeArt(context, it) }
+            val sampleLogo = sampleGame?.let { GameScreensaverResolver.resolveGameLogo(context, it) }
+            val sampleContent = DualScreenTopContent(
+                title = sampleGame?.cleanTitle ?: "Super Mario 64",
+                subtitle = sampleGame?.systemId ?: "Nintendo 64",
+                landscapeArtUrl = sampleArt,
+                logoUrl = sampleLogo,
+                isGame = sampleGame != null,
+                systemDisplayName = sampleGame?.systemId?.uppercase() ?: "NINTENDO 64",
+                tileType = GridTileType.GAME,
+                game = sampleGame,
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { showDualScreenPreview = false },
+            ) {
+                GameDualScreenTopScreen(state = sampleContent)
+            }
+        }
     }
     }
 }

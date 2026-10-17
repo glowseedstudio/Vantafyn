@@ -51,12 +51,14 @@ import dev.vantafyn.core.jellyfin.DefaultJellyfinGamesRepository
 import dev.vantafyn.core.jellyfin.GameDetail
 import dev.vantafyn.core.jellyfin.GameLibrary
 import dev.vantafyn.core.jellyfin.GamePlayTracker
+import dev.vantafyn.core.jellyfin.GameSaveKind
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
 import dev.vantafyn.core.jellyfin.RecentGameRecord
 import dev.vantafyn.core.jellyfin.JellyfinGamesRepository
 import dev.vantafyn.feature.home.games.GamesTab
 import dev.vantafyn.feature.player.games.GameStorageManager
+import dev.vantafyn.feature.player.games.SaveSyncStatus
 import dev.vantafyn.core.jellyfin.JellyfinLibraryRepository
 import dev.vantafyn.core.jellyfin.LibraryViewMode
 import dev.vantafyn.core.jellyfin.LibrariesViewMode
@@ -1251,6 +1253,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     loadFavorites(result.value)
                     refreshOmbiRequestsAvailability(forceCompanionCheck = true)
                     refreshAchievementsAvailability(force = true)
+                    loadGames()
                 }
                 is JellyfinResult.Failure -> {
                     val reason = (result.cause as? JellyfinSessionRestoreFailure)?.reason
@@ -1342,9 +1345,19 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     records = allCompleted
                 }
             }
-            if (reason in setOf(JellyfinRestoreFailureReason.ServerUnreachable, JellyfinRestoreFailureReason.NetworkUnavailable) && records.isNotEmpty()) {
+            val downloadedKeys = gameStorageManager.listDownloadedGameKeys()
+            val local3ds = gameStorageManager.scanLocal3dsGameSummaries()
+            val hasGames = downloadedKeys.isNotEmpty() || local3ds.isNotEmpty()
+            val hasAnyOfflineContent = records.isNotEmpty() || hasGames
+            if (reason in setOf(JellyfinRestoreFailureReason.ServerUnreachable, JellyfinRestoreFailureReason.NetworkUnavailable) && hasAnyOfflineContent) {
                 _state.update {
-                    val targetDestination = if (it.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Downloads
+                    val targetDestination = when {
+                        it.experienceMode == ExperienceMode.MusicOnly -> MobileDestination.Music
+                        it.experienceMode == ExperienceMode.GamesOnly -> MobileDestination.Games
+                        records.isNotEmpty() -> MobileDestination.Downloads
+                        hasGames -> MobileDestination.Games
+                        else -> MobileDestination.Downloads
+                    }
                     it.copy(
                         step = VantafynSetupStep.Home,
                         selectedProfileId = profile.id,
@@ -1372,11 +1385,14 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                         mobileDestination = targetDestination,
                         previousMobileDestination = MobileDestination.Profile,
                         offlineDownloads = records,
+                        downloadedGameKeys = downloadedKeys,
+                        isGamesAvailable = hasGames,
                         isDownloadsLoading = false,
                         downloadsError = null,
                         mobileMessage = "Working offline",
                     )
                 }
+                loadCachedOfflineGames()
                 return@launch
             }
             _state.update {
@@ -1533,10 +1549,10 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         if (destination == MobileDestination.Games) {
             refreshGameTrackerData()
             refreshDownloadedGameKeys()
-            val has3dsInSystems = _state.value.gameSystems.any { it.id.equals("3ds", ignoreCase = true) }
-            val hasLocalGames = gameStorageManager.scanLocal3dsGameSummaries().isNotEmpty()
-            if (_state.value.allGamesList.isEmpty() || (hasLocalGames && !has3dsInSystems)) {
+            if (_state.value.session != null) {
                 loadGames()
+            } else if (_state.value.allGamesList.isEmpty()) {
+                loadCachedOfflineGames()
             }
         }
         if (destination == MobileDestination.Favorites) loadFavorites()
@@ -1592,7 +1608,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     isPokemonVaultAvailable = pokemonReady,
                 )
             }
-            if ((gamesReady || hasLocalGames) && _state.value.gameSystems.isEmpty()) {
+            if (gamesReady || hasLocalGames) {
                 loadGames()
             }
         }
@@ -1606,10 +1622,12 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
 
     fun refreshDownloadedGameKeys() {
         val keys = gameStorageManager.listDownloadedGameKeys()
+        val local3ds = gameStorageManager.scanLocal3dsGameSummaries()
+        val hasGames = keys.isNotEmpty() || local3ds.isNotEmpty()
         _state.update {
             it.copy(
                 downloadedGameKeys = keys,
-                isGamesAvailable = if (keys.isNotEmpty()) true else it.isGamesAvailable,
+                isGamesAvailable = if (hasGames) true else it.isGamesAvailable,
             )
         }
     }
@@ -1667,6 +1685,69 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             target.writeText(root.toString())
         } catch (e: Exception) {
             android.util.Log.w("VantafynHomeViewModel", "Failed to cache games catalog: ${e.message}")
+        }
+    }
+
+    private fun detectSystemFromExtension(ext: String): GameSystem {
+        return when (ext.lowercase()) {
+            "3ds", "cci", "cxi", "3dsx", "cia" -> GameSystem(id = "3ds", name = "Nintendo 3DS", core = "citra", gameCount = 1, extensions = listOf("3ds", "cci", "cxi", "3dsx", "cia"))
+            "gba" -> GameSystem(id = "gba", name = "Game Boy Advance", core = "mgba", gameCount = 1, extensions = listOf("gba"))
+            "gbc" -> GameSystem(id = "gbc", name = "Game Boy Color", core = "gambatte", gameCount = 1, extensions = listOf("gbc"))
+            "gb" -> GameSystem(id = "gb", name = "Game Boy", core = "gambatte", gameCount = 1, extensions = listOf("gb"))
+            "nds", "ds" -> GameSystem(id = "nds", name = "Nintendo DS", core = "melonds", gameCount = 1, extensions = listOf("nds", "ds"))
+            "n64", "z64", "v64" -> GameSystem(id = "n64", name = "Nintendo 64", core = "mupen64plus_next", gameCount = 1, extensions = listOf("n64", "z64", "v64"))
+            "sfc", "smc" -> GameSystem(id = "snes", name = "Super Nintendo", core = "snes9x", gameCount = 1, extensions = listOf("sfc", "smc"))
+            "nes" -> GameSystem(id = "nes", name = "Nintendo Entertainment System", core = "fceumm", gameCount = 1, extensions = listOf("nes"))
+            "md", "gen", "bin" -> GameSystem(id = "genesis", name = "Sega Genesis", core = "genesis_plus_gx", gameCount = 1, extensions = listOf("md", "gen", "bin"))
+            "psx", "iso", "chd", "cue" -> GameSystem(id = "psx", name = "PlayStation", core = "pcsx_rearmed", gameCount = 1, extensions = listOf("psx", "iso", "chd", "cue"))
+            else -> GameSystem(id = ext.lowercase(), name = ext.uppercase(), core = ext.lowercase(), gameCount = 1, extensions = listOf(ext.lowercase()))
+        }
+    }
+
+    private fun mergePersistentDownloadedGames(
+        systems: MutableList<GameSystem>,
+        allGames: MutableList<GameSummary>,
+    ) {
+        val files = gameStorageManager.persistentRomsDir.listFiles()?.filter { it.isFile && it.length() > 0 } ?: return
+        if (files.isEmpty()) return
+
+        val existingTokens = allGames.map { it.token.lowercase() }.filter { it.isNotBlank() }.toSet()
+        val existingIds = allGames.map { it.id.lowercase() }.toSet()
+        val existingFiles = allGames.map { it.filename.lowercase() }.toSet()
+
+        for (file in files) {
+            val nameWithoutExt = file.nameWithoutExtension.lowercase()
+            val filename = file.name.lowercase()
+            if (nameWithoutExt in existingTokens || nameWithoutExt in existingIds || filename in existingFiles) {
+                continue
+            }
+            val ext = file.extension.lowercase()
+            val detectedSys = detectSystemFromExtension(ext)
+            val baseName = file.nameWithoutExtension
+            val cleanTitle = baseName
+                .replace(Regex("\\[.*?\\]"), "")
+                .replace(Regex("\\(.*?\\)"), "")
+                .replace(Regex("^[0-9]{3,5}\\s*[-_]\\s*"), "")
+                .trim()
+                .ifEmpty { baseName }
+            val safeId = "downloaded_${baseName.replace(Regex("[^a-zA-Z0-9_-]"), "_")}"
+            val gameSummary = GameSummary(
+                id = safeId,
+                title = cleanTitle,
+                systemId = detectedSys.id,
+                filename = file.name,
+                sizeBytes = file.length(),
+                token = baseName,
+                extension = ext,
+                boxartUrl = null,
+            )
+            allGames.add(gameSummary)
+            val sysIdx = systems.indexOfFirst { it.id.equals(detectedSys.id, ignoreCase = true) }
+            if (sysIdx >= 0) {
+                systems[sysIdx] = systems[sysIdx].copy(gameCount = systems[sysIdx].gameCount + 1)
+            } else {
+                systems.add(detectedSys.copy(gameCount = 1))
+            }
         }
     }
 
@@ -1771,36 +1852,108 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
 
             mergeLocalGames(systems, games)
+            mergePersistentDownloadedGames(systems, games)
 
-            val effectiveLibraries = if (libraries.isEmpty() && systems.isNotEmpty()) {
-                listOf(GameLibrary(id = "local", name = "Local Games", path = ""))
+            val downloadedKeys = gameStorageManager.listDownloadedGameKeys()
+
+            val isOffline = _state.value.session == null
+            val playableGames = if (isOffline) {
+                games.filter { g ->
+                    val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                    val safeToken = g.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                    g.id.startsWith("local_") ||
+                        g.systemId.equals("3ds", ignoreCase = true) ||
+                        downloadedKeys.contains(g.id) ||
+                        downloadedKeys.contains(safeId) ||
+                        (safeToken.isNotBlank() && (downloadedKeys.contains(g.token) || downloadedKeys.contains(safeToken))) ||
+                        downloadedKeys.contains(g.filename)
+                }
+            } else {
+                games
+            }
+
+            val readySystems = if (isOffline) {
+                systems.mapNotNull { sys ->
+                    val count = playableGames.count { it.systemId.equals(sys.id, ignoreCase = true) }
+                    if (count > 0) sys.copy(gameCount = count) else null
+                }
+            } else {
+                systems
+            }
+
+            val effectiveLibraries = if (libraries.isEmpty() && readySystems.isNotEmpty()) {
+                listOf(GameLibrary(id = if (isOffline) "offline" else "local", name = if (isOffline) "Offline Games" else "Local Games", path = ""))
             } else {
                 libraries
             }
             val library = effectiveLibraries.firstOrNull()
             val currentSelectedSystem = _state.value.selectedGameSystem
-            val activeSys = systems.firstOrNull { it.id == currentSelectedSystem?.id }
+            val activeSys = readySystems.firstOrNull { it.id == currentSelectedSystem?.id }
             val filteredGames = if (activeSys != null) {
-                games.filter { it.systemId == activeSys.id }
+                playableGames.filter { it.systemId == activeSys.id }
             } else {
-                games
+                playableGames
             }
 
             _state.update {
                 it.copy(
                     gameLibraries = effectiveLibraries,
                     selectedGameLibrary = library,
-                    gameSystems = systems,
+                    gameSystems = readySystems,
                     selectedGameSystem = activeSys,
-                    allGamesList = games,
+                    allGamesList = playableGames,
                     gamesList = filteredGames,
                     isLoadingGames = false,
-                    isGamesAvailable = games.isNotEmpty(),
+                    downloadedGameKeys = downloadedKeys,
+                    isGamesAvailable = playableGames.isNotEmpty(),
                 )
             }
         } catch (e: Exception) {
             android.util.Log.w("VantafynHomeViewModel", "Failed to load cached games: ${e.message}")
             _state.update { it.copy(isLoadingGames = false) }
+        }
+    }
+
+    private fun autoSyncPendingOfflineSaves(session: dev.vantafyn.core.jellyfin.JellyfinSession, games: List<GameSummary>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val saveFiles = gameStorageManager.savesDir.listFiles()?.filter { it.isFile && it.length() > 0 } ?: return@launch
+            if (saveFiles.isEmpty()) return@launch
+
+            val candidateGameIds = mutableSetOf<String>()
+            for (f in saveFiles) {
+                candidateGameIds.add(f.nameWithoutExtension)
+            }
+
+            val gamesToCheck = games.filter { g ->
+                if (g.id.startsWith("local_")) return@filter false
+                val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                val safeToken = g.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+                g.id in candidateGameIds || safeId in candidateGameIds || (safeToken.isNotBlank() && safeToken in candidateGameIds)
+            }
+
+            var uploadedCount = 0
+            for (g in gamesToCheck) {
+                try {
+                    if (g.systemId.equals("3ds", ignoreCase = true)) {
+                        gameStorageManager.sync3dsSaveFromSdmc(g.id, g.title)
+                    }
+                    val syncInfo = gameStorageManager.checkSaveSync(session, g.id, GameSaveKind.Sram, g.title)
+                    if (syncInfo.status == SaveSyncStatus.LOCAL_NEWER || syncInfo.status == SaveSyncStatus.LOCAL_ONLY) {
+                        val res = gameStorageManager.replaceCloudWithLocalSave(session, g.id, GameSaveKind.Sram, g.title)
+                        if (res.isSuccess) {
+                            uploadedCount++
+                            android.util.Log.d("VantafynHomeViewModel", "Auto-synced offline save to cloud for: ${g.title}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("VantafynHomeViewModel", "Failed to auto-sync save for ${g.title}: ${e.message}")
+                }
+            }
+            if (uploadedCount > 0) {
+                _state.update {
+                    it.copy(mobileMessage = "Synced $uploadedCount offline save${if (uploadedCount > 1) "s" else ""} to cloud")
+                }
+            }
         }
     }
 
@@ -1828,8 +1981,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
 
-            // Merge local on-device 3DS ROMs
+            // Merge local on-device 3DS ROMs and persistent downloaded games
             mergeLocalGames(systems, allGames)
+            mergePersistentDownloadedGames(systems, allGames)
 
             val effectiveLibraries = if (libraries.isEmpty() && systems.isNotEmpty()) {
                 listOf(GameLibrary(id = "local", name = "Local Games", path = ""))
@@ -1859,6 +2013,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             }
             if (allGames.isNotEmpty()) {
                 saveGamesCatalogCache(effectiveLibraries, systems, allGames)
+                autoSyncPendingOfflineSaves(session, allGames)
             }
         }
     }
@@ -1988,7 +2143,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
         refreshDownloadedGameKeys()
         val has3dsInSystems = _state.value.gameSystems.any { it.id.equals("3ds", ignoreCase = true) }
         val hasLocalGames = gameStorageManager.scanLocal3dsGameSummaries().isNotEmpty()
-        if (hasLocalGames && !has3dsInSystems) {
+        if ((hasLocalGames && !has3dsInSystems) || (_state.value.session != null && _state.value.gameSystems.size <= 3)) {
             loadGames()
         }
     }
@@ -6617,12 +6772,16 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 } else if (snapshot.activeGamesTab != GamesTab.Home) {
                     setActiveGamesTab(GamesTab.Home)
                 } else if (snapshot.experienceMode != ExperienceMode.GamesOnly) {
-                    navigateMobile(snapshot.experienceMode.defaultDestination())
+                    val defaultDest = if (snapshot.session == null) MobileDestination.Downloads else snapshot.experienceMode.defaultDestination()
+                    navigateMobile(defaultDest)
                 }
             }
             MobileDestination.Admin,
             MobileDestination.Achievements,
-            MobileDestination.Profile -> navigateMobile(snapshot.experienceMode.defaultDestination())
+            MobileDestination.Profile -> {
+                val defaultDest = if (snapshot.session == null) MobileDestination.Downloads else snapshot.experienceMode.defaultDestination()
+                navigateMobile(defaultDest)
+            }
             else -> Unit
         }
     }
@@ -7672,7 +7831,9 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
             ?: _state.value.savedProfiles.firstOrNull()
             ?: return
         viewModelScope.launch {
-            refreshDownloadedGameKeys()
+            val downloadedKeys = gameStorageManager.listDownloadedGameKeys()
+            val local3ds = gameStorageManager.scanLocal3dsGameSummaries()
+            val hasGames = downloadedKeys.isNotEmpty() || local3ds.isNotEmpty()
             _state.update {
                 it.copy(
                     step = VantafynSetupStep.Home,
@@ -7701,6 +7862,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     activeGamesTab = GamesTab.Home,
                     selectedGameSystem = null,
                     isLoadingGames = true,
+                    downloadedGameKeys = downloadedKeys,
+                    isGamesAvailable = true,
                     downloadsError = null,
                     mobileMessage = "Playing downloaded games offline",
                     homeLayout = readHomeLayout(profile.id),
@@ -7738,8 +7901,17 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
             val summary = downloadRepository.storageSummary(profile.serverRef, profile.jellyfinUserId.toString())
+            val downloadedKeys = gameStorageManager.listDownloadedGameKeys()
+            val local3ds = gameStorageManager.scanLocal3dsGameSummaries()
+            val hasGames = downloadedKeys.isNotEmpty() || local3ds.isNotEmpty()
             _state.update {
-                val targetDestination = if (it.experienceMode == ExperienceMode.MusicOnly) MobileDestination.Music else MobileDestination.Downloads
+                val targetDestination = when {
+                    it.experienceMode == ExperienceMode.MusicOnly -> MobileDestination.Music
+                    it.experienceMode == ExperienceMode.GamesOnly -> MobileDestination.Games
+                    records.isNotEmpty() -> MobileDestination.Downloads
+                    hasGames -> MobileDestination.Games
+                    else -> MobileDestination.Downloads
+                }
                 it.copy(
                     step = VantafynSetupStep.Home,
                     selectedProfileId = profile.id,
@@ -7766,6 +7938,8 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     previousMobileDestination = MobileDestination.Profile,
                     offlineDownloads = records,
                     offlineDownloadStorageSummary = summary,
+                    downloadedGameKeys = downloadedKeys,
+                    isGamesAvailable = hasGames,
                     isDownloadsLoading = false,
                     downloadsError = null,
                     mobileMessage = message,
@@ -7787,6 +7961,7 @@ class VantafynHomeViewModel(application: Application) : AndroidViewModel(applica
                     passoutProtectionLimitMinutes = readPassoutProtectionLimitMinutes(profile.id),
                 )
             }
+            loadCachedOfflineGames()
         }
     }
 

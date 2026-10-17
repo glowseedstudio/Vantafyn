@@ -1820,7 +1820,7 @@ private fun ConnectionRecoveryScreen(
                                     }
                                 }
                             }
-                            val hasDownloadedGames = state.downloadedGameKeys.isNotEmpty()
+                            val hasDownloadedGames = state.downloadedGameKeys.isNotEmpty() || state.isGamesAvailable
                             if (hasDownloadedGames) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -3884,6 +3884,28 @@ private fun MobileShellScreen(
     }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val isImmersive = state.mobileDestination == MobileDestination.Player || state.mobileDestination == MobileDestination.GamePlayer
+    val retroPrefs = remember(context) {
+        context.getSharedPreferences("vantafyn_retro_settings", android.content.Context.MODE_PRIVATE)
+    }
+    var isGamesChannelView by remember {
+        mutableStateOf(retroPrefs.getBoolean("games_home_channel_view", true))
+    }
+    DisposableEffect(retroPrefs) {
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { sp, key ->
+            if (key == "games_home_channel_view") {
+                isGamesChannelView = sp.getBoolean("games_home_channel_view", true)
+            }
+        }
+        retroPrefs.registerOnSharedPreferenceChangeListener(listener)
+        onDispose {
+            retroPrefs.unregisterOnSharedPreferenceChangeListener(listener)
+        }
+    }
+    val hideNavForGamesChannels = (state.mobileDestination == MobileDestination.Games || state.experienceMode == ExperienceMode.GamesOnly) && (
+        (state.activeGamesTab == dev.vantafyn.feature.home.games.GamesTab.Home && isGamesChannelView) ||
+        (state.activeGamesTab == dev.vantafyn.feature.home.games.GamesTab.Library && (state.experienceMode == ExperienceMode.GamesOnly || isGamesChannelView))
+    )
+
     VantafynOnboardingBackground(tv = false, modifier = modifier, backgroundResId = state.selectedBackground.drawableResId()) {
         Box(
             modifier = Modifier.fillMaxSize(),
@@ -3898,7 +3920,7 @@ private fun MobileShellScreen(
                             WindowInsets(0, 0, 0, 0)
                         }
                     )
-                    .padding(start = if (isLandscape && !isImmersive) 74.dp else 0.dp),
+                    .padding(start = if (isLandscape && !isImmersive && !hideNavForGamesChannels) 74.dp else 0.dp),
             ) {
                 when (state.mobileDestination) {
                 MobileDestination.Home -> {
@@ -3956,9 +3978,9 @@ private fun MobileShellScreen(
                 MobileDestination.Requests -> RequestsScreen(session = state.session, onOpenMedia = onOpenMedia)
                 MobileDestination.Games -> {
                     val currentUser = state.savedProfiles.firstOrNull { it.jellyfinUserId == state.session?.user?.id }
-                    val userImageUrl = currentUser?.imageUrl
-                    val userName = state.session?.user?.name?.ifEmpty { "Player" } ?: "Player"
-                    val serverName = state.session?.server?.name?.ifEmpty { "Jellyfin" } ?: "Jellyfin"
+                    val userImageUrl = currentUser?.imageUrl ?: state.offlineProfile?.imageUrl
+                    val userName = state.session?.user?.name?.ifEmpty { null } ?: state.offlineProfile?.displayName?.ifEmpty { null } ?: "Player"
+                    val serverName = state.session?.server?.name?.ifEmpty { null } ?: state.offlineProfile?.serverName?.ifEmpty { null } ?: "Jellyfin"
                     GamesScreen(
                         activeTab = state.activeGamesTab,
                         userName = userName,
@@ -3986,15 +4008,19 @@ private fun MobileShellScreen(
                         onOpenGame = viewModel::openGameDetail,
                         onRemoveRecentGame = viewModel::removeRecentGame,
                         onBackToMain = onNavigateBack,
+                        onNavigateToSettings = { onNavigate(MobileDestination.Profile) },
                     )
 
                     val activeDetail = state.activeGameDetail
                     val isGameDownloaded = if (activeDetail != null) {
                         val safeId = activeDetail.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
                         val safeToken = activeDetail.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-                        state.downloadedGameKeys.contains(activeDetail.id) ||
+                        activeDetail.id.startsWith("local_") ||
+                            activeDetail.systemId.equals("3ds", ignoreCase = true) ||
+                            state.downloadedGameKeys.contains(activeDetail.id) ||
                             state.downloadedGameKeys.contains(safeId) ||
-                            (activeDetail.token.isNotBlank() && (state.downloadedGameKeys.contains(activeDetail.token) || state.downloadedGameKeys.contains(safeToken)))
+                            (activeDetail.token.isNotBlank() && (state.downloadedGameKeys.contains(activeDetail.token) || state.downloadedGameKeys.contains(safeToken))) ||
+                            state.downloadedGameKeys.contains(activeDetail.filename)
                     } else false
                     val isGameDownloading = activeDetail != null && activeDetail.id == state.downloadingGameId
 
@@ -4628,7 +4654,7 @@ private fun MobileShellScreen(
                 )
             }
             val hideBottomNavForHarmonia = state.mobileDestination == MobileDestination.Music && isHarmoniaStoryOpen
-            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.GamePlayer && state.mobileDestination != MobileDestination.Chat && !isCarMode && !hideBottomNavForHarmonia) {
+            if (state.mobileDestination != MobileDestination.Player && state.mobileDestination != MobileDestination.GamePlayer && state.mobileDestination != MobileDestination.Chat && !isCarMode && !hideBottomNavForHarmonia && !hideNavForGamesChannels) {
                 AnimatedVisibility(
                     visible = homeEditorOpen && state.mobileDestination == MobileDestination.Home,
                     modifier = Modifier.align(Alignment.BottomCenter),
@@ -4818,8 +4844,9 @@ private fun MobileShellScreen(
                     accentMode = state.bottomRailAccent,
                     atmosphereMode = state.bottomRailAtmosphere,
                     experienceMode = state.experienceMode,
-                    isGamesAvailable = state.isGamesAvailable,
+                    isGamesAvailable = state.isGamesAvailable || state.downloadedGameKeys.isNotEmpty(),
                     isPokemonVaultAvailable = state.isPokemonVaultAvailable,
+                    isOffline = state.session == null,
                     modifier = if (isLandscape) Modifier.align(Alignment.CenterStart) else Modifier.align(Alignment.BottomCenter),
                 )
             val isMusicMiniPlayerVisible = state.mobileDestination == MobileDestination.Music && musicPlayback.currentTrack != null
@@ -22560,10 +22587,11 @@ private fun MobileBottomNav(
     experienceMode: ExperienceMode = ExperienceMode.FullMedia,
     isGamesAvailable: Boolean = false,
     isPokemonVaultAvailable: Boolean = false,
+    isOffline: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var tapTrigger by remember { mutableIntStateOf(0) }
-    val mainTabs = remember(isAdmin, experienceMode, isGamesAvailable) {
+    val mainTabs = remember(isAdmin, experienceMode, isGamesAvailable, isOffline) {
         if (experienceMode == ExperienceMode.GamesOnly) {
             buildList {
                 add(MobileDestination.Games)
@@ -22574,6 +22602,13 @@ private fun MobileBottomNav(
                 add(MobileDestination.Music)
                 add(MobileDestination.Favorites)
                 add(MobileDestination.Downloads)
+                add(MobileDestination.Profile)
+            }
+        } else if (isOffline) {
+            buildList {
+                add(MobileDestination.Downloads)
+                if (isGamesAvailable) add(MobileDestination.Games)
+                add(MobileDestination.Music)
                 add(MobileDestination.Profile)
             }
         } else {

@@ -314,10 +314,7 @@ object GameBoxartScraper {
             .replace("%28", "(")
             .replace("%29", ")")
             .replace("%2C", ",")
-        if (platform.githubRepo.contains("3DS", ignoreCase = true)) {
-            return "https://raw.githubusercontent.com/libretro-thumbnails/${platform.githubRepo}/master/Named_Boxarts/$encodedFilename"
-        }
-        return "https://cdn.jsdelivr.net/gh/libretro-thumbnails/${platform.githubRepo}@master/Named_Boxarts/$encodedFilename"
+        return "https://raw.githubusercontent.com/libretro-thumbnails/${platform.githubRepo}/master/Named_Boxarts/$encodedFilename"
     }
 
     fun resolve3dsBoxartUrl(fileName: String): String {
@@ -331,24 +328,163 @@ object GameBoxartScraper {
     }
 
     /**
-     * Converts slow Libretro Apache URLs to ultra-fast CDN URLs.
+     * Builds a fast global CDN URL for landscape in-game snaps.
+     */
+    fun buildSnapUrl(platform: PlatformInfo, filename: String): String {
+        val encodedFilename = URLEncoder.encode(filename, "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/${platform.githubRepo}/master/Named_Snaps/$encodedFilename"
+    }
+
+    /**
+     * Builds a fast global CDN URL for 3D clear logos / wheel artwork.
+     */
+    fun buildLogoUrl(platform: PlatformInfo, filename: String): String {
+        val encodedFilename = URLEncoder.encode(filename, "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/${platform.githubRepo}/master/Named_Logos/$encodedFilename"
+    }
+
+    /**
+     * Builds a fast global CDN URL for landscape title screens.
+     */
+    fun buildTitleUrl(platform: PlatformInfo, filename: String): String {
+        val encodedFilename = URLEncoder.encode(filename, "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/${platform.githubRepo}/master/Named_Titles/$encodedFilename"
+    }
+
+    fun resolve3dsSnapUrl(fileName: String): String {
+        val nameWithoutExt = fileName.substringBeforeLast('.')
+        val encodedFilename = URLEncoder.encode("$nameWithoutExt.png", "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS/master/Named_Snaps/$encodedFilename"
+    }
+
+    fun resolve3dsLogoUrl(fileName: String): String {
+        val nameWithoutExt = fileName.substringBeforeLast('.')
+        val encodedFilename = URLEncoder.encode("$nameWithoutExt.png", "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS/master/Named_Logos/$encodedFilename"
+    }
+
+    fun resolve3dsTitleUrl(fileName: String): String {
+        val nameWithoutExt = fileName.substringBeforeLast('.')
+        val encodedFilename = URLEncoder.encode("$nameWithoutExt.png", "UTF-8")
+            .replace("+", "%20")
+            .replace("%28", "(")
+            .replace("%29", ")")
+            .replace("%2C", ",")
+        return "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS/master/Named_Titles/$encodedFilename"
+    }
+
+    /**
+     * Converts a known boxart CDN URL or Jellyfin image URL to its corresponding in-game landscape snap/backdrop URL.
+     */
+    fun convertBoxartUrlToSnapUrl(boxartUrl: String?): String? {
+        if (boxartUrl.isNullOrBlank()) return null
+        if (boxartUrl.contains("/Named_Boxarts/")) {
+            return boxartUrl
+                .replace("/Named_Boxarts/", "/Named_Snaps/")
+                .replace("https://cdn.jsdelivr.net/gh/libretro-thumbnails/", "https://raw.githubusercontent.com/libretro-thumbnails/")
+                .replace("@master/", "/master/")
+        }
+        if (boxartUrl.contains("/Images/Primary")) {
+            return boxartUrl.replace("/Images/Primary", "/Images/Backdrop")
+        }
+        return null
+    }
+
+    /**
+     * Converts a known boxart CDN URL or Jellyfin image URL to its corresponding 3D clear logo URL.
+     */
+    fun convertBoxartUrlToLogoUrl(boxartUrl: String?): String? {
+        if (boxartUrl.isNullOrBlank()) return null
+        if (boxartUrl.contains("/Named_Boxarts/")) {
+            return boxartUrl
+                .replace("/Named_Boxarts/", "/Named_Logos/")
+                .replace("https://cdn.jsdelivr.net/gh/libretro-thumbnails/", "https://raw.githubusercontent.com/libretro-thumbnails/")
+                .replace("@master/", "/master/")
+        }
+        if (boxartUrl.contains("/Images/Primary")) {
+            return boxartUrl.replace("/Images/Primary", "/Images/Logo")
+        }
+        return null
+    }
+
+    /**
+     * Converts a known boxart CDN URL or Jellyfin image URL to its corresponding title screen/thumb URL.
+     */
+    fun convertBoxartUrlToTitleUrl(boxartUrl: String?): String? {
+        if (boxartUrl.isNullOrBlank()) return null
+        if (boxartUrl.contains("/Named_Boxarts/")) {
+            return boxartUrl
+                .replace("/Named_Boxarts/", "/Named_Titles/")
+                .replace("https://cdn.jsdelivr.net/gh/libretro-thumbnails/", "https://raw.githubusercontent.com/libretro-thumbnails/")
+                .replace("@master/", "/master/")
+        }
+        if (boxartUrl.contains("/Images/Primary")) {
+            return boxartUrl.replace("/Images/Primary", "/Images/Thumb")
+        }
+        return null
+    }
+
+    /**
+     * Converts slow Libretro Apache URLs or blocked CDN URLs to raw GitHub URLs.
      */
     fun convertToCdnUrl(originalUrl: String?): String? {
         if (originalUrl.isNullOrBlank()) return null
+        if (originalUrl.contains("cdn.jsdelivr.net/gh/libretro-thumbnails/")) {
+            return originalUrl
+                .replace("https://cdn.jsdelivr.net/gh/libretro-thumbnails/", "https://raw.githubusercontent.com/libretro-thumbnails/")
+                .replace("@master/", "/master/")
+        }
         if (!originalUrl.startsWith("https://thumbnails.libretro.com/")) return originalUrl
 
         val path = originalUrl.removePrefix("https://thumbnails.libretro.com/")
-        val parts = path.split("/Named_Boxarts/")
-        if (parts.size != 2) return originalUrl
+        val (platformPart, folder, filenamePart) = when {
+            path.contains("/Named_Boxarts/") -> {
+                val parts = path.split("/Named_Boxarts/")
+                Triple(parts[0], "Named_Boxarts", parts[1])
+            }
+            path.contains("/Named_Snaps/") -> {
+                val parts = path.split("/Named_Snaps/")
+                Triple(parts[0], "Named_Snaps", parts[1])
+            }
+            path.contains("/Named_Logos/") -> {
+                val parts = path.split("/Named_Logos/")
+                Triple(parts[0], "Named_Logos", parts[1])
+            }
+            path.contains("/Named_Titles/") -> {
+                val parts = path.split("/Named_Titles/")
+                Triple(parts[0], "Named_Titles", parts[1])
+            }
+            else -> return originalUrl
+        }
 
-        val platformPart = URLDecoder.decode(parts[0], "UTF-8")
-        val filenamePart = parts[1] // Keep encoded
-
-        val platform = resolvePlatform(platformPart)
-        return if (platform != null) {
-            buildCdnUrl(platform, URLDecoder.decode(filenamePart, "UTF-8"))
-        } else {
-            originalUrl
+        val decodedPlatform = URLDecoder.decode(platformPart, "UTF-8")
+        val platform = resolvePlatform(decodedPlatform) ?: return originalUrl
+        val decodedFilename = URLDecoder.decode(filenamePart, "UTF-8")
+        return when (folder) {
+            "Named_Snaps" -> buildSnapUrl(platform, decodedFilename)
+            "Named_Logos" -> buildLogoUrl(platform, decodedFilename)
+            "Named_Titles" -> buildTitleUrl(platform, decodedFilename)
+            else -> buildCdnUrl(platform, decodedFilename)
         }
     }
 }

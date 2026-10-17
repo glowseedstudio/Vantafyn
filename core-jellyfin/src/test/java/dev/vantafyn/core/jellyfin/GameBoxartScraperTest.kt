@@ -107,4 +107,50 @@ class GameBoxartScraperTest {
             converted,
         )
     }
+
+    @Test
+    fun buildSnapUrl_and_convertBoxartUrlToSnapUrl_formatsCorrectly() {
+        val gba = GameBoxartScraper.resolvePlatform("gba")!!
+        val snapUrl = GameBoxartScraper.buildSnapUrl(gba, "Pokemon - Emerald Version (USA, Europe).png")
+        assertEquals(
+            "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Game_Boy_Advance@master/Named_Snaps/Pokemon%20-%20Emerald%20Version%20(USA,%20Europe).png",
+            snapUrl,
+        )
+
+        val boxartUrl = "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Game_Boy_Advance@master/Named_Boxarts/Pokemon%20-%20Emerald%20Version%20(USA,%20Europe).png"
+        val converted = GameBoxartScraper.convertBoxartUrlToSnapUrl(boxartUrl)
+        assertEquals(
+            "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Game_Boy_Advance@master/Named_Snaps/Pokemon%20-%20Emerald%20Version%20(USA,%20Europe).png",
+            converted,
+        )
+
+        val snap3ds = GameBoxartScraper.resolve3dsSnapUrl("Super Mario 3D Land.3ds")
+        assertEquals(
+            "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS/master/Named_Snaps/Super%20Mario%203D%20Land.png",
+            snap3ds,
+        )
+    }
+
+    @Test
+    fun buildLogoUrl_and_convertBoxartUrlToLogoUrl_formatsCorrectly() {
+        val gba = GameBoxartScraper.resolvePlatform("gba")!!
+        val logoUrl = GameBoxartScraper.buildLogoUrl(gba, "Pokemon - Emerald Version (USA, Europe).png")
+        assertEquals(
+            "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Game_Boy_Advance@master/Named_Logos/Pokemon%20-%20Emerald%20Version%20(USA,%20Europe).png",
+            logoUrl,
+        )
+
+        val boxartUrl = "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Game_Boy_Advance@master/Named_Boxarts/Pokemon%20-%20Emerald%20Version%20(USA,%20Europe).png"
+        val converted = GameBoxartScraper.convertBoxartUrlToLogoUrl(boxartUrl)
+        assertEquals(
+            "https://cdn.jsdelivr.net/gh/libretro-thumbnails/Nintendo_-_Game_Boy_Advance@master/Named_Logos/Pokemon%20-%20Emerald%20Version%20(USA,%20Europe).png",
+            converted,
+        )
+
+        val logo3ds = GameBoxartScraper.resolve3dsLogoUrl("Super Mario 3D Land.3ds")
+        assertEquals(
+            "https://raw.githubusercontent.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS/master/Named_Logos/Super%20Mario%203D%20Land.png",
+            logo3ds,
+        )
+    }
 }

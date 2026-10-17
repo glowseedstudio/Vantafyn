@@ -137,6 +137,7 @@ class NativeEmulatorEngine(
 
     fun reset() {
         nativeReset()
+        isRunning = true
     }
 
     fun stop() {

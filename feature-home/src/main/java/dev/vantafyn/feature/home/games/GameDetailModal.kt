@@ -58,9 +58,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import android.view.KeyEvent
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.window.Dialog
 import androidx.compose.material3.TextButton
 import dev.vantafyn.core.ui.VantafynGradientProgressBar
+import dev.vantafyn.core.ui.VantafynSoundEffects
+import dev.vantafyn.feature.home.games.grid.rememberIsGamepadConnected
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,6 +107,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private data class PendingBatterySaveImport(val fileName: String, val bytes: ByteArray)
+
+private enum class GameModalFocus {
+    CORE,
+    CLOSE,
+    PLAY,
+    DOWNLOAD,
+    IMPORT,
+    LINK,
+}
 
 data class SystemCoreOption(
     val id: String,
@@ -247,6 +266,20 @@ fun GameDetailModal(
         }
     }
 
+    val isGamepadConnected = rememberIsGamepadConnected()
+    val modalFocusRequester = remember { FocusRequester() }
+
+    var focusedItem by remember(game?.id) { mutableStateOf(GameModalFocus.PLAY) }
+
+    LaunchedEffect(game) {
+        if (game != null) {
+            focusedItem = GameModalFocus.PLAY
+            try {
+                modalFocusRequester.requestFocus()
+            } catch (_: Exception) {}
+        }
+    }
+
     AnimatedVisibility(
         visible = game != null,
         enter = fadeIn(),
@@ -258,164 +291,241 @@ fun GameDetailModal(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xDD0A0A0C))
-                .clickable(onClick = onDismiss),
+                .background(Color(0xE608080C))
+                .clickable(onClick = onDismiss)
+                .focusRequester(modalFocusRequester)
+                .focusable()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) {
+                        if (event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BUTTON_B || event.nativeKeyEvent.keyCode == KeyEvent.KEYCODE_BACK) {
+                            onDismiss()
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+                    when (event.nativeKeyEvent.keyCode) {
+                        KeyEvent.KEYCODE_DPAD_LEFT -> {
+                            focusedItem = when (focusedItem) {
+                                GameModalFocus.CLOSE -> if (availableCores.isNotEmpty()) GameModalFocus.CORE else GameModalFocus.CLOSE
+                                GameModalFocus.CORE -> GameModalFocus.CORE
+                                GameModalFocus.LINK -> if (storageManager != null) GameModalFocus.IMPORT else if (onDownloadOffline != null || isDownloaded || isDownloading) GameModalFocus.DOWNLOAD else GameModalFocus.PLAY
+                                GameModalFocus.IMPORT -> if (onDownloadOffline != null || isDownloaded || isDownloading) GameModalFocus.DOWNLOAD else GameModalFocus.PLAY
+                                GameModalFocus.DOWNLOAD -> GameModalFocus.PLAY
+                                GameModalFocus.PLAY -> GameModalFocus.PLAY
+                            }
+                            VantafynSoundEffects.playChannelClick(context)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                            focusedItem = when (focusedItem) {
+                                GameModalFocus.CORE -> GameModalFocus.CLOSE
+                                GameModalFocus.CLOSE -> GameModalFocus.CLOSE
+                                GameModalFocus.PLAY -> {
+                                    if (onDownloadOffline != null || isDownloaded || isDownloading) GameModalFocus.DOWNLOAD
+                                    else if (storageManager != null) GameModalFocus.IMPORT
+                                    else if (isLinkCapable) GameModalFocus.LINK
+                                    else GameModalFocus.PLAY
+                                }
+                                GameModalFocus.DOWNLOAD -> {
+                                    if (storageManager != null) GameModalFocus.IMPORT
+                                    else if (isLinkCapable) GameModalFocus.LINK
+                                    else GameModalFocus.DOWNLOAD
+                                }
+                                GameModalFocus.IMPORT -> {
+                                    if (isLinkCapable) GameModalFocus.LINK
+                                    else GameModalFocus.IMPORT
+                                }
+                                GameModalFocus.LINK -> GameModalFocus.LINK
+                            }
+                            VantafynSoundEffects.playChannelClick(context)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            focusedItem = if (availableCores.isNotEmpty()) GameModalFocus.CORE else GameModalFocus.CLOSE
+                            VantafynSoundEffects.playChannelClick(context)
+                            true
+                        }
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            focusedItem = GameModalFocus.PLAY
+                            VantafynSoundEffects.playChannelClick(context)
+                            true
+                        }
+                        KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER -> {
+                            when (focusedItem) {
+                                GameModalFocus.PLAY -> onPlay(game.copy(core = currentCoreId))
+                                GameModalFocus.DOWNLOAD -> {
+                                    if (isDownloaded && onDeleteOffline != null) onDeleteOffline(game)
+                                    else if (!isDownloaded && !isDownloading && onDownloadOffline != null) onDownloadOffline(game)
+                                }
+                                GameModalFocus.IMPORT -> {
+                                    if (storageManager != null) importLauncher.launch(arrayOf("application/octet-stream", "*/*"))
+                                }
+                                GameModalFocus.LINK -> {
+                                    if (isLinkCapable) showLinkChoiceModal = true
+                                }
+                                GameModalFocus.CORE -> {
+                                    if (availableCores.isNotEmpty()) showCorePickerModal = true
+                                }
+                                GameModalFocus.CLOSE -> onDismiss()
+                            }
+                            true
+                        }
+                        KeyEvent.KEYCODE_BUTTON_B, KeyEvent.KEYCODE_BACK -> {
+                            onDismiss()
+                            true
+                        }
+                        else -> true
+                    }
+                },
             contentAlignment = Alignment.Center,
         ) {
             Box(
                 modifier = Modifier
-                    .widthIn(max = if (isLandscape) 480.dp else 420.dp)
-                    .heightIn(max = if (isLandscape) 330.dp else 700.dp)
-                    .clip(RoundedCornerShape(if (isLandscape) 20.dp else 28.dp))
-                    .background(Color(0xFF131317))
+                    .widthIn(max = if (isLandscape) 520.dp else 400.dp)
+                    .heightIn(max = if (isLandscape) 300.dp else 460.dp)
+                    .clip(RoundedCornerShape(22.dp))
                     .border(
-                        width = 1.dp,
+                        width = 1.2.dp,
                         brush = Brush.horizontalGradient(
-                            listOf(VantafynColors.Primary, VantafynColors.Secondary)
+                            listOf(Color(0xFF00E5FF), Color(0xFF9D00FF), Color(0xFFFF2A85))
                         ),
-                        shape = RoundedCornerShape(if (isLandscape) 20.dp else 28.dp),
+                        shape = RoundedCornerShape(22.dp),
                     )
-                    .clickable(enabled = false) {}
-                    .padding(if (isLandscape) 14.dp else 24.dp),
+                    .background(Color(0xFF101016))
+                    .clickable(enabled = false) {},
             ) {
+                // Background Box Art with Dark Scrim
+                val effectiveBoxart = remember(game.id, game.boxartUrl) {
+                    val p = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
+                    val local = p.getString("boxart_${game.id}", null)
+                    GameBoxartScraper.convertToCdnUrl(local ?: game.boxartUrl)
+                }
+                if (!effectiveBoxart.isNullOrBlank()) {
+                    AsyncImage(
+                        model = effectiveBoxart,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = 0.30f },
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    Color(0xFF0F0F16).copy(alpha = 0.88f),
+                                    Color(0xFF0A0A10).copy(alpha = 0.95f),
+                                    Color(0xFF07070C).copy(alpha = 0.98f),
+                                )
+                            )
+                        )
+                )
+
+                // Single-window modal content - NO SCROLL
                 Column(
-                    modifier = Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(if (isLandscape) 10.dp else 18.dp),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(if (isLandscape) 14.dp else 20.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
                 ) {
-                    // Top Bar with Close Button
+                    // Top Bar: System Pill + Region (Left) & Core Selector + Close (Right)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Row(
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x2221D8FF)),
-                                contentAlignment = Alignment.Center,
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.18f))
+                                    .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp),
                             ) {
-                                VantafynGradientIcon(
-                                    imageVector = Icons.Rounded.SportsEsports,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(20.dp),
-                                )
-                            }
-                            Text(
-                                text = game.systemId.uppercase(),
-                                style = TextStyle(
-                                    brush = VantafynGradients.accentHorizontal(),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                    letterSpacing = 1.sp,
-                                ),
-                            )
-                        }
-
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Close,
-                                contentDescription = "Close",
-                                tint = VantafynColors.Muted,
-                            )
-                        }
-                    }
-
-                    val context = LocalContext.current
-                    val effectiveBoxart = remember(game.id, game.boxartUrl) {
-                        val prefs = context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
-                        val local = prefs.getString("boxart_${game.id}", null)
-                        GameBoxartScraper.convertToCdnUrl(local ?: game.boxartUrl)
-                    }
-
-                    if (!effectiveBoxart.isNullOrBlank()) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(if (isLandscape) 80.dp else 160.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFF0D0F18)),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            AsyncImage(
-                                model = effectiveBoxart,
-                                contentDescription = game.cleanTitle,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
-
-                    // Game Title & Tags
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = game.cleanTitle.ifEmpty { game.title },
-                            color = VantafynColors.Ink,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = if (isLandscape) 17.sp else 22.sp,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            if (game.region != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .background(Color(0x22E026FF))
-                                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.SportsEsports,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00E5FF),
+                                        modifier = Modifier.size(13.dp),
+                                    )
                                     Text(
-                                        text = game.region.orEmpty(),
-                                        color = VantafynColors.Secondary,
+                                        text = game.systemId.uppercase(),
+                                        color = Color(0xFF00E5FF),
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 11.sp,
+                                        letterSpacing = 0.5.sp,
                                     )
                                 }
                             }
-
-                            val sizeFormatted = formatFileSize(game.sizeBytes)
-                            if (sizeFormatted.isNotEmpty()) {
-                                Text(
-                                    text = sizeFormatted,
-                                    color = VantafynColors.Muted,
-                                    fontSize = 12.sp,
-                                )
+                            if (!game.region.isNullOrBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFFFF2A85).copy(alpha = 0.16f))
+                                        .border(1.dp, Color(0xFFFF2A85).copy(alpha = 0.4f), RoundedCornerShape(8.dp))
+                                        .padding(horizontal = 7.dp, vertical = 3.dp),
+                                ) {
+                                    Text(
+                                        text = game.region.orEmpty().uppercase(),
+                                        color = Color(0xFFFF80AB),
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                    )
+                                }
                             }
+                        }
 
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             if (availableCores.isNotEmpty()) {
                                 val currentCoreOption = availableCores.firstOrNull { it.id.equals(currentCoreId, ignoreCase = true) }
                                 val coreDisplayName = currentCoreOption?.name ?: currentCoreId
-                                Surface(
-                                    onClick = { showCorePickerModal = true },
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0x28805AD5),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x66B794F4)),
+                                val isCoreFocused = isGamepadConnected && focusedItem == GameModalFocus.CORE
+                                Box(
+                                    modifier = Modifier
+                                        .graphicsLayer {
+                                            if (isCoreFocused) {
+                                                scaleX = 1.05f
+                                                scaleY = 1.05f
+                                            }
+                                        }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF9D00FF).copy(alpha = 0.22f))
+                                        .border(
+                                            width = if (isCoreFocused) 2.dp else 1.dp,
+                                            brush = if (isCoreFocused) Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85)))
+                                            else Brush.linearGradient(listOf(Color(0xFFB794F4).copy(alpha = 0.6f), Color(0xFF9D00FF).copy(alpha = 0.4f))),
+                                            shape = RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { showCorePickerModal = true }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                                    contentAlignment = Alignment.Center,
                                 ) {
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(4.dp),
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                     ) {
                                         Icon(
                                             imageVector = Icons.Rounded.Tune,
                                             contentDescription = null,
                                             tint = Color(0xFFD6BCFA),
-                                            modifier = Modifier.size(12.dp),
+                                            modifier = Modifier.size(13.dp),
                                         )
                                         Text(
                                             text = "Core: $coreDisplayName",
-                                            color = Color(0xFFE9D8FD),
+                                            color = Color(0xFFEDE9FE),
                                             fontWeight = FontWeight.SemiBold,
                                             fontSize = 11.sp,
                                         )
@@ -423,265 +533,364 @@ fun GameDetailModal(
                                             imageVector = Icons.Rounded.ArrowDropDown,
                                             contentDescription = "Select Core",
                                             tint = Color(0xFFD6BCFA),
-                                            modifier = Modifier.size(14.dp),
+                                            modifier = Modifier.size(16.dp),
                                         )
                                     }
                                 }
-                            } else if (game.core.isNotEmpty()) {
-                                Text(
-                                    text = "• Core: ${game.core}",
-                                    color = VantafynColors.Muted,
-                                    fontSize = 12.sp,
-                                )
                             }
-                        }
-                    }
 
-                    // Battery save sync indicator
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(Color(0x18FFFFFF))
-                            .padding(12.dp),
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.CloudDone,
-                                contentDescription = null,
-                                tint = Color(0xFF00FFB2),
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "Cross-Device Cloud Saves",
-                                    color = Color.White,
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 13.sp,
-                                )
-                                Text(
-                                    text = "Saves automatically sync with your Jellyfin server",
-                                    color = VantafynColors.Muted,
-                                    fontSize = 11.sp,
-                                )
-                            }
-                        }
-                    }
-
-                    // Offline Download Action
-                    if (isDownloading) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = "Downloading ROM for Offline...",
-                                        color = Color(0xFF00E5FF),
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 12.sp,
+                            // Close Button
+                            val isCloseFocused = isGamepadConnected && focusedItem == GameModalFocus.CLOSE
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .graphicsLayer {
+                                        if (isCloseFocused) {
+                                            scaleX = 1.1f
+                                            scaleY = 1.1f
+                                        }
+                                    }
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = if (isCloseFocused) 0.25f else 0.10f))
+                                    .border(
+                                        width = if (isCloseFocused) 2.dp else 1.dp,
+                                        color = if (isCloseFocused) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.15f),
+                                        shape = CircleShape,
                                     )
-                                    Text(
-                                        text = "${(downloadProgress * 100).toInt()}%",
-                                        color = Color(0xFF00E5FF),
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                    )
-                                }
-                                VantafynGradientProgressBar(
-                                    progress = downloadProgress,
-                                    height = 7.dp,
-                                )
-                            }
-                        }
-                    } else if (isDownloaded) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF00E676).copy(alpha = 0.1f))
-                                .border(1.dp, Color(0xFF00E676).copy(alpha = 0.3f), RoundedCornerShape(14.dp))
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    .clickable(onClick = onDismiss),
+                                contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    imageVector = Icons.Rounded.DownloadDone,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E676),
-                                    modifier = Modifier.size(20.dp),
+                                    imageVector = Icons.Rounded.Close,
+                                    contentDescription = "Close",
+                                    tint = if (isCloseFocused) Color.White else Color.White.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(16.dp),
                                 )
-                                Column(modifier = Modifier.weight(1f)) {
+                            }
+                        }
+                    }
+
+                    // Middle Section: Box Art Cartridge Preview & Title/Metadata
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        if (!effectiveBoxart.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(width = if (isLandscape) 56.dp else 68.dp, height = if (isLandscape) 72.dp else 88.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .border(1.2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF08080C)),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                AsyncImage(
+                                    model = effectiveBoxart,
+                                    contentDescription = game.cleanTitle,
+                                    contentScale = ContentScale.Fit,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            }
+                        }
+
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                text = game.cleanTitle.ifEmpty { game.title },
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = if (isLandscape) 16.sp else 18.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                val sizeFormatted = formatFileSize(game.sizeBytes)
+                                if (sizeFormatted.isNotEmpty()) {
                                     Text(
-                                        text = "Downloaded for Offline Play",
-                                        color = Color(0xFF00E676),
-                                        fontWeight = FontWeight.SemiBold,
-                                        fontSize = 13.sp,
-                                    )
-                                    Text(
-                                        text = "Playable anywhere without network",
+                                        text = sizeFormatted,
                                         color = VantafynColors.Muted,
-                                        fontSize = 11.sp,
+                                        fontSize = 11.5.sp,
                                     )
                                 }
-                                if (onDeleteOffline != null) {
-                                    IconButton(
-                                        onClick = { onDeleteOffline(game) },
-                                        modifier = Modifier.size(32.dp),
+
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.CloudDone,
+                                        contentDescription = null,
+                                        tint = Color(0xFF00E676),
+                                        modifier = Modifier.size(13.dp),
+                                    )
+                                    Text(
+                                        text = "Cloud Sync",
+                                        color = Color(0xFF81C784),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    )
+                                }
+
+                                if (isDownloaded) {
+                                    Text(
+                                        text = "• Downloaded",
+                                        color = Color(0xFF00E676),
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Bottom Action Buttons Row
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Primary Play Button
+                        val isPlayFocused = isGamepadConnected && focusedItem == GameModalFocus.PLAY
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (isLandscape) 44.dp else 48.dp)
+                                .graphicsLayer {
+                                    if (isPlayFocused) {
+                                        scaleX = 1.02f
+                                        scaleY = 1.02f
+                                    }
+                                }
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(
+                                    Brush.horizontalGradient(
+                                        listOf(Color(0xFF00E5FF), Color(0xFF9D00FF))
+                                    )
+                                )
+                                .border(
+                                    width = if (isPlayFocused) 2.5.dp else 0.dp,
+                                    color = if (isPlayFocused) Color.White else Color.Transparent,
+                                    shape = RoundedCornerShape(14.dp),
+                                )
+                                .clickable { onPlay(game.copy(core = currentCoreId)) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.PlayArrow,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp),
+                                )
+                                Text(
+                                    text = if (isPlayFocused) "PLAY GAME  [A]" else "PLAY GAME",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 14.5.sp,
+                                    letterSpacing = 1.sp,
+                                )
+                            }
+                        }
+
+                        // Secondary Action Buttons Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // Download Offline / Downloading / Delete Button
+                            if (isDownloading) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .padding(horizontal = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        VantafynGradientProgressBar(
+                                            progress = downloadProgress,
+                                            height = 5.dp,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Text(
+                                            text = "${(downloadProgress * 100).toInt()}%",
+                                            color = Color(0xFF00E5FF),
+                                            fontSize = 10.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                        )
+                                    }
+                                }
+                            } else if (isDownloaded) {
+                                val isDownloadFocused = isGamepadConnected && focusedItem == GameModalFocus.DOWNLOAD
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .graphicsLayer { if (isDownloadFocused) { scaleX = 1.04f; scaleY = 1.04f } }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF00E676).copy(alpha = 0.12f))
+                                        .border(
+                                            width = if (isDownloadFocused) 2.dp else 1.dp,
+                                            color = if (isDownloadFocused) Color.White else Color(0xFF00E676).copy(alpha = 0.4f),
+                                            shape = RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { if (onDeleteOffline != null) onDeleteOffline(game) }
+                                        .padding(horizontal = 8.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Rounded.DeleteOutline,
-                                            contentDescription = "Delete downloaded ROM",
-                                            tint = Color(0xFFFF5277).copy(alpha = 0.8f),
-                                            modifier = Modifier.size(18.dp),
+                                            imageVector = Icons.Rounded.DownloadDone,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E676),
+                                            modifier = Modifier.size(15.dp),
+                                        )
+                                        Text(
+                                            text = "Offline Ready",
+                                            color = Color(0xFF00E676),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        if (onDeleteOffline != null) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.DeleteOutline,
+                                                contentDescription = "Delete",
+                                                tint = Color(0xFFFF5277).copy(alpha = 0.8f),
+                                                modifier = Modifier.size(14.dp),
+                                            )
+                                        }
+                                    }
+                                }
+                            } else if (onDownloadOffline != null) {
+                                val isDownloadFocused = isGamepadConnected && focusedItem == GameModalFocus.DOWNLOAD
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .graphicsLayer { if (isDownloadFocused) { scaleX = 1.04f; scaleY = 1.04f } }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .border(
+                                            width = if (isDownloadFocused) 2.dp else 1.dp,
+                                            color = if (isDownloadFocused) Color(0xFF00E5FF) else Color.White.copy(alpha = 0.15f),
+                                            shape = RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { onDownloadOffline(game) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Download,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                        Text(
+                                            text = "Download Offline",
+                                            color = Color(0xFF00E5FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
                                         )
                                     }
                                 }
                             }
-                        }
-                    } else if (onDownloadOffline != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(44.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(14.dp))
-                                .clickable { onDownloadOffline(game) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Download,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    text = "Download for Offline Play",
-                                    color = Color(0xFF00E5FF),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 13.sp,
-                                )
+
+                            // Import Battery Save Button
+                            if (storageManager != null) {
+                                val isImportFocused = isGamepadConnected && focusedItem == GameModalFocus.IMPORT
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .graphicsLayer { if (isImportFocused) { scaleX = 1.04f; scaleY = 1.04f } }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.08f))
+                                        .border(
+                                            width = if (isImportFocused) 2.dp else 1.dp,
+                                            color = if (isImportFocused) Color(0xFFB8A4FF) else Color(0xFFB8A4FF).copy(alpha = 0.35f),
+                                            shape = RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { importLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.UploadFile,
+                                            contentDescription = null,
+                                            tint = Color(0xFFB8A4FF),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                        Text(
+                                            text = "Import Save",
+                                            color = Color(0xFFDED3FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
                             }
-                        }
-                    }
 
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Import happens before launch so EmulatorJS never runs while its battery save is replaced.
-                    if (storageManager != null) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(if (isLandscape) 40.dp else 46.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .border(1.dp, Color(0xFFB8A4FF).copy(alpha = 0.45f), RoundedCornerShape(14.dp))
-                                .clickable { importLauncher.launch(arrayOf("application/octet-stream", "*/*")) },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.UploadFile,
-                                    contentDescription = null,
-                                    tint = Color(0xFFB8A4FF),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    text = "IMPORT BATTERY SAVE",
-                                    color = Color(0xFFDED3FF),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    letterSpacing = 0.6.sp,
-                                )
-                            }
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    // Play Button
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(if (isLandscape) 44.dp else 52.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(VantafynGradients.accentHorizontal())
-                            .clickable { onPlay(game.copy(core = currentCoreId)) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.PlayArrow,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(24.dp),
-                            )
-                            Text(
-                                text = "PLAY GAME",
-                                color = Color.White,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 15.sp,
-                                letterSpacing = 1.sp,
-                            )
-                        }
-                    }
-
-                    // Wireless Link Cable Play Button
-                    if (isLinkCapable) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(if (isLandscape) 40.dp else 46.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF00E5FF).copy(alpha = 0.10f))
-                                .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f), RoundedCornerShape(14.dp))
-                                .clickable { showLinkChoiceModal = true },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Rounded.Cable,
-                                    contentDescription = null,
-                                    tint = Color(0xFF00E5FF),
-                                    modifier = Modifier.size(18.dp),
-                                )
-                                Text(
-                                    text = "WIRELESS & LINK PLAY",
-                                    color = Color(0xFF00E5FF),
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    letterSpacing = 0.6.sp,
-                                )
+                            // Wireless Link Button
+                            if (isLinkCapable) {
+                                val isLinkFocused = isGamepadConnected && focusedItem == GameModalFocus.LINK
+                                Box(
+                                    modifier = Modifier
+                                        .weight(0.9f)
+                                        .height(36.dp)
+                                        .graphicsLayer { if (isLinkFocused) { scaleX = 1.04f; scaleY = 1.04f } }
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0xFF00E5FF).copy(alpha = 0.12f))
+                                        .border(
+                                            width = if (isLinkFocused) 2.dp else 1.dp,
+                                            color = if (isLinkFocused) Color(0xFF00E5FF) else Color(0xFF00E5FF).copy(alpha = 0.4f),
+                                            shape = RoundedCornerShape(10.dp),
+                                        )
+                                        .clickable { showLinkChoiceModal = true },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.Cable,
+                                            contentDescription = null,
+                                            tint = Color(0xFF00E5FF),
+                                            modifier = Modifier.size(14.dp),
+                                        )
+                                        Text(
+                                            text = "Link Play",
+                                            color = Color(0xFF00E5FF),
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

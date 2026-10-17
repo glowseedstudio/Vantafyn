@@ -1300,7 +1300,28 @@ static bool core_environment(unsigned cmd, void *data) {
                 var->value = "enabled";
                 return true;
             }
-            if (strcmp(var->key, "citra_use_custom_textures") == 0 || strcmp(var->key, "azahar_use_custom_textures") == 0) {
+            if (strcmp(var->key, "citra_use_custom_textures") == 0 || strcmp(var->key, "azahar_use_custom_textures") == 0 ||
+                strcmp(var->key, "citra_custom_textures") == 0 || strcmp(var->key, "azahar_custom_textures") == 0) {
+                for (int i = 0; i < s->option_count; i++) {
+                    if (strcmp(s->options[i].key, "citra_use_custom_textures") == 0 ||
+                        strcmp(s->options[i].key, "azahar_use_custom_textures") == 0 ||
+                        strcmp(s->options[i].key, "citra_custom_textures") == 0 ||
+                        strcmp(s->options[i].key, "azahar_custom_textures") == 0) {
+                        var->value = s->options[i].value;
+                        return true;
+                    }
+                }
+                var->value = "disabled";
+                return true;
+            }
+            if (strcmp(var->key, "citra_preload_textures") == 0 || strcmp(var->key, "azahar_preload_textures") == 0) {
+                for (int i = 0; i < s->option_count; i++) {
+                    if (strcmp(s->options[i].key, "citra_preload_textures") == 0 ||
+                        strcmp(s->options[i].key, "azahar_preload_textures") == 0) {
+                        var->value = s->options[i].value;
+                        return true;
+                    }
+                }
                 var->value = "disabled";
                 return true;
             }
@@ -2149,6 +2170,12 @@ static void* run_loop_thread(void *arg) {
 
     while (atomic_load(&s->is_thread_running)) {
         if (atomic_exchange(&s->reset_requested, false)) {
+            if (s->is_hw_render && s->egl_display && s->egl_context) {
+                EGLSurface cur = (s->egl_surface != EGL_NO_SURFACE) ? s->egl_surface : s->egl_pbuffer_surface;
+                if (cur != EGL_NO_SURFACE) {
+                    eglMakeCurrent(s->egl_display, cur, cur, s->egl_context);
+                }
+            }
             if (s->retro_reset) {
                 LOGI("Executing retro_reset synchronously on emulation worker thread");
                 s->retro_reset();
@@ -2774,6 +2801,7 @@ void vf_session_resume(vf_session_t *session) {
 void vf_session_reset(vf_session_t *session) {
     if (session) {
         atomic_store(&session->reset_requested, true);
+        atomic_store(&session->is_paused, false);
     }
 }
 

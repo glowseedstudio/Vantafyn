@@ -28,8 +28,10 @@ import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.CloudUpload
 import androidx.compose.material.icons.rounded.Dashboard
+import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.FastForward
 import androidx.compose.material.icons.rounded.GraphicEq
+import androidx.compose.material.icons.rounded.ImageSearch
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
@@ -132,6 +134,10 @@ fun GamePauseHud(
     onCycleCitraResolution: () -> Unit = {},
     citraAccurateMul: Boolean = false,
     onToggleCitraAccurateMul: () -> Unit = {},
+    customTexturesEnabled: Boolean = true,
+    onToggleCustomTextures: () -> Unit = {},
+    mods3dsEnabled: Boolean = true,
+    onToggle3dsMods: () -> Unit = {},
     onResume: () -> Unit,
     onToggleSpeed: () -> Unit,
     onCycleAspectRatio: () -> Unit,
@@ -337,12 +343,47 @@ fun GamePauseHud(
                                 }
                             }
                             if (!hasSecondaryDisplay) {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    HudMenuButton(
+                                        label = if (citraAccurateMul) "Accurate Mul: On" else "Accurate Mul: Off",
+                                        icon = Icons.Rounded.Tune,
+                                        onClick = onToggleCitraAccurateMul,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    HudMenuButton(
+                                        label = if (customTexturesEnabled) "HD Textures: On" else "HD Textures: Off",
+                                        icon = Icons.Rounded.ImageSearch,
+                                        onClick = onToggleCustomTextures,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                                 HudMenuButton(
-                                    label = if (citraAccurateMul) "Accurate Multiplication: On" else "Accurate Multiplication: Off",
-                                    icon = Icons.Rounded.Tune,
-                                    onClick = onToggleCitraAccurateMul,
+                                    label = if (mods3dsEnabled) "3DS Mods: Enabled" else "3DS Mods: Disabled",
+                                    icon = Icons.Rounded.Extension,
+                                    onClick = onToggle3dsMods,
                                     modifier = Modifier.fillMaxWidth(),
                                 )
+                            } else {
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    HudMenuButton(
+                                        label = if (customTexturesEnabled) "HD Textures: On" else "HD Textures: Off",
+                                        icon = Icons.Rounded.ImageSearch,
+                                        onClick = onToggleCustomTextures,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    HudMenuButton(
+                                        label = if (mods3dsEnabled) "3DS Mods: Enabled" else "3DS Mods: Disabled",
+                                        icon = Icons.Rounded.Extension,
+                                        onClick = onToggle3dsMods,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
                             }
                         }
 

@@ -59,6 +59,7 @@ object VantafynSoundEffects {
             R.raw.achievement_unlocked,
             R.raw.message_sent,
             R.raw.unlock_guide,
+            R.raw.click,
         )
         for (resId in rawSounds) {
             try {
@@ -137,5 +138,13 @@ object VantafynSoundEffects {
 
     fun playUnlockGuide(context: Context) {
         playRawSound(context, R.raw.unlock_guide, volume = 0.80f)
+    }
+
+    /**
+     * Tactile Wii-styled channel navigation click sound.
+     * Played when moving between channels, changing pages, or dragging tiles.
+     */
+    fun playChannelClick(context: Context) {
+        playRawSound(context, R.raw.click, volume = 0.95f)
     }
 }

@@ -1,9 +1,29 @@
 package dev.vantafyn.feature.home.games
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
+import dev.vantafyn.feature.home.games.screensaver.GameHubScreensaver
+import dev.vantafyn.feature.home.games.dualscreen.GameDualScreenManager
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import dev.vantafyn.feature.home.games.grid.ConsoleStatusTray
+import dev.vantafyn.feature.home.games.grid.ChannelTileItem
+import dev.vantafyn.feature.home.games.grid.GridTileType
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +39,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -41,6 +62,7 @@ import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Dns
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Save
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.SportsEsports
 import androidx.compose.material3.Icon
@@ -51,9 +73,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import android.view.KeyEvent
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.window.Dialog
@@ -67,6 +94,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.ui.res.painterResource
 import coil3.compose.AsyncImage
@@ -75,12 +103,16 @@ import dev.vantafyn.core.jellyfin.GamePlayTracker
 import dev.vantafyn.core.jellyfin.GameSummary
 import dev.vantafyn.core.jellyfin.GameSystem
 import dev.vantafyn.core.jellyfin.RecentGameRecord
+import androidx.compose.runtime.setValue
 import dev.vantafyn.core.ui.VantafynColors
 import dev.vantafyn.core.ui.VantafynGradients
+import dev.vantafyn.core.ui.VantafynSoundEffects
 import dev.vantafyn.feature.home.CompactBackButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import dev.vantafyn.feature.home.games.grid.VantafynChannelGrid
+import dev.vantafyn.feature.home.games.grid.VantafynGridPersistence
 
 @Composable
 fun GamesHomeScreen(
@@ -96,7 +128,14 @@ fun GamesHomeScreen(
     onOpenGame: (GameSummary) -> Unit,
     onRemoveRecentGame: (String) -> Unit = {},
     onSelectSystem: (GameSystem) -> Unit,
+    onOpenPokemonVault: () -> Unit = {},
+    onOpenSaves: () -> Unit = {},
+    onNavigateToSettings: () -> Unit = {},
+    onSelectLibrary: () -> Unit = {},
+    onSelectSearch: () -> Unit = {},
     onNavigateBack: () -> Unit,
+    isOffline: Boolean = false,
+    isGamesOnlyMode: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val totalGamesCount = remember(allGames, games, systems) {
@@ -111,52 +150,411 @@ fun GamesHomeScreen(
     var pendingRecentRemoval by remember { mutableStateOf<RecentGameRecord?>(null) }
 
     val pullToRefreshState = rememberPullToRefreshState()
+    val context = LocalContext.current
+    val prefs = remember(context) {
+        context.getSharedPreferences("vantafyn_retro_settings", android.content.Context.MODE_PRIVATE)
+    }
+    LaunchedEffect(userName, userImageUrl) {
+        prefs.edit().apply {
+            if (userName.isNotBlank()) putString("user_profile_name", userName)
+            if (!userImageUrl.isNullOrBlank()) putString("user_profile_avatar", userImageUrl)
+            apply()
+        }
+    }
+    var isChannelView by remember {
+        mutableStateOf(prefs.getBoolean("games_home_channel_view", true))
+    }
+    var channelItems by remember(games, systems, recentGames) {
+        mutableStateOf(
+            VantafynGridPersistence.loadGrid(context, allGames.ifEmpty { games }, systems, recentGames)
+        )
+    }
+
+    val profileFocusRequester = remember { FocusRequester() }
+    val channelsToggleFocusRequester = remember { FocusRequester() }
+    val overviewToggleFocusRequester = remember { FocusRequester() }
+    val gridFocusRequester = remember { FocusRequester() }
+    val isGamepadConnected = dev.vantafyn.feature.home.games.grid.rememberIsGamepadConnected()
+
+    val activity = context as? android.app.Activity
+    DisposableEffect(isGamesOnlyMode, isChannelView) {
+        if (isGamesOnlyMode && isChannelView && activity != null) {
+            val window = activity.window
+            val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
+            insetsController.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            insetsController.hide(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            onDispose {
+                insetsController.show(androidx.core.view.WindowInsetsCompat.Type.statusBars())
+            }
+        } else {
+            onDispose {}
+        }
+    }
+
+    val dualScreenManager = remember(context) { GameDualScreenManager(context) }
+    DisposableEffect(dualScreenManager, isGamesOnlyMode) {
+        if (isGamesOnlyMode) {
+            dualScreenManager.start()
+        }
+        onDispose {
+            dualScreenManager.stop()
+        }
+    }
+
+    var lastFocusedChannelItem by remember { mutableStateOf<ChannelTileItem?>(null) }
+    LaunchedEffect(lastFocusedChannelItem, allGames, games, systems, channelItems, isGamesOnlyMode) {
+        if (isGamesOnlyMode) {
+            val targetItem = lastFocusedChannelItem
+                ?: channelItems.firstOrNull { it != null && it.type != GridTileType.EMPTY_CHANNEL }
+            if (targetItem != null) {
+                dualScreenManager.updateSelection(targetItem, allGames.ifEmpty { games }, systems)
+            }
+        }
+    }
+
+    val screensaverEnabled = prefs.getBoolean("games_screensaver_enabled", true)
+    val screensaverTimeoutMs = prefs.getLong("games_screensaver_timeout_ms", 300_000L)
+    val screensaverSlideMs = prefs.getLong("games_screensaver_slide_ms", 8_000L)
+    val screensaverShowClock = prefs.getBoolean("games_screensaver_show_clock", true)
+
+    var lastInteractionTime by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    var isScreensaverActive by remember { mutableStateOf(false) }
+
+    fun recordActivity() {
+        lastInteractionTime = System.currentTimeMillis()
+        if (isScreensaverActive) {
+            isScreensaverActive = false
+        }
+    }
+
+    LaunchedEffect(lastInteractionTime, screensaverEnabled, isChannelView, isGamesOnlyMode, screensaverTimeoutMs, pendingRecentRemoval) {
+        if (!screensaverEnabled || !isChannelView || !isGamesOnlyMode || pendingRecentRemoval != null) {
+            isScreensaverActive = false
+            return@LaunchedEffect
+        }
+        while (true) {
+            val elapsed = System.currentTimeMillis() - lastInteractionTime
+            val remaining = screensaverTimeoutMs - elapsed
+            if (remaining <= 0L) {
+                isScreensaverActive = true
+                break
+            }
+            delay(remaining.coerceAtLeast(1000L))
+        }
+    }
 
     GameScreenReveal(
         key = "games_home_screen",
         modifier = modifier.fillMaxSize(),
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onPreviewKeyEvent {
+                    recordActivity()
+                    false
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        awaitFirstDown(requireUnconsumed = false)
+                        recordActivity()
+                    }
+                },
+        ) {
         PullToRefreshBox(
             isRefreshing = isRefreshing,
             state = pullToRefreshState,
             onRefresh = onRefresh,
             modifier = Modifier.fillMaxSize(),
-        indicator = {
-            PullToRefreshDefaults.Indicator(
-                state = pullToRefreshState,
-                isRefreshing = isRefreshing,
-                modifier = Modifier.align(Alignment.TopCenter),
-                containerColor = Color(0xFF1E1E28),
-                color = Color(0xFF00E5FF),
-            )
-        },
-    ) {
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)),
-            contentPadding = PaddingValues(top = 12.dp, bottom = 140.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-        ) {
-        // 1. Top Bar: Back Button & Title
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp),
-            ) {
-                CompactBackButton(onClick = onNavigateBack)
-                Text(
-                    text = "Games Hub",
-                    color = VantafynColors.Ink,
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f),
+            indicator = {
+                PullToRefreshDefaults.Indicator(
+                    state = pullToRefreshState,
+                    isRefreshing = isRefreshing,
+                    modifier = Modifier.align(Alignment.TopCenter),
+                    containerColor = Color(0xFF1E1E28),
+                    color = Color(0xFF00E5FF),
                 )
-            }
-        }
+            },
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(
+                        if (isGamesOnlyMode && isChannelView) {
+                            Modifier.padding(top = 8.dp)
+                        } else {
+                            Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+                        }
+                    ),
+            ) {
+                // Console Top Bar: Player Avatar (Left) + View Switcher & Hardware Status Tray (Right)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Left: Back Button (if not games-only mode) + User Profile Avatar
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (!isGamesOnlyMode) {
+                            CompactBackButton(onClick = onNavigateBack)
+                        }
+
+                        // User Profile Avatar with Controller Focus
+                        var isProfileFocused by remember { mutableStateOf(false) }
+                        Box(
+                            modifier = Modifier
+                                .size(34.dp)
+                                .focusRequester(profileFocusRequester)
+                                .onFocusChanged { isProfileFocused = it.isFocused }
+                                .focusable()
+                                .clip(CircleShape)
+                                .background(Color(0xFF1E1E28))
+                                .border(
+                                    width = if (isGamepadConnected && isProfileFocused) 2.5.dp else 1.5.dp,
+                                    brush = if (isGamepadConnected && isProfileFocused) {
+                                        Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85)))
+                                    } else {
+                                        Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFF9D00FF)))
+                                    },
+                                    shape = CircleShape,
+                                )
+                                .clickable {
+                                    VantafynSoundEffects.playChannelClick(context)
+                                    onNavigateToSettings()
+                                }
+                                .onPreviewKeyEvent {
+                                    if (it.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                    when (it.nativeKeyEvent.keyCode) {
+                                        KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER -> {
+                                            VantafynSoundEffects.playChannelClick(context)
+                                            onNavigateToSettings()
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                            channelsToggleFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                            gridFocusRequester.requestFocus()
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (!userImageUrl.isNullOrBlank()) {
+                                AsyncImage(
+                                    model = userImageUrl,
+                                    contentDescription = userName,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize(),
+                                )
+                            } else {
+                                Text(
+                                    text = userName.take(1).uppercase(),
+                                    color = Color(0xFF00E5FF),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // Right Cluster: Magnetic View Switcher Pill + Console Status Tray (Wifi/Cellular, Battery %, Clock)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
+                        // Magnetic Animated View Switcher Pill [ Grid | List ]
+                        val pillTargetX = if (isChannelView) 3.dp else 37.dp
+                        val animatedPillX by animateDpAsState(
+                            targetValue = pillTargetX,
+                            animationSpec = spring(stiffness = Spring.StiffnessMediumLow, dampingRatio = Spring.DampingRatioLowBouncy),
+                            label = "magneticPillX",
+                        )
+
+                        Box(
+                            modifier = Modifier
+                                .height(36.dp)
+                                .width(72.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(Color(0xFF14141E).copy(alpha = 0.85f))
+                                .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(999.dp)),
+                            contentAlignment = Alignment.CenterStart,
+                        ) {
+                            // Magnetic Sliding Indicator Pill
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = animatedPillX)
+                                    .size(32.dp)
+                                    .shadow(elevation = 8.dp, shape = CircleShape, ambientColor = Color(0xFF00E5FF), spotColor = Color(0xFF00E5FF))
+                                    .clip(CircleShape)
+                                    .background(
+                                        Brush.linearGradient(
+                                            listOf(Color(0xFF00E5FF), Color(0xFF9D00FF))
+                                        )
+                                    )
+                            )
+
+                            // Two View Icons
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                // 3D Channels Grid Icon
+                                var isChannelsFocused by remember { mutableStateOf(false) }
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .focusRequester(channelsToggleFocusRequester)
+                                        .onFocusChanged { isChannelsFocused = it.isFocused }
+                                        .focusable()
+                                        .clip(CircleShape)
+                                        .then(
+                                            if (isGamepadConnected && isChannelsFocused) {
+                                                Modifier.border(2.dp, Color(0xFF00E5FF), CircleShape)
+                                            } else Modifier
+                                        )
+                                        .clickable {
+                                            if (!isChannelView) {
+                                                VantafynSoundEffects.playChannelClick(context)
+                                                isChannelView = true
+                                                prefs.edit().putBoolean("games_home_channel_view", true).apply()
+                                            }
+                                        }
+                                        .onPreviewKeyEvent {
+                                            if (it.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                            when (it.nativeKeyEvent.keyCode) {
+                                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER -> {
+                                                    if (!isChannelView) {
+                                                        VantafynSoundEffects.playChannelClick(context)
+                                                        isChannelView = true
+                                                        prefs.edit().putBoolean("games_home_channel_view", true).apply()
+                                                    }
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                                    profileFocusRequester.requestFocus()
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                                    overviewToggleFocusRequester.requestFocus()
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                    gridFocusRequester.requestFocus()
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    ConsoleGridIcon(isSelected = isChannelView)
+                                }
+
+                                // Overview List Icon
+                                var isOverviewFocused by remember { mutableStateOf(false) }
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .focusRequester(overviewToggleFocusRequester)
+                                        .onFocusChanged { isOverviewFocused = it.isFocused }
+                                        .focusable()
+                                        .clip(CircleShape)
+                                        .then(
+                                            if (isGamepadConnected && isOverviewFocused) {
+                                                Modifier.border(2.dp, Color(0xFFFF2A85), CircleShape)
+                                            } else Modifier
+                                        )
+                                        .clickable {
+                                            if (isChannelView) {
+                                                VantafynSoundEffects.playChannelClick(context)
+                                                isChannelView = false
+                                                prefs.edit().putBoolean("games_home_channel_view", false).apply()
+                                            }
+                                        }
+                                        .onPreviewKeyEvent {
+                                            if (it.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                                            when (it.nativeKeyEvent.keyCode) {
+                                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER -> {
+                                                    if (isChannelView) {
+                                                        VantafynSoundEffects.playChannelClick(context)
+                                                        isChannelView = false
+                                                        prefs.edit().putBoolean("games_home_channel_view", false).apply()
+                                                    }
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                                    channelsToggleFocusRequester.requestFocus()
+                                                    true
+                                                }
+                                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                                    gridFocusRequester.requestFocus()
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    ConsoleOverviewIcon(isSelected = !isChannelView)
+                                }
+                            }
+                        }
+
+                        // Hardware Console Status Tray (Wifi/Cellular, Battery %, Clock)
+                        ConsoleStatusTray()
+                    }
+                }
+
+                if (isChannelView) {
+                    VantafynChannelGrid(
+                        items = channelItems,
+                        games = allGames.ifEmpty { games },
+                        systems = systems,
+                        onOpenGame = onOpenGame,
+                        onSelectSystem = onSelectSystem,
+                        onOpenPokemonVault = onOpenPokemonVault,
+                        onOpenSaves = onOpenSaves,
+                        onNavigateToSettings = onNavigateToSettings,
+                        onSelectLibrary = onSelectLibrary,
+                        onSelectSearch = onSelectSearch,
+                        onNavigateBack = onNavigateBack,
+                        onGridUpdated = { updated ->
+                            channelItems = updated
+                        },
+                        onRequestFocusTopBar = {
+                            profileFocusRequester.requestFocus()
+                        },
+                        onFocusedTileChanged = { focusedItem ->
+                            lastFocusedChannelItem = focusedItem
+                            if (isGamesOnlyMode) {
+                                dualScreenManager.updateSelection(focusedItem, allGames.ifEmpty { games }, systems)
+                            }
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .focusRequester(gridFocusRequester)
+                            .padding(bottom = 0.dp),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentPadding = PaddingValues(top = 10.dp, bottom = 140.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
 
         // 2. Centered Big Gamer Profile Card
         item {
@@ -224,12 +622,20 @@ fun GamesHomeScreen(
                     overflow = TextOverflow.Ellipsis,
                 )
 
-                // Centered "RETRO VAULT PILOT" badge
+                // Centered "RETRO VAULT PILOT" / "OFFLINE VAULT PILOT" badge
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0xFF00E5FF).copy(alpha = 0.12f))
-                        .border(1.dp, Color(0xFF00E5FF).copy(alpha = 0.35f), RoundedCornerShape(999.dp))
+                        .background(
+                            if (isOffline) Color(0xFFFFB300).copy(alpha = 0.14f)
+                            else Color(0xFF00E5FF).copy(alpha = 0.12f)
+                        )
+                        .border(
+                            1.dp,
+                            if (isOffline) Color(0xFFFFB300).copy(alpha = 0.45f)
+                            else Color(0xFF00E5FF).copy(alpha = 0.35f),
+                            RoundedCornerShape(999.dp)
+                        )
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -237,11 +643,11 @@ fun GamesHomeScreen(
                     Box(
                         modifier = Modifier
                             .size(7.dp)
-                            .background(Color(0xFF00E5FF), CircleShape),
+                            .background(if (isOffline) Color(0xFFFFB300) else Color(0xFF00E5FF), CircleShape),
                     )
                     Text(
-                        text = "RETRO VAULT PILOT",
-                        color = Color(0xFF8FE7FF),
+                        text = if (isOffline) "OFFLINE VAULT PILOT" else "RETRO VAULT PILOT",
+                        color = if (isOffline) Color(0xFFFFD54F) else Color(0xFF8FE7FF),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         letterSpacing = 1.sp,
@@ -289,10 +695,10 @@ fun GamesHomeScreen(
                         modifier = Modifier.weight(1f),
                     )
                     GamerStatCard(
-                        title = "CLOUD SAVES",
-                        value = "SYNCED",
-                        icon = Icons.Rounded.CloudDone,
-                        accentColor = Color(0xFF00E676),
+                        title = if (isOffline) "LOCAL SAVES" else "CLOUD SAVES",
+                        value = if (isOffline) "STANDBY" else "SYNCED",
+                        icon = if (isOffline) Icons.Rounded.Save else Icons.Rounded.CloudDone,
+                        accentColor = if (isOffline) Color(0xFFFFB300) else Color(0xFF00E676),
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -372,26 +778,11 @@ fun GamesHomeScreen(
                                 fontSize = 12.sp,
                                 textAlign = TextAlign.Center,
                             )
+                        }
+                    }
+                }
             }
         }
-    }
-    }
-
-    pendingRecentRemoval?.let { record ->
-        ContinuePlayingGameModal(
-            record = record,
-            onDismiss = { pendingRecentRemoval = null },
-            onResume = {
-                onOpenGame(record.toGameSummary())
-                pendingRecentRemoval = null
-            },
-            onRemove = {
-                onRemoveRecentGame(record.id)
-                pendingRecentRemoval = null
-            },
-        )
-    }
-}
 
         // 4. Consoles & Systems Quick Jump Grid
         if (systems.isNotEmpty()) {
@@ -534,7 +925,43 @@ fun GamesHomeScreen(
             }
         }
     }
+}
+}
+
+        // Ambient Console Screensaver Overlay
+        AnimatedVisibility(
+            visible = isScreensaverActive,
+            enter = fadeIn(animationSpec = tween(800)),
+            exit = fadeOut(animationSpec = tween(400)),
+        ) {
+            GameHubScreensaver(
+                games = allGames.ifEmpty { games },
+                systems = systems,
+                slideDurationMs = screensaverSlideMs,
+                showClock = screensaverShowClock,
+                onWake = {
+                    recordActivity()
+                    isScreensaverActive = false
+                },
+            )
+        }
     }
+    }
+}
+
+    pendingRecentRemoval?.let { record ->
+        ContinuePlayingGameModal(
+            record = record,
+            onDismiss = { pendingRecentRemoval = null },
+            onResume = {
+                onOpenGame(record.toGameSummary())
+                pendingRecentRemoval = null
+            },
+            onRemove = {
+                onRemoveRecentGame(record.id)
+                pendingRecentRemoval = null
+            },
+        )
     }
 }
 
@@ -954,13 +1381,26 @@ private fun ContinuePlayingGameModal(
 internal fun SystemQuickCard(
     system: GameSystem,
     onClick: () -> Unit,
+    isFocused: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = if (isFocused) 1.05f else 1f
+                scaleY = if (isFocused) 1.05f else 1f
+            }
             .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.04f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(16.dp))
+            .background(Color.White.copy(alpha = if (isFocused) 0.10f else 0.04f))
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                brush = if (isFocused) {
+                    Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85)))
+                } else {
+                    androidx.compose.ui.graphics.SolidColor(Color.White.copy(alpha = 0.08f))
+                },
+                shape = RoundedCornerShape(16.dp),
+            )
             .clickable(onClick = onClick)
             .padding(14.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1015,3 +1455,78 @@ internal fun SystemQuickCard(
         )
     }
 }
+
+/**
+ * Pixel-perfect console 2x2 grid icon for channel mode toggle with neon gradient styling.
+ */
+@Composable
+private fun ConsoleGridIcon(isSelected: Boolean) {
+    androidx.compose.foundation.Canvas(modifier = Modifier.size(14.dp)) {
+        val dSize = size.width * 0.38f
+        val gap = size.width - (dSize * 2f)
+        val corner = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+
+        val brush = if (isSelected) {
+            Brush.linearGradient(listOf(Color(0xFF0A0E1A), Color(0xFF141422)))
+        } else {
+            Brush.linearGradient(listOf(Color(0xFF00E5FF).copy(alpha = 0.85f), Color(0xFF00B0FF).copy(alpha = 0.85f)))
+        }
+
+        // Top-left
+        drawRoundRect(
+            brush = brush,
+            topLeft = androidx.compose.ui.geometry.Offset(0f, 0f),
+            size = androidx.compose.ui.geometry.Size(dSize, dSize),
+            cornerRadius = corner,
+        )
+        // Top-right
+        drawRoundRect(
+            brush = brush,
+            topLeft = androidx.compose.ui.geometry.Offset(dSize + gap, 0f),
+            size = androidx.compose.ui.geometry.Size(dSize, dSize),
+            cornerRadius = corner,
+        )
+        // Bottom-left
+        drawRoundRect(
+            brush = brush,
+            topLeft = androidx.compose.ui.geometry.Offset(0f, dSize + gap),
+            size = androidx.compose.ui.geometry.Size(dSize, dSize),
+            cornerRadius = corner,
+        )
+        // Bottom-right
+        drawRoundRect(
+            brush = brush,
+            topLeft = androidx.compose.ui.geometry.Offset(dSize + gap, dSize + gap),
+            size = androidx.compose.ui.geometry.Size(dSize, dSize),
+            cornerRadius = corner,
+        )
+    }
+}
+
+/**
+ * Pixel-perfect console 3-bar list/overview icon for view switcher with neon gradient styling.
+ */
+@Composable
+private fun ConsoleOverviewIcon(isSelected: Boolean) {
+    androidx.compose.foundation.Canvas(modifier = Modifier.size(14.dp)) {
+        val brush = if (isSelected) {
+            Brush.linearGradient(listOf(Color(0xFF0A0E1A), Color(0xFF141422)))
+        } else {
+            Brush.linearGradient(listOf(Color(0xFF9D00FF).copy(alpha = 0.85f), Color(0xFFFF2A85).copy(alpha = 0.85f)))
+        }
+        val barHeight = size.height * 0.18f
+        val corner = androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx())
+        val spacing = (size.height - (barHeight * 3f)) / 2f
+
+        for (i in 0..2) {
+            val y = i * (barHeight + spacing)
+            drawRoundRect(
+                brush = brush,
+                topLeft = androidx.compose.ui.geometry.Offset(0f, y),
+                size = androidx.compose.ui.geometry.Size(size.width, barHeight),
+                cornerRadius = corner,
+            )
+        }
+    }
+}
+

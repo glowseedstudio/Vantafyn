@@ -82,6 +82,36 @@ import dev.vantafyn.feature.home.CompactBackButton
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.window.Dialog
+import android.view.KeyEvent
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.draw.shadow
+import dev.vantafyn.core.ui.VantafynSoundEffects
+import dev.vantafyn.feature.home.games.grid.rememberIsGamepadConnected
+import kotlinx.coroutines.launch
+
+enum class GamesHubFocusArea {
+    BACK,
+    SEARCH,
+    FILTERS,
+    GRID,
+}
+
+sealed interface HubFilterItem {
+    data class AllSystems(val count: Int) : HubFilterItem
+    data object PokemonVault : HubFilterItem
+    data class Downloaded(val count: Int) : HubFilterItem
+    data class SystemItem(val system: GameSystem, val count: Int) : HubFilterItem
+}
 
 @Composable
 fun GamesHubScreen(
@@ -98,10 +128,11 @@ fun GamesHubScreen(
     onSelectSystem: (GameSystem?) -> Unit,
     onOpenGame: (GameSummary) -> Unit,
     onBack: () -> Unit,
+    isOffline: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var searchQuery by remember { mutableStateOf("") }
-    var isOfflineFilterSelected by remember { mutableStateOf(false) }
+    var isOfflineFilterSelected by remember(isOffline) { mutableStateOf(isOffline) }
     var gameActionTarget by remember { mutableStateOf<GameSummary?>(null) }
     var identifyGameTarget by remember { mutableStateOf<GameSummary?>(null) }
     var boxartRevision by remember { mutableIntStateOf(0) }
@@ -110,12 +141,41 @@ fun GamesHubScreen(
         context.getSharedPreferences("vantafyn_retro_settings", Context.MODE_PRIVATE)
     }
 
-    val basePool = if (isOfflineFilterSelected) {
-        allGames.filter { g ->
+    val isGamepadConnected = rememberIsGamepadConnected()
+    var focusArea by remember { mutableStateOf(GamesHubFocusArea.GRID) }
+    var focusedFilterIndex by remember { mutableIntStateOf(0) }
+    var focusedGridIndex by remember { mutableIntStateOf(0) }
+    val screenFocusRequester = remember { FocusRequester() }
+    val lazyGridState = rememberLazyGridState()
+    val filterRowState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+
+    LaunchedEffect(isGamepadConnected) {
+        if (isGamepadConnected) {
+            screenFocusRequester.requestFocus()
+        }
+    }
+
+    val isGameReady = remember(downloadedGameKeys) {
+        { g: GameSummary ->
             val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
             val safeToken = g.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            downloadedGameKeys.contains(safeId) || (safeToken.isNotBlank() && downloadedGameKeys.contains(safeToken))
+            g.id.startsWith("local_") ||
+                g.systemId.equals("3ds", ignoreCase = true) ||
+                downloadedGameKeys.contains(g.id) ||
+                downloadedGameKeys.contains(safeId) ||
+                (safeToken.isNotBlank() && (downloadedGameKeys.contains(g.token) || downloadedGameKeys.contains(safeToken))) ||
+                downloadedGameKeys.contains(g.filename)
         }
+    }
+
+    val basePool = if (isOffline || isOfflineFilterSelected) {
+        val pool = if (selectedSystem != null) {
+            allGames.filter { it.systemId.equals(selectedSystem.id, ignoreCase = true) }
+        } else {
+            allGames
+        }
+        pool.filter(isGameReady)
     } else {
         games
     }
@@ -126,11 +186,27 @@ fun GamesHubScreen(
         else systems.sumOf { it.gameCount }
     }
 
-    val downloadedCount = remember(allGames, downloadedGameKeys) {
-        allGames.count { g ->
-            val safeId = g.id.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            val safeToken = g.token.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-            downloadedGameKeys.contains(safeId) || (safeToken.isNotBlank() && downloadedGameKeys.contains(safeToken))
+    val downloadedCount = remember(allGames, isGameReady) {
+        allGames.count(isGameReady)
+    }
+
+    val filterItems = remember(systems, allGames, games, isOffline, downloadedCount, isPokemonVaultAvailable, isOfflineFilterSelected, selectedSystem) {
+        buildList {
+            add(HubFilterItem.AllSystems(count = if (isOffline) downloadedCount else totalLibraryGamesCount))
+            if (isPokemonVaultAvailable) {
+                add(HubFilterItem.PokemonVault)
+            }
+            if (downloadedCount > 0) {
+                add(HubFilterItem.Downloaded(count = downloadedCount))
+            }
+            for (sys in systems) {
+                val count = if (isOffline) {
+                    allGames.count { isGameReady(it) && it.systemId.equals(sys.id, ignoreCase = true) }
+                } else {
+                    sys.gameCount
+                }
+                add(HubFilterItem.SystemItem(sys, count))
+            }
         }
     }
 
@@ -148,6 +224,215 @@ fun GamesHubScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .focusRequester(screenFocusRequester)
+                .focusable()
+                .onPreviewKeyEvent { keyEvent ->
+                    if (keyEvent.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    val nativeKey = keyEvent.nativeKeyEvent.keyCode
+                    val isBackKey = nativeKey == KeyEvent.KEYCODE_BACK || nativeKey == KeyEvent.KEYCODE_BUTTON_B
+
+                    if (isBackKey) {
+                        if (searchQuery.isNotEmpty()) {
+                            searchQuery = ""
+                            VantafynSoundEffects.playChannelClick(context)
+                            return@onPreviewKeyEvent true
+                        }
+                        if (isOfflineFilterSelected) {
+                            isOfflineFilterSelected = false
+                            VantafynSoundEffects.playChannelClick(context)
+                            return@onPreviewKeyEvent true
+                        }
+                        if (selectedSystem != null) {
+                            onSelectSystem(null)
+                            VantafynSoundEffects.playChannelClick(context)
+                            return@onPreviewKeyEvent true
+                        }
+                        onBack()
+                        return@onPreviewKeyEvent true
+                    }
+
+                    val isBrowsingConsoles = selectedSystem == null && !isOfflineFilterSelected && searchQuery.isBlank()
+                    val gridItemCount = if (isBrowsingConsoles) systems.size else filteredGames.size
+
+                    when (focusArea) {
+                        GamesHubFocusArea.BACK -> {
+                            when (nativeKey) {
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    focusArea = GamesHubFocusArea.SEARCH
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    if (filterItems.isNotEmpty()) {
+                                        focusArea = GamesHubFocusArea.FILTERS
+                                        focusedFilterIndex = 0
+                                    } else if (gridItemCount > 0) {
+                                        focusArea = GamesHubFocusArea.GRID
+                                        focusedGridIndex = 0
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER -> {
+                                    if (isOfflineFilterSelected) {
+                                        isOfflineFilterSelected = false
+                                    } else if (selectedSystem != null) {
+                                        onSelectSystem(null)
+                                    } else {
+                                        onBack()
+                                    }
+                                    VantafynSoundEffects.playChannelClick(context)
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        GamesHubFocusArea.SEARCH -> {
+                            when (nativeKey) {
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    focusArea = GamesHubFocusArea.BACK
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    if (filterItems.isNotEmpty()) {
+                                        focusArea = GamesHubFocusArea.FILTERS
+                                        focusedFilterIndex = 0
+                                    } else if (gridItemCount > 0) {
+                                        focusArea = GamesHubFocusArea.GRID
+                                        focusedGridIndex = 0
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        GamesHubFocusArea.FILTERS -> {
+                            when (nativeKey) {
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    focusArea = if (focusedFilterIndex == 0) GamesHubFocusArea.BACK else GamesHubFocusArea.SEARCH
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    if (gridItemCount > 0) {
+                                        focusArea = GamesHubFocusArea.GRID
+                                        focusedGridIndex = 0
+                                        coroutineScope.launch { lazyGridState.animateScrollToItem(0) }
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    if (focusedFilterIndex > 0) {
+                                        focusedFilterIndex--
+                                        coroutineScope.launch { filterRowState.animateScrollToItem(focusedFilterIndex) }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                        true
+                                    } else false
+                                }
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    if (focusedFilterIndex < filterItems.size - 1) {
+                                        focusedFilterIndex++
+                                        coroutineScope.launch { filterRowState.animateScrollToItem(focusedFilterIndex) }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                        true
+                                    } else false
+                                }
+                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER -> {
+                                    val targetItem = filterItems.getOrNull(focusedFilterIndex)
+                                    if (targetItem != null) {
+                                        when (targetItem) {
+                                            is HubFilterItem.AllSystems -> {
+                                                isOfflineFilterSelected = false
+                                                onSelectSystem(null)
+                                            }
+                                            is HubFilterItem.PokemonVault -> {
+                                                onOpenPokemonVault()
+                                            }
+                                            is HubFilterItem.Downloaded -> {
+                                                isOfflineFilterSelected = true
+                                                onSelectSystem(null)
+                                            }
+                                            is HubFilterItem.SystemItem -> {
+                                                isOfflineFilterSelected = false
+                                                onSelectSystem(targetItem.system)
+                                            }
+                                        }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                    }
+                                    true
+                                }
+                                else -> false
+                            }
+                        }
+                        GamesHubFocusArea.GRID -> {
+                            val cols = if (isLandscape) 4 else 2
+                            when (nativeKey) {
+                                KeyEvent.KEYCODE_DPAD_UP -> {
+                                    if (focusedGridIndex < cols) {
+                                        if (filterItems.isNotEmpty()) {
+                                            focusArea = GamesHubFocusArea.FILTERS
+                                        } else {
+                                            focusArea = GamesHubFocusArea.SEARCH
+                                        }
+                                        true
+                                    } else {
+                                        focusedGridIndex -= cols
+                                        coroutineScope.launch { lazyGridState.animateScrollToItem(focusedGridIndex) }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                        true
+                                    }
+                                }
+                                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                                    if (focusedGridIndex + cols < gridItemCount) {
+                                        focusedGridIndex += cols
+                                        coroutineScope.launch { lazyGridState.animateScrollToItem(focusedGridIndex) }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                        true
+                                    } else false
+                                }
+                                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                                    if (focusedGridIndex % cols > 0) {
+                                        focusedGridIndex--
+                                        coroutineScope.launch { lazyGridState.animateScrollToItem(focusedGridIndex) }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                        true
+                                    } else false
+                                }
+                                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                                    if ((focusedGridIndex + 1) % cols != 0 && focusedGridIndex + 1 < gridItemCount) {
+                                        focusedGridIndex++
+                                        coroutineScope.launch { lazyGridState.animateScrollToItem(focusedGridIndex) }
+                                        VantafynSoundEffects.playChannelClick(context)
+                                        true
+                                    } else false
+                                }
+                                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_BUTTON_A, KeyEvent.KEYCODE_ENTER -> {
+                                    if (isBrowsingConsoles) {
+                                        val sys = systems.getOrNull(focusedGridIndex)
+                                        if (sys != null) {
+                                            VantafynSoundEffects.playChannelClick(context)
+                                            onSelectSystem(sys)
+                                        }
+                                    } else {
+                                        val gm = filteredGames.getOrNull(focusedGridIndex)
+                                        if (gm != null) {
+                                            VantafynSoundEffects.playChannelClick(context)
+                                            onOpenGame(gm)
+                                        }
+                                    }
+                                    true
+                                }
+                                KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_MENU -> {
+                                    if (!isBrowsingConsoles && filteredGames.isNotEmpty()) {
+                                        val gm = filteredGames.getOrNull(focusedGridIndex)
+                                        if (gm != null) {
+                                            gameActionTarget = gm
+                                            true
+                                        } else false
+                                    } else false
+                                }
+                                else -> false
+                            }
+                        }
+                    }
+                }
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
                 .padding(top = if (isLandscape) 4.dp else 12.dp),
         ) {
@@ -169,6 +454,11 @@ fun GamesHubScreen(
                             onBack()
                         }
                     },
+                    modifier = Modifier.then(
+                        if (isGamepadConnected && focusArea == GamesHubFocusArea.BACK) {
+                            Modifier.border(2.dp, Color(0xFF00E5FF), CircleShape)
+                        } else Modifier
+                    ),
                 )
 
                 Text(
@@ -179,7 +469,15 @@ fun GamesHubScreen(
                     modifier = Modifier.weight(1f),
                 )
 
-                Box(modifier = Modifier.width(260.dp)) {
+                Box(
+                    modifier = Modifier
+                        .width(260.dp)
+                        .then(
+                            if (isGamepadConnected && focusArea == GamesHubFocusArea.SEARCH) {
+                                Modifier.border(2.dp, Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85))), RoundedCornerShape(12.dp))
+                            } else Modifier
+                        ),
+                ) {
                     VantafynTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
@@ -225,6 +523,11 @@ fun GamesHubScreen(
                             onBack()
                         }
                     },
+                    modifier = Modifier.then(
+                        if (isGamepadConnected && focusArea == GamesHubFocusArea.BACK) {
+                            Modifier.border(2.dp, Color(0xFF00E5FF), CircleShape)
+                        } else Modifier
+                    ),
                 )
 
                 Text(
@@ -240,7 +543,12 @@ fun GamesHubScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .then(
+                        if (isGamepadConnected && focusArea == GamesHubFocusArea.SEARCH) {
+                            Modifier.border(2.dp, Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85))), RoundedCornerShape(12.dp))
+                        } else Modifier
+                    ),
             ) {
                 VantafynTextField(
                     value = searchQuery,
@@ -269,52 +577,86 @@ fun GamesHubScreen(
             }
         }
 
+        if (isOffline) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFFFFB300).copy(alpha = 0.10f))
+                    .border(1.dp, Color(0xFFFFB300).copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.DownloadDone,
+                    contentDescription = null,
+                    tint = Color(0xFFFFD54F),
+                    modifier = Modifier.size(16.dp),
+                )
+                Text(
+                    text = "OFFLINE VAULT • READY-TO-PLAY TITLES",
+                    color = Color(0xFFFFD54F),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 0.8.sp,
+                )
+            }
+        }
+
         // Systems Carousel
         LazyRow(
+            state = filterRowState,
             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item {
-                SystemFilterPill(
-                    label = "All Systems",
-                    count = totalLibraryGamesCount,
-                    isSelected = selectedSystem == null && !isOfflineFilterSelected,
-                    onClick = {
-                        isOfflineFilterSelected = false
-                        onSelectSystem(null)
-                    },
-                )
-            }
-            if (isPokemonVaultAvailable) {
-                item {
-                    PokemonVaultFilterPill(
-                        onClick = onOpenPokemonVault,
-                    )
+            itemsIndexed(filterItems) { index, item ->
+                val isPillFocused = isGamepadConnected && focusArea == GamesHubFocusArea.FILTERS && focusedFilterIndex == index
+                when (item) {
+                    is HubFilterItem.AllSystems -> {
+                        SystemFilterPill(
+                            label = "All Systems",
+                            count = item.count,
+                            isSelected = selectedSystem == null && !isOfflineFilterSelected,
+                            isFocused = isPillFocused,
+                            onClick = {
+                                isOfflineFilterSelected = false
+                                onSelectSystem(null)
+                            },
+                        )
+                    }
+                    is HubFilterItem.PokemonVault -> {
+                        PokemonVaultFilterPill(
+                            isFocused = isPillFocused,
+                            onClick = onOpenPokemonVault,
+                        )
+                    }
+                    is HubFilterItem.Downloaded -> {
+                        SystemFilterPill(
+                            label = "Downloaded",
+                            count = item.count,
+                            isSelected = isOfflineFilterSelected,
+                            isFocused = isPillFocused,
+                            onClick = {
+                                isOfflineFilterSelected = true
+                                onSelectSystem(null)
+                            },
+                        )
+                    }
+                    is HubFilterItem.SystemItem -> {
+                        SystemFilterPill(
+                            label = item.system.displayName,
+                            count = item.count,
+                            isSelected = selectedSystem?.id == item.system.id && !isOfflineFilterSelected,
+                            isFocused = isPillFocused,
+                            onClick = {
+                                isOfflineFilterSelected = false
+                                onSelectSystem(item.system)
+                            },
+                        )
+                    }
                 }
-            }
-            if (downloadedCount > 0) {
-                item {
-                    SystemFilterPill(
-                        label = "Downloaded",
-                        count = downloadedCount,
-                        isSelected = isOfflineFilterSelected,
-                        onClick = {
-                            isOfflineFilterSelected = true
-                            onSelectSystem(null)
-                        },
-                    )
-                }
-            }
-            items(systems) { system ->
-                SystemFilterPill(
-                    label = system.displayName,
-                    count = system.gameCount,
-                    isSelected = selectedSystem?.id == system.id && !isOfflineFilterSelected,
-                    onClick = {
-                        isOfflineFilterSelected = false
-                        onSelectSystem(system)
-                    },
-                )
             }
         }
 
@@ -381,16 +723,19 @@ fun GamesHubScreen(
                     }
                 } else {
                     LazyVerticalGrid(
+                        state = lazyGridState,
                         columns = GridCells.Adaptive(minSize = 160.dp),
                         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = if (isLandscape) 24.dp else 140.dp, top = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(systems, key = { it.id }) { system ->
+                        itemsIndexed(systems, key = { _, it -> it.id }) { index, system ->
+                            val isFocused = isGamepadConnected && focusArea == GamesHubFocusArea.GRID && focusedGridIndex == index
                             SystemQuickCard(
                                 system = system,
                                 onClick = { onSelectSystem(system) },
+                                isFocused = isFocused,
                             )
                         }
                     }
@@ -422,23 +767,26 @@ fun GamesHubScreen(
                 }
             } else {
                 LazyVerticalGrid(
+                    state = lazyGridState,
                     columns = GridCells.Adaptive(minSize = 160.dp),
                     contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = if (isLandscape) 24.dp else 140.dp, top = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                     modifier = Modifier.fillMaxSize(),
                 ) {
-                    items(filteredGames, key = { it.id }) { game ->
+                    itemsIndexed(filteredGames, key = { _, it -> it.id }) { index, game ->
                         val safeId = remember(game.id) { game.id.replace(Regex("[^a-zA-Z0-9_-]"), "_") }
                         val safeToken = remember(game.token) { game.token.replace(Regex("[^a-zA-Z0-9_-]"), "_") }
                         val isDownloaded = downloadedGameKeys.contains(game.id) ||
                             downloadedGameKeys.contains(safeId) ||
                             (game.token.isNotBlank() && (downloadedGameKeys.contains(game.token) || downloadedGameKeys.contains(safeToken)))
 
+                        val isFocused = isGamepadConnected && focusArea == GamesHubFocusArea.GRID && focusedGridIndex == index
                         GameCard(
                             game = game,
                             isDownloaded = isDownloaded,
                             boxartRevision = boxartRevision,
+                            isFocused = isFocused,
                             onClick = { onOpenGame(game) },
                             onLongPress = { gameActionTarget = game },
                         )
@@ -471,7 +819,12 @@ fun GamesHubScreen(
             currentBoxartUrl = GameBoxartScraper.convertToCdnUrl(prefs.getString("boxart_${game.id}", null) ?: game.boxartUrl),
             onDismiss = { identifyGameTarget = null },
             onSelectArtwork = { url ->
-                prefs.edit().putString("boxart_${game.id}", url).apply()
+                val editor = prefs.edit().putString("boxart_${game.id}", url)
+                val snapUrl = GameBoxartScraper.convertBoxartUrlToSnapUrl(url)
+                val logoUrl = GameBoxartScraper.convertBoxartUrlToLogoUrl(url)
+                if (!snapUrl.isNullOrBlank()) editor.putString("snap_${game.id}", snapUrl)
+                if (!logoUrl.isNullOrBlank()) editor.putString("logo_${game.id}", logoUrl)
+                editor.apply()
                 boxartRevision++
                 identifyGameTarget = null
             },
@@ -485,6 +838,7 @@ private fun SystemFilterPill(
     label: String,
     count: Int,
     isSelected: Boolean,
+    isFocused: Boolean = false,
     onClick: () -> Unit,
 ) {
     val bgModifier = if (isSelected) {
@@ -498,11 +852,18 @@ private fun SystemFilterPill(
             .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(20.dp))
     }
 
+    val focusModifier = if (isFocused) {
+        Modifier
+            .graphicsLayer { scaleX = 1.05f; scaleY = 1.05f }
+            .border(2.dp, Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85))), RoundedCornerShape(20.dp))
+    } else Modifier
+
     Box(
         modifier = Modifier
             .height(36.dp)
             .clip(RoundedCornerShape(20.dp))
             .then(bgModifier)
+            .then(focusModifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
@@ -530,8 +891,15 @@ private fun SystemFilterPill(
 
 @Composable
 private fun PokemonVaultFilterPill(
+    isFocused: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val focusModifier = if (isFocused) {
+        Modifier
+            .graphicsLayer { scaleX = 1.05f; scaleY = 1.05f }
+            .border(2.dp, Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85))), RoundedCornerShape(20.dp))
+    } else Modifier
+
     Box(
         modifier = Modifier
             .height(36.dp)
@@ -542,6 +910,7 @@ private fun PokemonVaultFilterPill(
                 brush = VantafynGradients.accentHorizontal(),
                 shape = RoundedCornerShape(20.dp),
             )
+            .then(focusModifier)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
@@ -680,7 +1049,7 @@ private fun GameActionRow(
 }
 
 @Composable
-private fun IdentifyGameArtworkDialog(
+internal fun IdentifyGameArtworkDialog(
     game: GameSummary,
     currentBoxartUrl: String?,
     onDismiss: () -> Unit,
@@ -921,15 +1290,28 @@ private fun GameCard(
     game: GameSummary,
     isDownloaded: Boolean = false,
     boxartRevision: Int = 0,
+    isFocused: Boolean = false,
     onClick: () -> Unit,
     onLongPress: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     Box(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = if (isFocused) 1.04f else 1f
+                scaleY = if (isFocused) 1.04f else 1f
+            }
             .clip(RoundedCornerShape(16.dp))
-            .background(Color(0xFF14141B).copy(alpha = 0.72f))
-            .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+            .background(Color(0xFF14141B).copy(alpha = if (isFocused) 0.90f else 0.72f))
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                brush = if (isFocused) {
+                    Brush.linearGradient(listOf(Color(0xFF00E5FF), Color(0xFFFF2A85)))
+                } else {
+                    androidx.compose.ui.graphics.SolidColor(Color.White.copy(alpha = 0.12f))
+                },
+                shape = RoundedCornerShape(16.dp),
+            )
             .combinedClickable(onClick = onClick, onLongClick = onLongPress)
             .padding(10.dp),
     ) {
